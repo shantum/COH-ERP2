@@ -13,7 +13,7 @@ export default function Products() {
     const [showEditProduct, setShowEditProduct] = useState<any>(null);
     const [showAddVariation, setShowAddVariation] = useState<string | null>(null);
     const [showEditVariation, setShowEditVariation] = useState<any>(null);
-    const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', baseProductionTimeMins: 60 });
+    const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', baseProductionTimeMins: 60 });
     const [variationForm, setVariationForm] = useState({ colorName: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
     const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', colorHex: '', fabricId: '', isActive: true, skus: [], newSkus: [] });
     const [newSkuSize, setNewSkuSize] = useState('');
@@ -23,7 +23,7 @@ export default function Products() {
 
     const createProduct = useMutation({
         mutationFn: (data: any) => productsApi.create(data),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowAddProduct(false); setProductForm({ name: '', category: 'dress', productType: 'basic', baseProductionTimeMins: 60 }); }
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowAddProduct(false); setProductForm({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', baseProductionTimeMins: 60 }); }
     });
 
     const updateProduct = useMutation({
@@ -239,7 +239,7 @@ export default function Products() {
                                 {expandedProducts.has(product.id) ? <ChevronDown size={20} className="mr-2 text-gray-400" /> : <ChevronRight size={20} className="mr-2 text-gray-400" />}
                                 <div>
                                     <h3 className="font-semibold text-gray-900">{product.name}</h3>
-                                    <p className="text-sm text-gray-500">{product.category} • {product.productType} • {product.baseProductionTimeMins} mins</p>
+                                    <p className="text-sm text-gray-500">{product.category} • {product.gender || 'unisex'} • {product.productType} • {product.baseProductionTimeMins} mins</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-4">
@@ -300,7 +300,7 @@ export default function Products() {
                                 <label className="label">Product Name</label>
                                 <input className="input" value={productForm.name} onChange={(e) => setProductForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Linen MIDI Dress" required />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="label">Category</label>
                                     <select className="input" value={productForm.category} onChange={(e) => setProductForm(f => ({ ...f, category: e.target.value }))}>
@@ -309,6 +309,14 @@ export default function Products() {
                                         <option value="bottom">Bottom</option>
                                         <option value="outerwear">Outerwear</option>
                                         <option value="accessory">Accessory</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="label">Gender</label>
+                                    <select className="input" value={productForm.gender} onChange={(e) => setProductForm(f => ({ ...f, gender: e.target.value }))}>
+                                        <option value="womens">Womens</option>
+                                        <option value="mens">Mens</option>
+                                        <option value="unisex">Unisex</option>
                                     </select>
                                 </div>
                                 <div>
@@ -346,7 +354,7 @@ export default function Products() {
                                 <label className="label">Product Name</label>
                                 <input className="input" value={showEditProduct.name} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, name: e.target.value }))} required />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="label">Category</label>
                                     <select className="input" value={showEditProduct.category} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, category: e.target.value }))}>
@@ -355,6 +363,14 @@ export default function Products() {
                                         <option value="bottom">Bottom</option>
                                         <option value="outerwear">Outerwear</option>
                                         <option value="accessory">Accessory</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="label">Gender</label>
+                                    <select className="input" value={showEditProduct.gender || 'unisex'} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, gender: e.target.value }))}>
+                                        <option value="womens">Womens</option>
+                                        <option value="mens">Mens</option>
+                                        <option value="unisex">Unisex</option>
                                     </select>
                                 </div>
                                 <div>

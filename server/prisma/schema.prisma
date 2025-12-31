@@ -36,6 +36,7 @@ model Product {
   name                   String
   category               String   // dress, top, bottom, outerwear, accessory
   productType            String   // basic, seasonal, limited
+  gender                 String   @default("unisex") // mens, womens, unisex
   baseProductionTimeMins Int      @default(60)
   isActive               Boolean  @default(true)
   createdAt              DateTime @default(now())
