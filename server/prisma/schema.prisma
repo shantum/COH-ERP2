@@ -1,0 +1,488 @@
+// Creatures of Habit ERP - Database Schema (SQLite Compatible)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USERS & AUTH
+// ============================================
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("staff")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventoryTransactions InventoryTransaction[]
+  fabricTransactions    FabricTransaction[]
+  returnStatusHistory   ReturnStatusHistory[]
+}
+
+// ============================================
+// PRODUCTS HIERARCHY
+// ============================================
+
+model Product {
+  id                     String   @id @default(uuid())
+  name                   String
+  category               String   // dress, top, bottom, outerwear, accessory
+  productType            String   // basic, seasonal, limited
+  baseProductionTimeMins Int      @default(60)
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  variations Variation[]
+}
+
+model Variation {
+  id        String  @id @default(uuid())
+  productId String
+  colorName String
+  colorHex  String?
+  fabricId  String
+  isActive  Boolean @default(true)
+
+  product Product @relation(fields: [productId], references: [id])
+  fabric  Fabric  @relation(fields: [fabricId], references: [id])
+  skus    Sku[]
+
+  @@unique([productId, colorName])
+}
+
+model Sku {
+  id                String  @id @default(uuid())
+  skuCode           String  @unique
+  variationId       String
+  size              String  // XS, S, M, L, XL, XXL, Free
+  fabricConsumption Float   @default(1.5)
+  mrp               Float
+  targetStockQty    Int     @default(10)
+  targetStockMethod String  @default("day14") // day7, day14, day28, manual
+  isActive          Boolean @default(true)
+
+  // Shopify integration
+  shopifyInventoryItemId String?
+  shopifyVariantId       String?
+
+  variation             Variation              @relation(fields: [variationId], references: [id])
+  inventoryTransactions InventoryTransaction[]
+  orderLines            OrderLine[]
+  productionBatches     ProductionBatch[]
+  skuCosting            SkuCosting?
+  returnRequestLines    ReturnRequestLine[]    @relation("ReturnedSku")
+  exchangeRequestLines  ReturnRequestLine[]    @relation("ExchangeSku")
+  feedbackProductLinks  FeedbackProductLink[]
+  shopifyInventoryCache ShopifyInventoryCache?
+}
+
+model SkuCosting {
+  skuId           String   @id
+  fabricCost      Float
+  laborTimeMins   Int
+  laborRatePerMin Float
+  laborCost       Float
+  packagingCost   Float    @default(0)
+  otherCost       Float    @default(0)
+  totalCogs       Float
+  lastUpdated     DateTime @default(now())
+
+  sku Sku @relation(fields: [skuId], references: [id])
+}
+
+model CostConfig {
+  id                   String   @id @default(uuid())
+  laborRatePerMin      Float    @default(2.50)
+  defaultPackagingCost Float    @default(50)
+  lastUpdated          DateTime @default(now())
+}
+
+// ============================================
+// FABRIC MANAGEMENT
+// ============================================
+
+model FabricType {
+  id              String  @id @default(uuid())
+  name            String
+  composition     String?
+  unit            String  // meter, kg
+  avgShrinkagePct Float   @default(0)
+
+  fabrics Fabric[]
+}
+
+model Fabric {
+  id           String  @id @default(uuid())
+  fabricTypeId String
+  name         String
+  colorName    String
+  colorHex     String?
+  costPerUnit  Float
+  supplierId   String?
+  leadTimeDays Int     @default(14)
+  minOrderQty  Float   @default(10)
+  isActive     Boolean @default(true)
+
+  fabricType   FabricType          @relation(fields: [fabricTypeId], references: [id])
+  supplier     Supplier?           @relation(fields: [supplierId], references: [id])
+  variations   Variation[]
+  transactions FabricTransaction[]
+  fabricOrders FabricOrder[]
+}
+
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  fabrics      Fabric[]
+  fabricOrders FabricOrder[]
+}
+
+model FabricTransaction {
+  id          String   @id @default(uuid())
+  fabricId    String
+  txnType     String   // inward, outward
+  qty         Float
+  unit        String   // meter, kg
+  reason      String   // supplier_receipt, production, shrinkage, damage, adjustment
+  referenceId String?
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  fabric    Fabric @relation(fields: [fabricId], references: [id])
+  createdBy User   @relation(fields: [createdById], references: [id])
+}
+
+model FabricOrder {
+  id           String    @id @default(uuid())
+  fabricId     String
+  supplierId   String
+  qtyOrdered   Float
+  unit         String    // meter, kg
+  costPerUnit  Float
+  totalCost    Float
+  orderDate    DateTime  @default(now())
+  expectedDate DateTime?
+  receivedDate DateTime?
+  qtyReceived  Float?
+  status       String    @default("ordered") // ordered, partial, received, cancelled
+  notes        String?
+
+  fabric   Fabric   @relation(fields: [fabricId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+}
+
+// ============================================
+// INVENTORY
+// ============================================
+
+model InventoryTransaction {
+  id                String   @id @default(uuid())
+  skuId             String
+  txnType           String   // inward, outward
+  qty               Int
+  reason            String   // production, sale, return_receipt, damage, adjustment, transfer
+  referenceId       String?
+  notes             String?
+  warehouseLocation String?
+  createdById       String
+  createdAt         DateTime @default(now())
+
+  sku       Sku  @relation(fields: [skuId], references: [id])
+  createdBy User @relation(fields: [createdById], references: [id])
+}
+
+// ============================================
+// CUSTOMERS
+// ============================================
+
+model Customer {
+  id                String    @id @default(uuid())
+  shopifyCustomerId String?   @unique
+  email             String    @unique
+  phone             String?
+  firstName         String?
+  lastName          String?
+  defaultAddress    String?   // JSON stored as string
+  tags              String?   // Comma-separated
+  acceptsMarketing  Boolean   @default(false)
+  firstOrderDate    DateTime?
+  lastOrderDate     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  orders         Order[]
+  returnRequests ReturnRequest[]
+  feedback       Feedback[]
+}
+
+// ============================================
+// ORDERS
+// ============================================
+
+model Order {
+  id              String    @id @default(uuid())
+  orderNumber     String    @unique
+  shopifyOrderId  String?   @unique
+  channel         String    @default("shopify") // shopify, amazon, offline, custom
+  customerId      String?
+  customerName    String
+  customerEmail   String?
+  customerPhone   String?
+  shippingAddress String?   // JSON stored as string
+  orderDate       DateTime  @default(now())
+  customerNotes   String?
+  internalNotes   String?
+  status          String    @default("open") // open, shipped, delivered, cancelled, returned
+  awbNumber       String?
+  courier         String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  totalAmount     Float
+  createdAt       DateTime  @default(now())
+  syncedAt        DateTime?
+
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  orderLines     OrderLine[]
+  returnRequests ReturnRequest[]
+}
+
+model OrderLine {
+  id                String    @id @default(uuid())
+  orderId           String
+  shopifyLineId     String?
+  skuId             String
+  qty               Int
+  unitPrice         Float
+  lineStatus        String    @default("pending") // pending, allocated, picked, packed, shipped
+  allocatedAt       DateTime?
+  pickedAt          DateTime?
+  packedAt          DateTime?
+  shippedAt         DateTime?
+  inventoryTxnId    String?
+  productionBatchId String?
+  notes             String?
+
+  order              Order               @relation(fields: [orderId], references: [id])
+  sku                Sku                 @relation(fields: [skuId], references: [id])
+  productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
+  returnRequestLines ReturnRequestLine[]
+}
+
+// ============================================
+// RETURNS & EXCHANGES
+// ============================================
+
+model ReturnRequest {
+  id              String   @id @default(uuid())
+  requestNumber   String   @unique
+  requestType     String   // return, exchange
+  originalOrderId String
+  customerId      String?
+  status          String   @default("requested") // requested, reverse_initiated, in_transit, received, inspected, resolved, cancelled
+  reasonCategory  String   // size_issue, color_mismatch, quality_defect, wrong_item, changed_mind, other
+  reasonDetails   String?
+  resolutionType  String?  // refund, exchange, store_credit, rejected
+  resolutionNotes String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  originalOrder Order                 @relation(fields: [originalOrderId], references: [id])
+  customer      Customer?             @relation(fields: [customerId], references: [id])
+  lines         ReturnRequestLine[]
+  shipping      ReturnShipping[]
+  statusHistory ReturnStatusHistory[]
+}
+
+model ReturnRequestLine {
+  id                  String  @id @default(uuid())
+  requestId           String
+  originalOrderLineId String?
+  skuId               String
+  qty                 Int
+  exchangeSkuId       String?
+  exchangeQty         Int?
+  itemCondition       String? // unused, used, damaged, defective
+  inspectionNotes     String?
+
+  request           ReturnRequest @relation(fields: [requestId], references: [id])
+  originalOrderLine OrderLine?    @relation(fields: [originalOrderLineId], references: [id])
+  sku               Sku           @relation("ReturnedSku", fields: [skuId], references: [id])
+  exchangeSku       Sku?          @relation("ExchangeSku", fields: [exchangeSkuId], references: [id])
+}
+
+model ReturnShipping {
+  id                String    @id @default(uuid())
+  requestId         String
+  direction         String    // reverse, forward
+  courier           String?
+  awbNumber         String?
+  pickupAddress     String?   // JSON stored as string
+  pickupScheduledAt DateTime?
+  pickedUpAt        DateTime?
+  receivedAt        DateTime?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+  status            String    @default("scheduled") // scheduled, picked_up, in_transit, delivered, failed
+  notes             String?
+
+  request ReturnRequest @relation(fields: [requestId], references: [id])
+}
+
+model ReturnStatusHistory {
+  id          String   @id @default(uuid())
+  requestId   String
+  fromStatus  String
+  toStatus    String
+  changedById String
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  request   ReturnRequest @relation(fields: [requestId], references: [id])
+  changedBy User          @relation(fields: [changedById], references: [id])
+}
+
+// ============================================
+// CUSTOMER FEEDBACK
+// ============================================
+
+model Feedback {
+  id           String   @id @default(uuid())
+  customerId   String?
+  orderId      String?
+  orderLineId  String?
+  source       String   // post_delivery, review_request, support, manual, shopify_review
+  feedbackType String   // rating, review, complaint, suggestion, praise
+  status       String   @default("new") // new, acknowledged, actioned, resolved, archived
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customer     Customer?             @relation(fields: [customerId], references: [id])
+  ratings      FeedbackRating[]
+  content      FeedbackContent?
+  media        FeedbackMedia[]
+  productLinks FeedbackProductLink[]
+  tags         FeedbackTag[]
+}
+
+model FeedbackRating {
+  id         String @id @default(uuid())
+  feedbackId String
+  dimension  String // overall, quality, fit, comfort, value, packaging
+  score      Int
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id])
+}
+
+model FeedbackContent {
+  id             String   @id @default(uuid())
+  feedbackId     String   @unique
+  title          String?
+  body           String?
+  pros           String?
+  cons           String?
+  wouldRecommend Boolean?
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id])
+}
+
+model FeedbackMedia {
+  id         String  @id @default(uuid())
+  feedbackId String
+  mediaType  String
+  url        String
+  caption    String?
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id])
+}
+
+model FeedbackProductLink {
+  id          String  @id @default(uuid())
+  feedbackId  String
+  productId   String?
+  variationId String?
+  skuId       String?
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id])
+  sku      Sku?     @relation(fields: [skuId], references: [id])
+}
+
+model FeedbackTag {
+  id         String @id @default(uuid())
+  feedbackId String
+  tag        String
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id])
+}
+
+// ============================================
+// PRODUCTION
+// ============================================
+
+model Tailor {
+  id                String   @id @default(uuid())
+  name              String
+  specializations   String?  // Comma-separated: dress,top,bottom
+  dailyCapacityMins Int      @default(480)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  productionBatches ProductionBatch[]
+}
+
+model ProductionBatch {
+  id                String    @id @default(uuid())
+  batchDate         DateTime  @default(now())
+  tailorId          String?
+  skuId             String
+  qtyPlanned        Int
+  qtyCompleted      Int       @default(0)
+  priority          String    // order_fulfillment, stock_replenishment
+  sourceOrderLineId String?
+  status            String    @default("planned") // planned, in_progress, completed, cancelled
+  notes             String?
+  createdAt         DateTime  @default(now())
+  completedAt       DateTime?
+
+  tailor     Tailor?     @relation(fields: [tailorId], references: [id])
+  sku        Sku         @relation(fields: [skuId], references: [id])
+  orderLines OrderLine[]
+}
+
+// ============================================
+// SHOPIFY INTEGRATION
+// ============================================
+
+model ShopifyInventoryCache {
+  skuId                  String   @id
+  shopifyInventoryItemId String
+  availableQty           Int
+  lastSynced             DateTime @default(now())
+
+  sku Sku @relation(fields: [skuId], references: [id])
+}
+
+model StockAlert {
+  id        String   @id @default(uuid())
+  skuId     String
+  alertType String
+  details   String?
+  createdAt DateTime @default(now())
+  resolved  Boolean  @default(false)
+}
