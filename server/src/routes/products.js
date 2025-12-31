@@ -69,13 +69,14 @@ router.get('/:id', async (req, res) => {
 // Create product
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { name, category, productType, baseProductionTimeMins } = req.body;
+        const { name, category, productType, gender, baseProductionTimeMins } = req.body;
 
         const product = await req.prisma.product.create({
             data: {
                 name,
                 category,
                 productType,
+                gender: gender || 'unisex',
                 baseProductionTimeMins: baseProductionTimeMins || 60,
             },
         });
@@ -90,7 +91,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update product
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, category, productType, baseProductionTimeMins, isActive } = req.body;
+        const { name, category, productType, gender, baseProductionTimeMins, isActive } = req.body;
 
         const product = await req.prisma.product.update({
             where: { id: req.params.id },
@@ -98,6 +99,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 name,
                 category,
                 productType,
+                gender,
                 baseProductionTimeMins,
                 isActive,
             },
