@@ -109,13 +109,14 @@ router.get('/:id', async (req, res) => {
 // Create fabric
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { fabricTypeId, name, colorName, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty } = req.body;
+        const { fabricTypeId, name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty } = req.body;
 
         const fabric = await req.prisma.fabric.create({
             data: {
                 fabricTypeId,
                 name,
                 colorName,
+                standardColor: standardColor || null,
                 colorHex,
                 costPerUnit,
                 supplierId,
@@ -138,11 +139,11 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update fabric
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, colorName, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive } = req.body;
+        const { name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive } = req.body;
 
         const fabric = await req.prisma.fabric.update({
             where: { id: req.params.id },
-            data: { name, colorName, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive },
+            data: { name, colorName, standardColor: standardColor || null, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive },
             include: {
                 fabricType: true,
                 supplier: true,

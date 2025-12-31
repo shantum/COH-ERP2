@@ -96,7 +96,12 @@ router.get('/:id', async (req, res) => {
                             include: {
                                 sku: {
                                     include: {
-                                        variation: { include: { product: true } },
+                                        variation: {
+                                            include: {
+                                                product: true,
+                                                fabric: { include: { fabricType: true } },
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -136,15 +141,38 @@ router.get('/:id', async (req, res) => {
 
         // Product affinity
         const productCounts = {};
+        // Color affinity (using standardColor if available, else colorName)
+        const colorCounts = {};
+        // Fabric affinity (by fabric type)
+        const fabricCounts = {};
+
         orders.forEach((order) => {
             order.orderLines.forEach((line) => {
-                const productName = line.sku.variation.product.name;
+                const variation = line.sku.variation;
+                const productName = variation.product.name;
+                const colorKey = variation.standardColor || variation.colorName;
+                const fabricType = variation.fabric?.fabricType?.name;
+
                 productCounts[productName] = (productCounts[productName] || 0) + line.qty;
+                colorCounts[colorKey] = (colorCounts[colorKey] || 0) + line.qty;
+                if (fabricType) {
+                    fabricCounts[fabricType] = (fabricCounts[fabricType] || 0) + line.qty;
+                }
             });
         });
 
         const productAffinity = Object.entries(productCounts)
             .map(([name, qty]) => ({ productName: name, qty }))
+            .sort((a, b) => b.qty - a.qty)
+            .slice(0, 5);
+
+        const colorAffinity = Object.entries(colorCounts)
+            .map(([color, qty]) => ({ color, qty }))
+            .sort((a, b) => b.qty - a.qty)
+            .slice(0, 5);
+
+        const fabricAffinity = Object.entries(fabricCounts)
+            .map(([fabricType, qty]) => ({ fabricType, qty }))
             .sort((a, b) => b.qty - a.qty)
             .slice(0, 5);
 
@@ -154,6 +182,8 @@ router.get('/:id', async (req, res) => {
             lifetimeValue: lifetimeValue.toFixed(2),
             customerTier,
             productAffinity,
+            colorAffinity,
+            fabricAffinity,
         });
     } catch (error) {
         console.error('Get customer error:', error);

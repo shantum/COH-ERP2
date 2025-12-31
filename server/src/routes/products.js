@@ -134,12 +134,13 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // Create variation
 router.post('/:productId/variations', authenticateToken, async (req, res) => {
     try {
-        const { colorName, colorHex, fabricId } = req.body;
+        const { colorName, standardColor, colorHex, fabricId } = req.body;
 
         const variation = await req.prisma.variation.create({
             data: {
                 productId: req.params.productId,
                 colorName,
+                standardColor: standardColor || null,
                 colorHex,
                 fabricId,
             },
@@ -156,11 +157,11 @@ router.post('/:productId/variations', authenticateToken, async (req, res) => {
 // Update variation
 router.put('/variations/:id', authenticateToken, async (req, res) => {
     try {
-        const { colorName, colorHex, fabricId, isActive } = req.body;
+        const { colorName, standardColor, colorHex, fabricId, isActive } = req.body;
 
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
-            data: { colorName, colorHex, fabricId, isActive },
+            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, isActive },
             include: { fabric: true },
         });
 
@@ -215,6 +216,16 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
     try {
         const { skuCode, size, fabricConsumption, mrp, targetStockQty, targetStockMethod, barcode } = req.body;
 
+        // Check for duplicate barcode
+        if (barcode && barcode.trim()) {
+            const existingBarcode = await req.prisma.sku.findFirst({
+                where: { barcode: barcode.trim() },
+            });
+            if (existingBarcode) {
+                return res.status(400).json({ error: `Barcode ${barcode} is already in use by SKU ${existingBarcode.skuCode}` });
+            }
+        }
+
         const sku = await req.prisma.sku.create({
             data: {
                 variationId: req.params.variationId,
@@ -224,13 +235,16 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
                 mrp,
                 targetStockQty: targetStockQty || 10,
                 targetStockMethod: targetStockMethod || 'day14',
-                barcode: barcode || null,
+                barcode: barcode?.trim() || null,
             },
         });
 
         res.status(201).json(sku);
     } catch (error) {
         console.error('Create SKU error:', error);
+        if (error.code === 'P2002' && error.meta?.target?.includes('barcode')) {
+            return res.status(400).json({ error: 'This barcode is already in use' });
+        }
         res.status(500).json({ error: 'Failed to create SKU' });
     }
 });
@@ -243,6 +257,19 @@ router.put('/skus/:id', authenticateToken, async (req, res) => {
         // Convert empty barcode to null to avoid unique constraint issues
         const sanitizedBarcode = barcode && barcode.trim() ? barcode.trim() : null;
 
+        // Check for duplicate barcode (excluding current SKU)
+        if (sanitizedBarcode) {
+            const existingBarcode = await req.prisma.sku.findFirst({
+                where: {
+                    barcode: sanitizedBarcode,
+                    NOT: { id: req.params.id }
+                },
+            });
+            if (existingBarcode) {
+                return res.status(400).json({ error: `Barcode ${sanitizedBarcode} is already in use by SKU ${existingBarcode.skuCode}` });
+            }
+        }
+
         const sku = await req.prisma.sku.update({
             where: { id: req.params.id },
             data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive, barcode: sanitizedBarcode },
@@ -251,6 +278,9 @@ router.put('/skus/:id', authenticateToken, async (req, res) => {
         res.json(sku);
     } catch (error) {
         console.error('Update SKU error:', error);
+        if (error.code === 'P2002' && error.meta?.target?.includes('barcode')) {
+            return res.status(400).json({ error: 'This barcode is already in use' });
+        }
         res.status(500).json({ error: 'Failed to update SKU' });
     }
 });

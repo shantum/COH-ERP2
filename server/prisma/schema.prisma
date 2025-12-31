@@ -46,12 +46,13 @@ model Product {
 }
 
 model Variation {
-  id        String  @id @default(uuid())
-  productId String
-  colorName String
-  colorHex  String?
-  fabricId  String
-  isActive  Boolean @default(true)
+  id            String  @id @default(uuid())
+  productId     String
+  colorName     String  // e.g., "Mustard", "Wildflower Blue"
+  standardColor String? // e.g., "Yellow", "Blue" - for analytics/grouping
+  colorHex      String?
+  fabricId      String
+  isActive      Boolean @default(true)
 
   product Product @relation(fields: [productId], references: [id])
   fabric  Fabric  @relation(fields: [fabricId], references: [id])
@@ -123,12 +124,13 @@ model FabricType {
 }
 
 model Fabric {
-  id           String  @id @default(uuid())
-  fabricTypeId String
-  name         String
-  colorName    String
-  colorHex     String?
-  costPerUnit  Float
+  id            String  @id @default(uuid())
+  fabricTypeId  String
+  name          String
+  colorName     String  // e.g., "Mustard", "Ocean Blue"
+  standardColor String? // e.g., "Yellow", "Blue" - for analytics/grouping
+  colorHex      String?
+  costPerUnit   Float
   supplierId   String?
   leadTimeDays Int     @default(14)
   minOrderQty  Float   @default(10)

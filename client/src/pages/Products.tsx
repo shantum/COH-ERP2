@@ -14,8 +14,9 @@ export default function Products() {
     const [showAddVariation, setShowAddVariation] = useState<string | null>(null);
     const [showEditVariation, setShowEditVariation] = useState<any>(null);
     const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', baseProductionTimeMins: 60 });
-    const [variationForm, setVariationForm] = useState({ colorName: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
-    const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', colorHex: '', fabricId: '', isActive: true, skus: [], newSkus: [] });
+    const [variationForm, setVariationForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
+    const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', standardColor: '', colorHex: '', fabricId: '', isActive: true, skus: [], newSkus: [] });
+    const standardColors = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
     const [newSkuSize, setNewSkuSize] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -34,6 +35,7 @@ export default function Products() {
     const openEditVariation = (variation: any) => {
         setEditVariationForm({
             colorName: variation.colorName,
+            standardColor: variation.standardColor || '',
             colorHex: variation.colorHex || '#6B8E9F',
             fabricId: variation.fabricId,
             isActive: variation.isActive,
@@ -92,6 +94,7 @@ export default function Products() {
             // Update the variation
             await productsApi.updateVariation(showEditVariation.id, {
                 colorName: editVariationForm.colorName,
+                standardColor: editVariationForm.standardColor || null,
                 colorHex: editVariationForm.colorHex,
                 fabricId: editVariationForm.fabricId,
                 isActive: editVariationForm.isActive
@@ -179,6 +182,7 @@ export default function Products() {
         try {
             const variationRes = await productsApi.createVariation(showAddVariation, {
                 colorName: variationForm.colorName,
+                standardColor: variationForm.standardColor || null,
                 colorHex: variationForm.colorHex,
                 fabricId: variationForm.fabricId
             });
@@ -200,7 +204,7 @@ export default function Products() {
 
             queryClient.invalidateQueries({ queryKey: ['products'] });
             setShowAddVariation(null);
-            setVariationForm({ colorName: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
+            setVariationForm({ colorName: '', standardColor: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
         } catch (error) {
             console.error('Failed to create variation:', error);
             alert('Failed to create variation. Please try again.');
@@ -410,10 +414,17 @@ export default function Products() {
                             <button onClick={() => setShowAddVariation(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <form onSubmit={handleSubmitVariation} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="label">Color Name</label>
                                     <input className="input" value={variationForm.colorName} onChange={(e) => setVariationForm(f => ({ ...f, colorName: e.target.value }))} placeholder="e.g., Wildflower Blue" required />
+                                </div>
+                                <div>
+                                    <label className="label">Standard Color</label>
+                                    <select className="input" value={variationForm.standardColor} onChange={(e) => setVariationForm(f => ({ ...f, standardColor: e.target.value }))}>
+                                        <option value="">Select...</option>
+                                        {standardColors.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="label">Color</label>
@@ -469,10 +480,17 @@ export default function Products() {
                             <button onClick={() => setShowEditVariation(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <form onSubmit={handleEditVariation} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="label">Color Name</label>
                                     <input className="input" value={editVariationForm.colorName} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, colorName: e.target.value }))} required />
+                                </div>
+                                <div>
+                                    <label className="label">Standard Color</label>
+                                    <select className="input" value={editVariationForm.standardColor} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, standardColor: e.target.value }))}>
+                                        <option value="">Select...</option>
+                                        {standardColors.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="label">Color</label>

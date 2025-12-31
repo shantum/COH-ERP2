@@ -24,9 +24,10 @@ export default function Fabrics() {
     });
 
     const [typeForm, setTypeForm] = useState({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0 });
-    const [colorForm, setColorForm] = useState({ colorName: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
+    const [colorForm, setColorForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
     const [inwardForm, setInwardForm] = useState({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
     const [supplierForm, setSupplierForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
+    const standardColors = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
 
     const createType = useMutation({
         mutationFn: (data: any) => fabricsApi.createType(data),
@@ -45,7 +46,7 @@ export default function Fabrics() {
             queryClient.invalidateQueries({ queryKey: ['fabrics'] });
             queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
             setShowAddColor(null);
-            setColorForm({ colorName: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
+            setColorForm({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric')
     });
@@ -91,6 +92,7 @@ export default function Fabrics() {
             fabricTypeId: showAddColor,
             name: `${type?.name} - ${colorForm.colorName}`,
             colorName: colorForm.colorName,
+            standardColor: colorForm.standardColor || null,
             colorHex: colorForm.colorHex,
             costPerUnit: colorForm.costPerUnit,
             supplierId: colorForm.supplierId || null,
@@ -260,10 +262,17 @@ export default function Fabrics() {
                             <button onClick={() => setShowAddColor(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <form onSubmit={handleSubmitColor} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="label">Color Name</label>
                                     <input className="input" value={colorForm.colorName} onChange={(e) => setColorForm(f => ({ ...f, colorName: e.target.value }))} placeholder="e.g., Wildflower Blue" required />
+                                </div>
+                                <div>
+                                    <label className="label">Standard Color</label>
+                                    <select className="input" value={colorForm.standardColor} onChange={(e) => setColorForm(f => ({ ...f, standardColor: e.target.value }))}>
+                                        <option value="">Select...</option>
+                                        {standardColors.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="label">Color</label>
