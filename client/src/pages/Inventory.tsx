@@ -63,7 +63,7 @@ export default function Inventory() {
                 <table className="w-full">
                     <thead><tr className="border-b">
                         <th className="table-header">SKU</th><th className="table-header">Product</th><th className="table-header">Color</th><th className="table-header">Size</th>
-                        <th className="table-header text-right">Stock</th><th className="table-header text-right">Target</th><th className="table-header">Status</th><th className="table-header"></th>
+                        <th className="table-header text-right">Stock</th><th className="table-header text-right">Available</th><th className="table-header text-right">Target</th><th className="table-header">Status</th><th className="table-header"></th>
                     </tr></thead>
                     <tbody>
                         {filteredBalance?.map((item: any) => (
@@ -72,7 +72,13 @@ export default function Inventory() {
                                 <td className="table-cell">{item.productName}</td>
                                 <td className="table-cell">{item.colorName}</td>
                                 <td className="table-cell">{item.size}</td>
-                                <td className="table-cell text-right font-medium">{item.currentBalance}</td>
+                                <td className="table-cell text-right font-medium">
+                                    {item.currentBalance}
+                                    {item.reservedBalance > 0 && (
+                                        <span className="text-xs text-yellow-600 ml-1">({item.reservedBalance} held)</span>
+                                    )}
+                                </td>
+                                <td className="table-cell text-right font-medium text-primary-600">{item.availableBalance}</td>
                                 <td className="table-cell text-right text-gray-500">{item.targetStockQty}</td>
                                 <td className="table-cell"><span className={`badge ${item.status === 'ok' ? 'badge-success' : 'badge-danger'}`}>{item.status === 'ok' ? 'OK' : 'Low'}</span></td>
                                 <td className="table-cell">
@@ -122,11 +128,21 @@ export default function Inventory() {
                         </div>
 
                         {/* Summary Stats */}
-                        <div className="grid grid-cols-5 gap-3 mb-4">
+                        <div className="grid grid-cols-3 gap-3 mb-4">
                             <div className="bg-gray-50 rounded-lg p-3 text-center">
-                                <p className="text-xs text-gray-500">Current Stock</p>
+                                <p className="text-xs text-gray-500">Physical Stock</p>
                                 <p className="text-xl font-semibold">{showDetail.currentBalance}</p>
                             </div>
+                            <div className="bg-yellow-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-yellow-600">Reserved/Held</p>
+                                <p className="text-xl font-semibold text-yellow-700">{showDetail.reservedBalance || 0}</p>
+                            </div>
+                            <div className="bg-primary-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-primary-600">Available</p>
+                                <p className="text-xl font-semibold text-primary-700">{showDetail.availableBalance}</p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-4 gap-3 mb-4">
                             <div className="bg-green-50 rounded-lg p-3 text-center">
                                 <p className="text-xs text-green-600">Total Inward</p>
                                 <p className="text-xl font-semibold text-green-700">{showDetail.totalInward}</p>
