@@ -47,7 +47,9 @@ export const productsApi = {
     getAllSkus: (params?: Record<string, string>) => api.get('/products/skus/all', { params }),
     getCogs: () => api.get('/products/cogs'),
     createVariation: (productId: string, data: any) => api.post(`/products/${productId}/variations`, data),
+    updateVariation: (variationId: string, data: any) => api.put(`/products/variations/${variationId}`, data),
     createSku: (variationId: string, data: any) => api.post(`/products/variations/${variationId}/skus`, data),
+    updateSku: (skuId: string, data: any) => api.put(`/products/skus/${skuId}`, data),
 };
 
 // Fabrics

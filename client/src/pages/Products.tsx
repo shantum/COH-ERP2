@@ -12,8 +12,10 @@ export default function Products() {
     const [showAddProduct, setShowAddProduct] = useState(false);
     const [showEditProduct, setShowEditProduct] = useState<any>(null);
     const [showAddVariation, setShowAddVariation] = useState<string | null>(null);
+    const [showEditVariation, setShowEditVariation] = useState<any>(null);
     const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', baseProductionTimeMins: 60 });
     const [variationForm, setVariationForm] = useState({ colorName: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
+    const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', colorHex: '', fabricId: '', isActive: true, skus: [] });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const createProduct = useMutation({
@@ -25,6 +27,58 @@ export default function Products() {
         mutationFn: ({ id, data }: { id: string; data: any }) => productsApi.update(id, data),
         onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowEditProduct(null); }
     });
+
+    const openEditVariation = (variation: any) => {
+        setEditVariationForm({
+            colorName: variation.colorName,
+            colorHex: variation.colorHex || '#6B8E9F',
+            fabricId: variation.fabricId,
+            isActive: variation.isActive,
+            skus: variation.skus?.map((s: any) => ({ ...s })) || []
+        });
+        setShowEditVariation(variation);
+    };
+
+    const handleEditVariation = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!showEditVariation) return;
+
+        setIsSubmitting(true);
+        try {
+            // Update the variation
+            await productsApi.updateVariation(showEditVariation.id, {
+                colorName: editVariationForm.colorName,
+                colorHex: editVariationForm.colorHex,
+                fabricId: editVariationForm.fabricId,
+                isActive: editVariationForm.isActive
+            });
+
+            // Update each SKU
+            for (const sku of editVariationForm.skus) {
+                await productsApi.updateSku(sku.id, {
+                    mrp: sku.mrp,
+                    fabricConsumption: sku.fabricConsumption,
+                    isActive: sku.isActive,
+                    barcode: sku.barcode || null
+                });
+            }
+
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+            setShowEditVariation(null);
+        } catch (error) {
+            console.error('Failed to update variation:', error);
+            alert('Failed to update variation. Please try again.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const updateSkuInForm = (skuId: string, field: string, value: any) => {
+        setEditVariationForm((f: any) => ({
+            ...f,
+            skus: f.skus.map((s: any) => s.id === skuId ? { ...s, [field]: value } : s)
+        }));
+    };
 
     const toggleExpand = (id: string) => {
         const newSet = new Set(expandedProducts);
@@ -143,13 +197,17 @@ export default function Products() {
                                                     <p className="text-xs text-gray-500">{v.fabric?.name}</p>
                                                 </div>
                                             </div>
-                                            <span className="text-sm text-gray-500">{v.skus?.length || 0} SKUs</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm text-gray-500">{v.skus?.length || 0} SKUs</span>
+                                                <button onClick={(e) => { e.stopPropagation(); openEditVariation(v); }} className="text-gray-400 hover:text-gray-600"><Pencil size={14} /></button>
+                                            </div>
                                         </div>
                                         {v.skus?.length > 0 && (
                                             <div className="mt-2 flex flex-wrap gap-2">
                                                 {v.skus.map((s: any) => (
-                                                    <span key={s.id} className="px-2 py-1 bg-white rounded text-xs border">
+                                                    <span key={s.id} className="px-2 py-1 bg-white rounded text-xs border" title={s.barcode ? `Barcode: ${s.barcode}` : 'No barcode'}>
                                                         <span className="font-medium">{s.size}</span> • ₹{Number(s.mrp).toLocaleString()}
+                                                        {s.barcode && <span className="text-gray-400 ml-1">#{s.barcode}</span>}
                                                     </span>
                                                 ))}
                                             </div>
@@ -316,6 +374,82 @@ export default function Products() {
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddVariation(null)} className="btn-secondary flex-1">Cancel</button>
                                 <button type="submit" className="btn-primary flex-1" disabled={isSubmitting}>{isSubmitting ? 'Creating...' : 'Add Variation'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Variation Modal */}
+            {showEditVariation && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-semibold">Edit Variation</h2>
+                            <button onClick={() => setShowEditVariation(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleEditVariation} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="label">Color Name</label>
+                                    <input className="input" value={editVariationForm.colorName} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, colorName: e.target.value }))} required />
+                                </div>
+                                <div>
+                                    <label className="label">Color</label>
+                                    <input type="color" className="input h-10" value={editVariationForm.colorHex} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, colorHex: e.target.value }))} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="label">Fabric</label>
+                                <select className="input" value={editVariationForm.fabricId} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, fabricId: e.target.value }))} required>
+                                    <option value="">Select fabric...</option>
+                                    {fabrics?.map((f: any) => <option key={f.id} value={f.id}>{f.name} - {f.colorName}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="flex items-center gap-2">
+                                    <input type="checkbox" checked={editVariationForm.isActive} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, isActive: e.target.checked }))} className="rounded border-gray-300" />
+                                    <span className="text-sm">Active</span>
+                                </label>
+                            </div>
+
+                            {/* SKU Pricing Section */}
+                            {editVariationForm.skus?.length > 0 && (
+                                <div className="border-t pt-4">
+                                    <label className="label mb-3">SKU Details</label>
+                                    <div className="space-y-3">
+                                        {editVariationForm.skus.map((sku: any) => (
+                                            <div key={sku.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="font-medium text-sm w-12">{sku.size}</span>
+                                                    <div className="flex-1">
+                                                        <label className="text-xs text-gray-500">MRP (₹)</label>
+                                                        <input type="number" className="input input-sm" value={sku.mrp} onChange={(e) => updateSkuInForm(sku.id, 'mrp', Number(e.target.value))} min={0} />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <label className="text-xs text-gray-500">Fabric (m)</label>
+                                                        <input type="number" step="0.1" className="input input-sm" value={sku.fabricConsumption} onChange={(e) => updateSkuInForm(sku.id, 'fabricConsumption', Number(e.target.value))} min={0} />
+                                                    </div>
+                                                    <div className="flex items-center pt-4">
+                                                        <label className="flex items-center gap-1">
+                                                            <input type="checkbox" checked={sku.isActive} onChange={(e) => updateSkuInForm(sku.id, 'isActive', e.target.checked)} className="rounded border-gray-300" />
+                                                            <span className="text-xs">Active</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                                <div className="ml-12">
+                                                    <label className="text-xs text-gray-500">Barcode (8 digits)</label>
+                                                    <input type="text" className="input input-sm w-40" value={sku.barcode || ''} onChange={(e) => updateSkuInForm(sku.id, 'barcode', e.target.value)} placeholder="e.g., 10000001" maxLength={8} pattern="[0-9]{8}" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={() => setShowEditVariation(null)} className="btn-secondary flex-1">Cancel</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</button>
                             </div>
                         </form>
                     </div>

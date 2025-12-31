@@ -77,20 +77,21 @@ async function main() {
         data: { productId: relaxedTop.id, colorName: 'Pure White', colorHex: '#FFFFFF', fabricId: whiteCottonFabric.id },
     });
 
-    // Create SKUs
+    // Create SKUs with barcodes
     const sizes = ['XS', 'S', 'M', 'L', 'XL'];
     const skusData = [];
+    let barcodeCounter = 10000001; // Start with 8-digit barcode
 
     for (const size of sizes) {
-        skusData.push({ skuCode: `LMD-BLU-${size}`, variationId: blueMidiVar.id, size, fabricConsumption: 2.2, mrp: 4500, targetStockQty: 5 });
-        skusData.push({ skuCode: `LMD-BGE-${size}`, variationId: beigeMidiVar.id, size, fabricConsumption: 2.2, mrp: 4500, targetStockQty: 5 });
-        skusData.push({ skuCode: `RFT-WHT-${size}`, variationId: whiteTopVar.id, size, fabricConsumption: 1.2, mrp: 2200, targetStockQty: 8 });
+        skusData.push({ skuCode: `LMD-BLU-${size}`, variationId: blueMidiVar.id, size, fabricConsumption: 2.2, mrp: 4500, targetStockQty: 5, barcode: String(barcodeCounter++) });
+        skusData.push({ skuCode: `LMD-BGE-${size}`, variationId: beigeMidiVar.id, size, fabricConsumption: 2.2, mrp: 4500, targetStockQty: 5, barcode: String(barcodeCounter++) });
+        skusData.push({ skuCode: `RFT-WHT-${size}`, variationId: whiteTopVar.id, size, fabricConsumption: 1.2, mrp: 2200, targetStockQty: 8, barcode: String(barcodeCounter++) });
     }
 
     for (const skuData of skusData) {
         await prisma.sku.create({ data: skuData });
     }
-    console.log('✅ Created SKUs');
+    console.log('✅ Created SKUs with barcodes');
 
     // Add some initial inventory
     const allSkus = await prisma.sku.findMany();

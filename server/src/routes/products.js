@@ -211,7 +211,7 @@ router.get('/skus/all', async (req, res) => {
 // Create SKU
 router.post('/variations/:variationId/skus', authenticateToken, async (req, res) => {
     try {
-        const { skuCode, size, fabricConsumption, mrp, targetStockQty, targetStockMethod } = req.body;
+        const { skuCode, size, fabricConsumption, mrp, targetStockQty, targetStockMethod, barcode } = req.body;
 
         const sku = await req.prisma.sku.create({
             data: {
@@ -222,6 +222,7 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
                 mrp,
                 targetStockQty: targetStockQty || 10,
                 targetStockMethod: targetStockMethod || 'day14',
+                barcode: barcode || null,
             },
         });
 
@@ -235,11 +236,14 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
 // Update SKU
 router.put('/skus/:id', authenticateToken, async (req, res) => {
     try {
-        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive } = req.body;
+        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive, barcode } = req.body;
+
+        // Convert empty barcode to null to avoid unique constraint issues
+        const sanitizedBarcode = barcode && barcode.trim() ? barcode.trim() : null;
 
         const sku = await req.prisma.sku.update({
             where: { id: req.params.id },
-            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive },
+            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive, barcode: sanitizedBarcode },
         });
 
         res.json(sku);
