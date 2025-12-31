@@ -9,6 +9,7 @@ import Orders from './pages/Orders';
 import Customers from './pages/Customers';
 import Returns from './pages/Returns';
 import Production from './pages/Production';
+import Ledgers from './pages/Ledgers';
 import Login from './pages/Login';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import './index.css';
@@ -60,6 +61,7 @@ function App() {
               <Route path="customers" element={<Customers />} />
               <Route path="returns" element={<Returns />} />
               <Route path="production" element={<Production />} />
+              <Route path="ledgers" element={<Ledgers />} />
             </Route>
           </Routes>
         </BrowserRouter>

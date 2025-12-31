@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, Package, Boxes, Scissors, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -15,6 +15,7 @@ const navItems = [
     { to: '/customers', icon: Users, label: 'Customers' },
     { to: '/returns', icon: RotateCcw, label: 'Returns' },
     { to: '/production', icon: Factory, label: 'Production' },
+    { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
 ];
 
 export default function Layout() {

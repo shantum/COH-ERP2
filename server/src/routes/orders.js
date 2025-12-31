@@ -499,8 +499,18 @@ router.post('/:id/ship', authenticateToken, async (req, res) => {
                 data: { lineStatus: 'shipped', shippedAt: new Date() },
             });
 
-            // Create inventory outward transactions for each line
+            // Create inventory outward transactions for each line and remove reservations
             for (const line of order.orderLines) {
+                // Delete the reserved transaction (allocation is now fulfilled)
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: line.id,
+                        txnType: 'reserved',
+                        reason: 'order_allocation',
+                    },
+                });
+
+                // Create the actual outward transaction for the sale
                 await tx.inventoryTransaction.create({
                     data: {
                         skuId: line.skuId,
