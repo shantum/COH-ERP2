@@ -60,6 +60,7 @@ router.get('/open', async (req, res) => {
         const orders = await req.prisma.order.findMany({
             where: { status: 'open' },
             include: {
+                customer: true,
                 orderLines: {
                     include: {
                         sku: {
@@ -111,6 +112,7 @@ router.get('/shipped', async (req, res) => {
     try {
         const orders = await req.prisma.order.findMany({
             where: { status: { in: ['shipped', 'delivered'] } },
+            include: { customer: true },
             orderBy: { shippedAt: 'desc' },
         });
 
@@ -193,19 +195,40 @@ router.post('/', authenticateToken, async (req, res) => {
 
         // Find or create customer
         let customerId = null;
-        if (customerEmail) {
-            let customer = await req.prisma.customer.findUnique({ where: { email: customerEmail } });
+        if (customerEmail || customerPhone) {
+            let customer = null;
+
+            // Try to find by email first
+            if (customerEmail) {
+                customer = await req.prisma.customer.findUnique({ where: { email: customerEmail } });
+            }
+
+            // If no email or not found, try to find by phone
+            if (!customer && customerPhone) {
+                customer = await req.prisma.customer.findFirst({ where: { phone: customerPhone } });
+            }
+
+            // Create new customer if not found
             if (!customer) {
+                // Use email if provided, otherwise generate one from phone
+                const email = customerEmail || `${customerPhone.replace(/\D/g, '')}@phone.local`;
                 customer = await req.prisma.customer.create({
                     data: {
-                        email: customerEmail,
+                        email,
                         firstName: customerName?.split(' ')[0],
                         lastName: customerName?.split(' ').slice(1).join(' '),
                         phone: customerPhone,
                         defaultAddress: shippingAddress,
                     },
                 });
+            } else if (customerPhone && !customer.phone) {
+                // Update phone if customer exists but doesn't have phone
+                customer = await req.prisma.customer.update({
+                    where: { id: customer.id },
+                    data: { phone: customerPhone },
+                });
             }
+
             customerId = customer.id;
         }
 
