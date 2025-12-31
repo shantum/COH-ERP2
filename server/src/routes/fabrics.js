@@ -167,7 +167,10 @@ router.get('/:id/transactions', async (req, res) => {
 
         const transactions = await req.prisma.fabricTransaction.findMany({
             where: { fabricId: req.params.id },
-            include: { createdBy: { select: { id: true, name: true } } },
+            include: {
+                createdBy: { select: { id: true, name: true } },
+                supplier: { select: { id: true, name: true } }
+            },
             orderBy: { createdAt: 'desc' },
             take: Number(limit),
             skip: Number(offset),
@@ -183,7 +186,7 @@ router.get('/:id/transactions', async (req, res) => {
 // Create fabric transaction (inward/outward)
 router.post('/:id/transactions', authenticateToken, async (req, res) => {
     try {
-        const { txnType, qty, unit, reason, referenceId, notes } = req.body;
+        const { txnType, qty, unit, reason, referenceId, notes, costPerUnit, supplierId } = req.body;
 
         const transaction = await req.prisma.fabricTransaction.create({
             data: {
@@ -194,9 +197,14 @@ router.post('/:id/transactions', authenticateToken, async (req, res) => {
                 reason,
                 referenceId,
                 notes,
+                costPerUnit: costPerUnit || null,
+                supplierId: supplierId || null,
                 createdById: req.user.id,
             },
-            include: { createdBy: { select: { id: true, name: true } } },
+            include: {
+                createdBy: { select: { id: true, name: true } },
+                supplier: { select: { id: true, name: true } },
+            },
         });
 
         res.status(201).json(transaction);

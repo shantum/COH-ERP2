@@ -150,8 +150,9 @@ model Supplier {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  fabrics      Fabric[]
-  fabricOrders FabricOrder[]
+  fabrics            Fabric[]
+  fabricOrders       FabricOrder[]
+  fabricTransactions FabricTransaction[]
 }
 
 model FabricTransaction {
@@ -161,13 +162,16 @@ model FabricTransaction {
   qty         Float
   unit        String   // meter, kg
   reason      String   // supplier_receipt, production, shrinkage, damage, adjustment
+  costPerUnit Float?   // Cost per unit for inward transactions
+  supplierId  String?  // Supplier for inward transactions
   referenceId String?
   notes       String?
   createdById String
   createdAt   DateTime @default(now())
 
-  fabric    Fabric @relation(fields: [fabricId], references: [id])
-  createdBy User   @relation(fields: [createdById], references: [id])
+  fabric    Fabric    @relation(fields: [fabricId], references: [id])
+  createdBy User      @relation(fields: [createdById], references: [id])
+  supplier  Supplier? @relation(fields: [supplierId], references: [id])
 }
 
 model FabricOrder {

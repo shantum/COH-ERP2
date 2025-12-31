@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi, productsApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, AlertTriangle } from 'lucide-react';
+import { Plus, AlertTriangle, Eye, X, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 
 export default function Inventory() {
     const queryClient = useQueryClient();
@@ -12,6 +12,14 @@ export default function Inventory() {
     const [showInward, setShowInward] = useState(false);
     const [inwardForm, setInwardForm] = useState({ skuCode: '', qty: 1, reason: 'production', notes: '' });
     const [filter, setFilter] = useState({ belowTarget: false, search: '' });
+    const [showDetail, setShowDetail] = useState<any>(null);
+
+    // Fetch transactions when detail view is open
+    const { data: transactions, isLoading: txnLoading } = useQuery({
+        queryKey: ['skuTransactions', showDetail?.skuId],
+        queryFn: () => inventoryApi.getSkuTransactions(showDetail.skuId).then(r => r.data),
+        enabled: !!showDetail?.skuId
+    });
 
     const quickInward = useMutation({
         mutationFn: (data: any) => inventoryApi.quickInward(data),
@@ -55,7 +63,7 @@ export default function Inventory() {
                 <table className="w-full">
                     <thead><tr className="border-b">
                         <th className="table-header">SKU</th><th className="table-header">Product</th><th className="table-header">Color</th><th className="table-header">Size</th>
-                        <th className="table-header text-right">Stock</th><th className="table-header text-right">Target</th><th className="table-header">Status</th>
+                        <th className="table-header text-right">Stock</th><th className="table-header text-right">Target</th><th className="table-header">Status</th><th className="table-header"></th>
                     </tr></thead>
                     <tbody>
                         {filteredBalance?.map((item: any) => (
@@ -67,6 +75,11 @@ export default function Inventory() {
                                 <td className="table-cell text-right font-medium">{item.currentBalance}</td>
                                 <td className="table-cell text-right text-gray-500">{item.targetStockQty}</td>
                                 <td className="table-cell"><span className={`badge ${item.status === 'ok' ? 'badge-success' : 'badge-danger'}`}>{item.status === 'ok' ? 'OK' : 'Low'}</span></td>
+                                <td className="table-cell">
+                                    <button onClick={() => setShowDetail(item)} className="btn-secondary text-xs py-1 px-2 flex items-center gap-1">
+                                        <Eye size={14} /> View
+                                    </button>
+                                </td>
                             </tr>
                         ))}
                     </tbody>
@@ -92,6 +105,109 @@ export default function Inventory() {
                                 <button type="submit" className="btn-primary flex-1" disabled={quickInward.isPending}>{quickInward.isPending ? 'Saving...' : 'Add Inward'}</button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* SKU Detail Modal with Transaction Ledger */}
+            {showDetail && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h2 className="text-lg font-semibold">{showDetail.skuCode}</h2>
+                                <p className="text-sm text-gray-500">{showDetail.productName} • {showDetail.colorName} • {showDetail.size}</p>
+                            </div>
+                            <button onClick={() => setShowDetail(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+
+                        {/* Summary Stats */}
+                        <div className="grid grid-cols-5 gap-3 mb-4">
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-gray-500">Current Stock</p>
+                                <p className="text-xl font-semibold">{showDetail.currentBalance}</p>
+                            </div>
+                            <div className="bg-green-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-green-600">Total Inward</p>
+                                <p className="text-xl font-semibold text-green-700">{showDetail.totalInward}</p>
+                            </div>
+                            <div className="bg-red-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-red-600">Total Outward</p>
+                                <p className="text-xl font-semibold text-red-700">{showDetail.totalOutward}</p>
+                            </div>
+                            <div className="bg-blue-50 rounded-lg p-3 text-center">
+                                <p className="text-xs text-blue-600">Target</p>
+                                <p className="text-xl font-semibold text-blue-700">{showDetail.targetStockQty}</p>
+                            </div>
+                            <div className={`${showDetail.status === 'ok' ? 'bg-green-50' : 'bg-red-50'} rounded-lg p-3 text-center`}>
+                                <p className="text-xs text-gray-600">Status</p>
+                                <p className={`text-sm font-semibold ${showDetail.status === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
+                                    {showDetail.status === 'ok' ? 'OK' : 'Below Target'}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Transaction Ledger */}
+                        <div className="flex-1 overflow-y-auto">
+                            <h3 className="font-medium text-gray-700 mb-3">Transaction Ledger</h3>
+                            {txnLoading ? (
+                                <div className="flex justify-center py-8">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                                </div>
+                            ) : transactions?.length === 0 ? (
+                                <div className="text-center py-8 text-gray-500">No transactions yet</div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {transactions?.map((txn: any) => (
+                                        <div key={txn.id} className={`p-3 rounded-lg border ${txn.txnType === 'inward' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    {txn.txnType === 'inward' ? (
+                                                        <ArrowDownCircle size={20} className="text-green-600" />
+                                                    ) : (
+                                                        <ArrowUpCircle size={20} className="text-red-600" />
+                                                    )}
+                                                    <div>
+                                                        <p className="font-medium">
+                                                            {txn.txnType === 'inward' ? '+' : '-'}{txn.qty} units
+                                                            <span className="ml-2 text-xs text-gray-500 font-normal capitalize">
+                                                                {txn.reason.replace(/_/g, ' ')}
+                                                            </span>
+                                                        </p>
+                                                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                            <span>{new Date(txn.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                                                            <span>•</span>
+                                                            <span>{txn.createdBy?.name || 'System'}</span>
+                                                            {txn.referenceId && (
+                                                                <>
+                                                                    <span>•</span>
+                                                                    <span className="font-mono text-xs">Ref: {txn.referenceId.slice(0, 8)}...</span>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                        {txn.notes && <p className="text-xs text-gray-600 mt-1">{txn.notes}</p>}
+                                                    </div>
+                                                </div>
+                                                <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex gap-3 pt-4 mt-4 border-t">
+                            <button onClick={() => setShowDetail(null)} className="btn-secondary flex-1">Close</button>
+                            <button
+                                onClick={() => { setInwardForm(f => ({ ...f, skuCode: showDetail.skuCode })); setShowInward(true); setShowDetail(null); }}
+                                className="btn-primary flex-1 flex items-center justify-center gap-2"
+                            >
+                                <Plus size={16} /> Add Inward
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

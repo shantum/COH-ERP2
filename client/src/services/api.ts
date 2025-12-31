@@ -60,14 +60,18 @@ export const fabricsApi = {
     getTypes: () => api.get('/fabrics/types'),
     createType: (data: any) => api.post('/fabrics/types', data),
     getSuppliers: () => api.get('/fabrics/suppliers/all'),
+    createSupplier: (data: any) => api.post('/fabrics/suppliers', data),
     getStockAnalysis: () => api.get('/fabrics/dashboard/stock-analysis'),
     createTransaction: (id: string, data: any) => api.post(`/fabrics/${id}/transactions`, data),
+    getTransactions: (id: string) => api.get(`/fabrics/${id}/transactions`),
 };
 
 // Inventory
 export const inventoryApi = {
     getBalance: (params?: Record<string, string>) => api.get('/inventory/balance', { params }),
+    getSkuBalance: (skuId: string) => api.get(`/inventory/balance/${skuId}`),
     getTransactions: (params?: Record<string, string>) => api.get('/inventory/transactions', { params }),
+    getSkuTransactions: (skuId: string) => api.get('/inventory/transactions', { params: { skuId } }),
     createInward: (data: any) => api.post('/inventory/inward', data),
     createOutward: (data: any) => api.post('/inventory/outward', data),
     quickInward: (data: any) => api.post('/inventory/quick-inward', data),

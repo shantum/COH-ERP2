@@ -15,8 +15,11 @@ export default function Products() {
     const [showEditVariation, setShowEditVariation] = useState<any>(null);
     const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', baseProductionTimeMins: 60 });
     const [variationForm, setVariationForm] = useState({ colorName: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
-    const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', colorHex: '', fabricId: '', isActive: true, skus: [] });
+    const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', colorHex: '', fabricId: '', isActive: true, skus: [], newSkus: [] });
+    const [newSkuSize, setNewSkuSize] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
 
     const createProduct = useMutation({
         mutationFn: (data: any) => productsApi.create(data),
@@ -34,9 +37,50 @@ export default function Products() {
             colorHex: variation.colorHex || '#6B8E9F',
             fabricId: variation.fabricId,
             isActive: variation.isActive,
-            skus: variation.skus?.map((s: any) => ({ ...s })) || []
+            skus: variation.skus?.map((s: any) => ({ ...s })) || [],
+            newSkus: []
         });
+        setNewSkuSize('');
         setShowEditVariation(variation);
+    };
+
+    const getAvailableSizes = () => {
+        const existingSizes = new Set([
+            ...editVariationForm.skus.map((s: any) => s.size),
+            ...editVariationForm.newSkus.map((s: any) => s.size)
+        ]);
+        return allSizes.filter(size => !existingSizes.has(size));
+    };
+
+    const addNewSku = () => {
+        if (!newSkuSize) return;
+        const defaultMrp = editVariationForm.skus[0]?.mrp || 2500;
+        const defaultFabric = editVariationForm.skus[0]?.fabricConsumption || 1.5;
+        setEditVariationForm((f: any) => ({
+            ...f,
+            newSkus: [...f.newSkus, {
+                size: newSkuSize,
+                mrp: defaultMrp,
+                fabricConsumption: defaultFabric,
+                barcode: '',
+                isActive: true
+            }]
+        }));
+        setNewSkuSize('');
+    };
+
+    const updateNewSkuInForm = (size: string, field: string, value: any) => {
+        setEditVariationForm((f: any) => ({
+            ...f,
+            newSkus: f.newSkus.map((s: any) => s.size === size ? { ...s, [field]: value } : s)
+        }));
+    };
+
+    const removeNewSku = (size: string) => {
+        setEditVariationForm((f: any) => ({
+            ...f,
+            newSkus: f.newSkus.filter((s: any) => s.size !== size)
+        }));
     };
 
     const handleEditVariation = async (e: React.FormEvent) => {
@@ -53,7 +97,7 @@ export default function Products() {
                 isActive: editVariationForm.isActive
             });
 
-            // Update each SKU
+            // Update each existing SKU
             for (const sku of editVariationForm.skus) {
                 await productsApi.updateSku(sku.id, {
                     mrp: sku.mrp,
@@ -61,6 +105,26 @@ export default function Products() {
                     isActive: sku.isActive,
                     barcode: sku.barcode || null
                 });
+            }
+
+            // Create new SKUs
+            if (editVariationForm.newSkus.length > 0) {
+                const product = products?.find((p: any) =>
+                    p.variations?.some((v: any) => v.id === showEditVariation.id)
+                );
+                const productCode = product?.name?.substring(0, 3).toUpperCase() || 'PRD';
+                const colorCode = editVariationForm.colorName.substring(0, 3).toUpperCase();
+
+                for (const newSku of editVariationForm.newSkus) {
+                    const skuCode = `${productCode}-${colorCode}-${newSku.size}`;
+                    await productsApi.createSku(showEditVariation.id, {
+                        skuCode,
+                        size: newSku.size,
+                        mrp: newSku.mrp,
+                        fabricConsumption: newSku.fabricConsumption,
+                        barcode: newSku.barcode || null
+                    });
+                }
             }
 
             queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -416,7 +480,7 @@ export default function Products() {
                             {/* SKU Pricing Section */}
                             {editVariationForm.skus?.length > 0 && (
                                 <div className="border-t pt-4">
-                                    <label className="label mb-3">SKU Details</label>
+                                    <label className="label mb-3">Existing SKUs</label>
                                     <div className="space-y-3">
                                         {editVariationForm.skus.map((sku: any) => (
                                             <div key={sku.id} className="p-3 bg-gray-50 rounded-lg space-y-2">
@@ -443,6 +507,55 @@ export default function Products() {
                                                 </div>
                                             </div>
                                         ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* New SKUs Section */}
+                            {editVariationForm.newSkus?.length > 0 && (
+                                <div className="border-t pt-4">
+                                    <label className="label mb-3">New Sizes to Add</label>
+                                    <div className="space-y-3">
+                                        {editVariationForm.newSkus.map((sku: any) => (
+                                            <div key={sku.size} className="p-3 bg-green-50 border border-green-200 rounded-lg space-y-2">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="font-medium text-sm w-12 text-green-700">{sku.size}</span>
+                                                    <div className="flex-1">
+                                                        <label className="text-xs text-gray-500">MRP (₹)</label>
+                                                        <input type="number" className="input input-sm" value={sku.mrp} onChange={(e) => updateNewSkuInForm(sku.size, 'mrp', Number(e.target.value))} min={0} />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <label className="text-xs text-gray-500">Fabric (m)</label>
+                                                        <input type="number" step="0.1" className="input input-sm" value={sku.fabricConsumption} onChange={(e) => updateNewSkuInForm(sku.size, 'fabricConsumption', Number(e.target.value))} min={0} />
+                                                    </div>
+                                                    <button type="button" onClick={() => removeNewSku(sku.size)} className="text-red-500 hover:text-red-700 pt-4">
+                                                        <X size={16} />
+                                                    </button>
+                                                </div>
+                                                <div className="ml-12">
+                                                    <label className="text-xs text-gray-500">Barcode (8 digits)</label>
+                                                    <input type="text" className="input input-sm w-40" value={sku.barcode || ''} onChange={(e) => updateNewSkuInForm(sku.size, 'barcode', e.target.value)} placeholder="e.g., 10000001" maxLength={8} />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Add New Size */}
+                            {getAvailableSizes().length > 0 && (
+                                <div className="border-t pt-4">
+                                    <label className="label mb-2">Add New Size</label>
+                                    <div className="flex gap-2">
+                                        <select className="input flex-1" value={newSkuSize} onChange={(e) => setNewSkuSize(e.target.value)}>
+                                            <option value="">Select size...</option>
+                                            {getAvailableSizes().map(size => (
+                                                <option key={size} value={size}>{size}</option>
+                                            ))}
+                                        </select>
+                                        <button type="button" onClick={addNewSku} disabled={!newSkuSize} className="btn-secondary flex items-center">
+                                            <Plus size={16} className="mr-1" /> Add
+                                        </button>
                                     </div>
                                 </div>
                             )}
