@@ -14,6 +14,10 @@ import feedbackRoutes from './routes/feedback.js';
 import productionRoutes from './routes/production.js';
 import reportRoutes from './routes/reports.js';
 import authRoutes from './routes/auth.js';
+import importExportRoutes from './routes/import-export.js';
+import shopifyRoutes from './routes/shopify.js';
+import adminRoutes from './routes/admin.js';
+import webhookRoutes from './routes/webhooks.js';
 
 dotenv.config();
 
@@ -22,6 +26,15 @@ const prisma = new PrismaClient();
 
 // Middleware
 app.use(cors());
+
+// Capture raw body for webhook signature verification
+app.use('/api/webhooks', express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf.toString();
+    }
+}));
+
+// Standard JSON parsing for other routes
 app.use(express.json());
 
 // Make prisma available to routes
@@ -41,6 +54,10 @@ app.use('/api/returns', returnRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/production', productionRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api', importExportRoutes);
+app.use('/api/shopify', shopifyRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

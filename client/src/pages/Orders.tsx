@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi } from '../services/api';
 import { useState } from 'react';
-import { Truck, CheckCircle, Clock, Package, Plus, X, Trash2, AlertTriangle, Factory, Pencil } from 'lucide-react';
+import { Plus, X, Trash2, ChevronRight, Check, ChevronLeft } from 'lucide-react';
 
 export default function Orders() {
     const queryClient = useQueryClient();
@@ -12,20 +12,24 @@ export default function Orders() {
     const { data: inventoryBalance } = useQuery({ queryKey: ['inventoryBalance'], queryFn: () => inventoryApi.getBalance().then(r => r.data) });
     const { data: fabricStock } = useQuery({ queryKey: ['fabricStock'], queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data) });
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
-    const [editOrder, setEditOrder] = useState<any>(null);
-    const [editLines, setEditLines] = useState<any[]>([]);
     const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
     const [showCreateOrder, setShowCreateOrder] = useState(false);
-    const [showProductionPlan, setShowProductionPlan] = useState<any>(null);
-    const [productionDate, setProductionDate] = useState(new Date().toISOString().split('T')[0]);
     const [orderForm, setOrderForm] = useState({ customerName: '', customerEmail: '', customerPhone: '', channel: 'offline' });
     const [orderLines, setOrderLines] = useState<{ skuId: string; qty: number; unitPrice: number }[]>([]);
     const [allocatingLines, setAllocatingLines] = useState<Set<string>>(new Set());
+    const [page, setPage] = useState(1);
+    const [pageSize] = useState(25);
 
     const invalidateAll = () => {
         queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+        queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
         queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
     };
+
+    const ship = useMutation({
+        mutationFn: ({ id, data }: any) => ordersApi.ship(id, data),
+        onSuccess: () => { invalidateAll(); setSelectedOrder(null); }
+    });
 
     const allocate = useMutation({
         mutationFn: (lineId: string) => ordersApi.allocateLine(lineId),
@@ -39,16 +43,9 @@ export default function Orders() {
         onSettled: (_, __, lineId) => { setAllocatingLines(p => { const n = new Set(p); n.delete(lineId); return n; }); invalidateAll(); }
     });
 
-    const pick = useMutation({ mutationFn: (lineId: string) => ordersApi.pickLine(lineId), onSuccess: invalidateAll });
-    const unpick = useMutation({ mutationFn: (lineId: string) => ordersApi.unpickLine(lineId), onSuccess: invalidateAll });
-    const pack = useMutation({ mutationFn: (lineId: string) => ordersApi.packLine(lineId), onSuccess: invalidateAll });
-    const unpack = useMutation({ mutationFn: (lineId: string) => ordersApi.unpackLine(lineId), onSuccess: invalidateAll });
-    const ship = useMutation({ mutationFn: ({ id, data }: any) => ordersApi.ship(id, data), onSuccess: () => { invalidateAll(); queryClient.invalidateQueries({ queryKey: ['shippedOrders'] }); setSelectedOrder(null); } });
-
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
-        onSuccess: () => { invalidateAll(); setShowProductionPlan(null); },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create production batch')
+        onSuccess: () => invalidateAll()
     });
 
     const updateBatch = useMutation({
@@ -67,12 +64,6 @@ export default function Orders() {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to create order')
     });
 
-    const getStageIcon = (stage: string) => {
-        if (stage === 'ready_to_ship') return <Truck size={16} className="text-green-600" />;
-        if (stage === 'in_progress') return <Package size={16} className="text-yellow-600" />;
-        return <Clock size={16} className="text-gray-400" />;
-    };
-
     const getSkuBalance = (skuId: string) => {
         const inv = inventoryBalance?.find((i: any) => i.skuId === skuId);
         return inv?.availableBalance ?? inv?.currentBalance ?? 0;
@@ -80,43 +71,65 @@ export default function Orders() {
 
     const getFabricBalance = (fabricId: string) => {
         const fab = fabricStock?.find((f: any) => f.fabricId === fabricId);
-        return fab ? { balance: parseFloat(fab.currentBalance), status: fab.status } : null;
+        return fab ? parseFloat(fab.currentBalance) : 0;
     };
 
-    const canProduceWithFabric = (line: any) => {
-        const fabricId = line.sku?.variation?.fabric?.id;
-        if (!fabricId) return false;
-        const fabricInfo = getFabricBalance(fabricId);
-        if (!fabricInfo) return false;
-        const fabricNeeded = (line.sku?.fabricConsumption || 1.5) * line.qty;
-        return fabricInfo.balance >= fabricNeeded;
-    };
-
-    const handleAllocationToggle = (line: any) => {
-        if (allocatingLines.has(line.id)) return;
-        if (line.lineStatus === 'allocated') {
-            unallocate.mutate(line.id);
-        } else if (line.lineStatus === 'pending') {
-            allocate.mutate(line.id);
+    const parseCity = (shippingAddress: string | null) => {
+        if (!shippingAddress) return '-';
+        try {
+            const addr = JSON.parse(shippingAddress);
+            return addr.city || '-';
+        } catch {
+            return '-';
         }
     };
 
-    const handleAddToProduction = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!showProductionPlan) return;
-        createBatch.mutate({
-            skuId: showProductionPlan.skuId,
-            qtyPlanned: showProductionPlan.qty,
-            priority: 'order_fulfillment',
-            sourceOrderLineId: showProductionPlan.lineId,
-            batchDate: new Date(productionDate),
-            notes: `For order ${showProductionPlan.orderNumber}`
-        });
+    const formatDateTime = (dateStr: string) => {
+        const date = new Date(dateStr);
+        return {
+            date: date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+            time: date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+        };
     };
 
-    const openEditOrder = (order: any) => {
-        setEditOrder({ id: order.id, orderNumber: order.orderNumber, customerName: order.customerName, customerEmail: order.customerEmail, customerPhone: order.customerPhone, channel: order.channel });
-        setEditLines(order.orderLines?.map((l: any) => ({ id: l.id, skuId: l.skuId, qty: l.qty, unitPrice: l.unitPrice, lineStatus: l.lineStatus })) || []);
+    // Flatten orders into order lines for table display
+    const flattenOrders = (orders: any[]) => {
+        if (!orders) return [];
+        const rows: any[] = [];
+        orders.forEach(order => {
+            order.orderLines?.forEach((line: any, idx: number) => {
+                const fabricId = line.sku?.variation?.fabric?.id;
+                const skuStock = getSkuBalance(line.skuId);
+                const fabricBal = fabricId ? getFabricBalance(fabricId) : 0;
+                const productionBatch = line.productionBatch;
+                rows.push({
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                    orderDate: order.orderDate,
+                    customerName: order.customerName,
+                    city: parseCity(order.shippingAddress),
+                    productName: line.sku?.variation?.product?.name || '-',
+                    colorName: line.sku?.variation?.colorName || '-',
+                    size: line.sku?.size || '-',
+                    skuCode: line.sku?.skuCode || '-',
+                    skuId: line.skuId,
+                    qty: line.qty,
+                    lineId: line.id,
+                    lineStatus: line.lineStatus,
+                    skuStock,
+                    fabricBalance: fabricBal,
+                    shopifyStatus: order.shopifyFulfillmentStatus || '-',
+                    productionBatch,
+                    productionBatchId: productionBatch?.id,
+                    productionDate: productionBatch?.batchDate?.split('T')[0],
+                    isFirstLine: idx === 0,
+                    totalLines: order.orderLines.length,
+                    fulfillmentStage: order.fulfillmentStage,
+                    order: order
+                });
+            });
+        });
+        return rows;
     };
 
     const addLine = () => setOrderLines([...orderLines, { skuId: '', qty: 1, unitPrice: 0 }]);
@@ -144,376 +157,418 @@ export default function Orders() {
     };
 
     const isLoading = tab === 'open' ? loadingOpen : loadingShipped;
+    const openRows = flattenOrders(openOrders);
+    const shippedRows = flattenOrders(shippedOrders);
+
+    // Pagination logic
+    const currentRows = tab === 'open' ? openRows : shippedRows;
+    const totalRows = currentRows.length;
+    const totalPages = Math.ceil(totalRows / pageSize);
+    const startIndex = (page - 1) * pageSize;
+    const paginatedRows = currentRows.slice(startIndex, startIndex + pageSize);
+
+    // Reset page when switching tabs
+    const handleTabChange = (newTab: 'open' | 'shipped') => {
+        setTab(newTab);
+        setPage(1);
+    };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
-                <button onClick={() => setShowCreateOrder(true)} className="btn-primary flex items-center"><Plus size={20} className="mr-2" />Create Order</button>
+                <button onClick={() => setShowCreateOrder(true)} className="btn-primary flex items-center text-sm"><Plus size={18} className="mr-1" />New Order</button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-2 border-b">
-                <button className={`px-4 py-2 font-medium ${tab === 'open' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('open')}>Open ({openOrders?.length || 0})</button>
-                <button className={`px-4 py-2 font-medium ${tab === 'shipped' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('shipped')}>Shipped</button>
+            <div className="flex gap-4 border-b text-sm">
+                <button className={`pb-2 font-medium ${tab === 'open' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => handleTabChange('open')}>
+                    Open <span className="text-gray-400 ml-1">({openOrders?.length || 0})</span>
+                </button>
+                <button className={`pb-2 font-medium ${tab === 'shipped' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => handleTabChange('shipped')}>
+                    Shipped
+                </button>
             </div>
 
-            {isLoading && <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>}
+            {isLoading && <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div></div>}
 
-            {/* Open Orders */}
-            {tab === 'open' && (
-                <div className="space-y-4">
-                    {openOrders?.map((order: any) => (
-                        <div key={order.id} className="card">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                    {getStageIcon(order.fulfillmentStage)}
-                                    <div>
-                                        <h3 className="font-semibold">{order.orderNumber}</h3>
-                                        <p className="text-sm text-gray-500">{order.customerName} • {new Date(order.orderDate).toLocaleDateString()}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button onClick={() => openEditOrder(order)} className="btn-secondary text-sm flex items-center gap-1"><Pencil size={14} /> Edit</button>
-                                    {order.fulfillmentStage === 'ready_to_ship' && (
-                                        <button onClick={() => setSelectedOrder(order)} className="btn-primary text-sm">Ship Order</button>
-                                    )}
-                                </div>
+            {/* Orders Table */}
+            {!isLoading && (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wide">
+                                <th className="pb-2 pr-3 font-medium">Date</th>
+                                <th className="pb-2 pr-3 font-medium">Customer</th>
+                                <th className="pb-2 pr-3 font-medium">City</th>
+                                <th className="pb-2 pr-3 font-medium">Product</th>
+                                <th className="pb-2 pr-3 font-medium">Colour</th>
+                                <th className="pb-2 pr-3 font-medium">Size</th>
+                                <th className="pb-2 pr-3 font-medium">SKU</th>
+                                <th className="pb-2 pr-3 font-medium text-center">Qty</th>
+                                <th className="pb-2 pr-3 font-medium text-center">Stock</th>
+                                <th className="pb-2 pr-3 font-medium text-center">Fabric</th>
+                                <th className="pb-2 pr-3 font-medium text-center w-12">Alloc</th>
+                                <th className="pb-2 pr-3 font-medium">Production</th>
+                                <th className="pb-2 pr-3 font-medium">Shopify</th>
+                                <th className="pb-2 font-medium w-6"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {paginatedRows.map((row, idx) => {
+                                const dt = formatDateTime(row.orderDate);
+                                const hasStock = row.skuStock >= row.qty;
+                                const isAllocated = row.lineStatus === 'allocated' || row.lineStatus === 'picked' || row.lineStatus === 'packed';
+                                const isPending = row.lineStatus === 'pending';
+                                const canAllocate = isPending && hasStock;
+                                const isToggling = allocatingLines.has(row.lineId);
+                                const hasProductionDate = !!row.productionBatchId;
+                                const isReadyToPack = row.fulfillmentStage === 'ready_to_ship' || row.fulfillmentStage === 'allocated';
+
+                                // Row styling based on status
+                                let rowBgClass = '';
+                                if (row.lineStatus === 'packed') {
+                                    rowBgClass = 'bg-green-50 hover:bg-green-100';
+                                } else if (row.lineStatus === 'picked') {
+                                    rowBgClass = 'bg-emerald-50 hover:bg-emerald-100';
+                                } else if (isAllocated && isReadyToPack && row.isFirstLine) {
+                                    rowBgClass = 'bg-blue-50 hover:bg-blue-100';
+                                } else if (isAllocated) {
+                                    rowBgClass = 'bg-green-50/50 hover:bg-green-100';
+                                } else if (hasProductionDate) {
+                                    rowBgClass = 'bg-amber-50 hover:bg-amber-100';
+                                } else {
+                                    rowBgClass = 'hover:bg-gray-50';
+                                }
+
+                                return (
+                                    <tr
+                                        key={`${row.orderId}-${idx}`}
+                                        className={`border-b border-gray-100 cursor-pointer ${rowBgClass} ${row.isFirstLine ? '' : 'text-gray-500'}`}
+                                        onClick={() => setSelectedOrder(row.order)}
+                                    >
+                                        <td className="py-2 pr-3">
+                                            {row.isFirstLine ? (
+                                                <div>
+                                                    <span className="text-gray-900">{dt.date}</span>
+                                                    <span className="text-gray-400 ml-1 text-xs">{dt.time}</span>
+                                                </div>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            {row.isFirstLine ? (
+                                                <span className="text-gray-900">{row.customerName}</span>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            {row.isFirstLine ? (
+                                                <span className="text-gray-600">{row.city}</span>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 pr-3 text-gray-700">{row.productName}</td>
+                                        <td className="py-2 pr-3 text-gray-600">{row.colorName}</td>
+                                        <td className="py-2 pr-3 text-gray-600">{row.size}</td>
+                                        <td className="py-2 pr-3 font-mono text-xs text-gray-500">{row.skuCode}</td>
+                                        <td className="py-2 pr-3 text-center">{row.qty}</td>
+                                        <td className="py-2 pr-3 text-center">
+                                            <span className={`text-xs ${hasStock ? 'text-green-600' : 'text-red-500'}`}>
+                                                {row.skuStock}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 pr-3 text-center">
+                                            <span className="text-xs text-gray-500">{row.fabricBalance.toFixed(1)}m</span>
+                                        </td>
+                                        <td className="py-2 pr-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                            {isAllocated ? (
+                                                <button
+                                                    onClick={() => row.lineStatus === 'allocated' && unallocate.mutate(row.lineId)}
+                                                    disabled={isToggling || row.lineStatus !== 'allocated'}
+                                                    className={`w-5 h-5 rounded flex items-center justify-center ${
+                                                        row.lineStatus === 'allocated'
+                                                            ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
+                                                            : 'bg-green-100 text-green-600'
+                                                    }`}
+                                                    title={row.lineStatus === 'allocated' ? 'Click to unallocate' : row.lineStatus}
+                                                >
+                                                    <Check size={12} />
+                                                </button>
+                                            ) : canAllocate ? (
+                                                <button
+                                                    onClick={() => allocate.mutate(row.lineId)}
+                                                    disabled={isToggling}
+                                                    className="w-5 h-5 rounded border border-gray-300 hover:border-purple-400 hover:bg-purple-50 flex items-center justify-center"
+                                                    title="Click to allocate"
+                                                >
+                                                    {isToggling ? <span className="animate-spin text-xs">...</span> : null}
+                                                </button>
+                                            ) : (
+                                                <span className="text-gray-300">-</span>
+                                            )}
+                                        </td>
+                                        <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
+                                            {/* Show production date picker only for out-of-stock pending items */}
+                                            {!hasStock && row.lineStatus === 'pending' ? (
+                                                row.productionBatchId ? (
+                                                    <div className="flex items-center gap-1">
+                                                        <input
+                                                            type="date"
+                                                            className="text-xs border border-orange-200 bg-orange-50 rounded px-1 py-0.5 w-28"
+                                                            value={row.productionDate || ''}
+                                                            min={new Date().toISOString().split('T')[0]}
+                                                            onChange={(e) => updateBatch.mutate({ id: row.productionBatchId, data: { batchDate: e.target.value } })}
+                                                        />
+                                                        <button
+                                                            onClick={() => deleteBatch.mutate(row.productionBatchId)}
+                                                            className="text-gray-400 hover:text-red-500"
+                                                            title="Remove from production"
+                                                        >
+                                                            <X size={12} />
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <input
+                                                        type="date"
+                                                        className="text-xs border border-gray-200 rounded px-1 py-0.5 w-28 text-gray-400 hover:border-orange-300 hover:text-gray-600"
+                                                        placeholder="Schedule"
+                                                        min={new Date().toISOString().split('T')[0]}
+                                                        onChange={(e) => {
+                                                            if (e.target.value) {
+                                                                createBatch.mutate({
+                                                                    skuId: row.skuId,
+                                                                    qtyPlanned: row.qty,
+                                                                    priority: 'order_fulfillment',
+                                                                    sourceOrderLineId: row.lineId,
+                                                                    batchDate: e.target.value,
+                                                                    notes: `For order ${row.orderNumber}`
+                                                                });
+                                                            }
+                                                        }}
+                                                    />
+                                                )
+                                            ) : isAllocated ? (
+                                                <span className="text-xs text-green-600">in stock</span>
+                                            ) : hasStock ? (
+                                                <span className="text-xs text-gray-400">-</span>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            {row.isFirstLine && row.shopifyStatus !== '-' ? (
+                                                <span className={`text-xs ${
+                                                    row.shopifyStatus === 'fulfilled' ? 'text-green-600' :
+                                                    row.shopifyStatus === 'partial' ? 'text-yellow-600' :
+                                                    'text-gray-400'
+                                                }`}>
+                                                    {row.shopifyStatus}
+                                                </span>
+                                            ) : row.isFirstLine ? (
+                                                <span className="text-gray-300 text-xs">-</span>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 text-gray-300">
+                                            {row.isFirstLine && <ChevronRight size={14} />}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                    {totalRows === 0 && (
+                        <div className="text-center text-gray-400 py-12">No orders</div>
+                    )}
+
+                    {/* Pagination Controls */}
+                    {totalRows > 0 && (
+                        <div className="flex items-center justify-between border-t pt-3 mt-3">
+                            <div className="text-sm text-gray-500">
+                                Showing {startIndex + 1}-{Math.min(startIndex + pageSize, totalRows)} of {totalRows} items
                             </div>
-
-                            {/* Order Lines with Checkboxes */}
-                            <div className="border rounded-lg overflow-hidden">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="table-header w-12">Alloc</th>
-                                            <th className="table-header">SKU</th>
-                                            <th className="table-header">Product</th>
-                                            <th className="table-header text-center">Qty</th>
-                                            <th className="table-header text-center">Avail</th>
-                                            <th className="table-header">Fabric</th>
-                                            <th className="table-header">Status</th>
-                                            <th className="table-header">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {order.orderLines?.map((line: any) => {
-                                            const skuStock = getSkuBalance(line.skuId);
-                                            const fabricId = line.sku?.variation?.fabric?.id;
-                                            const fabricInfo = fabricId ? getFabricBalance(fabricId) : null;
-                                            const hasStock = skuStock >= line.qty;
-                                            const canProduce = !hasStock && canProduceWithFabric(line);
-                                            const isAllocated = line.lineStatus === 'allocated';
-                                            const isPending = line.lineStatus === 'pending';
-                                            const canAllocate = isPending && hasStock;
-                                            const canUnallocate = isAllocated;
-                                            const showCheckbox = canAllocate || canUnallocate;
-                                            const isToggling = allocatingLines.has(line.id);
-
-                                            return (
-                                                <tr key={line.id} className="border-t">
-                                                    <td className="table-cell text-center">
-                                                        {showCheckbox ? (
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={isAllocated}
-                                                                onChange={() => handleAllocationToggle(line)}
-                                                                disabled={isToggling}
-                                                                className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:opacity-50"
-                                                            />
-                                                        ) : line.lineStatus === 'picked' || line.lineStatus === 'packed' ? (
-                                                            <CheckCircle size={16} className="text-green-600 mx-auto" />
-                                                        ) : (
-                                                            <span className="text-gray-300">—</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="table-cell font-medium">{line.sku?.skuCode}</td>
-                                                    <td className="table-cell">{line.sku?.variation?.product?.name} - {line.sku?.variation?.colorName} - {line.sku?.size}</td>
-                                                    <td className="table-cell text-center">{line.qty}</td>
-                                                    <td className="table-cell text-center">
-                                                        <span className={`font-medium ${hasStock || isAllocated ? 'text-green-600' : 'text-red-600'}`}>{skuStock}</span>
-                                                        {!hasStock && !isAllocated && <AlertTriangle size={14} className="inline ml-1 text-red-500" />}
-                                                    </td>
-                                                    <td className="table-cell">
-                                                        {fabricInfo ? (
-                                                            <span className={`text-xs ${fabricInfo.status === 'OK' ? 'text-green-600' : fabricInfo.status === 'ORDER SOON' ? 'text-yellow-600' : 'text-red-600'}`}>
-                                                                {fabricInfo.balance}m
-                                                            </span>
-                                                        ) : '-'}
-                                                    </td>
-                                                    <td className="table-cell">
-                                                        <span className={`badge ${line.lineStatus === 'packed' ? 'badge-success' : line.lineStatus === 'picked' ? 'badge-warning' : line.lineStatus === 'allocated' ? 'badge-info' : 'badge-secondary'}`}>
-                                                            {line.lineStatus}
-                                                        </span>
-                                                    </td>
-                                                    <td className="table-cell">
-                                                        {/* No stock - show production planning */}
-                                                        {line.lineStatus === 'pending' && !hasStock && canProduce && !line.productionBatchId && (
-                                                            <div className="flex items-center gap-1">
-                                                                <input
-                                                                    type="date"
-                                                                    className="input text-xs py-0.5 px-1 w-28"
-                                                                    defaultValue={new Date().toISOString().split('T')[0]}
-                                                                    min={new Date().toISOString().split('T')[0]}
-                                                                    id={`prod-date-${line.id}`}
-                                                                />
-                                                                <button
-                                                                    onClick={() => {
-                                                                        const dateInput = document.getElementById(`prod-date-${line.id}`) as HTMLInputElement;
-                                                                        createBatch.mutate({
-                                                                            skuId: line.skuId,
-                                                                            qtyPlanned: line.qty,
-                                                                            priority: 'order_fulfillment',
-                                                                            sourceOrderLineId: line.id,
-                                                                            batchDate: new Date(dateInput.value),
-                                                                            notes: `For order ${order.orderNumber}`
-                                                                        });
-                                                                    }}
-                                                                    className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded hover:bg-orange-200 flex items-center gap-0.5"
-                                                                    disabled={createBatch.isPending}
-                                                                >
-                                                                    <Factory size={12} /> Plan
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                        {/* Has production batch - show current date with edit */}
-                                                        {line.productionBatch && line.productionBatch.status !== 'completed' && (
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="text-xs text-orange-600"><Factory size={12} className="inline mr-1" /></span>
-                                                                <input
-                                                                    type="date"
-                                                                    className="input text-xs py-0.5 px-1 w-28 bg-orange-50 border-orange-200"
-                                                                    defaultValue={line.productionBatch.batchDate?.split('T')[0]}
-                                                                    min={new Date().toISOString().split('T')[0]}
-                                                                    onChange={(e) => {
-                                                                        updateBatch.mutate({ id: line.productionBatch.id, data: { batchDate: e.target.value } });
-                                                                    }}
-                                                                />
-                                                                <button
-                                                                    onClick={() => deleteBatch.mutate(line.productionBatch.id)}
-                                                                    className="text-xs text-gray-400 hover:text-red-500"
-                                                                    title="Cancel production"
-                                                                >
-                                                                    <X size={14} />
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                        {line.lineStatus === 'allocated' && <button onClick={() => pick.mutate(line.id)} className="text-xs text-primary-600 hover:underline">Pick</button>}
-                                                        {line.lineStatus === 'picked' && (
-                                                            <div className="flex items-center gap-2">
-                                                                <button onClick={() => pack.mutate(line.id)} className="text-xs text-primary-600 hover:underline">Pack</button>
-                                                                <button onClick={() => unpick.mutate(line.id)} className="text-xs text-gray-400 hover:text-red-500">↩ Undo</button>
-                                                            </div>
-                                                        )}
-                                                        {line.lineStatus === 'packed' && (
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-xs text-green-600">Ready</span>
-                                                                <button onClick={() => unpack.mutate(line.id)} className="text-xs text-gray-400 hover:text-red-500">↩ Undo</button>
-                                                            </div>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                    disabled={page === 1}
+                                    className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronLeft size={16} />
+                                </button>
+                                <div className="flex items-center gap-1">
+                                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                                        let pageNum;
+                                        if (totalPages <= 5) {
+                                            pageNum = i + 1;
+                                        } else if (page <= 3) {
+                                            pageNum = i + 1;
+                                        } else if (page >= totalPages - 2) {
+                                            pageNum = totalPages - 4 + i;
+                                        } else {
+                                            pageNum = page - 2 + i;
+                                        }
+                                        return (
+                                            <button
+                                                key={pageNum}
+                                                onClick={() => setPage(pageNum)}
+                                                className={`w-8 h-8 rounded text-sm ${
+                                                    page === pageNum
+                                                        ? 'bg-gray-900 text-white'
+                                                        : 'hover:bg-gray-100'
+                                                }`}
+                                            >
+                                                {pageNum}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <button
+                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={page === totalPages}
+                                    className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronRight size={16} />
+                                </button>
                             </div>
                         </div>
-                    ))}
-                    {(!openOrders || openOrders.length === 0) && !loadingOpen && (
-                        <div className="card text-center text-gray-500 py-8">No open orders</div>
                     )}
                 </div>
-            )
-            }
+            )}
 
-            {/* Shipped Orders */}
-            {
-                tab === 'shipped' && (
-                    <div className="card overflow-x-auto">
-                        <table className="w-full">
-                            <thead><tr className="border-b"><th className="table-header">Order</th><th className="table-header">Customer</th><th className="table-header">AWB</th><th className="table-header">Courier</th><th className="table-header">Shipped</th><th className="table-header">Status</th></tr></thead>
-                            <tbody>
-                                {shippedOrders?.map((order: any) => (
-                                    <tr key={order.id} className="border-b last:border-0">
-                                        <td className="table-cell font-medium">{order.orderNumber}</td>
-                                        <td className="table-cell">{order.customerName}</td>
-                                        <td className="table-cell">{order.awbNumber || '-'}</td>
-                                        <td className="table-cell">{order.courier || '-'}</td>
-                                        <td className="table-cell">{order.shippedAt ? new Date(order.shippedAt).toLocaleDateString() : '-'}</td>
-                                        <td className="table-cell"><span className={`badge ${order.trackingStatus === 'completed' ? 'badge-success' : order.trackingStatus === 'delivery_delayed' ? 'badge-danger' : 'badge-warning'}`}>{order.trackingStatus}</span></td>
+            {/* Order Detail Modal */}
+            {selectedOrder && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h2 className="text-lg font-semibold">{selectedOrder.orderNumber}</h2>
+                                <p className="text-sm text-gray-500">{selectedOrder.customerName} • {parseCity(selectedOrder.shippingAddress)}</p>
+                            </div>
+                            <button onClick={() => setSelectedOrder(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+
+                        {/* Order Lines */}
+                        <div className="border rounded-lg overflow-hidden mb-4">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="text-left py-2 px-3 font-medium text-gray-600">Item</th>
+                                        <th className="text-center py-2 px-3 font-medium text-gray-600">Qty</th>
+                                        <th className="text-right py-2 px-3 font-medium text-gray-600">Price</th>
+                                        <th className="text-right py-2 px-3 font-medium text-gray-600">Status</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )
-            }
+                                </thead>
+                                <tbody>
+                                    {selectedOrder.orderLines?.map((line: any) => (
+                                        <tr key={line.id} className="border-t">
+                                            <td className="py-2 px-3">
+                                                <p className="font-medium">{line.sku?.skuCode}</p>
+                                                <p className="text-xs text-gray-500">{line.sku?.variation?.product?.name} - {line.sku?.size}</p>
+                                            </td>
+                                            <td className="py-2 px-3 text-center">{line.qty}</td>
+                                            <td className="py-2 px-3 text-right">₹{Number(line.unitPrice).toLocaleString()}</td>
+                                            <td className="py-2 px-3 text-right">
+                                                <span className={`text-xs px-2 py-0.5 rounded ${
+                                                    line.lineStatus === 'packed' ? 'bg-green-100 text-green-700' :
+                                                    line.lineStatus === 'picked' ? 'bg-blue-100 text-blue-700' :
+                                                    line.lineStatus === 'allocated' ? 'bg-purple-100 text-purple-700' :
+                                                    'bg-gray-100 text-gray-600'
+                                                }`}>
+                                                    {line.lineStatus}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
 
-            {/* Ship Modal */}
-            {
-                selectedOrder && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                            <h2 className="text-lg font-semibold mb-4">Ship Order {selectedOrder.orderNumber}</h2>
-                            <form onSubmit={(e) => { e.preventDefault(); ship.mutate({ id: selectedOrder.id, data: shipForm }); }} className="space-y-4">
-                                <div><label className="label">AWB Number</label><input className="input" value={shipForm.awbNumber} onChange={(e) => setShipForm(f => ({ ...f, awbNumber: e.target.value }))} required /></div>
-                                <div><label className="label">Courier</label><input className="input" value={shipForm.courier} onChange={(e) => setShipForm(f => ({ ...f, courier: e.target.value }))} required /></div>
-                                <div className="flex gap-3">
-                                    <button type="button" onClick={() => setSelectedOrder(null)} className="btn-secondary flex-1">Cancel</button>
-                                    <button type="submit" className="btn-primary flex-1" disabled={ship.isPending}>{ship.isPending ? 'Shipping...' : 'Mark Shipped'}</button>
+                        <div className="flex justify-between items-center text-sm mb-4">
+                            <span className="text-gray-500">Total</span>
+                            <span className="font-semibold">₹{Number(selectedOrder.totalAmount).toLocaleString()}</span>
+                        </div>
+
+                        {/* Ship Form */}
+                        {selectedOrder.fulfillmentStage === 'ready_to_ship' && selectedOrder.status === 'open' && (
+                            <form onSubmit={(e) => { e.preventDefault(); ship.mutate({ id: selectedOrder.id, data: shipForm }); }} className="border-t pt-4 space-y-3">
+                                <p className="text-sm font-medium text-gray-700">Ship Order</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <input className="input text-sm" placeholder="AWB Number" value={shipForm.awbNumber} onChange={(e) => setShipForm(f => ({ ...f, awbNumber: e.target.value }))} required />
+                                    <input className="input text-sm" placeholder="Courier" value={shipForm.courier} onChange={(e) => setShipForm(f => ({ ...f, courier: e.target.value }))} required />
                                 </div>
+                                <button type="submit" className="btn-primary w-full text-sm" disabled={ship.isPending}>{ship.isPending ? 'Shipping...' : 'Mark as Shipped'}</button>
                             </form>
-                        </div>
-                    </div>
-                )
-            }
+                        )}
 
-            {/* Edit Order Modal */}
-            {
-                editOrder && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
-                        <div className="bg-white rounded-xl p-6 w-full max-w-2xl">
-                            <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-lg font-semibold">Edit Order {editOrder.orderNumber}</h2>
-                                <button onClick={() => setEditOrder(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        {selectedOrder.status === 'shipped' && (
+                            <div className="border-t pt-4">
+                                <p className="text-sm text-gray-500">Shipped via <span className="font-medium text-gray-700">{selectedOrder.courier}</span></p>
+                                <p className="text-sm text-gray-500">AWB: <span className="font-medium text-gray-700">{selectedOrder.awbNumber}</span></p>
                             </div>
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="label">Customer Name</label>
-                                        <input className="input" value={editOrder.customerName || ''} onChange={(e) => setEditOrder((o: any) => ({ ...o, customerName: e.target.value }))} />
-                                    </div>
-                                    <div>
-                                        <label className="label">Channel</label>
-                                        <select className="input" value={editOrder.channel || 'offline'} onChange={(e) => setEditOrder((o: any) => ({ ...o, channel: e.target.value }))}>
-                                            <option value="offline">Offline</option>
-                                            <option value="shopify">Shopify</option>
-                                            <option value="amazon">Amazon</option>
-                                            <option value="custom">Custom</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="label">Email</label>
-                                        <input type="email" className="input" value={editOrder.customerEmail || ''} onChange={(e) => setEditOrder((o: any) => ({ ...o, customerEmail: e.target.value }))} />
-                                    </div>
-                                    <div>
-                                        <label className="label">Phone</label>
-                                        <input className="input" value={editOrder.customerPhone || ''} onChange={(e) => setEditOrder((o: any) => ({ ...o, customerPhone: e.target.value }))} />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="label">Order Items</label>
-                                    <div className="border rounded-lg overflow-hidden">
-                                        <table className="w-full text-sm">
-                                            <thead className="bg-gray-50"><tr><th className="table-header">SKU</th><th className="table-header text-center">Qty</th><th className="table-header text-right">Price</th><th className="table-header">Status</th></tr></thead>
-                                            <tbody>
-                                                {editLines.map((line: any, idx: number) => (
-                                                    <tr key={line.id || idx} className="border-t">
-                                                        <td className="table-cell">
-                                                            <select className="input text-sm py-1" value={line.skuId} onChange={(e) => { const nl = [...editLines]; nl[idx].skuId = e.target.value; setEditLines(nl); }} disabled={line.lineStatus !== 'pending'}>
-                                                                {allSkus?.map((s: any) => <option key={s.id} value={s.id}>{s.skuCode}</option>)}
-                                                            </select>
-                                                        </td>
-                                                        <td className="table-cell text-center">
-                                                            <input type="number" className="input text-sm py-1 w-16 text-center" value={line.qty} onChange={(e) => { const nl = [...editLines]; nl[idx].qty = Number(e.target.value); setEditLines(nl); }} disabled={line.lineStatus !== 'pending'} min={1} />
-                                                        </td>
-                                                        <td className="table-cell text-right">
-                                                            <input type="number" className="input text-sm py-1 w-20 text-right" value={line.unitPrice} onChange={(e) => { const nl = [...editLines]; nl[idx].unitPrice = Number(e.target.value); setEditLines(nl); }} min={0} />
-                                                        </td>
-                                                        <td className="table-cell"><span className="badge badge-info text-xs">{line.lineStatus}</span></td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <p className="text-right text-sm font-medium mt-2">Total: ₹{editLines.reduce((sum: number, l: any) => sum + (l.qty * l.unitPrice), 0).toLocaleString()}</p>
-                                </div>
-                                <div className="flex gap-3 pt-2">
-                                    <button type="button" onClick={() => setEditOrder(null)} className="btn-secondary flex-1">Cancel</button>
-                                    <button type="button" onClick={() => { alert('Order update API not yet implemented'); setEditOrder(null); }} className="btn-primary flex-1">Save Changes</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
+                        )}
 
-            {/* Production Plan Modal */}
-            {
-                showProductionPlan && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                        <div className="bg-white rounded-xl p-6 w-full max-w-md">
-                            <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-lg font-semibold">Add to Production Plan</h2>
-                                <button onClick={() => setShowProductionPlan(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                            </div>
-                            <div className="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-200">
-                                <p className="font-medium text-orange-800">{showProductionPlan.skuCode}</p>
-                                <p className="text-sm text-orange-600">Quantity: {showProductionPlan.qty} pcs • Order: {showProductionPlan.orderNumber}</p>
-                            </div>
-                            <form onSubmit={handleAddToProduction} className="space-y-4">
-                                <div>
-                                    <label className="label">Production Date</label>
-                                    <input type="date" className="input" value={productionDate} onChange={(e) => setProductionDate(e.target.value)} min={new Date().toISOString().split('T')[0]} required />
-                                </div>
-                                <div className="flex gap-3">
-                                    <button type="button" onClick={() => setShowProductionPlan(null)} className="btn-secondary flex-1">Cancel</button>
-                                    <button type="submit" className="btn-primary flex-1" disabled={createBatch.isPending}>{createBatch.isPending ? 'Creating...' : 'Add to Plan'}</button>
-                                </div>
-                            </form>
-                        </div>
+                        <button onClick={() => setSelectedOrder(null)} className="btn-secondary w-full mt-4 text-sm">Close</button>
                     </div>
-                )
-            }
+                </div>
+            )}
 
             {/* Create Order Modal */}
-            {
-                showCreateOrder && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
-                        <div className="bg-white rounded-xl p-6 w-full max-w-2xl">
-                            <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-lg font-semibold">Create Order</h2>
-                                <button onClick={() => setShowCreateOrder(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                            </div>
-                            <form onSubmit={handleCreateOrder} className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="label">Customer Name</label><input className="input" value={orderForm.customerName} onChange={(e) => setOrderForm(f => ({ ...f, customerName: e.target.value }))} required /></div>
-                                    <div><label className="label">Channel</label><select className="input" value={orderForm.channel} onChange={(e) => setOrderForm(f => ({ ...f, channel: e.target.value }))}><option value="offline">Offline</option><option value="shopify">Shopify</option><option value="amazon">Amazon</option><option value="custom">Custom</option></select></div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="label">Email (optional)</label><input type="email" className="input" value={orderForm.customerEmail} onChange={(e) => setOrderForm(f => ({ ...f, customerEmail: e.target.value }))} /></div>
-                                    <div><label className="label">Phone (optional)</label><input className="input" value={orderForm.customerPhone} onChange={(e) => setOrderForm(f => ({ ...f, customerPhone: e.target.value }))} /></div>
+            {showCreateOrder && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-lg">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-semibold">New Order</h2>
+                            <button onClick={() => setShowCreateOrder(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleCreateOrder} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Customer Name</label>
+                                    <input className="input text-sm" value={orderForm.customerName} onChange={(e) => setOrderForm(f => ({ ...f, customerName: e.target.value }))} required />
                                 </div>
                                 <div>
-                                    <div className="flex items-center justify-between mb-2"><label className="label mb-0">Order Items</label><button type="button" onClick={addLine} className="text-sm text-primary-600 hover:underline flex items-center"><Plus size={16} className="mr-1" />Add Item</button></div>
-                                    {orderLines.length === 0 && <p className="text-sm text-gray-500">No items added yet</p>}
-                                    <div className="space-y-2">
-                                        {orderLines.map((line, idx) => (
-                                            <div key={idx} className="flex gap-2 items-center">
-                                                <select className="input flex-1" value={line.skuId} onChange={(e) => updateLine(idx, 'skuId', e.target.value)} required>
-                                                    <option value="">Select SKU...</option>
-                                                    {allSkus?.map((sku: any) => (<option key={sku.id} value={sku.id}>{sku.skuCode} - {sku.variation?.product?.name} {sku.size} (Avail: {getSkuBalance(sku.id)})</option>))}
-                                                </select>
-                                                <input type="number" className="input w-20" value={line.qty} onChange={(e) => updateLine(idx, 'qty', Number(e.target.value))} min={1} placeholder="Qty" />
-                                                <input type="number" className="input w-24" value={line.unitPrice} onChange={(e) => updateLine(idx, 'unitPrice', Number(e.target.value))} min={0} placeholder="Price" />
-                                                <button type="button" onClick={() => removeLine(idx)} className="text-red-500 hover:text-red-700"><Trash2 size={18} /></button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    {orderLines.length > 0 && <p className="text-right text-sm font-medium mt-2">Total: ₹{orderLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0).toLocaleString()}</p>}
+                                    <label className="text-xs text-gray-500 mb-1 block">Channel</label>
+                                    <select className="input text-sm" value={orderForm.channel} onChange={(e) => setOrderForm(f => ({ ...f, channel: e.target.value }))}>
+                                        <option value="offline">Offline</option>
+                                        <option value="shopify">Shopify</option>
+                                        <option value="amazon">Amazon</option>
+                                    </select>
                                 </div>
-                                <div className="flex gap-3 pt-2">
-                                    <button type="button" onClick={() => setShowCreateOrder(false)} className="btn-secondary flex-1">Cancel</button>
-                                    <button type="submit" className="btn-primary flex-1" disabled={createOrder.isPending}>{createOrder.isPending ? 'Creating...' : 'Create Order'}</button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Email</label>
+                                    <input type="email" className="input text-sm" value={orderForm.customerEmail} onChange={(e) => setOrderForm(f => ({ ...f, customerEmail: e.target.value }))} />
                                 </div>
-                            </form>
-                        </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Phone</label>
+                                    <input className="input text-sm" value={orderForm.customerPhone} onChange={(e) => setOrderForm(f => ({ ...f, customerPhone: e.target.value }))} />
+                                </div>
+                            </div>
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="text-xs text-gray-500">Items</label>
+                                    <button type="button" onClick={addLine} className="text-xs text-primary-600 hover:underline">+ Add Item</button>
+                                </div>
+                                {orderLines.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No items added</p>}
+                                <div className="space-y-2">
+                                    {orderLines.map((line, idx) => (
+                                        <div key={idx} className="flex gap-2 items-center">
+                                            <select className="input text-sm flex-1" value={line.skuId} onChange={(e) => updateLine(idx, 'skuId', e.target.value)} required>
+                                                <option value="">Select SKU...</option>
+                                                {allSkus?.map((sku: any) => (<option key={sku.id} value={sku.id}>{sku.skuCode} ({getSkuBalance(sku.id)})</option>))}
+                                            </select>
+                                            <input type="number" className="input text-sm w-16 text-center" value={line.qty} onChange={(e) => updateLine(idx, 'qty', Number(e.target.value))} min={1} />
+                                            <input type="number" className="input text-sm w-20 text-right" value={line.unitPrice} onChange={(e) => updateLine(idx, 'unitPrice', Number(e.target.value))} min={0} />
+                                            <button type="button" onClick={() => removeLine(idx)} className="text-gray-400 hover:text-red-500"><Trash2 size={16} /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                                {orderLines.length > 0 && <p className="text-right text-sm font-medium mt-2">Total: ₹{orderLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0).toLocaleString()}</p>}
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={() => setShowCreateOrder(false)} className="btn-secondary flex-1 text-sm">Cancel</button>
+                                <button type="submit" className="btn-primary flex-1 text-sm" disabled={createOrder.isPending}>{createOrder.isPending ? 'Creating...' : 'Create Order'}</button>
+                            </div>
+                        </form>
                     </div>
-                )
-            }
-        </div >
+                </div>
+            )}
+        </div>
     );
 }

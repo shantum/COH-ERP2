@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi, productsApi } from '../services/api';
-import { useState } from 'react';
-import { Plus, AlertTriangle, Eye, X, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Plus, AlertTriangle, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function Inventory() {
     const queryClient = useQueryClient();
@@ -13,6 +13,7 @@ export default function Inventory() {
     const [inwardForm, setInwardForm] = useState({ skuCode: '', qty: 1, reason: 'production', notes: '' });
     const [filter, setFilter] = useState({ belowTarget: false, search: '' });
     const [showDetail, setShowDetail] = useState<any>(null);
+    const [sort, setSort] = useState<{ column: string; direction: 'asc' | 'desc' } | null>(null);
 
     // Fetch transactions when detail view is open
     const { data: transactions, isLoading: txnLoading } = useQuery({
@@ -26,11 +27,44 @@ export default function Inventory() {
         onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] }); setShowInward(false); setInwardForm({ skuCode: '', qty: 1, reason: 'production', notes: '' }); }
     });
 
-    const filteredBalance = balance?.filter((b: any) => {
-        if (filter.belowTarget && b.status !== 'below_target') return false;
-        if (filter.search && !b.skuCode.toLowerCase().includes(filter.search.toLowerCase()) && !b.productName.toLowerCase().includes(filter.search.toLowerCase())) return false;
-        return true;
-    });
+    const toggleSort = (column: string) => {
+        if (sort?.column === column) {
+            if (sort.direction === 'asc') {
+                setSort({ column, direction: 'desc' });
+            } else {
+                setSort(null); // Reset sort
+            }
+        } else {
+            setSort({ column, direction: 'asc' });
+        }
+    };
+
+    const filteredAndSortedBalance = useMemo(() => {
+        let result = balance?.filter((b: any) => {
+            if (filter.belowTarget && b.status !== 'below_target') return false;
+            if (filter.search && !b.skuCode.toLowerCase().includes(filter.search.toLowerCase()) && !b.productName.toLowerCase().includes(filter.search.toLowerCase())) return false;
+            return true;
+        }) || [];
+
+        if (sort) {
+            result = [...result].sort((a: any, b: any) => {
+                let aVal = 0, bVal = 0;
+                if (sort.column === 'stock') {
+                    aVal = a.currentBalance;
+                    bVal = b.currentBalance;
+                } else if (sort.column === 'available') {
+                    aVal = a.availableBalance;
+                    bVal = b.availableBalance;
+                } else if (sort.column === 'target') {
+                    aVal = a.targetStockQty;
+                    bVal = b.targetStockQty;
+                }
+                return sort.direction === 'asc' ? aVal - bVal : bVal - aVal;
+            });
+        }
+
+        return result;
+    }, [balance, filter, sort]);
 
     if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>;
 
@@ -63,10 +97,28 @@ export default function Inventory() {
                 <table className="w-full">
                     <thead><tr className="border-b">
                         <th className="table-header">SKU</th><th className="table-header">Product</th><th className="table-header">Color</th><th className="table-header">Size</th>
-                        <th className="table-header text-right">Stock</th><th className="table-header text-right">Available</th><th className="table-header text-right">Target</th><th className="table-header">Status</th><th className="table-header"></th>
+                        <th className="table-header text-right cursor-pointer hover:bg-gray-50 select-none" onClick={() => toggleSort('stock')}>
+                            <div className="flex items-center justify-end gap-1">
+                                Stock
+                                {sort?.column === 'stock' && (sort.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                            </div>
+                        </th>
+                        <th className="table-header text-right cursor-pointer hover:bg-gray-50 select-none" onClick={() => toggleSort('available')}>
+                            <div className="flex items-center justify-end gap-1">
+                                Available
+                                {sort?.column === 'available' && (sort.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                            </div>
+                        </th>
+                        <th className="table-header text-right cursor-pointer hover:bg-gray-50 select-none" onClick={() => toggleSort('target')}>
+                            <div className="flex items-center justify-end gap-1">
+                                Target
+                                {sort?.column === 'target' && (sort.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                            </div>
+                        </th>
+                        <th className="table-header">Status</th><th className="table-header"></th>
                     </tr></thead>
                     <tbody>
-                        {filteredBalance?.map((item: any) => (
+                        {filteredAndSortedBalance?.map((item: any) => (
                             <tr key={item.skuId} className="border-b last:border-0 hover:bg-gray-50">
                                 <td className="table-cell font-medium">{item.skuCode}</td>
                                 <td className="table-cell">{item.productName}</td>

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-COH-ERP is a full-stack ERP system for Creatures of Habit's manufacturing operations. It manages products, inventory, orders, customers, returns, and production tracking.
+COH-ERP is a full-stack ERP system for Creatures of Habit's manufacturing operations. It manages products, inventory, orders, customers, returns, production tracking, and Shopify integration.
 
 ## Development Commands
 
@@ -55,21 +55,81 @@ Default login: `admin@coh.com` / `admin123`
 
 ### Database Schema (Prisma)
 Located at `server/prisma/schema.prisma`. Key models:
-- **Product Hierarchy**: Product → Variation → SKU → SkuCosting
+- **Product Hierarchy**: Product → Variation → SKU (with imageUrl, barcode fields)
 - **Inventory**: FabricInventory/ProductInventory with InventoryTransaction ledger
-- **Orders**: Order → OrderItem with fulfillment status tracking
+- **Orders**: Order → OrderLine with fulfillment status tracking and Shopify sync fields
 - **Returns**: ReturnRequest with multi-step workflow states
-- **Production**: Tailor and ProductionBatch for manufacturing
+- **Production**: ProductionBatch for date-wise manufacturing scheduling
 
 ### API Routes
 All routes in `server/src/routes/`. Base URL: `/api`
-- Auth, Products, Fabrics, Inventory, Orders, Customers, Returns, Production, Reports, Feedback
+- **Auth**: `/api/auth` - Login, register, user management
+- **Products**: `/api/products` - Product/Variation/SKU CRUD
+- **Fabrics**: `/api/fabrics` - Fabric types and inventory
+- **Inventory**: `/api/inventory` - Stock balance, transactions, alerts
+- **Orders**: `/api/orders` - Order management, fulfillment workflow
+- **Customers**: `/api/customers` - Customer records
+- **Returns**: `/api/returns` - Return request workflow
+- **Production**: `/api/production` - Production batch scheduling
+- **Reports**: `/api/reports` - Analytics and reporting
+- **Shopify**: `/api/shopify` - Shopify sync (products, orders, customers)
+- **Webhooks**: `/api/webhooks` - Shopify webhook receivers
+- **Import/Export**: `/api/export/*`, `/api/import/*` - CSV import/export
+- **Admin**: `/api/admin` - System settings, database management
 
-### Environment Variables
-Server requires `DATABASE_URL` and `JWT_SECRET` in `.env`. Shopify integration fields are prepared but optional.
+## Shopify Integration
+
+### Configuration
+Shopify credentials stored in `SystemSetting` table (keys: `shopify_shop_domain`, `shopify_access_token`). Configure via Settings page in UI.
+
+### Sync Features
+- **Products**: Sync products, variations, SKUs with images and inventory quantities
+- **Orders**: Import orders with line items, customer data, fulfillment status
+- **Customers**: Sync customer records with addresses
+
+### Webhooks
+Webhook endpoints for real-time Shopify updates:
+- `POST /api/webhooks/shopify/orders/create`
+- `POST /api/webhooks/shopify/orders/updated`
+- `POST /api/webhooks/shopify/orders/cancelled`
+- `POST /api/webhooks/shopify/orders/fulfilled`
+- `POST /api/webhooks/shopify/customers/create`
+- `POST /api/webhooks/shopify/customers/update`
+
+Webhook secret stored in `SystemSetting` (key: `shopify_webhook_secret`). HMAC-SHA256 verification enabled when secret is configured.
+
+### Key Files
+- `server/src/services/shopify.js` - Shopify API client
+- `server/src/routes/shopify.js` - Sync endpoints
+- `server/src/routes/webhooks.js` - Webhook receivers
+
+## CSV Import/Export
+
+### Endpoints
+- `GET /api/export/products` - Export products/SKUs as CSV
+- `GET /api/export/fabrics` - Export fabrics as CSV
+- `POST /api/import/products` - Import products from CSV
+- `POST /api/import/fabrics` - Import fabrics from CSV
+
+## Orders UI Features
+- **Pagination**: 25 items per page with page controls
+- **Conditional Formatting**: Row colors indicate status:
+  - Green: Packed/allocated items
+  - Emerald: Picked items
+  - Blue: Ready to pack (fully allocated)
+  - Amber: Production queued
+- **Production Scheduling**: Date picker for out-of-stock items links to production batches
+
+## Environment Variables
+Server requires in `.env`:
+- `DATABASE_URL` - SQLite connection string
+- `JWT_SECRET` - JWT signing secret
+
+Shopify credentials stored in database via Settings UI (not env vars).
 
 ## Important Notes
 - Backend is JavaScript (ES modules), frontend is TypeScript
 - No test framework is currently configured
 - SQLite is the default database (file: `server/prisma/dev.db`)
-- Schema includes Shopify integration fields for future sync
+- Product/Variation models include `imageUrl` for Shopify thumbnails
+- SKU model includes `barcode` (unique, 8-digit) and Shopify variant IDs

@@ -10,6 +10,7 @@ import Customers from './pages/Customers';
 import Returns from './pages/Returns';
 import Production from './pages/Production';
 import Ledgers from './pages/Ledgers';
+import Settings from './pages/Settings';
 import Login from './pages/Login';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import './index.css';
@@ -62,6 +63,7 @@ function App() {
               <Route path="returns" element={<Returns />} />
               <Route path="production" element={<Production />} />
               <Route path="ledgers" element={<Ledgers />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>
         </BrowserRouter>

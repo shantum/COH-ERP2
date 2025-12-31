@@ -68,6 +68,7 @@ router.get('/open', async (req, res) => {
                                 variation: { include: { product: true, fabric: true } },
                             },
                         },
+                        productionBatch: true,
                     },
                 },
             },
@@ -112,7 +113,19 @@ router.get('/shipped', async (req, res) => {
     try {
         const orders = await req.prisma.order.findMany({
             where: { status: { in: ['shipped', 'delivered'] } },
-            include: { customer: true },
+            include: {
+                customer: true,
+                orderLines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true, fabric: true } },
+                            },
+                        },
+                        productionBatch: true,
+                    },
+                },
+            },
             orderBy: { shippedAt: 'desc' },
         });
 

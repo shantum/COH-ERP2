@@ -137,4 +137,49 @@ export const reportsApi = {
     getCogsSummary: () => api.get('/reports/cogs-summary'),
 };
 
+// Shopify Integration
+export const shopifyApi = {
+    getConfig: () => api.get('/shopify/config'),
+    updateConfig: (data: { shopDomain: string; accessToken: string }) => api.put('/shopify/config', data),
+    testConnection: () => api.post('/shopify/test-connection'),
+    getStatus: () => api.get('/shopify/status'),
+    getSyncHistory: () => api.get('/shopify/sync/history'),
+    previewProducts: (limit?: number) => api.post('/shopify/preview/products', { limit }),
+    previewOrders: (limit?: number) => api.post('/shopify/preview/orders', { limit }),
+    previewCustomers: (limit?: number) => api.post('/shopify/preview/customers', { limit }),
+    syncProducts: (data?: { limit?: number; syncAll?: boolean }) => api.post('/shopify/sync/products', data || {}),
+    syncOrders: (data?: { since_id?: string; created_at_min?: string; limit?: number; skipSkuMatching?: boolean }) =>
+        api.post('/shopify/sync/orders', data || {}),
+    syncCustomers: (data?: { since_id?: string; created_at_min?: string; limit?: number }) =>
+        api.post('/shopify/sync/customers', data || {}),
+};
+
+// Import/Export
+export const importExportApi = {
+    exportProducts: () => api.get('/export/products', { responseType: 'blob' }),
+    exportFabrics: () => api.get('/export/fabrics', { responseType: 'blob' }),
+    exportInventory: () => api.get('/export/inventory', { responseType: 'blob' }),
+    importProducts: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/import/products', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    importFabrics: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/import/fabrics', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+};
+
+// Admin
+export const adminApi = {
+    getStats: () => api.get('/admin/stats'),
+    clearTables: (tables: string[], confirmPhrase: string) =>
+        api.post('/admin/clear', { tables, confirmPhrase }),
+};
+
 export default api;

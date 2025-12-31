@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productsApi, fabricsApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, ChevronDown, ChevronRight, X, Pencil } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, X, Pencil, Package } from 'lucide-react';
 
 export default function Products() {
     const queryClient = useQueryClient();
@@ -239,11 +239,26 @@ export default function Products() {
                 {filteredProducts?.map((product: any) => (
                     <div key={product.id} className="card">
                         <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(product.id)}>
-                            <div className="flex items-center">
-                                {expandedProducts.has(product.id) ? <ChevronDown size={20} className="mr-2 text-gray-400" /> : <ChevronRight size={20} className="mr-2 text-gray-400" />}
-                                <div>
-                                    <h3 className="font-semibold text-gray-900">{product.name}</h3>
-                                    <p className="text-sm text-gray-500">{product.category} • {product.gender || 'unisex'} • {product.productType} • {product.baseProductionTimeMins} mins</p>
+                            <div className="flex items-center gap-3">
+                                {/* Product Thumbnail (2:3 aspect ratio) */}
+                                {product.imageUrl ? (
+                                    <img
+                                        src={product.imageUrl}
+                                        alt={product.name}
+                                        className="w-12 object-cover rounded-lg flex-shrink-0"
+                                        style={{ height: '72px' }}
+                                    />
+                                ) : (
+                                    <div className="w-12 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0" style={{ height: '72px' }}>
+                                        <Package size={20} className="text-gray-400" />
+                                    </div>
+                                )}
+                                <div className="flex items-center">
+                                    {expandedProducts.has(product.id) ? <ChevronDown size={20} className="mr-2 text-gray-400" /> : <ChevronRight size={20} className="mr-2 text-gray-400" />}
+                                    <div>
+                                        <h3 className="font-semibold text-gray-900">{product.name}</h3>
+                                        <p className="text-sm text-gray-500">{product.category} • {product.gender || 'unisex'} • {product.productType} • {product.baseProductionTimeMins} mins</p>
+                                    </div>
                                 </div>
                             </div>
                             <div className="flex items-center gap-4">
@@ -258,8 +273,18 @@ export default function Products() {
                                 {product.variations?.map((v: any) => (
                                     <div key={v.id} className="ml-6 p-3 bg-gray-50 rounded-lg">
                                         <div className="flex items-center justify-between">
-                                            <div className="flex items-center">
-                                                <div className="w-6 h-6 rounded-full border-2 border-gray-300 mr-3" style={{ backgroundColor: v.colorHex || '#ccc' }} />
+                                            <div className="flex items-center gap-3">
+                                                {/* Variation thumbnail (2:3 aspect ratio) - use variation image if available, else product image */}
+                                                {(v.imageUrl || product.imageUrl) ? (
+                                                    <img
+                                                        src={v.imageUrl || product.imageUrl}
+                                                        alt={v.colorName}
+                                                        className="w-10 object-cover rounded-lg flex-shrink-0"
+                                                        style={{ height: '60px' }}
+                                                    />
+                                                ) : (
+                                                    <div className="w-6 h-6 rounded-full border-2 border-gray-300" style={{ backgroundColor: v.colorHex || '#ccc' }} />
+                                                )}
                                                 <div>
                                                     <p className="font-medium">{v.colorName}</p>
                                                     <p className="text-xs text-gray-500">{v.fabric?.name}</p>

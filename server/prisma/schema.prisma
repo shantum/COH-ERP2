@@ -38,6 +38,7 @@ model Product {
   productType            String   // basic, seasonal, limited
   gender                 String   @default("unisex") // mens, womens, unisex
   baseProductionTimeMins Int      @default(60)
+  imageUrl               String?  // Main product image URL (from Shopify)
   isActive               Boolean  @default(true)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
@@ -52,6 +53,7 @@ model Variation {
   standardColor String? // e.g., "Yellow", "Blue" - for analytics/grouping
   colorHex      String?
   fabricId      String
+  imageUrl      String? // Color-specific image URL (from Shopify)
   isActive      Boolean @default(true)
 
   product Product @relation(fields: [productId], references: [id])
@@ -493,4 +495,14 @@ model StockAlert {
   details   String?
   createdAt DateTime @default(now())
   resolved  Boolean  @default(false)
+}
+
+// ============================================
+// SYSTEM SETTINGS
+// ============================================
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
