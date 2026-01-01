@@ -251,6 +251,7 @@ export default function Orders() {
                         <thead>
                             <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wide">
                                 <th className="pb-2 pr-3 font-medium">Date</th>
+                                <th className="pb-2 pr-3 font-medium">Order #</th>
                                 <th className="pb-2 pr-3 font-medium">Customer</th>
                                 <th className="pb-2 pr-3 font-medium">City</th>
                                 <th className="pb-2 pr-3 font-medium">Product</th>
@@ -305,6 +306,11 @@ export default function Orders() {
                                                     <span className="text-gray-900">{dt.date}</span>
                                                     <span className="text-gray-400 ml-1 text-xs">{dt.time}</span>
                                                 </div>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 pr-3">
+                                            {row.isFirstLine ? (
+                                                <span className="text-gray-600 font-mono text-xs">{row.orderNumber}</span>
                                             ) : null}
                                         </td>
                                         <td className="py-2 pr-3">
