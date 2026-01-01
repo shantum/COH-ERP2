@@ -424,6 +424,13 @@ router.get('/requirements', async (req, res) => {
                 const totalScheduled = scheduledProduction[line.skuId] || 0;
                 const scheduledForThisLine = scheduledByOrderLine[line.id] || 0;
                 const availableQty = currentInventory + totalScheduled;
+
+                // Skip if inventory already covers this line
+                if (currentInventory >= line.qty) {
+                    return; // No production needed - inventory available
+                }
+
+                // Skip if production is already scheduled for this line
                 const shortage = Math.max(0, line.qty - scheduledForThisLine);
 
                 if (shortage > 0) {
