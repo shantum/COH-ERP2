@@ -358,8 +358,8 @@ export default function Orders() {
                                             )}
                                         </td>
                                         <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
-                                            {/* Show production date picker only for out-of-stock pending items */}
-                                            {!hasStock && row.lineStatus === 'pending' ? (
+                                            {/* Show production date for pending items (even with stock available) */}
+                                            {row.lineStatus === 'pending' && (row.productionBatchId || !hasStock) ? (
                                                 row.productionBatchId ? (
                                                     <div className="flex items-center gap-1">
                                                         <input
