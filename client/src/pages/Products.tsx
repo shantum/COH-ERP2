@@ -7,13 +7,14 @@ export default function Products() {
     const queryClient = useQueryClient();
     const { data: products, isLoading } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.getAll().then(r => r.data) });
     const { data: fabrics } = useQuery({ queryKey: ['fabrics'], queryFn: () => fabricsApi.getAll().then(r => r.data) });
+    const { data: fabricTypes } = useQuery({ queryKey: ['fabricTypes'], queryFn: () => fabricsApi.getTypes().then(r => r.data) });
     const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
     const [filter, setFilter] = useState({ category: '', search: '' });
     const [showAddProduct, setShowAddProduct] = useState(false);
     const [showEditProduct, setShowEditProduct] = useState<any>(null);
     const [showAddVariation, setShowAddVariation] = useState<string | null>(null);
     const [showEditVariation, setShowEditVariation] = useState<any>(null);
-    const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', baseProductionTimeMins: 60 });
+    const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', fabricTypeId: '', baseProductionTimeMins: 60, defaultFabricConsumption: '' });
     const [variationForm, setVariationForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
     const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', standardColor: '', colorHex: '', fabricId: '', isActive: true, skus: [], newSkus: [] });
     const standardColors = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
@@ -24,7 +25,7 @@ export default function Products() {
 
     const createProduct = useMutation({
         mutationFn: (data: any) => productsApi.create(data),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowAddProduct(false); setProductForm({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', baseProductionTimeMins: 60 }); }
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowAddProduct(false); setProductForm({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', fabricTypeId: '', baseProductionTimeMins: 60, defaultFabricConsumption: '' }); }
     });
 
     const updateProduct = useMutation({
@@ -160,9 +161,20 @@ export default function Products() {
         return true;
     });
 
+    // Get available fabrics for a product (filtered by product's fabricTypeId)
+    const getAvailableFabricsForProduct = (productId: string) => {
+        const product = products?.find((p: any) => p.id === productId);
+        if (!product?.fabricTypeId || !fabrics) return fabrics || [];
+        return fabrics.filter((f: any) => f.fabricTypeId === product.fabricTypeId);
+    };
+
     const handleSubmitProduct = (e: React.FormEvent) => {
         e.preventDefault();
-        createProduct.mutate(productForm);
+        const data = {
+            ...productForm,
+            defaultFabricConsumption: productForm.defaultFabricConsumption ? Number(productForm.defaultFabricConsumption) : null
+        };
+        createProduct.mutate(data);
     };
 
     const handleEditProduct = (e: React.FormEvent) => {
@@ -257,7 +269,11 @@ export default function Products() {
                                     {expandedProducts.has(product.id) ? <ChevronDown size={20} className="mr-2 text-gray-400" /> : <ChevronRight size={20} className="mr-2 text-gray-400" />}
                                     <div>
                                         <h3 className="font-semibold text-gray-900">{product.name}</h3>
-                                        <p className="text-sm text-gray-500">{product.category} • {product.gender || 'unisex'} • {product.productType} • {product.baseProductionTimeMins} mins</p>
+                                        <p className="text-sm text-gray-500">
+                                            {product.category} • {product.gender || 'unisex'} • {product.productType}
+                                            {product.fabricType && <span className="ml-1">• {product.fabricType.name}</span>}
+                                            {product.defaultFabricConsumption && <span className="ml-1">• {product.defaultFabricConsumption}m</span>}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -358,8 +374,23 @@ export default function Products() {
                                 </div>
                             </div>
                             <div>
-                                <label className="label">Production Time (mins)</label>
-                                <input type="number" className="input" value={productForm.baseProductionTimeMins} onChange={(e) => setProductForm(f => ({ ...f, baseProductionTimeMins: Number(e.target.value) }))} min={1} />
+                                <label className="label">Fabric Type</label>
+                                <select className="input" value={productForm.fabricTypeId} onChange={(e) => setProductForm(f => ({ ...f, fabricTypeId: e.target.value }))}>
+                                    <option value="">Select fabric type...</option>
+                                    {fabricTypes?.map((ft: any) => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                </select>
+                                <p className="text-xs text-gray-400 mt-1">Variations will only show colors available in this fabric</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="label">Production Time (mins)</label>
+                                    <input type="number" className="input" value={productForm.baseProductionTimeMins} onChange={(e) => setProductForm(f => ({ ...f, baseProductionTimeMins: Number(e.target.value) }))} min={1} />
+                                </div>
+                                <div>
+                                    <label className="label">Default Fabric (m)</label>
+                                    <input type="number" step="0.1" className="input" value={productForm.defaultFabricConsumption} onChange={(e) => setProductForm(f => ({ ...f, defaultFabricConsumption: e.target.value }))} min={0} placeholder="e.g., 2.5" />
+                                    <p className="text-xs text-gray-400 mt-1">Fallback for SKUs without specific consumption</p>
+                                </div>
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddProduct(false)} className="btn-secondary flex-1">Cancel</button>
@@ -412,8 +443,23 @@ export default function Products() {
                                 </div>
                             </div>
                             <div>
-                                <label className="label">Production Time (mins)</label>
-                                <input type="number" className="input" value={showEditProduct.baseProductionTimeMins} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, baseProductionTimeMins: Number(e.target.value) }))} min={1} />
+                                <label className="label">Fabric Type</label>
+                                <select className="input" value={showEditProduct.fabricTypeId || ''} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, fabricTypeId: e.target.value || null }))}>
+                                    <option value="">Select fabric type...</option>
+                                    {fabricTypes?.map((ft: any) => <option key={ft.id} value={ft.id}>{ft.name}</option>)}
+                                </select>
+                                <p className="text-xs text-gray-400 mt-1">Variations will only show colors available in this fabric</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="label">Production Time (mins)</label>
+                                    <input type="number" className="input" value={showEditProduct.baseProductionTimeMins} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, baseProductionTimeMins: Number(e.target.value) }))} min={1} />
+                                </div>
+                                <div>
+                                    <label className="label">Default Fabric (m)</label>
+                                    <input type="number" step="0.1" className="input" value={showEditProduct.defaultFabricConsumption || ''} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, defaultFabricConsumption: e.target.value ? Number(e.target.value) : null }))} min={0} placeholder="e.g., 2.5" />
+                                    <p className="text-xs text-gray-400 mt-1">Fallback for SKUs without specific consumption</p>
+                                </div>
                             </div>
                             <div>
                                 <label className="flex items-center gap-2">
@@ -457,11 +503,25 @@ export default function Products() {
                                 </div>
                             </div>
                             <div>
-                                <label className="label">Fabric</label>
-                                <select className="input" value={variationForm.fabricId} onChange={(e) => setVariationForm(f => ({ ...f, fabricId: e.target.value }))} required>
-                                    <option value="">Select fabric...</option>
-                                    {fabrics?.map((f: any) => <option key={f.id} value={f.id}>{f.name} - {f.colorName}</option>)}
-                                </select>
+                                <label className="label">Fabric Color</label>
+                                {(() => {
+                                    const availableFabrics = showAddVariation ? getAvailableFabricsForProduct(showAddVariation) : [];
+                                    const product = products?.find((p: any) => p.id === showAddVariation);
+                                    return (
+                                        <>
+                                            <select className="input" value={variationForm.fabricId} onChange={(e) => setVariationForm(f => ({ ...f, fabricId: e.target.value }))} required>
+                                                <option value="">Select fabric color...</option>
+                                                {availableFabrics.map((f: any) => <option key={f.id} value={f.id}>{f.colorName}</option>)}
+                                            </select>
+                                            {product?.fabricTypeId && availableFabrics.length === 0 && (
+                                                <p className="text-xs text-amber-600 mt-1">No fabrics available for {product.fabricType?.name}. Add fabrics first.</p>
+                                            )}
+                                            {!product?.fabricTypeId && (
+                                                <p className="text-xs text-amber-600 mt-1">Set a fabric type on the product to filter available colors.</p>
+                                            )}
+                                        </>
+                                    );
+                                })()}
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -523,11 +583,19 @@ export default function Products() {
                                 </div>
                             </div>
                             <div>
-                                <label className="label">Fabric</label>
-                                <select className="input" value={editVariationForm.fabricId} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, fabricId: e.target.value }))} required>
-                                    <option value="">Select fabric...</option>
-                                    {fabrics?.map((f: any) => <option key={f.id} value={f.id}>{f.name} - {f.colorName}</option>)}
-                                </select>
+                                <label className="label">Fabric Color</label>
+                                {(() => {
+                                    const parentProduct = products?.find((p: any) =>
+                                        p.variations?.some((v: any) => v.id === showEditVariation?.id)
+                                    );
+                                    const availableFabrics = parentProduct ? getAvailableFabricsForProduct(parentProduct.id) : fabrics || [];
+                                    return (
+                                        <select className="input" value={editVariationForm.fabricId} onChange={(e) => setEditVariationForm((f: any) => ({ ...f, fabricId: e.target.value }))} required>
+                                            <option value="">Select fabric color...</option>
+                                            {availableFabrics.map((f: any) => <option key={f.id} value={f.id}>{f.colorName}</option>)}
+                                        </select>
+                                    );
+                                })()}
                             </div>
                             <div>
                                 <label className="flex items-center gap-2">

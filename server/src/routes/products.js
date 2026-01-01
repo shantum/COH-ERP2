@@ -19,6 +19,7 @@ router.get('/', async (req, res) => {
         const products = await req.prisma.product.findMany({
             where,
             include: {
+                fabricType: true,
                 variations: {
                     include: {
                         fabric: true,
@@ -42,6 +43,7 @@ router.get('/:id', async (req, res) => {
         const product = await req.prisma.product.findUnique({
             where: { id: req.params.id },
             include: {
+                fabricType: true,
                 variations: {
                     include: {
                         fabric: {
@@ -69,7 +71,7 @@ router.get('/:id', async (req, res) => {
 // Create product
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { name, category, productType, gender, baseProductionTimeMins } = req.body;
+        const { name, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption } = req.body;
 
         const product = await req.prisma.product.create({
             data: {
@@ -77,8 +79,11 @@ router.post('/', authenticateToken, async (req, res) => {
                 category,
                 productType,
                 gender: gender || 'unisex',
+                fabricTypeId: fabricTypeId || null,
                 baseProductionTimeMins: baseProductionTimeMins || 60,
+                defaultFabricConsumption: defaultFabricConsumption || null,
             },
+            include: { fabricType: true },
         });
 
         res.status(201).json(product);
@@ -91,7 +96,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update product
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, category, productType, gender, baseProductionTimeMins, isActive } = req.body;
+        const { name, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, isActive } = req.body;
 
         const product = await req.prisma.product.update({
             where: { id: req.params.id },
@@ -100,9 +105,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 category,
                 productType,
                 gender,
+                fabricTypeId,
                 baseProductionTimeMins,
+                defaultFabricConsumption,
                 isActive,
             },
+            include: { fabricType: true },
         });
 
         res.json(product);

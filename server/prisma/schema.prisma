@@ -32,17 +32,20 @@ model User {
 // ============================================
 
 model Product {
-  id                     String   @id @default(uuid())
-  name                   String
-  category               String   // dress, top, bottom, outerwear, accessory
-  productType            String   // basic, seasonal, limited
-  gender                 String   @default("unisex") // mens, womens, unisex
-  baseProductionTimeMins Int      @default(60)
-  imageUrl               String?  // Main product image URL (from Shopify)
-  isActive               Boolean  @default(true)
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                        String   @id @default(uuid())
+  name                      String
+  category                  String   // dress, top, bottom, outerwear, accessory
+  productType               String   // basic, seasonal, limited
+  gender                    String   @default("unisex") // mens, womens, unisex
+  fabricTypeId              String?  // Default fabric type for this product (e.g., "Linen 60 Lea")
+  baseProductionTimeMins    Int      @default(60)
+  defaultFabricConsumption  Float?   // Default fabric consumption for SKUs (fallback)
+  imageUrl                  String?  // Main product image URL (from Shopify)
+  isActive                  Boolean  @default(true)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
+  fabricType FabricType? @relation(fields: [fabricTypeId], references: [id])
   variations Variation[]
 }
 
@@ -122,7 +125,8 @@ model FabricType {
   unit            String  // meter, kg
   avgShrinkagePct Float   @default(0)
 
-  fabrics Fabric[]
+  fabrics  Fabric[]
+  products Product[]
 }
 
 model Fabric {

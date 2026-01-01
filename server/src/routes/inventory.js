@@ -3,6 +3,25 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
+// Helper to get effective fabric consumption (SKU-specific or Product-level fallback)
+const getEffectiveFabricConsumption = (sku, product) => {
+    const skuConsumption = Number(sku.fabricConsumption);
+    const DEFAULT_SKU_CONSUMPTION = 1.5; // Schema default
+
+    // If SKU has a non-default consumption value, use it
+    if (skuConsumption !== DEFAULT_SKU_CONSUMPTION) {
+        return skuConsumption;
+    }
+
+    // Otherwise, use Product-level default if set
+    if (product.defaultFabricConsumption) {
+        return Number(product.defaultFabricConsumption);
+    }
+
+    // Final fallback to SKU value
+    return skuConsumption;
+};
+
 // ============================================
 // INVENTORY DASHBOARD
 // ============================================
@@ -283,7 +302,13 @@ router.get('/alerts', async (req, res) => {
 
             if (balance.currentBalance < sku.targetStockQty) {
                 const shortage = sku.targetStockQty - balance.currentBalance;
-                const fabricNeeded = shortage * Number(sku.fabricConsumption);
+
+                // Get effective fabric consumption (SKU or Product-level fallback)
+                const consumptionPerUnit = getEffectiveFabricConsumption(
+                    sku,
+                    sku.variation.product
+                );
+                const fabricNeeded = shortage * consumptionPerUnit;
 
                 // Check fabric availability
                 const fabricBalance = await req.prisma.fabricTransaction.groupBy({
@@ -298,7 +323,7 @@ router.get('/alerts', async (req, res) => {
                     else fabricAvailable -= Number(r._sum.qty) || 0;
                 });
 
-                const canProduce = Math.floor(fabricAvailable / Number(sku.fabricConsumption));
+                const canProduce = Math.floor(fabricAvailable / consumptionPerUnit);
 
                 alerts.push({
                     skuId: sku.id,
@@ -312,6 +337,7 @@ router.get('/alerts', async (req, res) => {
                     fabricNeeded: fabricNeeded.toFixed(2),
                     fabricAvailable: fabricAvailable.toFixed(2),
                     canProduce,
+                    consumptionPerUnit: consumptionPerUnit.toFixed(2),
                     status: canProduce >= shortage ? 'can_produce' : 'fabric_needed',
                 });
             }

@@ -138,11 +138,33 @@ router.delete('/batches/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Helper to get effective fabric consumption (SKU-specific or Product-level fallback)
+const getEffectiveFabricConsumption = (sku, product) => {
+    const skuConsumption = Number(sku.fabricConsumption);
+    const DEFAULT_SKU_CONSUMPTION = 1.5; // Schema default
+
+    // If SKU has a non-default consumption value, use it
+    if (skuConsumption !== DEFAULT_SKU_CONSUMPTION) {
+        return skuConsumption;
+    }
+
+    // Otherwise, use Product-level default if set
+    if (product.defaultFabricConsumption) {
+        return Number(product.defaultFabricConsumption);
+    }
+
+    // Final fallback to SKU value
+    return skuConsumption;
+};
+
 // Complete batch (creates inventory inward + fabric outward)
 router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
     try {
         const { qtyCompleted } = req.body;
-        const batch = await req.prisma.productionBatch.findUnique({ where: { id: req.params.id }, include: { sku: { include: { variation: true } } } });
+        const batch = await req.prisma.productionBatch.findUnique({
+            where: { id: req.params.id },
+            include: { sku: { include: { variation: { include: { product: true } } } } }
+        });
 
         if (!batch) return res.status(404).json({ error: 'Batch not found' });
 
@@ -155,8 +177,13 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
                 data: { skuId: batch.skuId, txnType: 'inward', qty: qtyCompleted, reason: 'production', referenceId: batch.id, notes: `Production batch ${batch.id}`, createdById: req.user.id },
             });
 
-            // Create fabric outward
-            const fabricConsumption = Number(batch.sku.fabricConsumption) * qtyCompleted;
+            // Get effective fabric consumption (SKU or Product-level fallback)
+            const consumptionPerUnit = getEffectiveFabricConsumption(
+                batch.sku,
+                batch.sku.variation.product
+            );
+            const fabricConsumption = consumptionPerUnit * qtyCompleted;
+
             await tx.fabricTransaction.create({
                 data: { fabricId: batch.sku.variation.fabricId, txnType: 'outward', qty: fabricConsumption, unit: 'meter', reason: 'production', referenceId: batch.id, createdById: req.user.id },
             });
