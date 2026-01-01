@@ -196,11 +196,6 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
             await tx.fabricTransaction.create({
                 data: { fabricId: batch.sku.variation.fabricId, txnType: 'outward', qty: fabricConsumption, unit: 'meter', reason: 'production', referenceId: batch.id, createdById: req.user.id },
             });
-
-            // Update order line if linked
-            if (batch.sourceOrderLineId) {
-                await tx.orderLine.update({ where: { id: batch.sourceOrderLineId }, data: { lineStatus: 'allocated', allocatedAt: new Date() } });
-            }
         });
 
         const updated = await req.prisma.productionBatch.findUnique({ where: { id: req.params.id }, include: { tailor: true, sku: true } });
@@ -237,14 +232,6 @@ router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
             await tx.fabricTransaction.deleteMany({
                 where: { referenceId: batch.id, reason: 'production', txnType: 'outward' }
             });
-
-            // Revert order line status if linked
-            if (batch.sourceOrderLineId) {
-                await tx.orderLine.update({
-                    where: { id: batch.sourceOrderLineId },
-                    data: { lineStatus: 'pending', allocatedAt: null }
-                });
-            }
         });
 
         const updated = await req.prisma.productionBatch.findUnique({
