@@ -356,12 +356,12 @@ router.get('/capacity', async (req, res) => {
 // Get production requirements from open orders (order-wise)
 router.get('/requirements', async (req, res) => {
     try {
-        // Get all open orders with their lines
+        // Get all open orders with their lines (only pending - allocated already have inventory)
         const openOrders = await req.prisma.order.findMany({
             where: { status: 'open' },
             include: {
                 orderLines: {
-                    where: { lineStatus: { in: ['pending', 'allocated'] } },
+                    where: { lineStatus: 'pending' },
                     include: {
                         sku: {
                             include: {
