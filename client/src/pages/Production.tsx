@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi, productsApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check } from 'lucide-react';
+import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2 } from 'lucide-react';
 
 export default function Production() {
     const queryClient = useQueryClient();
@@ -31,6 +31,7 @@ export default function Production() {
     const startBatch = useMutation({ mutationFn: (id: string) => productionApi.startBatch(id), onSuccess: invalidateAll });
     const completeBatch = useMutation({ mutationFn: ({ id, data }: any) => productionApi.completeBatch(id, data), onSuccess: () => { invalidateAll(); setShowComplete(null); } });
     const deleteBatch = useMutation({ mutationFn: (id: string) => productionApi.deleteBatch(id), onSuccess: invalidateAll });
+    const uncompleteBatch = useMutation({ mutationFn: (id: string) => productionApi.uncompleteBatch(id), onSuccess: invalidateAll });
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
         onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); setItemSelection({ productId: '', variationId: '' }); },
@@ -584,7 +585,32 @@ export default function Production() {
                                                                 <CheckCircle size={14} />
                                                             </button>
                                                         )}
-                                                        {entry.status === 'completed' && (
+                                                        {entry.status === 'completed' && !group.isLocked && (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => entry.batches.filter((b: any) => b.status === 'completed').forEach((b: any) => uncompleteBatch.mutate(b.id))}
+                                                                    className="text-orange-500 hover:text-orange-700"
+                                                                    title="Undo completion"
+                                                                >
+                                                                    <Undo2 size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (confirm('Delete this completed batch? This will also reverse inventory changes.')) {
+                                                                            entry.batches.filter((b: any) => b.status === 'completed').forEach((b: any) => {
+                                                                                uncompleteBatch.mutate(b.id);
+                                                                                setTimeout(() => deleteBatch.mutate(b.id), 500);
+                                                                            });
+                                                                        }
+                                                                    }}
+                                                                    className="text-gray-400 hover:text-red-500"
+                                                                    title="Delete batch"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                        {entry.status === 'completed' && group.isLocked && (
                                                             <CheckCircle size={14} className="text-green-500" />
                                                         )}
                                                     </div>

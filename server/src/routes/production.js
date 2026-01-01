@@ -210,6 +210,54 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
     }
 });
 
+// Uncomplete batch (reverses inventory inward + fabric outward)
+router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
+    try {
+        const batch = await req.prisma.productionBatch.findUnique({
+            where: { id: req.params.id },
+            include: { sku: { include: { variation: true } } }
+        });
+
+        if (!batch) return res.status(404).json({ error: 'Batch not found' });
+        if (batch.status !== 'completed') return res.status(400).json({ error: 'Batch is not completed' });
+
+        await req.prisma.$transaction(async (tx) => {
+            // Update batch status back to planned
+            await tx.productionBatch.update({
+                where: { id: req.params.id },
+                data: { qtyCompleted: 0, status: 'planned', completedAt: null }
+            });
+
+            // Delete inventory inward transaction
+            await tx.inventoryTransaction.deleteMany({
+                where: { referenceId: batch.id, reason: 'production', txnType: 'inward' }
+            });
+
+            // Delete fabric outward transaction
+            await tx.fabricTransaction.deleteMany({
+                where: { referenceId: batch.id, reason: 'production', txnType: 'outward' }
+            });
+
+            // Revert order line status if linked
+            if (batch.sourceOrderLineId) {
+                await tx.orderLine.update({
+                    where: { id: batch.sourceOrderLineId },
+                    data: { lineStatus: 'pending', allocatedAt: null }
+                });
+            }
+        });
+
+        const updated = await req.prisma.productionBatch.findUnique({
+            where: { id: req.params.id },
+            include: { tailor: true, sku: { include: { variation: { include: { product: true } } } } }
+        });
+        res.json(updated);
+    } catch (error) {
+        console.error('Uncomplete batch error:', error);
+        res.status(500).json({ error: 'Failed to uncomplete batch' });
+    }
+});
+
 // Get locked production dates
 router.get('/locked-dates', async (req, res) => {
     try {

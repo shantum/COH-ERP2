@@ -127,6 +127,7 @@ export const productionApi = {
     deleteBatch: (id: string) => api.delete(`/production/batches/${id}`),
     startBatch: (id: string) => api.post(`/production/batches/${id}/start`),
     completeBatch: (id: string, data: any) => api.post(`/production/batches/${id}/complete`, data),
+    uncompleteBatch: (id: string) => api.post(`/production/batches/${id}/uncomplete`),
     getCapacity: (date?: string) => api.get('/production/capacity', { params: { date } }),
     getLockedDates: () => api.get('/production/locked-dates'),
     lockDate: (date: string) => api.post('/production/lock-date', { date }),
