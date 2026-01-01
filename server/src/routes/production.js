@@ -52,6 +52,25 @@ router.get('/batches', async (req, res) => {
     }
 });
 
+// Helper to generate batch code (YYYYMMDD-XXX)
+const generateBatchCode = async (prisma, targetDate) => {
+    const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Count existing batches for this date
+    const existingCount = await prisma.productionBatch.count({
+        where: {
+            batchDate: { gte: startOfDay, lte: endOfDay }
+        }
+    });
+
+    const serial = String(existingCount + 1).padStart(3, '0');
+    return `${dateStr}-${serial}`;
+};
+
 // Create batch
 router.post('/batches', authenticateToken, async (req, res) => {
     try {
@@ -70,8 +89,12 @@ router.post('/batches', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: `Production date ${dateStr} is locked. Cannot add new items.` });
         }
 
+        // Generate batch code
+        const batchCode = await generateBatchCode(req.prisma, targetDate);
+
         const batch = await req.prisma.productionBatch.create({
             data: {
+                batchCode,
                 batchDate: targetDate,
                 tailorId: tailorId || null,
                 skuId,
@@ -181,9 +204,9 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
             // Update batch
             await tx.productionBatch.update({ where: { id: req.params.id }, data: { qtyCompleted, status: 'completed', completedAt: new Date() } });
 
-            // Create inventory inward
+            // Create inventory inward with batch code for tracking
             await tx.inventoryTransaction.create({
-                data: { skuId: batch.skuId, txnType: 'inward', qty: qtyCompleted, reason: 'production', referenceId: batch.id, notes: `Production batch ${batch.id}`, createdById: req.user.id },
+                data: { skuId: batch.skuId, txnType: 'inward', qty: qtyCompleted, reason: 'production', referenceId: batch.id, notes: `Production ${batch.batchCode || batch.id}`, createdById: req.user.id },
             });
 
             // Get effective fabric consumption (SKU or Product-level fallback)

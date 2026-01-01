@@ -463,6 +463,7 @@ model Tailor {
 
 model ProductionBatch {
   id                String    @id @default(uuid())
+  batchCode         String?   @unique // Human-readable code: YYYYMMDD-001
   batchDate         DateTime  @default(now())
   tailorId          String?
   skuId             String

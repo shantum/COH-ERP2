@@ -482,6 +482,7 @@ export default function Production() {
                                 <table className="w-full text-sm bg-white">
                                     <thead>
                                         <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide">
+                                            <th className="py-2 px-4 font-medium">Batch #</th>
                                             <th className="py-2 px-4 font-medium">Style</th>
                                             <th className="py-2 px-4 font-medium">SKU</th>
                                             <th className="py-2 px-4 font-medium">Product Name</th>
@@ -504,6 +505,7 @@ export default function Production() {
                                             })
                                             .map((batch: any) => (
                                             <tr key={batch.id} className="border-t hover:bg-gray-50">
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">{batch.batchCode || '-'}</td>
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-600">{batch.sku?.variation?.product?.styleCode || '-'}</td>
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-500">{batch.sku?.skuCode}</td>
                                                 <td className="py-2 px-4 font-medium text-gray-900">{batch.sku?.variation?.product?.name}</td>
