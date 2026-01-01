@@ -5,7 +5,8 @@ import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock } f
 
 export default function Production() {
     const queryClient = useQueryClient();
-    const [tab, setTab] = useState<'planner' | 'schedule' | 'capacity' | 'tailors'>('planner');
+    const [tab, setTab] = useState<'schedule' | 'capacity' | 'tailors'>('schedule');
+    const [showPlanner, setShowPlanner] = useState(true);
     const { data: batches, isLoading } = useQuery({ queryKey: ['productionBatches'], queryFn: () => productionApi.getBatches().then(r => r.data) });
     const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
     const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
@@ -180,125 +181,115 @@ export default function Production() {
 
             {/* Tabs */}
             <div className="flex gap-4 border-b text-sm">
-                <button className={`pb-2 font-medium ${tab === 'planner' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('planner')}>
-                    Planner
-                    {requirements?.summary?.totalSkusNeedingProduction > 0 && (
-                        <span className="ml-1.5 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-xs">{requirements.summary.totalSkusNeedingProduction}</span>
-                    )}
-                </button>
                 <button className={`pb-2 font-medium ${tab === 'schedule' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('schedule')}>Schedule</button>
                 <button className={`pb-2 font-medium ${tab === 'capacity' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('capacity')}>Capacity</button>
                 <button className={`pb-2 font-medium ${tab === 'tailors' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('tailors')}>Tailors</button>
             </div>
 
-            {/* Planner - Production Requirements from Open Orders */}
-            {tab === 'planner' && (
-                <div className="space-y-4">
-                    {/* Summary Cards */}
-                    {requirements?.summary && (
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                                <p className="text-2xl font-bold text-red-700">{requirements.summary.totalSkusNeedingProduction}</p>
-                                <p className="text-sm text-red-600">SKUs Need Production</p>
-                            </div>
-                            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                                <p className="text-2xl font-bold text-orange-700">{requirements.summary.totalUnitsNeeded}</p>
-                                <p className="text-sm text-orange-600">Total Units to Produce</p>
-                            </div>
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                <p className="text-2xl font-bold text-blue-700">{requirements.summary.totalOrdersAffected}</p>
-                                <p className="text-sm text-blue-600">Orders Affected</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Requirements Table */}
-                    {requirements?.requirements?.length > 0 ? (
-                        <div className="card overflow-hidden">
-                            <table className="w-full text-sm">
-                                <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
-                                    <tr>
-                                        <th className="px-4 py-3">Product / SKU</th>
-                                        <th className="px-4 py-3">Fabric</th>
-                                        <th className="px-4 py-3 text-center">Ordered</th>
-                                        <th className="px-4 py-3 text-center">Inventory</th>
-                                        <th className="px-4 py-3 text-center">Scheduled</th>
-                                        <th className="px-4 py-3 text-center">Shortage</th>
-                                        <th className="px-4 py-3">Orders</th>
-                                        <th className="px-4 py-3"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                    {requirements.requirements.map((item: any) => (
-                                        <tr key={item.skuId} className="hover:bg-gray-50">
-                                            <td className="px-4 py-3">
-                                                <div className="font-medium text-gray-900">{item.productName}</div>
-                                                <div className="text-gray-500 text-xs">
-                                                    {item.colorName} / {item.size} • <span className="font-mono">{item.skuCode}</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3 text-gray-600 text-xs">
-                                                <div>{item.fabricType}</div>
-                                                <div className="text-gray-400">{item.fabricColor}</div>
-                                            </td>
-                                            <td className="px-4 py-3 text-center font-medium">{item.orderedQty}</td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className={item.currentInventory === 0 ? 'text-red-600 font-medium' : ''}>{item.currentInventory}</span>
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                {item.scheduledProduction > 0 ? (
-                                                    <span className="text-blue-600">{item.scheduledProduction}</span>
-                                                ) : (
-                                                    <span className="text-gray-400">—</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-center">
-                                                <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full font-medium">{item.shortage}</span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <div className="flex flex-wrap gap-1">
-                                                    {item.orders.slice(0, 3).map((o: any) => (
-                                                        <span key={o.orderId} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs" title={`Qty: ${o.qty}`}>
-                                                            {o.orderNumber}
-                                                        </span>
-                                                    ))}
-                                                    {item.orders.length > 3 && (
-                                                        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">+{item.orders.length - 3} more</span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => {
-                                                        setNewItem({ skuId: item.skuId, qty: item.shortage });
-                                                        setShowAddItem(new Date().toISOString().split('T')[0]);
-                                                    }}
-                                                    className="text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700"
-                                                >
-                                                    Schedule
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="text-center py-12 text-gray-400">
-                            <CheckCircle size={48} className="mx-auto mb-3 text-green-400" />
-                            <p className="font-medium text-gray-600">All caught up!</p>
-                            <p className="text-sm">No pending production requirements from open orders.</p>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Date-wise Schedule */}
+            {/* Schedule Tab with Planner Section */}
             {tab === 'schedule' && (
-                <div className="space-y-2">
-                    {dateGroups.length === 0 && (
-                        <div className="text-center text-gray-400 py-12">No production scheduled</div>
+                <div className="space-y-4">
+                    {/* Production Requirements Section (Collapsible) */}
+                    {requirements?.requirements?.length > 0 && (
+                        <div className="border border-red-200 rounded-lg overflow-hidden">
+                            <div
+                                className="flex items-center justify-between px-4 py-3 bg-red-50 cursor-pointer"
+                                onClick={() => setShowPlanner(!showPlanner)}
+                            >
+                                <div className="flex items-center gap-3">
+                                    {showPlanner ? <ChevronDown size={16} className="text-red-400" /> : <ChevronRight size={16} className="text-red-400" />}
+                                    <span className="font-medium text-red-800">Production Requirements</span>
+                                    <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                                        {requirements.summary.totalSkusNeedingProduction} SKUs • {requirements.summary.totalUnitsNeeded} units
+                                    </span>
+                                </div>
+                                <span className="text-xs text-red-600">{requirements.summary.totalOrdersAffected} orders affected</span>
+                            </div>
+
+                            {showPlanner && (
+                                <div className="bg-white">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
+                                            <tr>
+                                                <th className="px-4 py-2">Product / SKU</th>
+                                                <th className="px-4 py-2">Fabric</th>
+                                                <th className="px-4 py-2 text-center">Ordered</th>
+                                                <th className="px-4 py-2 text-center">Stock</th>
+                                                <th className="px-4 py-2 text-center">Planned</th>
+                                                <th className="px-4 py-2 text-center">Shortage</th>
+                                                <th className="px-4 py-2">Orders</th>
+                                                <th className="px-4 py-2"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {requirements.requirements.map((item: any) => (
+                                                <tr key={item.skuId} className="hover:bg-gray-50">
+                                                    <td className="px-4 py-2">
+                                                        <div className="font-medium text-gray-900 text-xs">{item.productName}</div>
+                                                        <div className="text-gray-500 text-xs">
+                                                            {item.colorName} / {item.size}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-2 text-gray-500 text-xs">{item.fabricType}</td>
+                                                    <td className="px-4 py-2 text-center font-medium text-xs">{item.orderedQty}</td>
+                                                    <td className="px-4 py-2 text-center text-xs">
+                                                        <span className={item.currentInventory === 0 ? 'text-red-600' : ''}>{item.currentInventory}</span>
+                                                    </td>
+                                                    <td className="px-4 py-2 text-center text-xs">
+                                                        {item.scheduledProduction > 0 ? (
+                                                            <span className="text-blue-600">{item.scheduledProduction}</span>
+                                                        ) : (
+                                                            <span className="text-gray-400">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-2 text-center">
+                                                        <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">{item.shortage}</span>
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {item.orders.slice(0, 2).map((o: any) => (
+                                                                <span key={o.orderId} className="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                                                    {o.orderNumber}
+                                                                </span>
+                                                            ))}
+                                                            {item.orders.length > 2 && (
+                                                                <span className="text-gray-400 text-xs">+{item.orders.length - 2}</span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <button
+                                                            onClick={() => {
+                                                                setNewItem({ skuId: item.skuId, qty: item.shortage });
+                                                                setShowAddItem(new Date().toISOString().split('T')[0]);
+                                                            }}
+                                                            className="text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700"
+                                                        >
+                                                            + Plan
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
                     )}
+
+                    {/* All caught up message */}
+                    {requirements?.requirements?.length === 0 && (
+                        <div className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg">
+                            <CheckCircle size={20} className="text-green-500" />
+                            <span className="text-sm text-green-700">All caught up! No pending production requirements from open orders.</span>
+                        </div>
+                    )}
+
+                    {/* Date-wise Schedule */}
+                    <div className="space-y-2">
+                        {dateGroups.length === 0 && (
+                            <div className="text-center text-gray-400 py-12">No production scheduled</div>
+                        )}
                     {dateGroups.map(group => (
                         <div key={group.date} className={`border rounded-lg overflow-hidden ${group.isLocked ? 'border-red-200' : group.isToday ? 'border-orange-300' : 'border-gray-200'}`}>
                             {/* Date Header */}
@@ -443,6 +434,7 @@ export default function Production() {
                             )}
                         </div>
                     ))}
+                    </div>
                 </div>
             )}
 
