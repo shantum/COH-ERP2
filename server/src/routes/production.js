@@ -309,4 +309,122 @@ router.get('/capacity', async (req, res) => {
     }
 });
 
+// Get production requirements from open orders
+router.get('/requirements', async (req, res) => {
+    try {
+        // Get all open orders with their lines
+        const openOrders = await req.prisma.order.findMany({
+            where: { status: 'open' },
+            include: {
+                orderLines: {
+                    where: { lineStatus: { in: ['pending', 'allocated'] } },
+                    include: {
+                        sku: {
+                            include: {
+                                variation: {
+                                    include: {
+                                        product: { include: { fabricType: true } },
+                                        fabric: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Get current inventory for all SKUs
+        const inventoryTxns = await req.prisma.inventoryTransaction.groupBy({
+            by: ['skuId', 'txnType'],
+            _sum: { qty: true }
+        });
+
+        // Calculate inventory balance per SKU
+        const inventoryBalance = {};
+        inventoryTxns.forEach(txn => {
+            if (!inventoryBalance[txn.skuId]) inventoryBalance[txn.skuId] = 0;
+            if (txn.txnType === 'inward') {
+                inventoryBalance[txn.skuId] += txn._sum.qty || 0;
+            } else {
+                inventoryBalance[txn.skuId] -= txn._sum.qty || 0;
+            }
+        });
+
+        // Get planned/in-progress production batches
+        const plannedBatches = await req.prisma.productionBatch.findMany({
+            where: { status: { in: ['planned', 'in_progress'] } },
+            select: { skuId: true, qtyPlanned: true, qtyCompleted: true }
+        });
+
+        // Calculate scheduled production per SKU
+        const scheduledProduction = {};
+        plannedBatches.forEach(batch => {
+            if (!scheduledProduction[batch.skuId]) scheduledProduction[batch.skuId] = 0;
+            scheduledProduction[batch.skuId] += (batch.qtyPlanned - batch.qtyCompleted);
+        });
+
+        // Consolidate requirements by SKU
+        const requirementsBySku = {};
+
+        openOrders.forEach(order => {
+            order.orderLines.forEach(line => {
+                const skuId = line.skuId;
+                const sku = line.sku;
+
+                if (!requirementsBySku[skuId]) {
+                    requirementsBySku[skuId] = {
+                        skuId,
+                        skuCode: sku.skuCode,
+                        productName: sku.variation.product.name,
+                        colorName: sku.variation.colorName,
+                        size: sku.size,
+                        fabricType: sku.variation.product.fabricType?.name || 'N/A',
+                        fabricColor: sku.variation.fabric?.colorName || 'N/A',
+                        category: sku.variation.product.category,
+                        orderedQty: 0,
+                        currentInventory: inventoryBalance[skuId] || 0,
+                        scheduledProduction: scheduledProduction[skuId] || 0,
+                        orders: []
+                    };
+                }
+
+                requirementsBySku[skuId].orderedQty += line.qty;
+                requirementsBySku[skuId].orders.push({
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                    orderDate: order.orderDate,
+                    qty: line.qty,
+                    lineStatus: line.lineStatus
+                });
+            });
+        });
+
+        // Calculate shortage and filter items that need production
+        const requirements = Object.values(requirementsBySku).map(item => {
+            const availableQty = item.currentInventory + item.scheduledProduction;
+            const shortage = Math.max(0, item.orderedQty - availableQty);
+            return {
+                ...item,
+                availableQty,
+                shortage,
+                needsProduction: shortage > 0
+            };
+        }).filter(item => item.needsProduction)
+          .sort((a, b) => b.shortage - a.shortage); // Sort by shortage (highest first)
+
+        // Summary stats
+        const summary = {
+            totalSkusNeedingProduction: requirements.length,
+            totalUnitsNeeded: requirements.reduce((sum, r) => sum + r.shortage, 0),
+            totalOrdersAffected: new Set(requirements.flatMap(r => r.orders.map(o => o.orderId))).size
+        };
+
+        res.json({ requirements, summary });
+    } catch (error) {
+        console.error('Get production requirements error:', error);
+        res.status(500).json({ error: 'Failed to fetch production requirements' });
+    }
+});
+
 export default router;

@@ -131,6 +131,7 @@ export const productionApi = {
     getLockedDates: () => api.get('/production/locked-dates'),
     lockDate: (date: string) => api.post('/production/lock-date', { date }),
     unlockDate: (date: string) => api.post('/production/unlock-date', { date }),
+    getRequirements: () => api.get('/production/requirements'),
 };
 
 // Reports
