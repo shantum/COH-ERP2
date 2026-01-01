@@ -24,6 +24,7 @@ export default function Production() {
     const invalidateAll = () => {
         queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
         queryClient.invalidateQueries({ queryKey: ['productionCapacity'] });
+        queryClient.invalidateQueries({ queryKey: ['productionRequirements'] });
     };
 
     const startBatch = useMutation({ mutationFn: (id: string) => productionApi.startBatch(id), onSuccess: invalidateAll });
