@@ -412,83 +412,85 @@ export default function Production() {
                                 </div>
                             </div>
 
-                            {/* Batch Items - Grouped by Product/Color */}
+                            {/* Batch Items - Simple Table */}
                             {expandedDates.has(group.date) && (
-                                <div className="bg-white divide-y">
-                                    {group.consolidatedGroups.map((productGroup: any) => (
-                                        <div key={productGroup.productName} className="py-2">
-                                            {/* Product Header */}
-                                            <div className="px-4 py-1 bg-gray-50">
-                                                <span className="font-medium text-gray-800 text-sm">{productGroup.productName}</span>
-                                            </div>
-                                            {/* Colors */}
-                                            {productGroup.colors.map((colorGroup: any) => (
-                                                <div key={colorGroup.colorName} className="px-4 py-2 ml-4 border-l-2 border-gray-200">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <span className="text-xs font-medium text-gray-600">{colorGroup.colorName}</span>
-                                                    </div>
-                                                    {/* Sizes in a row */}
-                                                    <div className="flex flex-wrap gap-2">
-                                                        {colorGroup.skus.map((sku: any, idx: number) => (
-                                                            <div
-                                                                key={`${sku.skuId}-${sku.status}-${idx}`}
-                                                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
-                                                                    sku.status === 'completed' ? 'bg-green-50 border border-green-200' :
-                                                                    sku.status === 'in_progress' ? 'bg-yellow-50 border border-yellow-200' :
-                                                                    'bg-gray-50 border border-gray-200'
-                                                                }`}
+                                <table className="w-full text-sm bg-white">
+                                    <thead>
+                                        <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide">
+                                            <th className="py-2 px-4 font-medium">SKU</th>
+                                            <th className="py-2 px-4 font-medium">Product Name</th>
+                                            <th className="py-2 px-4 font-medium">Colour</th>
+                                            <th className="py-2 px-4 font-medium">Size</th>
+                                            <th className="py-2 px-4 font-medium text-center">Qty</th>
+                                            <th className="py-2 px-4 font-medium">Status</th>
+                                            <th className="py-2 px-4 font-medium w-24"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {group.batches
+                                            .sort((a: any, b: any) => {
+                                                // Sort by product name, then color, then size
+                                                const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
+                                                if (productCompare !== 0) return productCompare;
+                                                const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
+                                                if (colorCompare !== 0) return colorCompare;
+                                                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                                                return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+                                            })
+                                            .map((batch: any) => (
+                                            <tr key={batch.id} className="border-t hover:bg-gray-50">
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">{batch.sku?.skuCode}</td>
+                                                <td className="py-2 px-4 font-medium text-gray-900">{batch.sku?.variation?.product?.name}</td>
+                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.variation?.colorName}</td>
+                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.size}</td>
+                                                <td className="py-2 px-4 text-center font-medium">{batch.qtyPlanned}</td>
+                                                <td className="py-2 px-4">
+                                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                                        batch.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                        batch.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
+                                                        'bg-gray-100 text-gray-600'
+                                                    }`}>
+                                                        {batch.status === 'in_progress' ? 'in progress' : batch.status}
+                                                    </span>
+                                                </td>
+                                                <td className="py-2 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                        {batch.status === 'planned' && !group.isLocked && (
+                                                            <>
+                                                                <button
+                                                                    onClick={() => startBatch.mutate(batch.id)}
+                                                                    className="text-blue-600 hover:text-blue-800"
+                                                                    title="Start"
+                                                                >
+                                                                    <Play size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => deleteBatch.mutate(batch.id)}
+                                                                    className="text-gray-400 hover:text-red-500"
+                                                                    title="Delete"
+                                                                >
+                                                                    <X size={14} />
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                        {batch.status === 'in_progress' && (
+                                                            <button
+                                                                onClick={() => { setShowComplete(batch); setQtyCompleted(batch.qtyPlanned); }}
+                                                                className="text-green-600 hover:text-green-800"
+                                                                title="Mark Complete"
                                                             >
-                                                                <span className="font-medium">{sku.size}</span>
-                                                                <span className="text-gray-500">×</span>
-                                                                <span className={`font-bold ${
-                                                                    sku.status === 'completed' ? 'text-green-700' :
-                                                                    sku.status === 'in_progress' ? 'text-yellow-700' :
-                                                                    'text-gray-700'
-                                                                }`}>
-                                                                    {sku.qtyPlanned}
-                                                                </span>
-                                                                {sku.qtyCompleted > 0 && sku.qtyCompleted < sku.qtyPlanned && (
-                                                                    <span className="text-green-600">({sku.qtyCompleted} done)</span>
-                                                                )}
-                                                                {/* Actions */}
-                                                                {sku.status === 'planned' && !group.isLocked && (
-                                                                    <div className="flex items-center gap-1 ml-1 border-l pl-2">
-                                                                        <button
-                                                                            onClick={() => startBatch.mutate(sku.originalBatch.id)}
-                                                                            className="text-blue-600 hover:text-blue-800"
-                                                                            title="Start"
-                                                                        >
-                                                                            <Play size={12} />
-                                                                        </button>
-                                                                        <button
-                                                                            onClick={() => deleteBatch.mutate(sku.originalBatch.id)}
-                                                                            className="text-gray-400 hover:text-red-500"
-                                                                            title="Delete"
-                                                                        >
-                                                                            <X size={12} />
-                                                                        </button>
-                                                                    </div>
-                                                                )}
-                                                                {sku.status === 'in_progress' && (
-                                                                    <button
-                                                                        onClick={() => { setShowComplete(sku.originalBatch); setQtyCompleted(sku.qtyPlanned); }}
-                                                                        className="text-green-600 hover:text-green-800 ml-1"
-                                                                        title="Complete"
-                                                                    >
-                                                                        <CheckCircle size={12} />
-                                                                    </button>
-                                                                )}
-                                                                {sku.status === 'completed' && (
-                                                                    <CheckCircle size={12} className="text-green-500 ml-1" />
-                                                                )}
-                                                            </div>
-                                                        ))}
+                                                                <CheckCircle size={14} />
+                                                            </button>
+                                                        )}
+                                                        {batch.status === 'completed' && (
+                                                            <CheckCircle size={14} className="text-green-500" />
+                                                        )}
                                                     </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ))}
-                                </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             )}
                         </div>
                     ))}
