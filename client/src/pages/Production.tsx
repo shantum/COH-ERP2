@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi, productsApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock } from 'lucide-react';
+import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check } from 'lucide-react';
 
 export default function Production() {
     const queryClient = useQueryClient();
@@ -20,6 +20,7 @@ export default function Production() {
     const [newItem, setNewItem] = useState({ skuId: '', qty: 1 });
     const [itemSelection, setItemSelection] = useState({ productId: '', variationId: '' });
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+    const [copiedDate, setCopiedDate] = useState<string | null>(null);
 
     const invalidateAll = () => {
         queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
@@ -46,6 +47,57 @@ export default function Production() {
 
     // Check if date is locked
     const isDateLocked = (dateStr: string) => lockedDates?.includes(dateStr) || false;
+
+    // Copy production plan to clipboard
+    const copyToClipboard = (group: any) => {
+        // Consolidate batches by SKU
+        const consolidatedMap = new Map<string, { sku: any; totalQty: number }>();
+        group.batches.forEach((batch: any) => {
+            const key = batch.skuId;
+            if (!consolidatedMap.has(key)) {
+                consolidatedMap.set(key, { sku: batch.sku, totalQty: 0 });
+            }
+            consolidatedMap.get(key)!.totalQty += batch.qtyPlanned;
+        });
+
+        const consolidated = Array.from(consolidatedMap.values())
+            .sort((a, b) => {
+                const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
+                if (productCompare !== 0) return productCompare;
+                const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
+                if (colorCompare !== 0) return colorCompare;
+                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+            });
+
+        // Format as text
+        const lines = [`Production Plan - ${group.displayDate} (${group.date})\n`];
+        let currentProduct = '';
+        let currentColor = '';
+
+        consolidated.forEach(entry => {
+            const product = entry.sku?.variation?.product?.name || '';
+            const color = entry.sku?.variation?.colorName || '';
+
+            if (product !== currentProduct) {
+                currentProduct = product;
+                currentColor = '';
+                lines.push(`\n${product}`);
+            }
+            if (color !== currentColor) {
+                currentColor = color;
+                lines.push(`  ${color}`);
+            }
+            lines.push(`    ${entry.sku?.size}: ${entry.totalQty}`);
+        });
+
+        lines.push(`\nTotal: ${group.totalPlanned} items`);
+
+        navigator.clipboard.writeText(lines.join('\n')).then(() => {
+            setCopiedDate(group.date);
+            setTimeout(() => setCopiedDate(null), 2000);
+        });
+    };
 
     // Group and consolidate batches by date, then by product/color
     const groupBatchesByDate = (batches: any[]) => {
@@ -409,6 +461,13 @@ export default function Production() {
                                             </button>
                                         </>
                                     )}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); copyToClipboard(group); }}
+                                        className={`text-xs flex items-center gap-1 ${copiedDate === group.date ? 'text-green-600' : 'text-gray-400 hover:text-gray-600'}`}
+                                        title="Copy to clipboard"
+                                    >
+                                        {copiedDate === group.date ? <Check size={14} /> : <Copy size={14} />}
+                                    </button>
                                 </div>
                             </div>
 
