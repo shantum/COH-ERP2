@@ -29,7 +29,6 @@ export default function Production() {
 
     const startBatch = useMutation({ mutationFn: (id: string) => productionApi.startBatch(id), onSuccess: invalidateAll });
     const completeBatch = useMutation({ mutationFn: ({ id, data }: any) => productionApi.completeBatch(id, data), onSuccess: () => { invalidateAll(); setShowComplete(null); } });
-    const updateBatch = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => productionApi.updateBatch(id, data), onSuccess: invalidateAll });
     const deleteBatch = useMutation({ mutationFn: (id: string) => productionApi.deleteBatch(id), onSuccess: invalidateAll });
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
@@ -48,7 +47,7 @@ export default function Production() {
     // Check if date is locked
     const isDateLocked = (dateStr: string) => lockedDates?.includes(dateStr) || false;
 
-    // Group batches by date
+    // Group and consolidate batches by date, then by product/color
     const groupBatchesByDate = (batches: any[]) => {
         if (!batches) return [];
         const groups: Record<string, any[]> = {};
@@ -67,19 +66,76 @@ export default function Production() {
                 if (a < today && b >= today) return 1;
                 return b.localeCompare(a);
             })
-            .map(([date, items]) => ({
-                date,
-                displayDate: formatDate(date),
-                isToday: date === today,
-                isFuture: date > today,
-                isPast: date < today,
-                isLocked: isDateLocked(date),
-                batches: items.sort((a, b) => a.sku?.skuCode?.localeCompare(b.sku?.skuCode || '') || 0),
-                totalPlanned: items.reduce((sum, b) => sum + b.qtyPlanned, 0),
-                totalCompleted: items.reduce((sum, b) => sum + b.qtyCompleted, 0),
-                allCompleted: items.every(b => b.status === 'completed'),
-                hasInProgress: items.some(b => b.status === 'in_progress')
-            }));
+            .map(([date, items]) => {
+                // Group batches by product → color for consolidated view
+                const productGroups: Record<string, { product: any; colorGroups: Record<string, { color: string; skus: any[] }> }> = {};
+
+                items.forEach(batch => {
+                    const product = batch.sku?.variation?.product;
+                    const productName = product?.name || 'Unknown';
+                    const colorName = batch.sku?.variation?.colorName || 'Unknown';
+
+                    if (!productGroups[productName]) {
+                        productGroups[productName] = { product, colorGroups: {} };
+                    }
+                    if (!productGroups[productName].colorGroups[colorName]) {
+                        productGroups[productName].colorGroups[colorName] = { color: colorName, skus: [] };
+                    }
+
+                    // Check if this SKU already exists, consolidate if so
+                    const existingSku = productGroups[productName].colorGroups[colorName].skus.find(
+                        s => s.skuId === batch.skuId && s.status === batch.status
+                    );
+                    if (existingSku) {
+                        existingSku.qtyPlanned += batch.qtyPlanned;
+                        existingSku.qtyCompleted += batch.qtyCompleted;
+                        existingSku.batchIds.push(batch.id);
+                    } else {
+                        productGroups[productName].colorGroups[colorName].skus.push({
+                            skuId: batch.skuId,
+                            size: batch.sku?.size,
+                            skuCode: batch.sku?.skuCode,
+                            qtyPlanned: batch.qtyPlanned,
+                            qtyCompleted: batch.qtyCompleted,
+                            status: batch.status,
+                            batchIds: [batch.id],
+                            originalBatch: batch // Keep reference for actions
+                        });
+                    }
+                });
+
+                // Convert to array and sort
+                const consolidatedGroups = Object.entries(productGroups)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([productName, data]) => ({
+                        productName,
+                        product: data.product,
+                        colors: Object.entries(data.colorGroups)
+                            .sort(([a], [b]) => a.localeCompare(b))
+                            .map(([colorName, colorData]) => ({
+                                colorName,
+                                skus: colorData.skus.sort((a, b) => {
+                                    const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                                    return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
+                                })
+                            }))
+                    }));
+
+                return {
+                    date,
+                    displayDate: formatDate(date),
+                    isToday: date === today,
+                    isFuture: date > today,
+                    isPast: date < today,
+                    isLocked: isDateLocked(date),
+                    batches: items, // Keep original for actions
+                    consolidatedGroups,
+                    totalPlanned: items.reduce((sum, b) => sum + b.qtyPlanned, 0),
+                    totalCompleted: items.reduce((sum, b) => sum + b.qtyCompleted, 0),
+                    allCompleted: items.every(b => b.status === 'completed'),
+                    hasInProgress: items.some(b => b.status === 'in_progress')
+                };
+            });
     };
 
     const formatDate = (dateStr: string) => {
@@ -190,7 +246,7 @@ export default function Production() {
             {/* Schedule Tab with Planner Section */}
             {tab === 'schedule' && (
                 <div className="space-y-4">
-                    {/* Production Requirements Section (Collapsible) */}
+                    {/* Production Requirements Section (Collapsible) - Order-wise */}
                     {requirements?.requirements?.length > 0 && (
                         <div className="border border-red-200 rounded-lg overflow-hidden">
                             <div
@@ -201,10 +257,10 @@ export default function Production() {
                                     {showPlanner ? <ChevronDown size={16} className="text-red-400" /> : <ChevronRight size={16} className="text-red-400" />}
                                     <span className="font-medium text-red-800">Production Requirements</span>
                                     <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
-                                        {requirements.summary.totalSkusNeedingProduction} SKUs • {requirements.summary.totalUnitsNeeded} units
+                                        {requirements.summary.totalLinesNeedingProduction} items • {requirements.summary.totalUnitsNeeded} units
                                     </span>
                                 </div>
-                                <span className="text-xs text-red-600">{requirements.summary.totalOrdersAffected} orders affected</span>
+                                <span className="text-xs text-red-600">{requirements.summary.totalOrdersAffected} orders</span>
                             </div>
 
                             {showPlanner && (
@@ -212,62 +268,66 @@ export default function Production() {
                                     <table className="w-full text-sm">
                                         <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
                                             <tr>
-                                                <th className="px-4 py-2">Product / SKU</th>
-                                                <th className="px-4 py-2">Fabric</th>
-                                                <th className="px-4 py-2 text-center">Ordered</th>
-                                                <th className="px-4 py-2 text-center">Stock</th>
-                                                <th className="px-4 py-2 text-center">Planned</th>
-                                                <th className="px-4 py-2 text-center">Shortage</th>
-                                                <th className="px-4 py-2">Orders</th>
-                                                <th className="px-4 py-2"></th>
+                                                <th className="px-3 py-2">Order</th>
+                                                <th className="px-3 py-2">Product</th>
+                                                <th className="px-3 py-2 text-center">Qty</th>
+                                                <th className="px-3 py-2 text-center">Planned</th>
+                                                <th className="px-3 py-2 text-center">Need</th>
+                                                <th className="px-3 py-2">Schedule For</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">
                                             {requirements.requirements.map((item: any) => (
-                                                <tr key={item.skuId} className="hover:bg-gray-50">
-                                                    <td className="px-4 py-2">
+                                                <tr key={item.orderLineId} className="hover:bg-gray-50">
+                                                    <td className="px-3 py-2">
+                                                        <div className="font-medium text-gray-900 text-xs">{item.orderNumber}</div>
+                                                        <div className="text-gray-400 text-xs">{new Date(item.orderDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+                                                    </td>
+                                                    <td className="px-3 py-2">
                                                         <div className="font-medium text-gray-900 text-xs">{item.productName}</div>
-                                                        <div className="text-gray-500 text-xs">
-                                                            {item.colorName} / {item.size}
-                                                        </div>
+                                                        <div className="text-gray-500 text-xs">{item.colorName} / {item.size}</div>
                                                     </td>
-                                                    <td className="px-4 py-2 text-gray-500 text-xs">{item.fabricType}</td>
-                                                    <td className="px-4 py-2 text-center font-medium text-xs">{item.orderedQty}</td>
-                                                    <td className="px-4 py-2 text-center text-xs">
-                                                        <span className={item.currentInventory === 0 ? 'text-red-600' : ''}>{item.currentInventory}</span>
-                                                    </td>
-                                                    <td className="px-4 py-2 text-center text-xs">
-                                                        {item.scheduledProduction > 0 ? (
-                                                            <span className="text-blue-600">{item.scheduledProduction}</span>
+                                                    <td className="px-3 py-2 text-center font-medium text-xs">{item.qty}</td>
+                                                    <td className="px-3 py-2 text-center text-xs">
+                                                        {item.scheduledForLine > 0 ? (
+                                                            <span className="text-blue-600">{item.scheduledForLine}</span>
                                                         ) : (
                                                             <span className="text-gray-400">—</span>
                                                         )}
                                                     </td>
-                                                    <td className="px-4 py-2 text-center">
+                                                    <td className="px-3 py-2 text-center">
                                                         <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">{item.shortage}</span>
                                                     </td>
-                                                    <td className="px-4 py-2">
-                                                        <div className="flex flex-wrap gap-1">
-                                                            {item.orders.slice(0, 2).map((o: any) => (
-                                                                <span key={o.orderId} className="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
-                                                                    {o.orderNumber}
-                                                                </span>
-                                                            ))}
-                                                            {item.orders.length > 2 && (
-                                                                <span className="text-gray-400 text-xs">+{item.orders.length - 2}</span>
-                                                            )}
+                                                    <td className="px-3 py-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <input
+                                                                type="date"
+                                                                className="text-xs border rounded px-2 py-1 w-32"
+                                                                defaultValue={new Date().toISOString().split('T')[0]}
+                                                                min={new Date().toISOString().split('T')[0]}
+                                                                id={`date-${item.orderLineId}`}
+                                                            />
+                                                            <button
+                                                                onClick={() => {
+                                                                    const dateInput = document.getElementById(`date-${item.orderLineId}`) as HTMLInputElement;
+                                                                    const selectedDate = dateInput?.value || new Date().toISOString().split('T')[0];
+                                                                    if (lockedDates?.includes(selectedDate)) {
+                                                                        alert('This date is locked. Please select another date.');
+                                                                        return;
+                                                                    }
+                                                                    createBatch.mutate({
+                                                                        skuId: item.skuId,
+                                                                        qtyPlanned: item.shortage,
+                                                                        batchDate: selectedDate,
+                                                                        sourceOrderLineId: item.orderLineId
+                                                                    });
+                                                                }}
+                                                                disabled={createBatch.isPending}
+                                                                className="text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50"
+                                                            >
+                                                                + Add
+                                                            </button>
                                                         </div>
-                                                    </td>
-                                                    <td className="px-4 py-2">
-                                                        <button
-                                                            onClick={() => {
-                                                                setNewItem({ skuId: item.skuId, qty: item.shortage });
-                                                                setShowAddItem(new Date().toISOString().split('T')[0]);
-                                                            }}
-                                                            className="text-xs px-2 py-1 bg-primary-600 text-white rounded hover:bg-primary-700"
-                                                        >
-                                                            + Plan
-                                                        </button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -352,86 +412,83 @@ export default function Production() {
                                 </div>
                             </div>
 
-                            {/* Batch Items */}
+                            {/* Batch Items - Grouped by Product/Color */}
                             {expandedDates.has(group.date) && (
-                                <table className="w-full text-sm">
-                                    <thead>
-                                        <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide bg-white">
-                                            <th className="py-2 px-4 font-medium">SKU</th>
-                                            <th className="py-2 px-4 font-medium">Product</th>
-                                            <th className="py-2 px-4 font-medium text-center">Planned</th>
-                                            <th className="py-2 px-4 font-medium text-center">Done</th>
-                                            <th className="py-2 px-4 font-medium">Status</th>
-                                            <th className="py-2 px-4 font-medium">Order</th>
-                                            <th className="py-2 px-4 font-medium w-32">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {group.batches.map((batch: any) => (
-                                            <tr key={batch.id} className="border-t hover:bg-gray-50">
-                                                <td className="py-2 px-4 font-mono text-xs">{batch.sku?.skuCode}</td>
-                                                <td className="py-2 px-4 text-gray-600">
-                                                    {batch.sku?.variation?.product?.name} - {batch.sku?.variation?.colorName} - {batch.sku?.size}
-                                                </td>
-                                                <td className="py-2 px-4 text-center">{batch.qtyPlanned}</td>
-                                                <td className="py-2 px-4 text-center">
-                                                    <span className={batch.qtyCompleted > 0 ? 'text-green-600' : 'text-gray-400'}>
-                                                        {batch.qtyCompleted}
-                                                    </span>
-                                                </td>
-                                                <td className="py-2 px-4">
-                                                    <span className={`text-xs ${
-                                                        batch.status === 'completed' ? 'text-green-600' :
-                                                        batch.status === 'in_progress' ? 'text-yellow-600' :
-                                                        'text-gray-400'
-                                                    }`}>
-                                                        {batch.status}
-                                                    </span>
-                                                </td>
-                                                <td className="py-2 px-4 text-xs text-gray-400">
-                                                    {batch.sourceOrderLineId ? 'order' : '-'}
-                                                </td>
-                                                <td className="py-2 px-4">
-                                                    <div className="flex items-center gap-2">
-                                                        {batch.status === 'planned' && (
-                                                            <>
-                                                                <button
-                                                                    onClick={() => startBatch.mutate(batch.id)}
-                                                                    className="text-xs text-blue-600 hover:underline flex items-center gap-0.5"
-                                                                >
-                                                                    <Play size={12} />Start
-                                                                </button>
-                                                                <input
-                                                                    type="date"
-                                                                    className="text-xs border rounded px-1 py-0.5 w-28"
-                                                                    value={batch.batchDate?.split('T')[0]}
-                                                                    onChange={(e) => updateBatch.mutate({ id: batch.id, data: { batchDate: e.target.value } })}
-                                                                />
-                                                                <button
-                                                                    onClick={() => deleteBatch.mutate(batch.id)}
-                                                                    className="text-gray-400 hover:text-red-500"
-                                                                >
-                                                                    <X size={14} />
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                        {batch.status === 'in_progress' && (
-                                                            <button
-                                                                onClick={() => { setShowComplete(batch); setQtyCompleted(batch.qtyPlanned); }}
-                                                                className="text-xs text-green-600 hover:underline flex items-center gap-0.5"
-                                                            >
-                                                                <CheckCircle size={12} />Complete
-                                                            </button>
-                                                        )}
-                                                        {batch.status === 'completed' && (
-                                                            <span className="text-xs text-green-500">✓</span>
-                                                        )}
+                                <div className="bg-white divide-y">
+                                    {group.consolidatedGroups.map((productGroup: any) => (
+                                        <div key={productGroup.productName} className="py-2">
+                                            {/* Product Header */}
+                                            <div className="px-4 py-1 bg-gray-50">
+                                                <span className="font-medium text-gray-800 text-sm">{productGroup.productName}</span>
+                                            </div>
+                                            {/* Colors */}
+                                            {productGroup.colors.map((colorGroup: any) => (
+                                                <div key={colorGroup.colorName} className="px-4 py-2 ml-4 border-l-2 border-gray-200">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className="text-xs font-medium text-gray-600">{colorGroup.colorName}</span>
                                                     </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                                    {/* Sizes in a row */}
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {colorGroup.skus.map((sku: any, idx: number) => (
+                                                            <div
+                                                                key={`${sku.skuId}-${sku.status}-${idx}`}
+                                                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+                                                                    sku.status === 'completed' ? 'bg-green-50 border border-green-200' :
+                                                                    sku.status === 'in_progress' ? 'bg-yellow-50 border border-yellow-200' :
+                                                                    'bg-gray-50 border border-gray-200'
+                                                                }`}
+                                                            >
+                                                                <span className="font-medium">{sku.size}</span>
+                                                                <span className="text-gray-500">×</span>
+                                                                <span className={`font-bold ${
+                                                                    sku.status === 'completed' ? 'text-green-700' :
+                                                                    sku.status === 'in_progress' ? 'text-yellow-700' :
+                                                                    'text-gray-700'
+                                                                }`}>
+                                                                    {sku.qtyPlanned}
+                                                                </span>
+                                                                {sku.qtyCompleted > 0 && sku.qtyCompleted < sku.qtyPlanned && (
+                                                                    <span className="text-green-600">({sku.qtyCompleted} done)</span>
+                                                                )}
+                                                                {/* Actions */}
+                                                                {sku.status === 'planned' && !group.isLocked && (
+                                                                    <div className="flex items-center gap-1 ml-1 border-l pl-2">
+                                                                        <button
+                                                                            onClick={() => startBatch.mutate(sku.originalBatch.id)}
+                                                                            className="text-blue-600 hover:text-blue-800"
+                                                                            title="Start"
+                                                                        >
+                                                                            <Play size={12} />
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => deleteBatch.mutate(sku.originalBatch.id)}
+                                                                            className="text-gray-400 hover:text-red-500"
+                                                                            title="Delete"
+                                                                        >
+                                                                            <X size={12} />
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                                {sku.status === 'in_progress' && (
+                                                                    <button
+                                                                        onClick={() => { setShowComplete(sku.originalBatch); setQtyCompleted(sku.qtyPlanned); }}
+                                                                        className="text-green-600 hover:text-green-800 ml-1"
+                                                                        title="Complete"
+                                                                    >
+                                                                        <CheckCircle size={12} />
+                                                                    </button>
+                                                                )}
+                                                                {sku.status === 'completed' && (
+                                                                    <CheckCircle size={12} className="text-green-500 ml-1" />
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ))}
+                                </div>
                             )}
                         </div>
                     ))}

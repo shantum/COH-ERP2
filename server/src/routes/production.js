@@ -309,7 +309,7 @@ router.get('/capacity', async (req, res) => {
     }
 });
 
-// Get production requirements from open orders
+// Get production requirements from open orders (order-wise)
 router.get('/requirements', async (req, res) => {
     try {
         // Get all open orders with their lines
@@ -330,8 +330,10 @@ router.get('/requirements', async (req, res) => {
                             }
                         }
                     }
-                }
-            }
+                },
+                customer: true
+            },
+            orderBy: { orderDate: 'asc' }
         });
 
         // Get current inventory for all SKUs
@@ -351,73 +353,66 @@ router.get('/requirements', async (req, res) => {
             }
         });
 
-        // Get planned/in-progress production batches
+        // Get planned/in-progress production batches per SKU
         const plannedBatches = await req.prisma.productionBatch.findMany({
             where: { status: { in: ['planned', 'in_progress'] } },
-            select: { skuId: true, qtyPlanned: true, qtyCompleted: true }
+            select: { skuId: true, qtyPlanned: true, qtyCompleted: true, sourceOrderLineId: true }
         });
 
         // Calculate scheduled production per SKU
         const scheduledProduction = {};
+        const scheduledByOrderLine = {};
         plannedBatches.forEach(batch => {
             if (!scheduledProduction[batch.skuId]) scheduledProduction[batch.skuId] = 0;
             scheduledProduction[batch.skuId] += (batch.qtyPlanned - batch.qtyCompleted);
+            if (batch.sourceOrderLineId) {
+                scheduledByOrderLine[batch.sourceOrderLineId] = (scheduledByOrderLine[batch.sourceOrderLineId] || 0) + batch.qtyPlanned;
+            }
         });
 
-        // Consolidate requirements by SKU
-        const requirementsBySku = {};
+        // Build order-wise requirements
+        const requirements = [];
 
         openOrders.forEach(order => {
             order.orderLines.forEach(line => {
-                const skuId = line.skuId;
                 const sku = line.sku;
+                const currentInventory = inventoryBalance[line.skuId] || 0;
+                const totalScheduled = scheduledProduction[line.skuId] || 0;
+                const scheduledForThisLine = scheduledByOrderLine[line.id] || 0;
+                const availableQty = currentInventory + totalScheduled;
+                const shortage = Math.max(0, line.qty - scheduledForThisLine);
 
-                if (!requirementsBySku[skuId]) {
-                    requirementsBySku[skuId] = {
-                        skuId,
+                if (shortage > 0) {
+                    requirements.push({
+                        orderLineId: line.id,
+                        orderId: order.id,
+                        orderNumber: order.orderNumber,
+                        orderDate: order.orderDate,
+                        customerName: order.customer?.name || 'Unknown',
+                        skuId: line.skuId,
                         skuCode: sku.skuCode,
                         productName: sku.variation.product.name,
                         colorName: sku.variation.colorName,
                         size: sku.size,
                         fabricType: sku.variation.product.fabricType?.name || 'N/A',
-                        fabricColor: sku.variation.fabric?.colorName || 'N/A',
-                        category: sku.variation.product.category,
-                        orderedQty: 0,
-                        currentInventory: inventoryBalance[skuId] || 0,
-                        scheduledProduction: scheduledProduction[skuId] || 0,
-                        orders: []
-                    };
+                        qty: line.qty,
+                        currentInventory,
+                        scheduledForLine: scheduledForThisLine,
+                        shortage,
+                        lineStatus: line.lineStatus
+                    });
                 }
-
-                requirementsBySku[skuId].orderedQty += line.qty;
-                requirementsBySku[skuId].orders.push({
-                    orderId: order.id,
-                    orderNumber: order.orderNumber,
-                    orderDate: order.orderDate,
-                    qty: line.qty,
-                    lineStatus: line.lineStatus
-                });
             });
         });
 
-        // Calculate shortage and filter items that need production
-        const requirements = Object.values(requirementsBySku).map(item => {
-            const availableQty = item.currentInventory + item.scheduledProduction;
-            const shortage = Math.max(0, item.orderedQty - availableQty);
-            return {
-                ...item,
-                availableQty,
-                shortage,
-                needsProduction: shortage > 0
-            };
-        }).filter(item => item.needsProduction)
-          .sort((a, b) => b.shortage - a.shortage); // Sort by shortage (highest first)
+        // Sort by order date (oldest first)
+        requirements.sort((a, b) => new Date(a.orderDate).getTime() - new Date(b.orderDate).getTime());
 
         // Summary stats
         const summary = {
-            totalSkusNeedingProduction: requirements.length,
+            totalLinesNeedingProduction: requirements.length,
             totalUnitsNeeded: requirements.reduce((sum, r) => sum + r.shortage, 0),
-            totalOrdersAffected: new Set(requirements.flatMap(r => r.orders.map(o => o.orderId))).size
+            totalOrdersAffected: new Set(requirements.map(r => r.orderId)).size
         };
 
         res.json({ requirements, summary });
