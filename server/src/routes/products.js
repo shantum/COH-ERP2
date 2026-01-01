@@ -71,11 +71,12 @@ router.get('/:id', async (req, res) => {
 // Create product
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        const { name, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption } = req.body;
+        const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption } = req.body;
 
         const product = await req.prisma.product.create({
             data: {
                 name,
+                styleCode: styleCode || null,
                 category,
                 productType,
                 gender: gender || 'unisex',
@@ -96,12 +97,13 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update product
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, isActive } = req.body;
+        const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, isActive } = req.body;
 
         const product = await req.prisma.product.update({
             where: { id: req.params.id },
             data: {
                 name,
+                styleCode: styleCode || null,
                 category,
                 productType,
                 gender,

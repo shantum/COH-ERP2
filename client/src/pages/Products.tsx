@@ -14,7 +14,7 @@ export default function Products() {
     const [showEditProduct, setShowEditProduct] = useState<any>(null);
     const [showAddVariation, setShowAddVariation] = useState<string | null>(null);
     const [showEditVariation, setShowEditVariation] = useState<any>(null);
-    const [productForm, setProductForm] = useState({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', fabricTypeId: '', baseProductionTimeMins: 60, defaultFabricConsumption: '' });
+    const [productForm, setProductForm] = useState({ name: '', styleCode: '', category: 'dress', productType: 'basic', gender: 'unisex', fabricTypeId: '', baseProductionTimeMins: 60, defaultFabricConsumption: '' });
     const [variationForm, setVariationForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', fabricId: '', sizes: ['XS', 'S', 'M', 'L', 'XL'], mrp: 2500, fabricConsumption: 1.5 });
     const [editVariationForm, setEditVariationForm] = useState<any>({ colorName: '', standardColor: '', colorHex: '', fabricId: '', isActive: true, skus: [], newSkus: [] });
     const standardColors = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
@@ -25,7 +25,7 @@ export default function Products() {
 
     const createProduct = useMutation({
         mutationFn: (data: any) => productsApi.create(data),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowAddProduct(false); setProductForm({ name: '', category: 'dress', productType: 'basic', gender: 'unisex', fabricTypeId: '', baseProductionTimeMins: 60, defaultFabricConsumption: '' }); }
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setShowAddProduct(false); setProductForm({ name: '', styleCode: '', category: 'dress', productType: 'basic', gender: 'unisex', fabricTypeId: '', baseProductionTimeMins: 60, defaultFabricConsumption: '' }); }
     });
 
     const updateProduct = useMutation({
@@ -268,7 +268,10 @@ export default function Products() {
                                 <div className="flex items-center">
                                     {expandedProducts.has(product.id) ? <ChevronDown size={20} className="mr-2 text-gray-400" /> : <ChevronRight size={20} className="mr-2 text-gray-400" />}
                                     <div>
-                                        <h3 className="font-semibold text-gray-900">{product.name}</h3>
+                                        <h3 className="font-semibold text-gray-900">
+                                            {product.name}
+                                            {product.styleCode && <span className="ml-2 text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{product.styleCode}</span>}
+                                        </h3>
                                         <p className="text-sm text-gray-500">
                                             {product.category} • {product.gender || 'unisex'} • {product.productType}
                                             {product.fabricType && <span className="ml-1">• {product.fabricType.name}</span>}
@@ -341,9 +344,15 @@ export default function Products() {
                             <button onClick={() => setShowAddProduct(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <form onSubmit={handleSubmitProduct} className="space-y-4">
-                            <div>
-                                <label className="label">Product Name</label>
-                                <input className="input" value={productForm.name} onChange={(e) => setProductForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Linen MIDI Dress" required />
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="col-span-2">
+                                    <label className="label">Product Name</label>
+                                    <input className="input" value={productForm.name} onChange={(e) => setProductForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Linen MIDI Dress" required />
+                                </div>
+                                <div>
+                                    <label className="label">Style Code</label>
+                                    <input className="input" value={productForm.styleCode} onChange={(e) => setProductForm(f => ({ ...f, styleCode: e.target.value.toUpperCase() }))} placeholder="e.g., LMD" maxLength={10} />
+                                </div>
                             </div>
                             <div className="grid grid-cols-3 gap-4">
                                 <div>
@@ -410,9 +419,15 @@ export default function Products() {
                             <button onClick={() => setShowEditProduct(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <form onSubmit={handleEditProduct} className="space-y-4">
-                            <div>
-                                <label className="label">Product Name</label>
-                                <input className="input" value={showEditProduct.name} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, name: e.target.value }))} required />
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="col-span-2">
+                                    <label className="label">Product Name</label>
+                                    <input className="input" value={showEditProduct.name} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, name: e.target.value }))} required />
+                                </div>
+                                <div>
+                                    <label className="label">Style Code</label>
+                                    <input className="input" value={showEditProduct.styleCode || ''} onChange={(e) => setShowEditProduct((p: any) => ({ ...p, styleCode: e.target.value.toUpperCase() }))} placeholder="e.g., LMD" maxLength={10} />
+                                </div>
                             </div>
                             <div className="grid grid-cols-3 gap-4">
                                 <div>

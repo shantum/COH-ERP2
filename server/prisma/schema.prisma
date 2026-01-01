@@ -34,6 +34,7 @@ model User {
 model Product {
   id                        String   @id @default(uuid())
   name                      String
+  styleCode                 String?  @unique // Style identifier (e.g., "LMD" for Linen Midi Dress)
   category                  String   // dress, top, bottom, outerwear, accessory
   productType               String   // basic, seasonal, limited
   gender                    String   @default("unisex") // mens, womens, unisex
