@@ -412,8 +412,49 @@ export default function Production() {
                                 </div>
                             </div>
 
-                            {/* Batch Items - Simple Table */}
-                            {expandedDates.has(group.date) && (
+                            {/* Batch Items - Simple Table (consolidated by SKU) */}
+                            {expandedDates.has(group.date) && (() => {
+                                // Consolidate batches by SKU
+                                const consolidatedMap = new Map<string, {
+                                    skuId: string;
+                                    sku: any;
+                                    totalQty: number;
+                                    batches: any[];
+                                    status: string;
+                                }>();
+
+                                group.batches.forEach((batch: any) => {
+                                    const key = batch.skuId;
+                                    if (!consolidatedMap.has(key)) {
+                                        consolidatedMap.set(key, {
+                                            skuId: batch.skuId,
+                                            sku: batch.sku,
+                                            totalQty: 0,
+                                            batches: [],
+                                            status: 'planned'
+                                        });
+                                    }
+                                    const entry = consolidatedMap.get(key)!;
+                                    entry.totalQty += batch.qtyPlanned;
+                                    entry.batches.push(batch);
+                                    // Status priority: in_progress > planned > completed
+                                    if (batch.status === 'in_progress') entry.status = 'in_progress';
+                                    else if (batch.status === 'completed' && entry.status !== 'in_progress') {
+                                        if (entry.batches.every((b: any) => b.status === 'completed')) entry.status = 'completed';
+                                    }
+                                });
+
+                                const consolidated = Array.from(consolidatedMap.values())
+                                    .sort((a, b) => {
+                                        const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
+                                        if (productCompare !== 0) return productCompare;
+                                        const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
+                                        if (colorCompare !== 0) return colorCompare;
+                                        const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                                        return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+                                    });
+
+                                return (
                                 <table className="w-full text-sm bg-white">
                                     <thead>
                                         <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide">
@@ -427,62 +468,57 @@ export default function Production() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {group.batches
-                                            .sort((a: any, b: any) => {
-                                                // Sort by product name, then color, then size
-                                                const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
-                                                if (productCompare !== 0) return productCompare;
-                                                const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
-                                                if (colorCompare !== 0) return colorCompare;
-                                                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
-                                                return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
-                                            })
-                                            .map((batch: any) => (
-                                            <tr key={batch.id} className="border-t hover:bg-gray-50">
-                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">{batch.sku?.skuCode}</td>
-                                                <td className="py-2 px-4 font-medium text-gray-900">{batch.sku?.variation?.product?.name}</td>
-                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.variation?.colorName}</td>
-                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.size}</td>
-                                                <td className="py-2 px-4 text-center font-medium">{batch.qtyPlanned}</td>
+                                        {consolidated.map((entry) => (
+                                            <tr key={entry.skuId} className="border-t hover:bg-gray-50">
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">{entry.sku?.skuCode}</td>
+                                                <td className="py-2 px-4 font-medium text-gray-900">{entry.sku?.variation?.product?.name}</td>
+                                                <td className="py-2 px-4 text-gray-600">{entry.sku?.variation?.colorName}</td>
+                                                <td className="py-2 px-4 text-gray-600">{entry.sku?.size}</td>
+                                                <td className="py-2 px-4 text-center font-medium">{entry.totalQty}</td>
                                                 <td className="py-2 px-4">
                                                     <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                                        batch.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                        batch.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
+                                                        entry.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                        entry.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
                                                         'bg-gray-100 text-gray-600'
                                                     }`}>
-                                                        {batch.status === 'in_progress' ? 'in progress' : batch.status}
+                                                        {entry.status === 'in_progress' ? 'in progress' : entry.status}
                                                     </span>
                                                 </td>
                                                 <td className="py-2 px-4">
                                                     <div className="flex items-center gap-2">
-                                                        {batch.status === 'planned' && !group.isLocked && (
+                                                        {entry.batches.some((b: any) => b.status === 'planned') && !group.isLocked && (
                                                             <>
                                                                 <button
-                                                                    onClick={() => startBatch.mutate(batch.id)}
+                                                                    onClick={() => entry.batches.filter((b: any) => b.status === 'planned').forEach((b: any) => startBatch.mutate(b.id))}
                                                                     className="text-blue-600 hover:text-blue-800"
-                                                                    title="Start"
+                                                                    title="Start all"
                                                                 >
                                                                     <Play size={14} />
                                                                 </button>
                                                                 <button
-                                                                    onClick={() => deleteBatch.mutate(batch.id)}
+                                                                    onClick={() => entry.batches.filter((b: any) => b.status === 'planned').forEach((b: any) => deleteBatch.mutate(b.id))}
                                                                     className="text-gray-400 hover:text-red-500"
-                                                                    title="Delete"
+                                                                    title="Delete all"
                                                                 >
                                                                     <X size={14} />
                                                                 </button>
                                                             </>
                                                         )}
-                                                        {batch.status === 'in_progress' && (
+                                                        {entry.batches.some((b: any) => b.status === 'in_progress') && (
                                                             <button
-                                                                onClick={() => { setShowComplete(batch); setQtyCompleted(batch.qtyPlanned); }}
+                                                                onClick={() => {
+                                                                    const inProgressBatches = entry.batches.filter((b: any) => b.status === 'in_progress');
+                                                                    const totalQty = inProgressBatches.reduce((sum: number, b: any) => sum + b.qtyPlanned, 0);
+                                                                    setShowComplete({ ...inProgressBatches[0], _allBatches: inProgressBatches });
+                                                                    setQtyCompleted(totalQty);
+                                                                }}
                                                                 className="text-green-600 hover:text-green-800"
                                                                 title="Mark Complete"
                                                             >
                                                                 <CheckCircle size={14} />
                                                             </button>
                                                         )}
-                                                        {batch.status === 'completed' && (
+                                                        {entry.status === 'completed' && (
                                                             <CheckCircle size={14} className="text-green-500" />
                                                         )}
                                                     </div>
@@ -491,7 +527,8 @@ export default function Production() {
                                         ))}
                                     </tbody>
                                 </table>
-                            )}
+                                );
+                            })()}
                         </div>
                     ))}
                     </div>
