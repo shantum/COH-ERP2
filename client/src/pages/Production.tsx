@@ -51,13 +51,15 @@ export default function Production() {
     // Copy production plan to clipboard
     const copyToClipboard = (group: any) => {
         // Consolidate batches by SKU
-        const consolidatedMap = new Map<string, { sku: any; totalQty: number }>();
+        const consolidatedMap = new Map<string, { sku: any; totalQty: number; notes: string[] }>();
         group.batches.forEach((batch: any) => {
             const key = batch.skuId;
             if (!consolidatedMap.has(key)) {
-                consolidatedMap.set(key, { sku: batch.sku, totalQty: 0 });
+                consolidatedMap.set(key, { sku: batch.sku, totalQty: 0, notes: [] });
             }
-            consolidatedMap.get(key)!.totalQty += batch.qtyPlanned;
+            const entry = consolidatedMap.get(key)!;
+            entry.totalQty += batch.qtyPlanned;
+            if (batch.notes) entry.notes.push(batch.notes);
         });
 
         const consolidated = Array.from(consolidatedMap.values())
@@ -70,28 +72,31 @@ export default function Production() {
                 return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
             });
 
-        // Format as text
-        const lines = [`Production Plan - ${group.displayDate} (${group.date})\n`];
-        let currentProduct = '';
-        let currentColor = '';
+        // Format date as "19 Aug 2025"
+        const date = new Date(group.date);
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const formattedDate = `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
 
-        consolidated.forEach(entry => {
+        // Format as numbered list
+        const lines = [`*Production Plan ${formattedDate}*\n`];
+        let totalPcs = 0;
+
+        consolidated.forEach((entry, index) => {
             const product = entry.sku?.variation?.product?.name || '';
+            const size = entry.sku?.size || '';
             const color = entry.sku?.variation?.colorName || '';
+            const skuCode = entry.sku?.skuCode || '';
+            const qty = entry.totalQty;
+            totalPcs += qty;
 
-            if (product !== currentProduct) {
-                currentProduct = product;
-                currentColor = '';
-                lines.push(`\n${product}`);
+            let line = `${index + 1}. ${product} - ${size} - ${color} - ${qty} pc - ${skuCode}`;
+            if (entry.notes.length > 0) {
+                line += ` (${entry.notes.join(', ')})`;
             }
-            if (color !== currentColor) {
-                currentColor = color;
-                lines.push(`  ${color}`);
-            }
-            lines.push(`    ${entry.sku?.size}: ${entry.totalQty}`);
+            lines.push(line);
         });
 
-        lines.push(`\nTotal: ${group.totalPlanned} items`);
+        lines.push(`\n*Total ${totalPcs} pcs*`);
 
         navigator.clipboard.writeText(lines.join('\n')).then(() => {
             setCopiedDate(group.date);
