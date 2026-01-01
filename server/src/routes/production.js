@@ -71,7 +71,15 @@ router.post('/batches', authenticateToken, async (req, res) => {
         }
 
         const batch = await req.prisma.productionBatch.create({
-            data: { batchDate: targetDate, tailorId, skuId, qtyPlanned, priority, sourceOrderLineId, notes },
+            data: {
+                batchDate: targetDate,
+                tailorId: tailorId || null,
+                skuId,
+                qtyPlanned,
+                priority: priority || 'normal',
+                sourceOrderLineId: sourceOrderLineId || null,
+                notes: notes || null
+            },
             include: { tailor: true, sku: { include: { variation: { include: { product: true } } } } },
         });
 
@@ -82,7 +90,8 @@ router.post('/batches', authenticateToken, async (req, res) => {
 
         res.status(201).json(batch);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to create batch' });
+        console.error('Create batch error:', error);
+        res.status(500).json({ error: error.message || 'Failed to create batch' });
     }
 });
 
