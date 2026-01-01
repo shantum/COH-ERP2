@@ -477,49 +477,8 @@ export default function Production() {
                                 </div>
                             </div>
 
-                            {/* Batch Items - Simple Table (consolidated by SKU) */}
-                            {expandedDates.has(group.date) && (() => {
-                                // Consolidate batches by SKU
-                                const consolidatedMap = new Map<string, {
-                                    skuId: string;
-                                    sku: any;
-                                    totalQty: number;
-                                    batches: any[];
-                                    status: string;
-                                }>();
-
-                                group.batches.forEach((batch: any) => {
-                                    const key = batch.skuId;
-                                    if (!consolidatedMap.has(key)) {
-                                        consolidatedMap.set(key, {
-                                            skuId: batch.skuId,
-                                            sku: batch.sku,
-                                            totalQty: 0,
-                                            batches: [],
-                                            status: 'planned'
-                                        });
-                                    }
-                                    const entry = consolidatedMap.get(key)!;
-                                    entry.totalQty += batch.qtyPlanned;
-                                    entry.batches.push(batch);
-                                    // Status priority: in_progress > planned > completed
-                                    if (batch.status === 'in_progress') entry.status = 'in_progress';
-                                    else if (batch.status === 'completed' && entry.status !== 'in_progress') {
-                                        if (entry.batches.every((b: any) => b.status === 'completed')) entry.status = 'completed';
-                                    }
-                                });
-
-                                const consolidated = Array.from(consolidatedMap.values())
-                                    .sort((a, b) => {
-                                        const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
-                                        if (productCompare !== 0) return productCompare;
-                                        const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
-                                        if (colorCompare !== 0) return colorCompare;
-                                        const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
-                                        return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
-                                    });
-
-                                return (
+                            {/* Batch Items - Individual rows */}
+                            {expandedDates.has(group.date) && (
                                 <table className="w-full text-sm bg-white">
                                     <thead>
                                         <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide">
@@ -534,50 +493,57 @@ export default function Production() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {consolidated.map((entry) => (
-                                            <tr key={entry.skuId} className="border-t hover:bg-gray-50">
-                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">{entry.sku?.variation?.product?.styleCode || '-'}</td>
-                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">{entry.sku?.skuCode}</td>
-                                                <td className="py-2 px-4 font-medium text-gray-900">{entry.sku?.variation?.product?.name}</td>
-                                                <td className="py-2 px-4 text-gray-600">{entry.sku?.variation?.colorName}</td>
-                                                <td className="py-2 px-4 text-gray-600">{entry.sku?.size}</td>
-                                                <td className="py-2 px-4 text-center font-medium">{entry.totalQty}</td>
+                                        {group.batches
+                                            .sort((a: any, b: any) => {
+                                                const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
+                                                if (productCompare !== 0) return productCompare;
+                                                const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
+                                                if (colorCompare !== 0) return colorCompare;
+                                                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                                                return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+                                            })
+                                            .map((batch: any) => (
+                                            <tr key={batch.id} className="border-t hover:bg-gray-50">
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">{batch.sku?.variation?.product?.styleCode || '-'}</td>
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">{batch.sku?.skuCode}</td>
+                                                <td className="py-2 px-4 font-medium text-gray-900">{batch.sku?.variation?.product?.name}</td>
+                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.variation?.colorName}</td>
+                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.size}</td>
+                                                <td className="py-2 px-4 text-center font-medium">{batch.qtyPlanned}</td>
                                                 <td className="py-2 px-4">
                                                     <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                                        entry.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                        entry.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
+                                                        batch.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                        batch.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' :
                                                         'bg-gray-100 text-gray-600'
                                                     }`}>
-                                                        {entry.status === 'in_progress' ? 'in progress' : entry.status}
+                                                        {batch.status === 'in_progress' ? 'in progress' : batch.status}
                                                     </span>
                                                 </td>
                                                 <td className="py-2 px-4">
                                                     <div className="flex items-center gap-2">
-                                                        {entry.batches.some((b: any) => b.status === 'planned') && !group.isLocked && (
+                                                        {batch.status === 'planned' && !group.isLocked && (
                                                             <>
                                                                 <button
-                                                                    onClick={() => entry.batches.filter((b: any) => b.status === 'planned').forEach((b: any) => startBatch.mutate(b.id))}
+                                                                    onClick={() => startBatch.mutate(batch.id)}
                                                                     className="text-blue-600 hover:text-blue-800"
-                                                                    title="Start all"
+                                                                    title="Start"
                                                                 >
                                                                     <Play size={14} />
                                                                 </button>
                                                                 <button
-                                                                    onClick={() => entry.batches.filter((b: any) => b.status === 'planned').forEach((b: any) => deleteBatch.mutate(b.id))}
+                                                                    onClick={() => deleteBatch.mutate(batch.id)}
                                                                     className="text-gray-400 hover:text-red-500"
-                                                                    title="Delete all"
+                                                                    title="Delete"
                                                                 >
                                                                     <X size={14} />
                                                                 </button>
                                                             </>
                                                         )}
-                                                        {entry.batches.some((b: any) => b.status === 'in_progress') && (
+                                                        {batch.status === 'in_progress' && (
                                                             <button
                                                                 onClick={() => {
-                                                                    const inProgressBatches = entry.batches.filter((b: any) => b.status === 'in_progress');
-                                                                    const totalQty = inProgressBatches.reduce((sum: number, b: any) => sum + b.qtyPlanned, 0);
-                                                                    setShowComplete({ ...inProgressBatches[0], _allBatches: inProgressBatches });
-                                                                    setQtyCompleted(totalQty);
+                                                                    setShowComplete(batch);
+                                                                    setQtyCompleted(batch.qtyPlanned);
                                                                 }}
                                                                 className="text-green-600 hover:text-green-800"
                                                                 title="Mark Complete"
@@ -585,10 +551,10 @@ export default function Production() {
                                                                 <CheckCircle size={14} />
                                                             </button>
                                                         )}
-                                                        {entry.status === 'completed' && !group.isLocked && (
+                                                        {batch.status === 'completed' && !group.isLocked && (
                                                             <>
                                                                 <button
-                                                                    onClick={() => entry.batches.filter((b: any) => b.status === 'completed').forEach((b: any) => uncompleteBatch.mutate(b.id))}
+                                                                    onClick={() => uncompleteBatch.mutate(batch.id)}
                                                                     className="text-orange-500 hover:text-orange-700"
                                                                     title="Undo completion"
                                                                 >
@@ -597,10 +563,8 @@ export default function Production() {
                                                                 <button
                                                                     onClick={() => {
                                                                         if (confirm('Delete this completed batch? This will also reverse inventory changes.')) {
-                                                                            entry.batches.filter((b: any) => b.status === 'completed').forEach((b: any) => {
-                                                                                uncompleteBatch.mutate(b.id);
-                                                                                setTimeout(() => deleteBatch.mutate(b.id), 500);
-                                                                            });
+                                                                            uncompleteBatch.mutate(batch.id);
+                                                                            setTimeout(() => deleteBatch.mutate(batch.id), 500);
                                                                         }
                                                                     }}
                                                                     className="text-gray-400 hover:text-red-500"
@@ -610,7 +574,7 @@ export default function Production() {
                                                                 </button>
                                                             </>
                                                         )}
-                                                        {entry.status === 'completed' && group.isLocked && (
+                                                        {batch.status === 'completed' && group.isLocked && (
                                                             <CheckCircle size={14} className="text-green-500" />
                                                         )}
                                                     </div>
@@ -619,8 +583,7 @@ export default function Production() {
                                         ))}
                                     </tbody>
                                 </table>
-                                );
-                            })()}
+                            )}
                         </div>
                     ))}
                     </div>
