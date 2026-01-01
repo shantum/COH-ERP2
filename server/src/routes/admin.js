@@ -177,6 +177,57 @@ router.post('/clear', authenticateToken, async (req, res) => {
     }
 });
 
+// Get order channels
+router.get('/channels', authenticateToken, async (req, res) => {
+    try {
+        const setting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'order_channels' }
+        });
+
+        // Default channels if not configured
+        const defaultChannels = [
+            { id: 'offline', name: 'Offline' },
+            { id: 'shopify', name: 'Shopify' },
+            { id: 'amazon', name: 'Amazon' },
+        ];
+
+        const channels = setting?.value ? JSON.parse(setting.value) : defaultChannels;
+        res.json(channels);
+    } catch (error) {
+        console.error('Get channels error:', error);
+        res.status(500).json({ error: 'Failed to get channels' });
+    }
+});
+
+// Update order channels
+router.put('/channels', authenticateToken, async (req, res) => {
+    try {
+        const { channels } = req.body;
+
+        if (!Array.isArray(channels)) {
+            return res.status(400).json({ error: 'Channels must be an array' });
+        }
+
+        // Validate channel format
+        for (const channel of channels) {
+            if (!channel.id || !channel.name) {
+                return res.status(400).json({ error: 'Each channel must have id and name' });
+            }
+        }
+
+        await req.prisma.systemSetting.upsert({
+            where: { key: 'order_channels' },
+            update: { value: JSON.stringify(channels) },
+            create: { key: 'order_channels', value: JSON.stringify(channels) }
+        });
+
+        res.json({ success: true, channels });
+    } catch (error) {
+        console.error('Update channels error:', error);
+        res.status(500).json({ error: 'Failed to update channels' });
+    }
+});
+
 // Reset and reseed database
 router.post('/reseed', authenticateToken, async (req, res) => {
     try {

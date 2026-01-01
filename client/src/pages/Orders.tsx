@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi } from '../services/api';
+import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi, adminApi } from '../services/api';
 import { useState } from 'react';
 import { Plus, X, Trash2, ChevronRight, Check, ChevronLeft } from 'lucide-react';
 
@@ -11,6 +11,8 @@ export default function Orders() {
     const { data: allSkus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });
     const { data: inventoryBalance } = useQuery({ queryKey: ['inventoryBalance'], queryFn: () => inventoryApi.getBalance().then(r => r.data) });
     const { data: fabricStock } = useQuery({ queryKey: ['fabricStock'], queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data) });
+    const { data: channels } = useQuery({ queryKey: ['orderChannels'], queryFn: () => adminApi.getChannels().then(r => r.data) });
+    const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
     const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
     const [showCreateOrder, setShowCreateOrder] = useState(false);
@@ -45,12 +47,16 @@ export default function Orders() {
 
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
-        onSuccess: () => invalidateAll()
+        onSuccess: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to add to production')
     });
+
+    const isDateLocked = (dateStr: string) => lockedDates?.includes(dateStr) || false;
 
     const updateBatch = useMutation({
         mutationFn: ({ id, data }: { id: string; data: any }) => productionApi.updateBatch(id, data),
-        onSuccess: () => invalidateAll()
+        onSuccess: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update batch')
     });
 
     const deleteBatch = useMutation({
@@ -60,8 +66,14 @@ export default function Orders() {
 
     const createOrder = useMutation({
         mutationFn: (data: any) => ordersApi.create(data),
-        onSuccess: () => { invalidateAll(); setShowCreateOrder(false); setOrderForm({ customerName: '', customerEmail: '', customerPhone: '', channel: 'offline' }); setOrderLines([]); },
+        onSuccess: () => { invalidateAll(); setShowCreateOrder(false); setOrderForm({ customerName: '', customerEmail: '', customerPhone: '', channel: 'offline' }); setOrderLines([]); setLineSelections({}); },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to create order')
+    });
+
+    const deleteOrder = useMutation({
+        mutationFn: (id: string) => ordersApi.delete(id),
+        onSuccess: () => { invalidateAll(); setSelectedOrder(null); },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete order')
     });
 
     const getSkuBalance = (skuId: string) => {
@@ -143,6 +155,46 @@ export default function Orders() {
         }
         setOrderLines(newLines);
     };
+
+    // SKU selection helpers
+    const getUniqueProducts = () => {
+        if (!allSkus) return [];
+        const products = new Map();
+        allSkus.forEach((sku: any) => {
+            const product = sku.variation?.product;
+            if (product && !products.has(product.id)) {
+                products.set(product.id, { id: product.id, name: product.name });
+            }
+        });
+        return Array.from(products.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const getColorsForProduct = (productId: string) => {
+        if (!allSkus || !productId) return [];
+        const colors = new Map();
+        allSkus.forEach((sku: any) => {
+            if (sku.variation?.product?.id === productId) {
+                const variation = sku.variation;
+                if (!colors.has(variation.id)) {
+                    colors.set(variation.id, { id: variation.id, name: variation.colorName });
+                }
+            }
+        });
+        return Array.from(colors.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const getSizesForProductColor = (variationId: string) => {
+        if (!allSkus || !variationId) return [];
+        return allSkus
+            .filter((sku: any) => sku.variation?.id === variationId)
+            .map((sku: any) => ({ id: sku.id, size: sku.size, stock: getSkuBalance(sku.id), mrp: sku.mrp }))
+            .sort((a: any, b: any) => {
+                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+                return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
+            });
+    };
+
+    const [lineSelections, setLineSelections] = useState<Record<number, { productId: string; variationId: string }>>({});
 
     const handleCreateOrder = (e: React.FormEvent) => {
         e.preventDefault();
@@ -312,10 +364,20 @@ export default function Orders() {
                                                     <div className="flex items-center gap-1">
                                                         <input
                                                             type="date"
-                                                            className="text-xs border border-orange-200 bg-orange-50 rounded px-1 py-0.5 w-28"
+                                                            className={`text-xs border rounded px-1 py-0.5 w-28 ${
+                                                                isDateLocked(row.productionDate || '')
+                                                                    ? 'border-red-200 bg-red-50'
+                                                                    : 'border-orange-200 bg-orange-50'
+                                                            }`}
                                                             value={row.productionDate || ''}
                                                             min={new Date().toISOString().split('T')[0]}
-                                                            onChange={(e) => updateBatch.mutate({ id: row.productionBatchId, data: { batchDate: e.target.value } })}
+                                                            onChange={(e) => {
+                                                                if (isDateLocked(e.target.value)) {
+                                                                    alert(`Production date ${e.target.value} is locked. Cannot move items to this date.`);
+                                                                    return;
+                                                                }
+                                                                updateBatch.mutate({ id: row.productionBatchId, data: { batchDate: e.target.value } });
+                                                            }}
                                                         />
                                                         <button
                                                             onClick={() => deleteBatch.mutate(row.productionBatchId)}
@@ -333,6 +395,11 @@ export default function Orders() {
                                                         min={new Date().toISOString().split('T')[0]}
                                                         onChange={(e) => {
                                                             if (e.target.value) {
+                                                                if (isDateLocked(e.target.value)) {
+                                                                    alert(`Production date ${e.target.value} is locked. Cannot add items to this date.`);
+                                                                    e.target.value = '';
+                                                                    return;
+                                                                }
                                                                 createBatch.mutate({
                                                                     skuId: row.skuId,
                                                                     qtyPlanned: row.qty,
@@ -502,7 +569,23 @@ export default function Orders() {
                             </div>
                         )}
 
-                        <button onClick={() => setSelectedOrder(null)} className="btn-secondary w-full mt-4 text-sm">Close</button>
+                        <div className="flex gap-2 mt-4">
+                            <button onClick={() => setSelectedOrder(null)} className="btn-secondary flex-1 text-sm">Close</button>
+                            {!selectedOrder.shopifyOrderId && (
+                                <button
+                                    onClick={() => {
+                                        if (confirm(`Delete order ${selectedOrder.orderNumber}? This cannot be undone.`)) {
+                                            deleteOrder.mutate(selectedOrder.id);
+                                        }
+                                    }}
+                                    className="btn-secondary text-sm text-red-600 hover:bg-red-50 hover:border-red-200 flex items-center gap-1"
+                                    disabled={deleteOrder.isPending}
+                                >
+                                    <Trash2 size={14} />
+                                    {deleteOrder.isPending ? 'Deleting...' : 'Delete'}
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
@@ -524,9 +607,12 @@ export default function Orders() {
                                 <div>
                                     <label className="text-xs text-gray-500 mb-1 block">Channel</label>
                                     <select className="input text-sm" value={orderForm.channel} onChange={(e) => setOrderForm(f => ({ ...f, channel: e.target.value }))}>
-                                        <option value="offline">Offline</option>
-                                        <option value="shopify">Shopify</option>
-                                        <option value="amazon">Amazon</option>
+                                        {channels?.map((ch: any) => (
+                                            <option key={ch.id} value={ch.id}>{ch.name}</option>
+                                        ))}
+                                        {(!channels || channels.length === 0) && (
+                                            <option value="offline">Offline</option>
+                                        )}
                                     </select>
                                 </div>
                             </div>
@@ -546,18 +632,109 @@ export default function Orders() {
                                     <button type="button" onClick={addLine} className="text-xs text-primary-600 hover:underline">+ Add Item</button>
                                 </div>
                                 {orderLines.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No items added</p>}
-                                <div className="space-y-2">
-                                    {orderLines.map((line, idx) => (
-                                        <div key={idx} className="flex gap-2 items-center">
-                                            <select className="input text-sm flex-1" value={line.skuId} onChange={(e) => updateLine(idx, 'skuId', e.target.value)} required>
-                                                <option value="">Select SKU...</option>
-                                                {allSkus?.map((sku: any) => (<option key={sku.id} value={sku.id}>{sku.skuCode} ({getSkuBalance(sku.id)})</option>))}
-                                            </select>
-                                            <input type="number" className="input text-sm w-16 text-center" value={line.qty} onChange={(e) => updateLine(idx, 'qty', Number(e.target.value))} min={1} />
-                                            <input type="number" className="input text-sm w-20 text-right" value={line.unitPrice} onChange={(e) => updateLine(idx, 'unitPrice', Number(e.target.value))} min={0} />
-                                            <button type="button" onClick={() => removeLine(idx)} className="text-gray-400 hover:text-red-500"><Trash2 size={16} /></button>
-                                        </div>
-                                    ))}
+                                <div className="space-y-3">
+                                    {orderLines.map((line, idx) => {
+                                        const selection = lineSelections[idx] || { productId: '', variationId: '' };
+                                        const colors = getColorsForProduct(selection.productId);
+                                        const sizes = getSizesForProductColor(selection.variationId);
+                                        const selectedSku = allSkus?.find((s: any) => s.id === line.skuId);
+
+                                        return (
+                                            <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-gray-400">Item {idx + 1}</span>
+                                                    <button type="button" onClick={() => removeLine(idx)} className="text-gray-400 hover:text-red-500"><Trash2 size={14} /></button>
+                                                </div>
+                                                {/* Product, Color, Size selection */}
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    <select
+                                                        className="input text-sm"
+                                                        value={selection.productId}
+                                                        onChange={(e) => {
+                                                            setLineSelections(s => ({ ...s, [idx]: { productId: e.target.value, variationId: '' } }));
+                                                            updateLine(idx, 'skuId', '');
+                                                        }}
+                                                    >
+                                                        <option value="">Product...</option>
+                                                        {getUniqueProducts().map((p: any) => (
+                                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    <select
+                                                        className="input text-sm"
+                                                        value={selection.variationId}
+                                                        onChange={(e) => {
+                                                            setLineSelections(s => ({ ...s, [idx]: { ...s[idx], variationId: e.target.value } }));
+                                                            updateLine(idx, 'skuId', '');
+                                                        }}
+                                                        disabled={!selection.productId}
+                                                    >
+                                                        <option value="">Colour...</option>
+                                                        {colors.map((c: any) => (
+                                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    <select
+                                                        className="input text-sm"
+                                                        value={line.skuId}
+                                                        onChange={(e) => updateLine(idx, 'skuId', e.target.value)}
+                                                        disabled={!selection.variationId}
+                                                        required
+                                                    >
+                                                        <option value="">Size...</option>
+                                                        {sizes.map((s: any) => (
+                                                            <option key={s.id} value={s.id}>{s.size} ({s.stock} in stock)</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                {/* Or search by SKU */}
+                                                <div className="flex items-center gap-2 text-xs text-gray-400">
+                                                    <span>or</span>
+                                                    <select
+                                                        className="input text-xs flex-1"
+                                                        value={line.skuId}
+                                                        onChange={(e) => {
+                                                            updateLine(idx, 'skuId', e.target.value);
+                                                            // Populate product/color from SKU
+                                                            const sku = allSkus?.find((s: any) => s.id === e.target.value);
+                                                            if (sku) {
+                                                                setLineSelections(s => ({
+                                                                    ...s,
+                                                                    [idx]: {
+                                                                        productId: sku.variation?.product?.id || '',
+                                                                        variationId: sku.variation?.id || ''
+                                                                    }
+                                                                }));
+                                                            }
+                                                        }}
+                                                    >
+                                                        <option value="">Search by SKU code...</option>
+                                                        {allSkus?.map((sku: any) => (
+                                                            <option key={sku.id} value={sku.id}>
+                                                                {sku.skuCode} - {sku.variation?.product?.name} {sku.variation?.colorName} {sku.size} ({getSkuBalance(sku.id)})
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                {/* Qty and Price */}
+                                                <div className="flex items-center gap-2">
+                                                    {selectedSku && (
+                                                        <span className="text-xs text-gray-500 flex-1">
+                                                            {selectedSku.skuCode}
+                                                        </span>
+                                                    )}
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-xs text-gray-400">Qty:</span>
+                                                        <input type="number" className="input text-sm w-14 text-center" value={line.qty} onChange={(e) => updateLine(idx, 'qty', Number(e.target.value))} min={1} />
+                                                    </div>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-xs text-gray-400">₹</span>
+                                                        <input type="number" className="input text-sm w-20 text-right" value={line.unitPrice} onChange={(e) => updateLine(idx, 'unitPrice', Number(e.target.value))} min={0} />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                                 {orderLines.length > 0 && <p className="text-right text-sm font-medium mt-2">Total: ₹{orderLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0).toLocaleString()}</p>}
                             </div>

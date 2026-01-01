@@ -4,12 +4,12 @@ import { shopifyApi, importExportApi, adminApi } from '../services/api';
 import {
     Store, Key, CheckCircle, XCircle, RefreshCw, Download, Upload,
     ShoppingCart, Users, Eye, Play, AlertCircle, FileSpreadsheet, Package,
-    Trash2, AlertOctagon, Database
+    Trash2, AlertOctagon, Database, Settings as SettingsIcon, Plus, X
 } from 'lucide-react';
 
 export default function Settings() {
     const queryClient = useQueryClient();
-    const [activeTab, setActiveTab] = useState<'shopify' | 'importExport' | 'database'>('shopify');
+    const [activeTab, setActiveTab] = useState<'general' | 'shopify' | 'importExport' | 'database'>('general');
 
     // Shopify config state
     const [shopDomain, setShopDomain] = useState('');
@@ -21,7 +21,6 @@ export default function Settings() {
     const [orderPreview, setOrderPreview] = useState<any>(null);
     const [customerPreview, setCustomerPreview] = useState<any>(null);
     const [syncLimit, setSyncLimit] = useState(20);
-    const [skipSkuMatching, setSkipSkuMatching] = useState(false);
 
     // Import state
     const [importFile, setImportFile] = useState<File | null>(null);
@@ -181,6 +180,12 @@ export default function Settings() {
             {/* Tabs */}
             <div className="flex gap-2 border-b">
                 <button
+                    className={`px-4 py-2 font-medium flex items-center gap-2 ${activeTab === 'general' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
+                    onClick={() => setActiveTab('general')}
+                >
+                    <SettingsIcon size={18} /> General
+                </button>
+                <button
                     className={`px-4 py-2 font-medium flex items-center gap-2 ${activeTab === 'shopify' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
                     onClick={() => setActiveTab('shopify')}
                 >
@@ -199,6 +204,11 @@ export default function Settings() {
                     <Database size={18} /> Database
                 </button>
             </div>
+
+            {/* General Tab */}
+            {activeTab === 'general' && (
+                <GeneralTab queryClient={queryClient} />
+            )}
 
             {/* Shopify Tab */}
             {activeTab === 'shopify' && (
@@ -511,7 +521,7 @@ export default function Settings() {
                                     </button>
                                     <button
                                         className="btn btn-primary flex items-center gap-2"
-                                        onClick={() => syncOrdersMutation.mutate({ limit: syncLimit, skipSkuMatching })}
+                                        onClick={() => syncOrdersMutation.mutate({ limit: syncLimit, skipSkuMatching: false })}
                                         disabled={syncOrdersMutation.isPending}
                                     >
                                         <Play size={16} />
@@ -780,6 +790,124 @@ export default function Settings() {
             {activeTab === 'database' && (
                 <DatabaseTab queryClient={queryClient} />
             )}
+        </div>
+    );
+}
+
+// Separate component for General tab
+function GeneralTab({ queryClient }: { queryClient: any }) {
+    const [newChannel, setNewChannel] = useState({ id: '', name: '' });
+
+    const { data: channels, isLoading } = useQuery({
+        queryKey: ['orderChannels'],
+        queryFn: () => adminApi.getChannels().then(r => r.data),
+    });
+
+    const updateChannelsMutation = useMutation({
+        mutationFn: (channels: { id: string; name: string }[]) => adminApi.updateChannels(channels),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['orderChannels'] });
+        },
+    });
+
+    const addChannel = () => {
+        if (!newChannel.id || !newChannel.name) {
+            alert('Both ID and Name are required');
+            return;
+        }
+        // Create ID from name if not provided as a slug
+        const channelId = newChannel.id.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+        if (channels?.some((c: any) => c.id === channelId)) {
+            alert('Channel ID already exists');
+            return;
+        }
+        const updatedChannels = [...(channels || []), { id: channelId, name: newChannel.name }];
+        updateChannelsMutation.mutate(updatedChannels);
+        setNewChannel({ id: '', name: '' });
+    };
+
+    const removeChannel = (id: string) => {
+        if (!confirm('Remove this channel?')) return;
+        const updatedChannels = channels?.filter((c: any) => c.id !== id) || [];
+        updateChannelsMutation.mutate(updatedChannels);
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Order Channels */}
+            <div className="card">
+                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <ShoppingCart size={20} /> Order Channels
+                </h2>
+                <p className="text-sm text-gray-600 mb-4">
+                    Configure the sales channels available when creating new orders.
+                </p>
+
+                {isLoading ? (
+                    <div className="flex justify-center p-4">
+                        <RefreshCw size={24} className="animate-spin text-gray-400" />
+                    </div>
+                ) : (
+                    <>
+                        {/* Current Channels */}
+                        <div className="space-y-2 mb-4">
+                            {channels?.map((channel: any) => (
+                                <div key={channel.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <div>
+                                        <span className="font-medium text-gray-900">{channel.name}</span>
+                                        <span className="ml-2 text-xs text-gray-500 font-mono">({channel.id})</span>
+                                    </div>
+                                    <button
+                                        onClick={() => removeChannel(channel.id)}
+                                        className="text-gray-400 hover:text-red-500"
+                                        disabled={updateChannelsMutation.isPending}
+                                    >
+                                        <X size={18} />
+                                    </button>
+                                </div>
+                            ))}
+                            {(!channels || channels.length === 0) && (
+                                <p className="text-gray-500 text-sm py-4 text-center">No channels configured</p>
+                            )}
+                        </div>
+
+                        {/* Add New Channel */}
+                        <div className="border-t pt-4">
+                            <p className="text-sm font-medium text-gray-700 mb-2">Add New Channel</p>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    className="input flex-1"
+                                    placeholder="Channel name (e.g., Instagram)"
+                                    value={newChannel.name}
+                                    onChange={(e) => setNewChannel(c => ({
+                                        ...c,
+                                        name: e.target.value,
+                                        id: e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+                                    }))}
+                                />
+                                <input
+                                    type="text"
+                                    className="input w-32 font-mono text-sm"
+                                    placeholder="ID"
+                                    value={newChannel.id}
+                                    onChange={(e) => setNewChannel(c => ({ ...c, id: e.target.value }))}
+                                />
+                                <button
+                                    onClick={addChannel}
+                                    className="btn btn-primary flex items-center gap-1"
+                                    disabled={updateChannelsMutation.isPending || !newChannel.name}
+                                >
+                                    <Plus size={16} /> Add
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                                ID is auto-generated from name, but can be customized
+                            </p>
+                        </div>
+                    </>
+                )}
+            </div>
         </div>
     );
 }

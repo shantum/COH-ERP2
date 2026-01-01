@@ -607,6 +607,64 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
     }
 });
 
+// Delete order (only for manually created orders)
+router.delete('/:id', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true }
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Only allow deleting manually created orders (not synced from Shopify)
+        if (order.shopifyOrderId) {
+            return res.status(400).json({ error: 'Cannot delete orders synced from Shopify. Use cancel instead.' });
+        }
+
+        // Delete in transaction
+        await req.prisma.$transaction(async (tx) => {
+            // Unlink production batches from order lines
+            for (const line of order.orderLines) {
+                if (line.productionBatchId) {
+                    await tx.productionBatch.update({
+                        where: { id: line.productionBatchId },
+                        data: { sourceOrderLineId: null }
+                    });
+                }
+
+                // Release any reserved inventory
+                if (line.lineStatus === 'allocated' || line.lineStatus === 'picked' || line.lineStatus === 'packed') {
+                    await tx.inventoryTransaction.create({
+                        data: {
+                            skuId: line.skuId,
+                            txnType: 'reserved',
+                            qty: -line.qty, // Negative to release
+                            reason: 'order_deleted',
+                            referenceId: order.id,
+                            notes: `Released from deleted order ${order.orderNumber}`,
+                            createdById: req.user.id,
+                        }
+                    });
+                }
+            }
+
+            // Delete order lines
+            await tx.orderLine.deleteMany({ where: { orderId: order.id } });
+
+            // Delete the order
+            await tx.order.delete({ where: { id: order.id } });
+        });
+
+        res.json({ success: true, message: 'Order deleted successfully' });
+    } catch (error) {
+        console.error('Delete order error:', error);
+        res.status(500).json({ error: 'Failed to delete order' });
+    }
+});
+
 // ============================================
 // HELPER
 // ============================================

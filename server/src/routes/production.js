@@ -57,8 +57,21 @@ router.post('/batches', authenticateToken, async (req, res) => {
     try {
         const { batchDate, tailorId, skuId, qtyPlanned, priority, sourceOrderLineId, notes } = req.body;
 
+        // Check if date is locked
+        const targetDate = batchDate ? new Date(batchDate) : new Date();
+        const dateStr = targetDate.toISOString().split('T')[0];
+
+        const lockSetting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'locked_production_dates' }
+        });
+        const lockedDates = lockSetting?.value ? JSON.parse(lockSetting.value) : [];
+
+        if (lockedDates.includes(dateStr)) {
+            return res.status(400).json({ error: `Production date ${dateStr} is locked. Cannot add new items.` });
+        }
+
         const batch = await req.prisma.productionBatch.create({
-            data: { batchDate: batchDate ? new Date(batchDate) : new Date(), tailorId, skuId, qtyPlanned, priority, sourceOrderLineId, notes },
+            data: { batchDate: targetDate, tailorId, skuId, qtyPlanned, priority, sourceOrderLineId, notes },
             include: { tailor: true, sku: { include: { variation: { include: { product: true } } } } },
         });
 
@@ -158,6 +171,76 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
         res.json(updated);
     } catch (error) {
         res.status(500).json({ error: 'Failed to complete batch' });
+    }
+});
+
+// Get locked production dates
+router.get('/locked-dates', async (req, res) => {
+    try {
+        const setting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'locked_production_dates' }
+        });
+        const lockedDates = setting?.value ? JSON.parse(setting.value) : [];
+        res.json(lockedDates);
+    } catch (error) {
+        console.error('Get locked dates error:', error);
+        res.status(500).json({ error: 'Failed to get locked dates' });
+    }
+});
+
+// Lock a production date
+router.post('/lock-date', authenticateToken, async (req, res) => {
+    try {
+        const { date } = req.body;
+        if (!date) return res.status(400).json({ error: 'Date is required' });
+
+        const dateStr = date.split('T')[0]; // Normalize to YYYY-MM-DD
+
+        const setting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'locked_production_dates' }
+        });
+        const lockedDates = setting?.value ? JSON.parse(setting.value) : [];
+
+        if (!lockedDates.includes(dateStr)) {
+            lockedDates.push(dateStr);
+            await req.prisma.systemSetting.upsert({
+                where: { key: 'locked_production_dates' },
+                update: { value: JSON.stringify(lockedDates) },
+                create: { key: 'locked_production_dates', value: JSON.stringify(lockedDates) }
+            });
+        }
+
+        res.json({ success: true, lockedDates });
+    } catch (error) {
+        console.error('Lock date error:', error);
+        res.status(500).json({ error: 'Failed to lock date' });
+    }
+});
+
+// Unlock a production date
+router.post('/unlock-date', authenticateToken, async (req, res) => {
+    try {
+        const { date } = req.body;
+        if (!date) return res.status(400).json({ error: 'Date is required' });
+
+        const dateStr = date.split('T')[0]; // Normalize to YYYY-MM-DD
+
+        const setting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'locked_production_dates' }
+        });
+        let lockedDates = setting?.value ? JSON.parse(setting.value) : [];
+
+        lockedDates = lockedDates.filter(d => d !== dateStr);
+        await req.prisma.systemSetting.upsert({
+            where: { key: 'locked_production_dates' },
+            update: { value: JSON.stringify(lockedDates) },
+            create: { key: 'locked_production_dates', value: JSON.stringify(lockedDates) }
+        });
+
+        res.json({ success: true, lockedDates });
+    } catch (error) {
+        console.error('Unlock date error:', error);
+        res.status(500).json({ error: 'Failed to unlock date' });
     }
 });
 

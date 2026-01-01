@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi, productsApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock } from 'lucide-react';
 
 export default function Production() {
     const queryClient = useQueryClient();
@@ -10,11 +10,13 @@ export default function Production() {
     const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
     const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
     const { data: allSkus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });
+    const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
 
     const [showComplete, setShowComplete] = useState<any>(null);
     const [qtyCompleted, setQtyCompleted] = useState(0);
     const [showAddItem, setShowAddItem] = useState<string | null>(null); // date string
     const [newItem, setNewItem] = useState({ skuId: '', qty: 1 });
+    const [itemSelection, setItemSelection] = useState({ productId: '', variationId: '' });
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
 
     const invalidateAll = () => {
@@ -28,8 +30,20 @@ export default function Production() {
     const deleteBatch = useMutation({ mutationFn: (id: string) => productionApi.deleteBatch(id), onSuccess: invalidateAll });
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
-        onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); }
+        onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); setItemSelection({ productId: '', variationId: '' }); },
+        onError: (error: any) => { alert(error.response?.data?.error || 'Failed to add item'); }
     });
+    const lockDate = useMutation({
+        mutationFn: (date: string) => productionApi.lockDate(date),
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['lockedProductionDates'] }); }
+    });
+    const unlockDate = useMutation({
+        mutationFn: (date: string) => productionApi.unlockDate(date),
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['lockedProductionDates'] }); }
+    });
+
+    // Check if date is locked
+    const isDateLocked = (dateStr: string) => lockedDates?.includes(dateStr) || false;
 
     // Group batches by date
     const groupBatchesByDate = (batches: any[]) => {
@@ -56,6 +70,7 @@ export default function Production() {
                 isToday: date === today,
                 isFuture: date > today,
                 isPast: date < today,
+                isLocked: isDateLocked(date),
                 batches: items.sort((a, b) => a.sku?.skuCode?.localeCompare(b.sku?.skuCode || '') || 0),
                 totalPlanned: items.reduce((sum, b) => sum + b.qtyPlanned, 0),
                 totalCompleted: items.reduce((sum, b) => sum + b.qtyCompleted, 0),
@@ -93,6 +108,44 @@ export default function Production() {
             priority: 'stock_replenishment',
             batchDate: showAddItem
         });
+    };
+
+    // SKU selection helpers
+    const getUniqueProducts = () => {
+        if (!allSkus) return [];
+        const products = new Map();
+        allSkus.forEach((sku: any) => {
+            const product = sku.variation?.product;
+            if (product && !products.has(product.id)) {
+                products.set(product.id, { id: product.id, name: product.name });
+            }
+        });
+        return Array.from(products.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const getColorsForProduct = (productId: string) => {
+        if (!allSkus || !productId) return [];
+        const colors = new Map();
+        allSkus.forEach((sku: any) => {
+            if (sku.variation?.product?.id === productId) {
+                const variation = sku.variation;
+                if (!colors.has(variation.id)) {
+                    colors.set(variation.id, { id: variation.id, name: variation.colorName });
+                }
+            }
+        });
+        return Array.from(colors.values()).sort((a, b) => a.name.localeCompare(b.name));
+    };
+
+    const getSizesForProductColor = (variationId: string) => {
+        if (!allSkus || !variationId) return [];
+        return allSkus
+            .filter((sku: any) => sku.variation?.id === variationId)
+            .map((sku: any) => ({ id: sku.id, size: sku.size, skuCode: sku.skuCode }))
+            .sort((a: any, b: any) => {
+                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+                return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
+            });
     };
 
     const dateGroups = groupBatchesByDate(batches);
@@ -138,10 +191,11 @@ export default function Production() {
                         <div className="text-center text-gray-400 py-12">No production scheduled</div>
                     )}
                     {dateGroups.map(group => (
-                        <div key={group.date} className={`border rounded-lg overflow-hidden ${group.isToday ? 'border-orange-300' : 'border-gray-200'}`}>
+                        <div key={group.date} className={`border rounded-lg overflow-hidden ${group.isLocked ? 'border-red-200' : group.isToday ? 'border-orange-300' : 'border-gray-200'}`}>
                             {/* Date Header */}
                             <div
                                 className={`flex items-center justify-between px-4 py-2 cursor-pointer ${
+                                    group.isLocked ? 'bg-red-50' :
                                     group.isToday ? 'bg-orange-50' :
                                     group.isFuture ? 'bg-blue-50' :
                                     'bg-gray-50'
@@ -153,22 +207,47 @@ export default function Production() {
                                         <ChevronDown size={16} className="text-gray-400" /> :
                                         <ChevronRight size={16} className="text-gray-400" />
                                     }
-                                    <span className={`font-medium ${group.isToday ? 'text-orange-700' : group.isFuture ? 'text-blue-700' : 'text-gray-700'}`}>
+                                    <span className={`font-medium ${group.isLocked ? 'text-red-700' : group.isToday ? 'text-orange-700' : group.isFuture ? 'text-blue-700' : 'text-gray-700'}`}>
                                         {group.displayDate}
                                     </span>
                                     <span className="text-xs text-gray-400">{group.date}</span>
+                                    {group.isLocked && (
+                                        <span className="flex items-center gap-1 text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
+                                            <Lock size={10} /> Locked
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-4 text-sm">
                                     <span className="text-gray-500">{group.batches.length} items</span>
                                     <span className={group.allCompleted ? 'text-green-600' : group.hasInProgress ? 'text-yellow-600' : 'text-gray-500'}>
                                         {group.totalCompleted}/{group.totalPlanned} done
                                     </span>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setShowAddItem(group.date); }}
-                                        className="text-xs text-gray-400 hover:text-gray-600"
-                                    >
-                                        <Plus size={14} />
-                                    </button>
+                                    {group.isLocked ? (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); unlockDate.mutate(group.date); }}
+                                            className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
+                                            title="Unlock this date"
+                                        >
+                                            <Unlock size={14} />
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); setShowAddItem(group.date); }}
+                                                className="text-xs text-gray-400 hover:text-gray-600"
+                                                title="Add item"
+                                            >
+                                                <Plus size={14} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); lockDate.mutate(group.date); }}
+                                                className="text-xs text-gray-400 hover:text-red-500 flex items-center gap-1"
+                                                title="Lock this date"
+                                            >
+                                                <Lock size={14} />
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
@@ -346,15 +425,78 @@ export default function Production() {
                                     onChange={(e) => setShowAddItem(e.target.value)}
                                 />
                             </div>
+
+                            {/* Product → Color → Size Cascading Selection */}
                             <div>
-                                <label className="text-xs text-gray-500 mb-1 block">SKU</label>
+                                <label className="text-xs text-gray-500 mb-1 block">Product</label>
+                                <select
+                                    className="input text-sm"
+                                    value={itemSelection.productId}
+                                    onChange={(e) => {
+                                        setItemSelection({ productId: e.target.value, variationId: '' });
+                                        setNewItem(n => ({ ...n, skuId: '' }));
+                                    }}
+                                >
+                                    <option value="">Select product...</option>
+                                    {getUniqueProducts().map((p: any) => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            {itemSelection.productId && (
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Color</label>
+                                    <select
+                                        className="input text-sm"
+                                        value={itemSelection.variationId}
+                                        onChange={(e) => {
+                                            setItemSelection(s => ({ ...s, variationId: e.target.value }));
+                                            setNewItem(n => ({ ...n, skuId: '' }));
+                                        }}
+                                    >
+                                        <option value="">Select color...</option>
+                                        {getColorsForProduct(itemSelection.productId).map((c: any) => (
+                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                            {itemSelection.variationId && (
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Size</label>
+                                    <select
+                                        className="input text-sm"
+                                        value={newItem.skuId}
+                                        onChange={(e) => setNewItem(n => ({ ...n, skuId: e.target.value }))}
+                                        required
+                                    >
+                                        <option value="">Select size...</option>
+                                        {getSizesForProductColor(itemSelection.variationId).map((s: any) => (
+                                            <option key={s.id} value={s.id}>{s.size} ({s.skuCode})</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Divider */}
+                            <div className="flex items-center gap-2 text-xs text-gray-400">
+                                <div className="flex-1 border-t" />
+                                <span>or search by SKU code</span>
+                                <div className="flex-1 border-t" />
+                            </div>
+
+                            {/* Direct SKU Search */}
+                            <div>
+                                <label className="text-xs text-gray-500 mb-1 block">SKU Code</label>
                                 <select
                                     className="input text-sm"
                                     value={newItem.skuId}
-                                    onChange={(e) => setNewItem(n => ({ ...n, skuId: e.target.value }))}
-                                    required
+                                    onChange={(e) => {
+                                        setNewItem(n => ({ ...n, skuId: e.target.value }));
+                                        setItemSelection({ productId: '', variationId: '' });
+                                    }}
                                 >
-                                    <option value="">Select SKU...</option>
+                                    <option value="">Search SKU...</option>
                                     {allSkus?.map((sku: any) => (
                                         <option key={sku.id} value={sku.id}>
                                             {sku.skuCode} - {sku.variation?.product?.name} {sku.size}
@@ -362,6 +504,7 @@ export default function Production() {
                                     ))}
                                 </select>
                             </div>
+
                             <div>
                                 <label className="text-xs text-gray-500 mb-1 block">Quantity</label>
                                 <input

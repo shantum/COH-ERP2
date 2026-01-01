@@ -85,6 +85,7 @@ export const ordersApi = {
     getShipped: () => api.get('/orders/shipped'),
     getById: (id: string) => api.get(`/orders/${id}`),
     create: (data: any) => api.post('/orders', data),
+    delete: (id: string) => api.delete(`/orders/${id}`),
     allocateLine: (lineId: string) => api.post(`/orders/lines/${lineId}/allocate`),
     unallocateLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unallocate`),
     pickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pick`),
@@ -127,6 +128,9 @@ export const productionApi = {
     startBatch: (id: string) => api.post(`/production/batches/${id}/start`),
     completeBatch: (id: string, data: any) => api.post(`/production/batches/${id}/complete`, data),
     getCapacity: (date?: string) => api.get('/production/capacity', { params: { date } }),
+    getLockedDates: () => api.get('/production/locked-dates'),
+    lockDate: (date: string) => api.post('/production/lock-date', { date }),
+    unlockDate: (date: string) => api.post('/production/unlock-date', { date }),
 };
 
 // Reports
@@ -180,6 +184,9 @@ export const adminApi = {
     getStats: () => api.get('/admin/stats'),
     clearTables: (tables: string[], confirmPhrase: string) =>
         api.post('/admin/clear', { tables, confirmPhrase }),
+    getChannels: () => api.get('/admin/channels'),
+    updateChannels: (channels: { id: string; name: string }[]) =>
+        api.put('/admin/channels', { channels }),
 };
 
 export default api;
