@@ -523,6 +523,7 @@ export default function Production() {
                                     <thead>
                                         <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide">
                                             <th className="py-2 px-4 font-medium">Style</th>
+                                            <th className="py-2 px-4 font-medium">SKU</th>
                                             <th className="py-2 px-4 font-medium">Product Name</th>
                                             <th className="py-2 px-4 font-medium">Colour</th>
                                             <th className="py-2 px-4 font-medium">Size</th>
@@ -535,6 +536,7 @@ export default function Production() {
                                         {consolidated.map((entry) => (
                                             <tr key={entry.skuId} className="border-t hover:bg-gray-50">
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-600">{entry.sku?.variation?.product?.styleCode || '-'}</td>
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">{entry.sku?.skuCode}</td>
                                                 <td className="py-2 px-4 font-medium text-gray-900">{entry.sku?.variation?.product?.name}</td>
                                                 <td className="py-2 px-4 text-gray-600">{entry.sku?.variation?.colorName}</td>
                                                 <td className="py-2 px-4 text-gray-600">{entry.sku?.size}</td>
