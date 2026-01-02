@@ -447,9 +447,27 @@ router.post('/preview/products', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
-        const { limit = 10, includeMetafields = true } = req.body;
+        const { limit = 10, includeMetafields = false, fetchAll = false, search = '' } = req.body;
 
-        const shopifyProducts = await shopifyClient.getProducts({ limit: Math.min(limit, 50) });
+        let shopifyProducts;
+        if (fetchAll) {
+            // Fetch ALL products for debugging
+            console.log('Fetching ALL products from Shopify for preview...');
+            shopifyProducts = await shopifyClient.getAllProducts();
+            console.log(`Fetched ${shopifyProducts.length} products`);
+        } else {
+            shopifyProducts = await shopifyClient.getProducts({ limit: Math.min(limit, 250) });
+        }
+
+        // Filter by search term if provided
+        if (search) {
+            const searchLower = search.toLowerCase();
+            shopifyProducts = shopifyProducts.filter(p =>
+                p.title?.toLowerCase().includes(searchLower) ||
+                p.handle?.toLowerCase().includes(searchLower) ||
+                p.product_type?.toLowerCase().includes(searchLower)
+            );
+        }
 
         // Get total count
         let totalCount = 0;
@@ -459,9 +477,9 @@ router.post('/preview/products', authenticateToken, async (req, res) => {
             totalCount = shopifyProducts.length;
         }
 
-        // Optionally fetch metafields for each product
+        // Optionally fetch metafields for each product (only for small sets)
         let productsWithMetafields = shopifyProducts;
-        if (includeMetafields) {
+        if (includeMetafields && shopifyProducts.length <= 20) {
             const CONCURRENCY_LIMIT = 5;
             productsWithMetafields = [];
 
@@ -480,6 +498,8 @@ router.post('/preview/products', authenticateToken, async (req, res) => {
         res.json({
             totalAvailable: totalCount,
             previewCount: productsWithMetafields.length,
+            fetchedAll: fetchAll,
+            searchTerm: search || null,
             products: productsWithMetafields,
         });
     } catch (error) {
