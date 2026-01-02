@@ -3,11 +3,20 @@ import { inventoryApi, productsApi } from '../services/api';
 import { useState, useMemo } from 'react';
 import { Plus, AlertTriangle, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronRight, Package } from 'lucide-react';
 
+interface DuplicateBarcodeSku {
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+}
+
 interface InventoryItem {
     skuId: string;
     skuCode: string;
     barcode: string | null;
     hasDuplicateBarcode: boolean;
+    duplicateBarcodeSkus: DuplicateBarcodeSku[];
     productId: string;
     productName: string;
     productType: string;
@@ -442,8 +451,11 @@ export default function Inventory() {
                                                                             {item.barcode ? (
                                                                                 <span className={`flex items-center gap-1 ${item.hasDuplicateBarcode ? 'text-orange-600' : 'text-gray-600'}`}>
                                                                                     {item.barcode}
-                                                                                    {item.hasDuplicateBarcode && (
-                                                                                        <span title="Duplicate barcode">
+                                                                                    {item.hasDuplicateBarcode && item.duplicateBarcodeSkus.length > 0 && (
+                                                                                        <span
+                                                                                            title={`Shared with: ${item.duplicateBarcodeSkus.map(s => `${s.productName} - ${s.colorName} (${s.size})`).join(', ')}`}
+                                                                                            className="cursor-help"
+                                                                                        >
                                                                                             <AlertTriangle size={12} className="text-orange-500" />
                                                                                         </span>
                                                                                     )}

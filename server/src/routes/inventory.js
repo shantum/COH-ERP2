@@ -44,16 +44,25 @@ router.get('/balance', authenticateToken, async (req, res) => {
             },
         });
 
-        // Find duplicate barcodes
-        const barcodeCounts = {};
+        // Find duplicate barcodes and track which SKUs share them
+        const barcodeToSkus = {};
         skus.forEach(sku => {
             if (sku.barcode) {
-                barcodeCounts[sku.barcode] = (barcodeCounts[sku.barcode] || 0) + 1;
+                if (!barcodeToSkus[sku.barcode]) {
+                    barcodeToSkus[sku.barcode] = [];
+                }
+                barcodeToSkus[sku.barcode].push({
+                    skuId: sku.id,
+                    skuCode: sku.skuCode,
+                    productName: sku.variation.product.name,
+                    colorName: sku.variation.colorName,
+                    size: sku.size,
+                });
             }
         });
         const duplicateBarcodes = new Set(
-            Object.entries(barcodeCounts)
-                .filter(([_, count]) => count > 1)
+            Object.entries(barcodeToSkus)
+                .filter(([_, skuList]) => skuList.length > 1)
                 .map(([barcode]) => barcode)
         );
 
@@ -69,6 +78,9 @@ router.get('/balance', authenticateToken, async (req, res) => {
                     skuCode: sku.skuCode,
                     barcode: sku.barcode,
                     hasDuplicateBarcode: sku.barcode ? duplicateBarcodes.has(sku.barcode) : false,
+                    duplicateBarcodeSkus: sku.barcode && duplicateBarcodes.has(sku.barcode)
+                        ? barcodeToSkus[sku.barcode].filter(s => s.skuId !== sku.id)
+                        : [],
                     productId: sku.variation.product.id,
                     productName: sku.variation.product.name,
                     productType: sku.variation.product.productType,
