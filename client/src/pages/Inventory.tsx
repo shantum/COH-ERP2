@@ -52,7 +52,7 @@ export default function Inventory() {
 
     const [showInward, setShowInward] = useState(false);
     const [inwardForm, setInwardForm] = useState({ skuCode: '', qty: 1, reason: 'production', notes: '' });
-    const [filter, setFilter] = useState({ belowTarget: false, search: '', productType: '', colorName: '' });
+    const [filter, setFilter] = useState({ belowTarget: false, search: '', gender: '', productType: '', colorName: '' });
     const [showDetail, setShowDetail] = useState<InventoryItem | null>(null);
     const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
     const [expandedColors, setExpandedColors] = useState<Set<string>>(new Set());
@@ -69,11 +69,19 @@ export default function Inventory() {
         onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] }); setShowInward(false); setInwardForm({ skuCode: '', qty: 1, reason: 'production', notes: '' }); }
     });
 
-    // Get unique product types and colors for filters
+    // Get unique genders, product types and colors for filters
     const filterOptions = useMemo(() => {
-        if (!balance) return { productTypes: [] as string[], colors: [] as string[] };
+        if (!balance) return { genders: [] as string[], productTypes: [] as string[], colors: [] as string[] };
 
-        const productTypes = Array.from(new Set(balance.map(b => b.productName))).sort();
+        // Get unique genders
+        const genders = Array.from(new Set(balance.map(b => b.gender).filter(Boolean))).sort() as string[];
+
+        // Products filtered by selected gender (if any)
+        let filteredByGender = balance;
+        if (filter.gender) {
+            filteredByGender = balance.filter(b => b.gender === filter.gender);
+        }
+        const productTypes = Array.from(new Set(filteredByGender.map(b => b.productName))).sort();
 
         // Colors filtered by selected product type
         let colors: string[] = [];
@@ -84,8 +92,8 @@ export default function Inventory() {
             )).sort();
         }
 
-        return { productTypes, colors };
-    }, [balance, filter.productType]);
+        return { genders, productTypes, colors };
+    }, [balance, filter.gender, filter.productType]);
 
     // Group and filter inventory data
     const groupedInventory = useMemo(() => {
@@ -94,6 +102,7 @@ export default function Inventory() {
         // Filter first
         const filtered = balance.filter(b => {
             if (filter.belowTarget && b.status !== 'below_target') return false;
+            if (filter.gender && b.gender !== filter.gender) return false;
             if (filter.productType && b.productName !== filter.productType) return false;
             if (filter.colorName && b.colorName !== filter.colorName) return false;
             if (filter.search) {
@@ -221,7 +230,22 @@ export default function Inventory() {
             {/* Filters */}
             <div className="card">
                 <div className="flex flex-wrap gap-4 items-end">
-                    {/* Product Type Filter */}
+                    {/* Gender Filter */}
+                    <div className="w-32">
+                        <label className="label">Gender</label>
+                        <select
+                            className="input"
+                            value={filter.gender}
+                            onChange={(e) => setFilter(f => ({ ...f, gender: e.target.value, productType: '', colorName: '' }))}
+                        >
+                            <option value="">All</option>
+                            {filterOptions.genders.map((g: string) => (
+                                <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Product Filter */}
                     <div className="flex-1 min-w-[200px]">
                         <label className="label">Product</label>
                         <select
