@@ -4,7 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 const router = Router();
 
 // Get all products with variations and SKUs
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
     try {
         const { category, productType, isActive, search } = req.query;
 
@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get single product with full details
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const product = await req.prisma.product.findUnique({
             where: { id: req.params.id },
@@ -187,7 +187,7 @@ router.put('/variations/:id', authenticateToken, async (req, res) => {
 // ============================================
 
 // Get all SKUs with details (flat list)
-router.get('/skus/all', async (req, res) => {
+router.get('/skus/all', authenticateToken, async (req, res) => {
     try {
         const { search, isActive } = req.query;
 
@@ -300,7 +300,7 @@ router.put('/skus/:id', authenticateToken, async (req, res) => {
 // ============================================
 
 // Get COGS for all SKUs
-router.get('/cogs', async (req, res) => {
+router.get('/cogs', authenticateToken, async (req, res) => {
     try {
         const costConfig = await req.prisma.costConfig.findFirst();
         const laborRatePerMin = costConfig?.laborRatePerMin || 2.5;

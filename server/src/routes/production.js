@@ -4,7 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 const router = Router();
 
 // Get all tailors
-router.get('/tailors', async (req, res) => {
+router.get('/tailors', authenticateToken, async (req, res) => {
     try {
         const tailors = await req.prisma.tailor.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
         res.json(tailors);
@@ -25,7 +25,7 @@ router.post('/tailors', authenticateToken, async (req, res) => {
 });
 
 // Get production batches
-router.get('/batches', async (req, res) => {
+router.get('/batches', authenticateToken, async (req, res) => {
     try {
         const { status, tailorId, startDate, endDate } = req.query;
         const where = {};
@@ -269,7 +269,7 @@ router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
 });
 
 // Get locked production dates
-router.get('/locked-dates', async (req, res) => {
+router.get('/locked-dates', authenticateToken, async (req, res) => {
     try {
         const setting = await req.prisma.systemSetting.findUnique({
             where: { key: 'locked_production_dates' }
@@ -339,7 +339,7 @@ router.post('/unlock-date', authenticateToken, async (req, res) => {
 });
 
 // Capacity dashboard
-router.get('/capacity', async (req, res) => {
+router.get('/capacity', authenticateToken, async (req, res) => {
     try {
         const { date } = req.query;
         const targetDate = date ? new Date(date) : new Date();
@@ -377,7 +377,7 @@ router.get('/capacity', async (req, res) => {
 });
 
 // Get production requirements from open orders (order-wise)
-router.get('/requirements', async (req, res) => {
+router.get('/requirements', authenticateToken, async (req, res) => {
     try {
         // Get all open orders with their lines (only pending - allocated already have inventory)
         const openOrders = await req.prisma.order.findMany({

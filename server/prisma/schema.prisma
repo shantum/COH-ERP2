@@ -182,6 +182,9 @@ model FabricTransaction {
   fabric    Fabric    @relation(fields: [fabricId], references: [id])
   createdBy User      @relation(fields: [createdById], references: [id])
   supplier  Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([fabricId])
+  @@index([txnType])
 }
 
 model FabricOrder {
@@ -221,6 +224,10 @@ model InventoryTransaction {
 
   sku       Sku  @relation(fields: [skuId], references: [id])
   createdBy User @relation(fields: [createdById], references: [id])
+
+  @@index([skuId])
+  @@index([txnType])
+  @@index([createdAt])
 }
 
 // ============================================
@@ -277,6 +284,10 @@ model Order {
   customer       Customer?       @relation(fields: [customerId], references: [id])
   orderLines     OrderLine[]
   returnRequests ReturnRequest[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([orderDate])
 }
 
 model OrderLine {
@@ -299,6 +310,10 @@ model OrderLine {
   sku                Sku                 @relation(fields: [skuId], references: [id])
   productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
   returnRequestLines ReturnRequestLine[]
+
+  @@index([orderId])
+  @@index([skuId])
+  @@index([lineStatus])
 }
 
 // ============================================

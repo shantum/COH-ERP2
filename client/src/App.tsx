@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
@@ -45,32 +46,34 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }>
-              <Route index element={<Dashboard />} />
-              <Route path="products" element={<Products />} />
-              <Route path="inventory" element={<Inventory />} />
-              <Route path="fabrics" element={<Fabrics />} />
-              <Route path="orders" element={<Orders />} />
-              <Route path="customers" element={<Customers />} />
-              <Route path="returns" element={<Returns />} />
-              <Route path="production" element={<Production />} />
-              <Route path="picklist" element={<Picklist />} />
-              <Route path="ledgers" element={<Ledgers />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/" element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }>
+                <Route index element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
+                <Route path="products" element={<ErrorBoundary><Products /></ErrorBoundary>} />
+                <Route path="inventory" element={<ErrorBoundary><Inventory /></ErrorBoundary>} />
+                <Route path="fabrics" element={<ErrorBoundary><Fabrics /></ErrorBoundary>} />
+                <Route path="orders" element={<ErrorBoundary><Orders /></ErrorBoundary>} />
+                <Route path="customers" element={<ErrorBoundary><Customers /></ErrorBoundary>} />
+                <Route path="returns" element={<ErrorBoundary><Returns /></ErrorBoundary>} />
+                <Route path="production" element={<ErrorBoundary><Production /></ErrorBoundary>} />
+                <Route path="picklist" element={<ErrorBoundary><Picklist /></ErrorBoundary>} />
+                <Route path="ledgers" element={<ErrorBoundary><Ledgers /></ErrorBoundary>} />
+                <Route path="settings" element={<ErrorBoundary><Settings /></ErrorBoundary>} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

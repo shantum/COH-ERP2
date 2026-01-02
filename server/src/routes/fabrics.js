@@ -8,7 +8,7 @@ const router = Router();
 // ============================================
 
 // Get all fabric types
-router.get('/types', async (req, res) => {
+router.get('/types', authenticateToken, async (req, res) => {
     try {
         const types = await req.prisma.fabricType.findMany({
             include: {
@@ -44,7 +44,7 @@ router.post('/types', authenticateToken, async (req, res) => {
 // ============================================
 
 // Get all fabrics with balance
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
     try {
         const { fabricTypeId, supplierId, isActive, search } = req.query;
 
@@ -84,7 +84,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get single fabric with details
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const fabric = await req.prisma.fabric.findUnique({
             where: { id: req.params.id },
@@ -162,7 +162,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // ============================================
 
 // Get transactions for a fabric
-router.get('/:id/transactions', async (req, res) => {
+router.get('/:id/transactions', authenticateToken, async (req, res) => {
     try {
         const { limit = 50, offset = 0 } = req.query;
 
@@ -220,7 +220,7 @@ router.post('/:id/transactions', authenticateToken, async (req, res) => {
 // ============================================
 
 // Get fabric stock analysis (with reorder recommendations)
-router.get('/dashboard/stock-analysis', async (req, res) => {
+router.get('/dashboard/stock-analysis', authenticateToken, async (req, res) => {
     try {
         const fabrics = await req.prisma.fabric.findMany({
             where: { isActive: true },
@@ -283,7 +283,7 @@ router.get('/dashboard/stock-analysis', async (req, res) => {
 // SUPPLIERS
 // ============================================
 
-router.get('/suppliers/all', async (req, res) => {
+router.get('/suppliers/all', authenticateToken, async (req, res) => {
     try {
         const suppliers = await req.prisma.supplier.findMany({
             where: { isActive: true },
@@ -315,7 +315,7 @@ router.post('/suppliers', authenticateToken, async (req, res) => {
 // FABRIC ORDERS
 // ============================================
 
-router.get('/orders/all', async (req, res) => {
+router.get('/orders/all', authenticateToken, async (req, res) => {
     try {
         const { status } = req.query;
         const where = status ? { status } : {};

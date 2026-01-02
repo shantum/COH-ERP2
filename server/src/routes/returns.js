@@ -4,7 +4,7 @@ import { authenticateToken } from '../middleware/auth.js';
 const router = Router();
 
 // Get all return requests
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
     try {
         const { status, requestType, limit = 50 } = req.query;
         const where = {};
@@ -30,12 +30,13 @@ router.get('/', async (req, res) => {
 
         res.json(enriched);
     } catch (error) {
+        console.error('Get return requests error:', error);
         res.status(500).json({ error: 'Failed to fetch return requests' });
     }
 });
 
 // Get single request
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateToken, async (req, res) => {
     try {
         const request = await req.prisma.returnRequest.findUnique({
             where: { id: req.params.id },
@@ -50,6 +51,7 @@ router.get('/:id', async (req, res) => {
         if (!request) return res.status(404).json({ error: 'Not found' });
         res.json(request);
     } catch (error) {
+        console.error('Get return request error:', error);
         res.status(500).json({ error: 'Failed to fetch request' });
     }
 });
@@ -79,7 +81,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
         res.status(201).json(request);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to create request' });
+        console.error('Create return request error:', error);
+        res.status(500).json({ error: 'Failed to create return request' });
     }
 });
 
@@ -93,7 +96,8 @@ router.post('/:id/initiate-reverse', authenticateToken, async (req, res) => {
         await updateStatus(req.prisma, req.params.id, 'reverse_initiated', req.user.id);
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: 'Failed' });
+        console.error('Initiate reverse shipping error:', error);
+        res.status(500).json({ error: 'Failed to initiate reverse shipping' });
     }
 });
 
@@ -103,7 +107,8 @@ router.post('/:id/mark-received', authenticateToken, async (req, res) => {
         await updateStatus(req.prisma, req.params.id, 'received', req.user.id);
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: 'Failed' });
+        console.error('Mark received error:', error);
+        res.status(500).json({ error: 'Failed to mark as received' });
     }
 });
 
@@ -122,12 +127,13 @@ router.post('/:id/resolve', authenticateToken, async (req, res) => {
         });
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ error: 'Failed' });
+        console.error('Resolve return error:', error);
+        res.status(500).json({ error: 'Failed to resolve return' });
     }
 });
 
 // Analytics
-router.get('/analytics/by-product', async (req, res) => {
+router.get('/analytics/by-product', authenticateToken, async (req, res) => {
     try {
         const returnLines = await req.prisma.returnRequestLine.findMany({ include: { sku: { include: { variation: { include: { product: true } } } }, request: true } });
         const orderLines = await req.prisma.orderLine.findMany({ include: { sku: { include: { variation: { include: { product: true } } } } } });
@@ -146,7 +152,8 @@ router.get('/analytics/by-product', async (req, res) => {
         const result = Object.entries(productStats).map(([id, s]) => ({ productId: id, ...s, returnRate: s.sold > 0 ? ((s.returned / s.sold) * 100).toFixed(1) : 0 }));
         res.json(result.sort((a, b) => b.returnRate - a.returnRate));
     } catch (error) {
-        res.status(500).json({ error: 'Failed' });
+        console.error('Return analytics error:', error);
+        res.status(500).json({ error: 'Failed to get return analytics' });
     }
 });
 

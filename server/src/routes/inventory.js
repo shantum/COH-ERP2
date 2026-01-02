@@ -27,7 +27,7 @@ const getEffectiveFabricConsumption = (sku, product) => {
 // ============================================
 
 // Get inventory balance for all SKUs
-router.get('/balance', async (req, res) => {
+router.get('/balance', authenticateToken, async (req, res) => {
     try {
         const { belowTarget, search } = req.query;
 
@@ -96,7 +96,7 @@ router.get('/balance', async (req, res) => {
 });
 
 // Get balance for single SKU
-router.get('/balance/:skuId', async (req, res) => {
+router.get('/balance/:skuId', authenticateToken, async (req, res) => {
     try {
         const sku = await req.prisma.sku.findUnique({
             where: { id: req.params.skuId },
@@ -133,7 +133,7 @@ router.get('/balance/:skuId', async (req, res) => {
 // ============================================
 
 // Get all transactions (with filters)
-router.get('/transactions', async (req, res) => {
+router.get('/transactions', authenticateToken, async (req, res) => {
     try {
         const { skuId, txnType, reason, startDate, endDate, limit = 100, offset = 0 } = req.query;
 
@@ -281,7 +281,7 @@ router.post('/quick-inward', authenticateToken, async (req, res) => {
 // STOCK ALERTS
 // ============================================
 
-router.get('/alerts', async (req, res) => {
+router.get('/alerts', authenticateToken, async (req, res) => {
     try {
         const skus = await req.prisma.sku.findMany({
             where: { isActive: true },
