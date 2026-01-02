@@ -199,32 +199,13 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
             });
         }
 
-        // Pre-fetch all metafields in parallel (with concurrency limit)
-        console.log('Fetching metafields for all products...');
-        const CONCURRENCY_LIMIT = 10;
-        const productMetafieldsMap = {};
-
-        for (let i = 0; i < shopifyProducts.length; i += CONCURRENCY_LIMIT) {
-            const batch = shopifyProducts.slice(i, i + CONCURRENCY_LIMIT);
-            const metafieldPromises = batch.map(async (product) => {
-                const metafields = await shopifyClient.getProductMetafields(product.id);
-                return { productId: product.id, metafields };
-            });
-            const batchResults = await Promise.all(metafieldPromises);
-            batchResults.forEach(result => {
-                productMetafieldsMap[result.productId] = result.metafields;
-            });
-        }
-        console.log('Metafields fetched, processing products...');
-
         for (const shopifyProduct of shopifyProducts) {
             try {
                 // Get main product image URL
                 const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
 
-                // Get pre-fetched metafields
-                const metafields = productMetafieldsMap[shopifyProduct.id] || [];
-                const gender = shopifyClient.extractGenderFromMetafields(metafields);
+                // Extract gender from product_type (e.g., "Women Co-ord Set" -> "women")
+                const gender = shopifyClient.normalizeGender(shopifyProduct.product_type);
 
                 // Build variant-to-image mapping
                 const variantImageMap = {};
@@ -419,7 +400,7 @@ router.post('/preview/products', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
-        const { limit = 10 } = req.body;
+        const { limit = 10, includeMetafields = true } = req.body;
 
         const shopifyProducts = await shopifyClient.getProducts({ limit: Math.min(limit, 50) });
 
@@ -431,42 +412,28 @@ router.post('/preview/products', authenticateToken, async (req, res) => {
             totalCount = shopifyProducts.length;
         }
 
-        const preview = shopifyProducts.map((product) => {
-            // Get main image
-            const imageUrl = product.image?.src || product.images?.[0]?.src || null;
+        // Optionally fetch metafields for each product
+        let productsWithMetafields = shopifyProducts;
+        if (includeMetafields) {
+            const CONCURRENCY_LIMIT = 5;
+            productsWithMetafields = [];
 
-            // Calculate total inventory
-            const totalInventory = (product.variants || []).reduce(
-                (sum, v) => sum + (v.inventory_quantity || 0), 0
-            );
-
-            // Extract variant details
-            const variants = (product.variants || []).map((v) => ({
-                sku: v.sku || '(no SKU)',
-                barcode: v.barcode || '',
-                color: v.option1 || 'Default',
-                size: v.option2 || v.option3 || 'One Size',
-                price: v.price,
-                inventory: v.inventory_quantity || 0,
-            }));
-
-            return {
-                shopifyProductId: String(product.id),
-                title: product.title,
-                productType: product.product_type || 'N/A',
-                variantCount: product.variants?.length || 0,
-                status: product.status,
-                imageUrl,
-                totalInventory,
-                variants: variants.slice(0, 5), // Show first 5 variants
-                hasMoreVariants: variants.length > 5,
-            };
-        });
+            for (let i = 0; i < shopifyProducts.length; i += CONCURRENCY_LIMIT) {
+                const batch = shopifyProducts.slice(i, i + CONCURRENCY_LIMIT);
+                const batchResults = await Promise.all(
+                    batch.map(async (product) => {
+                        const metafields = await shopifyClient.getProductMetafields(product.id);
+                        return { ...product, metafields };
+                    })
+                );
+                productsWithMetafields.push(...batchResults);
+            }
+        }
 
         res.json({
             totalAvailable: totalCount,
-            previewCount: preview.length,
-            products: preview,
+            previewCount: productsWithMetafields.length,
+            products: productsWithMetafields,
         });
     } catch (error) {
         console.error('Shopify product preview error:', error);
@@ -493,23 +460,18 @@ router.post('/preview/orders', authenticateToken, async (req, res) => {
 
         const shopifyOrders = await shopifyClient.getOrders({ limit: Math.min(limit, 50) });
 
-        const preview = shopifyOrders.map((order) => ({
-            shopifyOrderId: String(order.id),
-            orderNumber: String(order.order_number),
-            customerName: order.customer
-                ? `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim()
-                : order.shipping_address?.name || 'Unknown',
-            customerEmail: order.email,
-            totalAmount: parseFloat(order.total_price),
-            status: shopifyClient.mapOrderStatus(order),
-            itemCount: order.line_items?.length || 0,
-            orderDate: order.created_at,
-        }));
+        // Get total count
+        let totalCount = 0;
+        try {
+            totalCount = await shopifyClient.getOrderCount();
+        } catch (e) {
+            totalCount = shopifyOrders.length;
+        }
 
         res.json({
-            totalAvailable: await shopifyClient.getOrderCount(),
-            previewCount: preview.length,
-            orders: preview,
+            totalAvailable: totalCount,
+            previewCount: shopifyOrders.length,
+            orders: shopifyOrders,
         });
     } catch (error) {
         console.error('Shopify order preview error:', error);
@@ -532,20 +494,18 @@ router.post('/preview/customers', authenticateToken, async (req, res) => {
 
         const shopifyCustomers = await shopifyClient.getCustomers({ limit: Math.min(limit, 50) });
 
-        const preview = shopifyCustomers.map((customer) => ({
-            shopifyCustomerId: String(customer.id),
-            name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'No Name',
-            email: customer.email,
-            phone: customer.phone,
-            ordersCount: customer.orders_count || 0,
-            totalSpent: customer.total_spent,
-            createdAt: customer.created_at,
-        }));
+        // Get total count
+        let totalCount = 0;
+        try {
+            totalCount = await shopifyClient.getCustomerCount();
+        } catch (e) {
+            totalCount = shopifyCustomers.length;
+        }
 
         res.json({
-            totalAvailable: await shopifyClient.getCustomerCount(),
-            previewCount: preview.length,
-            customers: preview,
+            totalAvailable: totalCount,
+            previewCount: shopifyCustomers.length,
+            customers: shopifyCustomers,
         });
     } catch (error) {
         console.error('Shopify customer preview error:', error);

@@ -337,13 +337,14 @@ class ShopifyClient {
     }
 
     /**
-     * Extract gender from product metafields
+     * Extract gender from product data
      * @param {Array} metafields - Array of metafield objects
+     * @param {string} productType - Product type from main product data (e.g., "Women Co-ord Set")
      * @returns {string} - Gender value or 'unisex' as default
      */
-    extractGenderFromMetafields(metafields) {
-        // First, try my_fields.gender
-        const genderField = metafields.find(
+    extractGenderFromMetafields(metafields, productType = null) {
+        // First, try my_fields.gender metafield
+        const genderField = metafields?.find(
             mf => mf.namespace === 'my_fields' && mf.key === 'gender'
         );
 
@@ -351,13 +352,18 @@ class ShopifyClient {
             return this.normalizeGender(genderField.value);
         }
 
-        // Try custom.product_type_for_feed (e.g., "Women Co-ord Set", "Men Shirt")
-        const productTypeField = metafields.find(
+        // Try custom.product_type_for_feed metafield (e.g., "Women Co-ord Set", "Men Shirt")
+        const productTypeField = metafields?.find(
             mf => mf.namespace === 'custom' && mf.key === 'product_type_for_feed'
         );
 
         if (productTypeField?.value) {
             return this.normalizeGender(productTypeField.value);
+        }
+
+        // Fallback to main product_type field (e.g., "Women Co-ord Set")
+        if (productType) {
+            return this.normalizeGender(productType);
         }
 
         return 'unisex';

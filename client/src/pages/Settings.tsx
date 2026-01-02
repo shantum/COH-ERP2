@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { shopifyApi, importExportApi, adminApi, authApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import JsonViewer from '../components/JsonViewer';
 import {
     Store, Key, CheckCircle, XCircle, RefreshCw, Download, Upload,
     ShoppingCart, Users, Eye, Play, AlertCircle, FileSpreadsheet, Package,
@@ -398,76 +399,16 @@ export default function Settings() {
                                 </button>
                             </div>
 
-                            {/* Product Preview */}
+                            {/* Product Preview - Raw Data */}
                             {productPreview && (
                                 <div className="border rounded-lg overflow-hidden bg-white">
-                                    <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between">
-                                        <span>Preview ({productPreview.previewCount} of {productPreview.totalAvailable} products in Shopify)</span>
+                                    <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
+                                        <span>Raw Shopify Data ({productPreview.previewCount} of {productPreview.totalAvailable} products)</span>
                                         <button onClick={() => setProductPreview(null)} className="text-gray-400 hover:text-gray-600">
                                             <XCircle size={16} />
                                         </button>
                                     </div>
-                                    <div className="max-h-96 overflow-y-auto">
-                                        {productPreview.products?.map((product: any) => (
-                                            <div key={product.shopifyProductId} className="border-b last:border-0 p-3">
-                                                <div className="flex gap-3">
-                                                    {/* Product Thumbnail (2:3 aspect ratio) */}
-                                                    {product.imageUrl ? (
-                                                        <img
-                                                            src={product.imageUrl}
-                                                            alt={product.title}
-                                                            className="w-12 h-18 object-cover rounded-lg flex-shrink-0"
-                                                            style={{ height: '72px' }}
-                                                        />
-                                                    ) : (
-                                                        <div className="w-12 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0" style={{ height: '72px' }}>
-                                                            <Package size={24} className="text-gray-400" />
-                                                        </div>
-                                                    )}
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div>
-                                                                <p className="font-medium text-gray-900">{product.title}</p>
-                                                                <p className="text-xs text-gray-500">{product.productType} • {product.variantCount} variants • <span className="font-medium">{product.totalInventory} in stock</span></p>
-                                                            </div>
-                                                            <span className={`text-xs px-2 py-0.5 rounded ${product.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                                                {product.status}
-                                                            </span>
-                                                        </div>
-                                                        {product.variants?.length > 0 && (
-                                                            <div className="bg-gray-50 rounded p-2 text-xs">
-                                                                <table className="w-full">
-                                                                    <thead>
-                                                                        <tr className="text-gray-500">
-                                                                            <th className="text-left font-medium pb-1">SKU</th>
-                                                                            <th className="text-left font-medium pb-1">Color</th>
-                                                                            <th className="text-left font-medium pb-1">Size</th>
-                                                                            <th className="text-right font-medium pb-1">Stock</th>
-                                                                            <th className="text-right font-medium pb-1">Price</th>
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        {product.variants.map((v: any, i: number) => (
-                                                                            <tr key={i} className="border-t border-gray-200">
-                                                                                <td className="py-1 font-mono">{v.sku}</td>
-                                                                                <td className="py-1">{v.color}</td>
-                                                                                <td className="py-1">{v.size}</td>
-                                                                                <td className={`py-1 text-right ${v.inventory === 0 ? 'text-red-500' : 'text-green-600'}`}>{v.inventory}</td>
-                                                                                <td className="py-1 text-right">₹{v.price}</td>
-                                                                            </tr>
-                                                                        ))}
-                                                                    </tbody>
-                                                                </table>
-                                                                {product.hasMoreVariants && (
-                                                                    <p className="text-gray-500 mt-1 text-center">+ more variants...</p>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
+                                    <JsonViewer data={productPreview.products} rootName="products" />
                                 </div>
                             )}
 
@@ -531,35 +472,16 @@ export default function Settings() {
                                     </button>
                                 </div>
 
-                                {/* Order Preview */}
+                                {/* Order Preview - Raw Data */}
                                 {orderPreview && (
                                     <div className="border rounded-lg overflow-hidden">
-                                        <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between">
-                                            <span>Preview ({orderPreview.previewCount} of {orderPreview.totalAvailable})</span>
+                                        <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
+                                            <span>Raw Shopify Data ({orderPreview.previewCount} of {orderPreview.totalAvailable} orders)</span>
                                             <button onClick={() => setOrderPreview(null)} className="text-gray-400 hover:text-gray-600">
                                                 <XCircle size={16} />
                                             </button>
                                         </div>
-                                        <div className="max-h-64 overflow-y-auto">
-                                            <table className="w-full text-sm">
-                                                <thead className="bg-gray-50">
-                                                    <tr>
-                                                        <th className="px-2 py-1 text-left">Order #</th>
-                                                        <th className="px-2 py-1 text-left">Customer</th>
-                                                        <th className="px-2 py-1 text-right">Amount</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {orderPreview.orders?.map((order: any) => (
-                                                        <tr key={order.shopifyOrderId} className="border-t">
-                                                            <td className="px-2 py-1">#{order.orderNumber}</td>
-                                                            <td className="px-2 py-1 truncate max-w-32">{order.customerName}</td>
-                                                            <td className="px-2 py-1 text-right">₹{order.totalAmount?.toLocaleString()}</td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                        <JsonViewer data={orderPreview.orders} rootName="orders" />
                                     </div>
                                 )}
 
@@ -616,35 +538,16 @@ export default function Settings() {
                                     </button>
                                 </div>
 
-                                {/* Customer Preview */}
+                                {/* Customer Preview - Raw Data */}
                                 {customerPreview && (
                                     <div className="border rounded-lg overflow-hidden">
-                                        <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between">
-                                            <span>Preview ({customerPreview.previewCount} of {customerPreview.totalAvailable})</span>
+                                        <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
+                                            <span>Raw Shopify Data ({customerPreview.previewCount} of {customerPreview.totalAvailable} customers)</span>
                                             <button onClick={() => setCustomerPreview(null)} className="text-gray-400 hover:text-gray-600">
                                                 <XCircle size={16} />
                                             </button>
                                         </div>
-                                        <div className="max-h-64 overflow-y-auto">
-                                            <table className="w-full text-sm">
-                                                <thead className="bg-gray-50">
-                                                    <tr>
-                                                        <th className="px-2 py-1 text-left">Name</th>
-                                                        <th className="px-2 py-1 text-left">Email</th>
-                                                        <th className="px-2 py-1 text-right">Orders</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {customerPreview.customers?.map((customer: any) => (
-                                                        <tr key={customer.shopifyCustomerId} className="border-t">
-                                                            <td className="px-2 py-1">{customer.name}</td>
-                                                            <td className="px-2 py-1 truncate max-w-32">{customer.email}</td>
-                                                            <td className="px-2 py-1 text-right">{customer.ordersCount}</td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                        <JsonViewer data={customerPreview.customers} rootName="customers" />
                                     </div>
                                 )}
 
