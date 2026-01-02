@@ -6,6 +6,8 @@ import { Plus, AlertTriangle, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronRig
 interface InventoryItem {
     skuId: string;
     skuCode: string;
+    barcode: string | null;
+    hasDuplicateBarcode: boolean;
     productId: string;
     productName: string;
     productType: string;
@@ -421,6 +423,7 @@ export default function Inventory() {
                                                                 <tr className="text-xs text-gray-500 border-b">
                                                                     <th className="py-2 px-4 pl-20 text-left font-medium">Size</th>
                                                                     <th className="py-2 px-2 text-left font-medium">SKU</th>
+                                                                    <th className="py-2 px-2 text-left font-medium">Barcode</th>
                                                                     <th className="py-2 px-2 text-right font-medium">ERP Stock</th>
                                                                     <th className="py-2 px-2 text-right font-medium">Reserved</th>
                                                                     <th className="py-2 px-2 text-right font-medium">Available</th>
@@ -432,9 +435,23 @@ export default function Inventory() {
                                                             </thead>
                                                             <tbody>
                                                                 {color.items.map((item) => (
-                                                                    <tr key={item.skuId} className="border-b last:border-0 hover:bg-white">
+                                                                    <tr key={item.skuId} className={`border-b last:border-0 hover:bg-white ${item.hasDuplicateBarcode ? 'bg-orange-50' : ''}`}>
                                                                         <td className="py-2 px-4 pl-20 font-medium">{item.size}</td>
                                                                         <td className="py-2 px-2 font-mono text-xs text-gray-600">{item.skuCode}</td>
+                                                                        <td className="py-2 px-2 font-mono text-xs">
+                                                                            {item.barcode ? (
+                                                                                <span className={`flex items-center gap-1 ${item.hasDuplicateBarcode ? 'text-orange-600' : 'text-gray-600'}`}>
+                                                                                    {item.barcode}
+                                                                                    {item.hasDuplicateBarcode && (
+                                                                                        <span title="Duplicate barcode">
+                                                                                            <AlertTriangle size={12} className="text-orange-500" />
+                                                                                        </span>
+                                                                                    )}
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span className="text-gray-300">-</span>
+                                                                            )}
+                                                                        </td>
                                                                         <td className="py-2 px-2 text-right font-medium">{item.currentBalance}</td>
                                                                         <td className="py-2 px-2 text-right text-yellow-600">
                                                                             {item.reservedBalance > 0 ? item.reservedBalance : '-'}

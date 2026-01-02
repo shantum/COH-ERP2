@@ -44,6 +44,19 @@ router.get('/balance', authenticateToken, async (req, res) => {
             },
         });
 
+        // Find duplicate barcodes
+        const barcodeCounts = {};
+        skus.forEach(sku => {
+            if (sku.barcode) {
+                barcodeCounts[sku.barcode] = (barcodeCounts[sku.barcode] || 0) + 1;
+            }
+        });
+        const duplicateBarcodes = new Set(
+            Object.entries(barcodeCounts)
+                .filter(([_, count]) => count > 1)
+                .map(([barcode]) => barcode)
+        );
+
         const balances = await Promise.all(
             skus.map(async (sku) => {
                 const balance = await calculateInventoryBalance(req.prisma, sku.id);
@@ -54,6 +67,8 @@ router.get('/balance', authenticateToken, async (req, res) => {
                 return {
                     skuId: sku.id,
                     skuCode: sku.skuCode,
+                    barcode: sku.barcode,
+                    hasDuplicateBarcode: sku.barcode ? duplicateBarcodes.has(sku.barcode) : false,
                     productId: sku.variation.product.id,
                     productName: sku.variation.product.name,
                     productType: sku.variation.product.productType,

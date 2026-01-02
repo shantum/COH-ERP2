@@ -340,16 +340,7 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                             },
                         });
 
-                        // Check for barcode conflicts
-                        if (barcode && !sku) {
-                            const existingBarcode = await req.prisma.sku.findFirst({
-                                where: { barcode },
-                            });
-                            if (existingBarcode) {
-                                results.errors.push(`SKU ${skuCode}: Barcode ${barcode} already exists`);
-                                continue;
-                            }
-                        }
+                        // Note: Duplicate barcodes are allowed - they will be flagged in the UI
 
                         if (sku) {
                             // Update existing SKU with Shopify data

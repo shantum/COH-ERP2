@@ -70,7 +70,7 @@ model Variation {
 model Sku {
   id                String  @id @default(uuid())
   skuCode           String  @unique
-  barcode           String? @unique // 8-digit barcode (EAN-8 format)
+  barcode           String? // 8-digit barcode (EAN-8 format) - duplicates allowed, flagged in UI
   variationId       String
   size              String  // XS, S, M, L, XL, XXL, Free
   fabricConsumption Float   @default(1.5)
