@@ -586,15 +586,20 @@ router.post('/sync/customers', authenticateToken, async (req, res) => {
             created: 0,
             updated: 0,
             skipped: 0,
+            skippedNoOrders: 0,
             errors: [],
         };
 
         // Fetch customers from Shopify
-        const shopifyCustomers = await shopifyClient.getCustomers({
+        const allShopifyCustomers = await shopifyClient.getCustomers({
             since_id,
             created_at_min,
             limit,
         });
+
+        // Only sync customers who have placed at least 1 order
+        const shopifyCustomers = allShopifyCustomers.filter(c => (c.orders_count || 0) > 0);
+        results.skippedNoOrders = allShopifyCustomers.length - shopifyCustomers.length;
 
         for (const shopifyCustomer of shopifyCustomers) {
             try {
@@ -652,10 +657,11 @@ router.post('/sync/customers', authenticateToken, async (req, res) => {
 
         res.json({
             message: 'Customer sync completed',
-            fetched: shopifyCustomers.length,
+            fetched: allShopifyCustomers.length,
+            withOrders: shopifyCustomers.length,
             results,
-            lastSyncedId: shopifyCustomers.length > 0
-                ? String(shopifyCustomers[shopifyCustomers.length - 1].id)
+            lastSyncedId: allShopifyCustomers.length > 0
+                ? String(allShopifyCustomers[allShopifyCustomers.length - 1].id)
                 : null,
         });
     } catch (error) {
