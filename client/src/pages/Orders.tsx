@@ -238,7 +238,7 @@ export default function Orders() {
             .filter((sku: any) => sku.variation?.id === variationId)
             .map((sku: any) => ({ id: sku.id, size: sku.size, stock: getSkuBalance(sku.id), mrp: sku.mrp }))
             .sort((a: any, b: any) => {
-                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
                 return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
             });
     };

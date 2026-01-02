@@ -324,11 +324,13 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                             ? variant.sku.trim()
                             : `${shopifyProduct.handle}-${colorName}-${variant.option2 || 'OS'}`.replace(/\s+/g, '-').toUpperCase();
 
-                        // Get barcode from Shopify
-                        const barcode = variant.barcode && variant.barcode.trim() ? variant.barcode.trim() : null;
-
-                        // Determine size from option2 or variant title
-                        const size = variant.option2 || variant.option3 || 'One Size';
+                        // Determine size from option2 or variant title and normalize
+                        const rawSize = variant.option2 || variant.option3 || 'One Size';
+                        // Normalize sizes: XXL -> 2XL, XXXL -> 3XL, XXXXL -> 4XL
+                        const size = rawSize
+                            .replace(/^XXXXL$/i, '4XL')
+                            .replace(/^XXXL$/i, '3XL')
+                            .replace(/^XXL$/i, '2XL');
 
                         // Check if SKU exists by shopifyVariantId or skuCode
                         let sku = await req.prisma.sku.findFirst({
@@ -349,11 +351,6 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                                 shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
                                 mrp: parseFloat(variant.price) || sku.mrp,
                             };
-
-                            // Only update barcode if SKU doesn't have one and Shopify has one
-                            if (barcode && !sku.barcode) {
-                                updateData.barcode = barcode;
-                            }
 
                             await req.prisma.sku.update({
                                 where: { id: sku.id },
@@ -388,7 +385,6 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                                     mrp: parseFloat(variant.price) || 0,
                                     fabricConsumption: 1.5,
                                     targetStockQty: 10,
-                                    barcode,
                                     shopifyVariantId,
                                     shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
                                 },

@@ -1,22 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi, productsApi } from '../services/api';
 import { useState, useMemo } from 'react';
-import { Plus, AlertTriangle, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronRight, Package } from 'lucide-react';
-
-interface DuplicateBarcodeSku {
-    skuId: string;
-    skuCode: string;
-    productName: string;
-    colorName: string;
-    size: string;
-}
+import { Plus, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronRight, Package, AlertTriangle } from 'lucide-react';
 
 interface InventoryItem {
     skuId: string;
     skuCode: string;
-    barcode: string | null;
-    hasDuplicateBarcode: boolean;
-    duplicateBarcodeSkus: DuplicateBarcodeSku[];
     productId: string;
     productName: string;
     productType: string;
@@ -167,7 +156,7 @@ export default function Inventory() {
         });
 
         // Sort products by name, colors by name, items by size order
-        const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'Free'];
+        const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
         return Array.from(productMap.values())
             .sort((a, b) => a.productName.localeCompare(b.productName))
@@ -188,6 +177,26 @@ export default function Inventory() {
                     }))
             }));
     }, [balance, filter]);
+
+    // Detect duplicate SKU codes
+    const duplicateSkus = useMemo(() => {
+        if (!balance) return [];
+        const skuCodeCount: Record<string, { count: number; items: InventoryItem[] }> = {};
+        balance.forEach(item => {
+            if (!skuCodeCount[item.skuCode]) {
+                skuCodeCount[item.skuCode] = { count: 0, items: [] };
+            }
+            skuCodeCount[item.skuCode].count++;
+            skuCodeCount[item.skuCode].items.push(item);
+        });
+        return Object.entries(skuCodeCount)
+            .filter(([_, data]) => data.count > 1)
+            .map(([skuCode, data]) => ({
+                skuCode,
+                count: data.count,
+                items: data.items.map(i => `${i.productName} - ${i.colorName} (${i.size})`)
+            }));
+    }, [balance]);
 
     const toggleProduct = (productId: string) => {
         const newExpanded = new Set(expandedProducts);
@@ -229,6 +238,26 @@ export default function Inventory() {
                 <h1 className="text-2xl font-bold text-gray-900">Inventory</h1>
                 <button onClick={() => setShowInward(true)} className="btn-primary flex items-center"><Plus size={20} className="mr-2" />Quick Inward</button>
             </div>
+
+            {/* Duplicate SKU Warning */}
+            {duplicateSkus.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                        <AlertTriangle className="text-red-600" />
+                        <span className="text-red-800 font-medium">
+                            {duplicateSkus.length} duplicate SKU code{duplicateSkus.length > 1 ? 's' : ''} detected
+                        </span>
+                    </div>
+                    <div className="mt-2 text-sm text-red-700">
+                        {duplicateSkus.map(dup => (
+                            <div key={dup.skuCode} className="ml-8">
+                                <span className="font-mono font-medium">{dup.skuCode}</span>
+                                <span className="text-red-600"> → {dup.items.join(', ')}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Alerts Banner */}
             {alerts?.length > 0 && (
@@ -337,15 +366,16 @@ export default function Inventory() {
                                     className={`text-gray-400 transition-transform ${expandedProducts.has(product.productId) ? 'rotate-90' : ''}`}
                                 />
 
-                                {/* Product Image */}
+                                {/* Product Image (2:3 aspect ratio) */}
                                 {product.imageUrl ? (
                                     <img
                                         src={product.imageUrl}
                                         alt={product.productName}
-                                        className="w-10 h-10 object-cover rounded"
+                                        className="w-10 object-cover rounded flex-shrink-0"
+                                        style={{ height: '60px' }}
                                     />
                                 ) : (
-                                    <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
+                                    <div className="w-10 bg-gray-200 rounded flex items-center justify-center flex-shrink-0" style={{ height: '60px' }}>
                                         <Package size={20} className="text-gray-400" />
                                     </div>
                                 )}
@@ -396,15 +426,16 @@ export default function Inventory() {
                                                         className={`text-gray-400 transition-transform ${expandedColors.has(colorKey) ? 'rotate-90' : ''}`}
                                                     />
 
-                                                    {/* Color Image */}
+                                                    {/* Color Image (2:3 aspect ratio) */}
                                                     {color.imageUrl ? (
                                                         <img
                                                             src={color.imageUrl}
                                                             alt={color.colorName}
-                                                            className="w-8 h-8 object-cover rounded"
+                                                            className="w-8 object-cover rounded flex-shrink-0"
+                                                            style={{ height: '48px' }}
                                                         />
                                                     ) : (
-                                                        <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
+                                                        <div className="w-8 bg-gray-100 rounded flex items-center justify-center flex-shrink-0" style={{ height: '48px' }}>
                                                             <div className="w-4 h-4 rounded-full bg-gray-300"></div>
                                                         </div>
                                                     )}
@@ -432,7 +463,6 @@ export default function Inventory() {
                                                                 <tr className="text-xs text-gray-500 border-b">
                                                                     <th className="py-2 px-4 pl-20 text-left font-medium">Size</th>
                                                                     <th className="py-2 px-2 text-left font-medium">SKU</th>
-                                                                    <th className="py-2 px-2 text-left font-medium">Barcode</th>
                                                                     <th className="py-2 px-2 text-right font-medium">ERP Stock</th>
                                                                     <th className="py-2 px-2 text-right font-medium">Reserved</th>
                                                                     <th className="py-2 px-2 text-right font-medium">Available</th>
@@ -444,26 +474,9 @@ export default function Inventory() {
                                                             </thead>
                                                             <tbody>
                                                                 {color.items.map((item) => (
-                                                                    <tr key={item.skuId} className={`border-b last:border-0 hover:bg-white ${item.hasDuplicateBarcode ? 'bg-orange-50' : ''}`}>
+                                                                    <tr key={item.skuId} className="border-b last:border-0 hover:bg-white">
                                                                         <td className="py-2 px-4 pl-20 font-medium">{item.size}</td>
                                                                         <td className="py-2 px-2 font-mono text-xs text-gray-600">{item.skuCode}</td>
-                                                                        <td className="py-2 px-2 font-mono text-xs">
-                                                                            {item.barcode ? (
-                                                                                <span className={`flex items-center gap-1 ${item.hasDuplicateBarcode ? 'text-orange-600' : 'text-gray-600'}`}>
-                                                                                    {item.barcode}
-                                                                                    {item.hasDuplicateBarcode && item.duplicateBarcodeSkus.length > 0 && (
-                                                                                        <span
-                                                                                            title={`Shared with: ${item.duplicateBarcodeSkus.map(s => `${s.productName} - ${s.colorName} (${s.size})`).join(', ')}`}
-                                                                                            className="cursor-help"
-                                                                                        >
-                                                                                            <AlertTriangle size={12} className="text-orange-500" />
-                                                                                        </span>
-                                                                                    )}
-                                                                                </span>
-                                                                            ) : (
-                                                                                <span className="text-gray-300">-</span>
-                                                                            )}
-                                                                        </td>
                                                                         <td className="py-2 px-2 text-right font-medium">{item.currentBalance}</td>
                                                                         <td className="py-2 px-2 text-right text-yellow-600">
                                                                             {item.reservedBalance > 0 ? item.reservedBalance : '-'}
@@ -532,9 +545,9 @@ export default function Inventory() {
                         <div className="flex items-center justify-between mb-4">
                             <div className="flex items-center gap-3">
                                 {showDetail.imageUrl ? (
-                                    <img src={showDetail.imageUrl} alt="" className="w-12 h-12 object-cover rounded" />
+                                    <img src={showDetail.imageUrl} alt="" className="w-12 object-cover rounded" style={{ height: '72px' }} />
                                 ) : (
-                                    <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center">
+                                    <div className="w-12 bg-gray-100 rounded flex items-center justify-center" style={{ height: '72px' }}>
                                         <Package size={24} className="text-gray-400" />
                                     </div>
                                 )}

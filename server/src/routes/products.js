@@ -224,17 +224,7 @@ router.get('/skus/all', authenticateToken, async (req, res) => {
 // Create SKU
 router.post('/variations/:variationId/skus', authenticateToken, async (req, res) => {
     try {
-        const { skuCode, size, fabricConsumption, mrp, targetStockQty, targetStockMethod, barcode } = req.body;
-
-        // Check for duplicate barcode
-        if (barcode && barcode.trim()) {
-            const existingBarcode = await req.prisma.sku.findFirst({
-                where: { barcode: barcode.trim() },
-            });
-            if (existingBarcode) {
-                return res.status(400).json({ error: `Barcode ${barcode} is already in use by SKU ${existingBarcode.skuCode}` });
-            }
-        }
+        const { skuCode, size, fabricConsumption, mrp, targetStockQty, targetStockMethod } = req.body;
 
         const sku = await req.prisma.sku.create({
             data: {
@@ -245,16 +235,12 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
                 mrp,
                 targetStockQty: targetStockQty || 10,
                 targetStockMethod: targetStockMethod || 'day14',
-                barcode: barcode?.trim() || null,
             },
         });
 
         res.status(201).json(sku);
     } catch (error) {
         console.error('Create SKU error:', error);
-        if (error.code === 'P2002' && error.meta?.target?.includes('barcode')) {
-            return res.status(400).json({ error: 'This barcode is already in use' });
-        }
         res.status(500).json({ error: 'Failed to create SKU' });
     }
 });
@@ -262,35 +248,16 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
 // Update SKU
 router.put('/skus/:id', authenticateToken, async (req, res) => {
     try {
-        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive, barcode } = req.body;
-
-        // Convert empty barcode to null to avoid unique constraint issues
-        const sanitizedBarcode = barcode && barcode.trim() ? barcode.trim() : null;
-
-        // Check for duplicate barcode (excluding current SKU)
-        if (sanitizedBarcode) {
-            const existingBarcode = await req.prisma.sku.findFirst({
-                where: {
-                    barcode: sanitizedBarcode,
-                    NOT: { id: req.params.id }
-                },
-            });
-            if (existingBarcode) {
-                return res.status(400).json({ error: `Barcode ${sanitizedBarcode} is already in use by SKU ${existingBarcode.skuCode}` });
-            }
-        }
+        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive } = req.body;
 
         const sku = await req.prisma.sku.update({
             where: { id: req.params.id },
-            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive, barcode: sanitizedBarcode },
+            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive },
         });
 
         res.json(sku);
     } catch (error) {
         console.error('Update SKU error:', error);
-        if (error.code === 'P2002' && error.meta?.target?.includes('barcode')) {
-            return res.status(400).json({ error: 'This barcode is already in use' });
-        }
         res.status(500).json({ error: 'Failed to update SKU' });
     }
 });

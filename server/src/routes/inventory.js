@@ -44,28 +44,6 @@ router.get('/balance', authenticateToken, async (req, res) => {
             },
         });
 
-        // Find duplicate barcodes and track which SKUs share them
-        const barcodeToSkus = {};
-        skus.forEach(sku => {
-            if (sku.barcode) {
-                if (!barcodeToSkus[sku.barcode]) {
-                    barcodeToSkus[sku.barcode] = [];
-                }
-                barcodeToSkus[sku.barcode].push({
-                    skuId: sku.id,
-                    skuCode: sku.skuCode,
-                    productName: sku.variation.product.name,
-                    colorName: sku.variation.colorName,
-                    size: sku.size,
-                });
-            }
-        });
-        const duplicateBarcodes = new Set(
-            Object.entries(barcodeToSkus)
-                .filter(([_, skuList]) => skuList.length > 1)
-                .map(([barcode]) => barcode)
-        );
-
         const balances = await Promise.all(
             skus.map(async (sku) => {
                 const balance = await calculateInventoryBalance(req.prisma, sku.id);
@@ -76,11 +54,6 @@ router.get('/balance', authenticateToken, async (req, res) => {
                 return {
                     skuId: sku.id,
                     skuCode: sku.skuCode,
-                    barcode: sku.barcode,
-                    hasDuplicateBarcode: sku.barcode ? duplicateBarcodes.has(sku.barcode) : false,
-                    duplicateBarcodeSkus: sku.barcode && duplicateBarcodes.has(sku.barcode)
-                        ? barcodeToSkus[sku.barcode].filter(s => s.skuId !== sku.id)
-                        : [],
                     productId: sku.variation.product.id,
                     productName: sku.variation.product.name,
                     productType: sku.variation.product.productType,

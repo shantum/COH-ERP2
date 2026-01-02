@@ -9,7 +9,7 @@ export default function Products() {
     const { data: fabrics } = useQuery({ queryKey: ['fabrics'], queryFn: () => fabricsApi.getAll().then(r => r.data) });
     const { data: fabricTypes } = useQuery({ queryKey: ['fabricTypes'], queryFn: () => fabricsApi.getTypes().then(r => r.data) });
     const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
-    const [filter, setFilter] = useState({ category: '', search: '' });
+    const [filter, setFilter] = useState({ category: '', gender: '', search: '' });
     const [showAddProduct, setShowAddProduct] = useState(false);
     const [showEditProduct, setShowEditProduct] = useState<any>(null);
     const [showAddVariation, setShowAddVariation] = useState<string | null>(null);
@@ -21,7 +21,7 @@ export default function Products() {
     const [newSkuSize, setNewSkuSize] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+    const allSizes = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
     const createProduct = useMutation({
         mutationFn: (data: any) => productsApi.create(data),
@@ -65,7 +65,6 @@ export default function Products() {
                 size: newSkuSize,
                 mrp: defaultMrp,
                 fabricConsumption: defaultFabric,
-                barcode: '',
                 isActive: true
             }]
         }));
@@ -106,8 +105,7 @@ export default function Products() {
                 await productsApi.updateSku(sku.id, {
                     mrp: sku.mrp,
                     fabricConsumption: sku.fabricConsumption,
-                    isActive: sku.isActive,
-                    barcode: sku.barcode || null
+                    isActive: sku.isActive
                 });
             }
 
@@ -125,8 +123,7 @@ export default function Products() {
                         skuCode,
                         size: newSku.size,
                         mrp: newSku.mrp,
-                        fabricConsumption: newSku.fabricConsumption,
-                        barcode: newSku.barcode || null
+                        fabricConsumption: newSku.fabricConsumption
                     });
                 }
             }
@@ -156,6 +153,7 @@ export default function Products() {
     };
 
     const filteredProducts = products?.filter((p: any) => {
+        if (filter.gender && p.gender !== filter.gender) return false;
         if (filter.category && p.category !== filter.category) return false;
         if (filter.search && !p.name.toLowerCase().includes(filter.search.toLowerCase())) return false;
         return true;
@@ -235,15 +233,28 @@ export default function Products() {
             </div>
 
             {/* Filters */}
-            <div className="card flex flex-wrap gap-4">
+            <div className="card flex flex-wrap gap-4 items-center">
                 <input type="text" placeholder="Search products..." className="input max-w-xs" value={filter.search} onChange={(e) => setFilter(f => ({ ...f, search: e.target.value }))} />
-                <select className="input max-w-xs" value={filter.category} onChange={(e) => setFilter(f => ({ ...f, category: e.target.value }))}>
+                <select className="input w-32" value={filter.gender} onChange={(e) => setFilter(f => ({ ...f, gender: e.target.value }))}>
+                    <option value="">All Genders</option>
+                    <option value="men">Men</option>
+                    <option value="women">Women</option>
+                    <option value="unisex">Unisex</option>
+                </select>
+                <select className="input w-40" value={filter.category} onChange={(e) => setFilter(f => ({ ...f, category: e.target.value }))}>
                     <option value="">All Categories</option>
                     <option value="dress">Dress</option>
                     <option value="top">Top</option>
                     <option value="bottom">Bottom</option>
                     <option value="outerwear">Outerwear</option>
                 </select>
+                <div className="ml-auto text-sm text-gray-500">
+                    <span className="font-medium text-gray-700">{filteredProducts?.length || 0}</span> products
+                    {' · '}
+                    <span className="font-medium text-gray-700">{filteredProducts?.reduce((sum: number, p: any) => sum + (p.variations?.length || 0), 0) || 0}</span> variations
+                    {' · '}
+                    <span className="font-medium text-gray-700">{filteredProducts?.reduce((sum: number, p: any) => sum + (p.variations?.reduce((vSum: number, v: any) => vSum + (v.skus?.length || 0), 0) || 0), 0) || 0}</span> SKUs
+                </div>
             </div>
 
             {/* Products List */}
@@ -317,9 +328,8 @@ export default function Products() {
                                         {v.skus?.length > 0 && (
                                             <div className="mt-2 flex flex-wrap gap-2">
                                                 {v.skus.map((s: any) => (
-                                                    <span key={s.id} className="px-2 py-1 bg-white rounded text-xs border" title={s.barcode ? `Barcode: ${s.barcode}` : 'No barcode'}>
+                                                    <span key={s.id} className="px-2 py-1 bg-white rounded text-xs border" title={`SKU: ${s.skuCode}`}>
                                                         <span className="font-medium">{s.size}</span> • ₹{Number(s.mrp).toLocaleString()}
-                                                        {s.barcode && <span className="text-gray-400 ml-1">#{s.barcode}</span>}
                                                     </span>
                                                 ))}
                                             </div>
@@ -551,7 +561,7 @@ export default function Products() {
                             <div>
                                 <label className="label">Sizes (SKUs will be created for each)</label>
                                 <div className="flex gap-2 flex-wrap">
-                                    {['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'].map(size => (
+                                    {allSizes.map(size => (
                                         <label key={size} className="flex items-center gap-1">
                                             <input type="checkbox" checked={variationForm.sizes.includes(size)} onChange={(e) => {
                                                 if (e.target.checked) setVariationForm(f => ({ ...f, sizes: [...f.sizes, size] }));
@@ -644,8 +654,8 @@ export default function Products() {
                                                     </div>
                                                 </div>
                                                 <div className="ml-12">
-                                                    <label className="text-xs text-gray-500">Barcode (8 digits)</label>
-                                                    <input type="text" className="input input-sm w-40" value={sku.barcode || ''} onChange={(e) => updateSkuInForm(sku.id, 'barcode', e.target.value)} placeholder="e.g., 10000001" maxLength={8} pattern="[0-9]{8}" />
+                                                    <label className="text-xs text-gray-500">SKU Code</label>
+                                                    <div className="font-mono text-sm text-gray-600 py-1">{sku.skuCode || '-'}</div>
                                                 </div>
                                             </div>
                                         ))}
@@ -674,9 +684,8 @@ export default function Products() {
                                                         <X size={16} />
                                                     </button>
                                                 </div>
-                                                <div className="ml-12">
-                                                    <label className="text-xs text-gray-500">Barcode (8 digits)</label>
-                                                    <input type="text" className="input input-sm w-40" value={sku.barcode || ''} onChange={(e) => updateNewSkuInForm(sku.size, 'barcode', e.target.value)} placeholder="e.g., 10000001" maxLength={8} />
+                                                <div className="ml-12 text-xs text-gray-500">
+                                                    SKU code will be auto-generated
                                                 </div>
                                             </div>
                                         ))}

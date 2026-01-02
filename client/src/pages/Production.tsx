@@ -69,7 +69,7 @@ export default function Production() {
                 if (productCompare !== 0) return productCompare;
                 const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
                 if (colorCompare !== 0) return colorCompare;
-                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
                 return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
             });
 
@@ -173,7 +173,7 @@ export default function Production() {
                             .map(([colorName, colorData]) => ({
                                 colorName,
                                 skus: colorData.skus.sort((a, b) => {
-                                    const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                                    const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
                                     return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
                                 })
                             }))
@@ -260,7 +260,7 @@ export default function Production() {
             .filter((sku: any) => sku.variation?.id === variationId)
             .map((sku: any) => ({ id: sku.id, size: sku.size, skuCode: sku.skuCode }))
             .sort((a: any, b: any) => {
-                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
                 return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
             });
     };
@@ -500,7 +500,7 @@ export default function Production() {
                                                 if (productCompare !== 0) return productCompare;
                                                 const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
                                                 if (colorCompare !== 0) return colorCompare;
-                                                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free'];
+                                                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
                                                 return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
                                             })
                                             .map((batch: any) => (
