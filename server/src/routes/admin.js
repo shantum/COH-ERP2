@@ -72,7 +72,6 @@ router.post('/clear', requireAdmin, async (req, res) => {
             'productionBatches',
             // Inventory (references SKUs)
             'inventoryTransactions',
-            'productInventory',
             'shopifyInventoryCache',
             'stockAlerts',
             // Feedback (references SKUs, products, variations)
@@ -93,7 +92,6 @@ router.post('/clear', requireAdmin, async (req, res) => {
             // Fabric related
             'fabricTransactions',
             'fabricOrders',
-            'fabricInventory',
             'fabrics',
             'fabricTypes',
             // Other
@@ -141,10 +139,6 @@ router.post('/clear', requireAdmin, async (req, res) => {
                         case 'inventoryTransactions':
                             count = await req.prisma.inventoryTransaction.count();
                             await req.prisma.inventoryTransaction.deleteMany();
-                            break;
-                        case 'productInventory':
-                            count = await req.prisma.productInventory.count();
-                            await req.prisma.productInventory.deleteMany();
                             break;
                         case 'shopifyInventoryCache':
                             count = await req.prisma.shopifyInventoryCache.count();
@@ -210,10 +204,6 @@ router.post('/clear', requireAdmin, async (req, res) => {
                         case 'fabricOrders':
                             count = await req.prisma.fabricOrder.count();
                             await req.prisma.fabricOrder.deleteMany();
-                            break;
-                        case 'fabricInventory':
-                            count = await req.prisma.fabricInventory.count();
-                            await req.prisma.fabricInventory.deleteMany();
                             break;
                         case 'fabrics':
                             count = await req.prisma.fabric.count();
