@@ -57,178 +57,65 @@ router.post('/clear', requireAdmin, async (req, res) => {
 
         const results = {};
 
-        // Clear in correct order to respect foreign key constraints
-        // Tables with FK to SKU/Variation/Product must be deleted first
-        const clearOrder = [
-            // Return-related (references orders, SKUs)
-            'returnStatusHistory',
-            'returnShipping',
-            'returnRequestLines',
-            'returnRequests',
-            // Order-related (references customers, SKUs)
-            'orderLines',
-            'orders',
-            // Production (references SKUs)
-            'productionBatches',
-            // Inventory (references SKUs)
-            'inventoryTransactions',
-            'shopifyInventoryCache',
-            'stockAlerts',
-            // Feedback (references SKUs, products, variations)
-            'feedbackProductLinks',
-            'feedbackMedia',
-            'feedbackTags',
-            'feedbackContents',
-            'feedbackRatings',
-            'feedback',
-            // SKU related
-            'skuCostings',
-            'skus',
-            // Variations and Products
-            'variations',
-            'products',
-            // Customers
-            'customers',
-            // Fabric related
-            'fabricTransactions',
-            'fabricOrders',
-            'fabrics',
-            'fabricTypes',
-            // Other
-            'tailors',
-            'suppliers',
-        ];
+        // Use a transaction for PostgreSQL to ensure all deletes succeed or none do
+        await req.prisma.$transaction(async (prisma) => {
+            // Clear in correct order to respect foreign key constraints
+            const deleteOperations = [
+                // Return-related (references orders, SKUs)
+                { name: 'returnStatusHistory', model: prisma.returnStatusHistory },
+                { name: 'returnShipping', model: prisma.returnShipping },
+                { name: 'returnRequestLines', model: prisma.returnRequestLine },
+                { name: 'returnRequests', model: prisma.returnRequest },
+                // Order-related (references customers, SKUs)
+                { name: 'orderLines', model: prisma.orderLine },
+                { name: 'orders', model: prisma.order },
+                // Production (references SKUs)
+                { name: 'productionBatches', model: prisma.productionBatch },
+                // Inventory (references SKUs)
+                { name: 'inventoryTransactions', model: prisma.inventoryTransaction },
+                { name: 'shopifyInventoryCache', model: prisma.shopifyInventoryCache },
+                { name: 'stockAlerts', model: prisma.stockAlert },
+                // Feedback (references SKUs, products, variations)
+                { name: 'feedbackProductLinks', model: prisma.feedbackProductLink },
+                { name: 'feedbackMedia', model: prisma.feedbackMedia },
+                { name: 'feedbackTags', model: prisma.feedbackTag },
+                { name: 'feedbackContents', model: prisma.feedbackContent },
+                { name: 'feedbackRatings', model: prisma.feedbackRating },
+                { name: 'feedback', model: prisma.feedback },
+                // SKU related
+                { name: 'skuCostings', model: prisma.skuCosting },
+                { name: 'skus', model: prisma.sku },
+                // Variations and Products
+                { name: 'variations', model: prisma.variation },
+                { name: 'products', model: prisma.product },
+                // Customers
+                { name: 'customers', model: prisma.customer },
+                // Fabric related
+                { name: 'fabricTransactions', model: prisma.fabricTransaction },
+                { name: 'fabricOrders', model: prisma.fabricOrder },
+                { name: 'fabrics', model: prisma.fabric },
+                { name: 'fabricTypes', model: prisma.fabricType },
+                // Other
+                { name: 'costConfigs', model: prisma.costConfig },
+                { name: 'tailors', model: prisma.tailor },
+                { name: 'suppliers', model: prisma.supplier },
+            ];
 
-        for (const table of clearOrder) {
-            if (tables.includes(table) || tables.includes('all')) {
-                try {
-                    let count = 0;
-                    switch (table) {
-                        // Return related
-                        case 'returnStatusHistory':
-                            count = await req.prisma.returnStatusHistory.count();
-                            await req.prisma.returnStatusHistory.deleteMany();
-                            break;
-                        case 'returnShipping':
-                            count = await req.prisma.returnShipping.count();
-                            await req.prisma.returnShipping.deleteMany();
-                            break;
-                        case 'returnRequestLines':
-                            count = await req.prisma.returnRequestLine.count();
-                            await req.prisma.returnRequestLine.deleteMany();
-                            break;
-                        case 'returnRequests':
-                            count = await req.prisma.returnRequest.count();
-                            await req.prisma.returnRequest.deleteMany();
-                            break;
-                        // Order related
-                        case 'orderLines':
-                            count = await req.prisma.orderLine.count();
-                            await req.prisma.orderLine.deleteMany();
-                            break;
-                        case 'orders':
-                            count = await req.prisma.order.count();
-                            await req.prisma.order.deleteMany();
-                            break;
-                        // Production
-                        case 'productionBatches':
-                            count = await req.prisma.productionBatch.count();
-                            await req.prisma.productionBatch.deleteMany();
-                            break;
-                        // Inventory
-                        case 'inventoryTransactions':
-                            count = await req.prisma.inventoryTransaction.count();
-                            await req.prisma.inventoryTransaction.deleteMany();
-                            break;
-                        case 'shopifyInventoryCache':
-                            count = await req.prisma.shopifyInventoryCache.count();
-                            await req.prisma.shopifyInventoryCache.deleteMany();
-                            break;
-                        case 'stockAlerts':
-                            count = await req.prisma.stockAlert.count();
-                            await req.prisma.stockAlert.deleteMany();
-                            break;
-                        // Feedback related
-                        case 'feedbackProductLinks':
-                            count = await req.prisma.feedbackProductLink.count();
-                            await req.prisma.feedbackProductLink.deleteMany();
-                            break;
-                        case 'feedbackMedia':
-                            count = await req.prisma.feedbackMedia.count();
-                            await req.prisma.feedbackMedia.deleteMany();
-                            break;
-                        case 'feedbackTags':
-                            count = await req.prisma.feedbackTag.count();
-                            await req.prisma.feedbackTag.deleteMany();
-                            break;
-                        case 'feedbackContents':
-                            count = await req.prisma.feedbackContent.count();
-                            await req.prisma.feedbackContent.deleteMany();
-                            break;
-                        case 'feedbackRatings':
-                            count = await req.prisma.feedbackRating.count();
-                            await req.prisma.feedbackRating.deleteMany();
-                            break;
-                        case 'feedback':
-                            count = await req.prisma.feedback.count();
-                            await req.prisma.feedback.deleteMany();
-                            break;
-                        // SKU related
-                        case 'skuCostings':
-                            count = await req.prisma.skuCosting.count();
-                            await req.prisma.skuCosting.deleteMany();
-                            break;
-                        case 'skus':
-                            count = await req.prisma.sku.count();
-                            await req.prisma.sku.deleteMany();
-                            break;
-                        // Variations and Products
-                        case 'variations':
-                            count = await req.prisma.variation.count();
-                            await req.prisma.variation.deleteMany();
-                            break;
-                        case 'products':
-                            count = await req.prisma.product.count();
-                            await req.prisma.product.deleteMany();
-                            break;
-                        // Customers
-                        case 'customers':
-                            count = await req.prisma.customer.count();
-                            await req.prisma.customer.deleteMany();
-                            break;
-                        // Fabric related
-                        case 'fabricTransactions':
-                            count = await req.prisma.fabricTransaction.count();
-                            await req.prisma.fabricTransaction.deleteMany();
-                            break;
-                        case 'fabricOrders':
-                            count = await req.prisma.fabricOrder.count();
-                            await req.prisma.fabricOrder.deleteMany();
-                            break;
-                        case 'fabrics':
-                            count = await req.prisma.fabric.count();
-                            await req.prisma.fabric.deleteMany();
-                            break;
-                        case 'fabricTypes':
-                            count = await req.prisma.fabricType.count();
-                            await req.prisma.fabricType.deleteMany();
-                            break;
-                        // Other
-                        case 'tailors':
-                            count = await req.prisma.tailor.count();
-                            await req.prisma.tailor.deleteMany();
-                            break;
-                        case 'suppliers':
-                            count = await req.prisma.supplier.count();
-                            await req.prisma.supplier.deleteMany();
-                            break;
+            for (const { name, model } of deleteOperations) {
+                if (tables.includes(name) || tables.includes('all')) {
+                    try {
+                        const count = await model.count();
+                        await model.deleteMany();
+                        results[name] = count;
+                    } catch (tableError) {
+                        console.error(`Error deleting ${name}:`, tableError.message);
+                        results[name] = `Error: ${tableError.message}`;
                     }
-                    results[table] = count;
-                } catch (tableError) {
-                    results[table] = `Error: ${tableError.message}`;
                 }
             }
-        }
+        }, {
+            timeout: 60000, // 60 second timeout for large deletes
+        });
 
         res.json({
             message: 'Database cleared',
@@ -236,7 +123,7 @@ router.post('/clear', requireAdmin, async (req, res) => {
         });
     } catch (error) {
         console.error('Clear database error:', error);
-        res.status(500).json({ error: 'Failed to clear database' });
+        res.status(500).json({ error: `Failed to clear database: ${error.message}` });
     }
 });
 
