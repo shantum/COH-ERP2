@@ -342,25 +342,53 @@ class ShopifyClient {
      * @returns {string} - Gender value or 'unisex' as default
      */
     extractGenderFromMetafields(metafields) {
-        // Look for gender in my_fields namespace
+        // First, try my_fields.gender
         const genderField = metafields.find(
             mf => mf.namespace === 'my_fields' && mf.key === 'gender'
         );
 
         if (genderField?.value) {
-            const value = genderField.value.toLowerCase().trim();
-            // Normalize gender values
-            if (value.includes('women') || value.includes('female') || value === 'f') {
-                return 'women';
-            }
-            if (value.includes('men') || value.includes('male') || value === 'm') {
-                return 'men';
-            }
-            if (value.includes('unisex') || value.includes('all')) {
-                return 'unisex';
-            }
-            // Return as-is if it's a valid value
-            return value;
+            return this.normalizeGender(genderField.value);
+        }
+
+        // Try custom.product_type_for_feed (e.g., "Women Co-ord Set", "Men Shirt")
+        const productTypeField = metafields.find(
+            mf => mf.namespace === 'custom' && mf.key === 'product_type_for_feed'
+        );
+
+        if (productTypeField?.value) {
+            return this.normalizeGender(productTypeField.value);
+        }
+
+        return 'unisex';
+    }
+
+    /**
+     * Normalize gender value to standard format
+     * @param {string} value - Raw gender value
+     * @returns {string} - Normalized gender (women, men, or unisex)
+     */
+    normalizeGender(value) {
+        if (!value) return 'unisex';
+
+        const lowerValue = value.toLowerCase().trim();
+
+        // Check for women/female indicators
+        if (lowerValue.includes('women') || lowerValue.includes('woman') ||
+            lowerValue.includes('female') || lowerValue.includes('girl') ||
+            lowerValue.startsWith('w ') || lowerValue === 'f') {
+            return 'women';
+        }
+
+        // Check for men/male indicators (must come after women check to avoid "women" matching "men")
+        if (lowerValue.includes('men') || lowerValue.includes('man') ||
+            lowerValue.includes('male') || lowerValue.includes('boy') ||
+            lowerValue.startsWith('m ') || lowerValue === 'm') {
+            return 'men';
+        }
+
+        if (lowerValue.includes('unisex') || lowerValue.includes('all')) {
+            return 'unisex';
         }
 
         return 'unisex';
