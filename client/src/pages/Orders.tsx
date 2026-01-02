@@ -360,7 +360,6 @@ export default function Orders() {
                                 const canAllocate = isPending && hasStock;
                                 const isToggling = allocatingLines.has(row.lineId);
                                 const hasProductionDate = !!row.productionBatchId;
-                                const isReadyToPack = row.fulfillmentStage === 'ready_to_ship' || row.fulfillmentStage === 'allocated';
 
                                 // Check if ALL lines in this order are allocated (or beyond)
                                 const allLinesAllocated = row.order?.orderLines?.every((line: any) =>
