@@ -7,7 +7,7 @@ import {
     Store, Key, CheckCircle, XCircle, RefreshCw, Download, Upload,
     ShoppingCart, Users, Eye, Play, AlertCircle, FileSpreadsheet, Package,
     Trash2, AlertOctagon, Database, Settings as SettingsIcon, Plus, X,
-    Lock, UserPlus, Edit2, Shield
+    Lock, UserPlus, Edit2, Shield, Webhook, Copy, ExternalLink
 } from 'lucide-react';
 
 export default function Settings() {
@@ -24,6 +24,7 @@ export default function Settings() {
     const [orderPreview, setOrderPreview] = useState<any>(null);
     const [customerPreview, setCustomerPreview] = useState<any>(null);
     const [syncLimit, setSyncLimit] = useState(20);
+    const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
 
     // Import state
     const [importFile, setImportFile] = useState<File | null>(null);
@@ -103,6 +104,23 @@ export default function Settings() {
         mutationFn: (limit: number) => shopifyApi.syncCustomers({ limit }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
+        },
+    });
+
+    // Bulk sync mutations
+    const syncAllOrdersMutation = useMutation({
+        mutationFn: () => shopifyApi.syncAllOrders(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+        },
+    });
+
+    const syncAllCustomersMutation = useMutation({
+        mutationFn: () => shopifyApi.syncAllCustomers(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['customers'] });
         },
     });
 
@@ -453,7 +471,7 @@ export default function Settings() {
                                     <ShoppingCart size={18} /> Orders
                                 </h3>
 
-                                <div className="flex gap-2 mb-4">
+                                <div className="flex flex-wrap gap-2 mb-4">
                                     <button
                                         className="btn btn-secondary flex items-center gap-2"
                                         onClick={() => previewOrdersMutation.mutate()}
@@ -465,10 +483,22 @@ export default function Settings() {
                                     <button
                                         className="btn btn-primary flex items-center gap-2"
                                         onClick={() => syncOrdersMutation.mutate({ limit: syncLimit, skipSkuMatching: false })}
-                                        disabled={syncOrdersMutation.isPending}
+                                        disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
                                     >
                                         <Play size={16} />
                                         {syncOrdersMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} Orders`}
+                                    </button>
+                                    <button
+                                        className="btn bg-blue-700 text-white hover:bg-blue-800 flex items-center gap-2"
+                                        onClick={() => {
+                                            if (confirm('This will sync ALL orders from Shopify. This may take several minutes for large datasets. Continue?')) {
+                                                syncAllOrdersMutation.mutate();
+                                            }
+                                        }}
+                                        disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
+                                    >
+                                        <RefreshCw size={16} className={syncAllOrdersMutation.isPending ? 'animate-spin' : ''} />
+                                        {syncAllOrdersMutation.isPending ? 'Syncing All...' : 'Sync All Orders'}
                                     </button>
                                 </div>
 
@@ -511,6 +541,20 @@ export default function Settings() {
                                         )}
                                     </div>
                                 )}
+
+                                {/* Bulk sync result */}
+                                {syncAllOrdersMutation.data && (
+                                    <div className={`mt-3 p-3 rounded-lg text-sm ${syncAllOrdersMutation.data.data.results?.errors?.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
+                                        <p className="font-medium text-green-800">
+                                            Bulk sync completed! (Total in Shopify: {syncAllOrdersMutation.data.data.totalInShopify}, Fetched: {syncAllOrdersMutation.data.data.results?.totalFetched || 0})
+                                        </p>
+                                        <p className="text-green-700">
+                                            Created: {syncAllOrdersMutation.data.data.results?.created?.orders || 0} orders, {syncAllOrdersMutation.data.data.results?.created?.customers || 0} customers |{' '}
+                                            Updated: {syncAllOrdersMutation.data.data.results?.updated || 0} |
+                                            Skipped: {syncAllOrdersMutation.data.data.results?.skipped || 0}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Customers */}
@@ -519,7 +563,7 @@ export default function Settings() {
                                     <Users size={18} /> Customers
                                 </h3>
 
-                                <div className="flex gap-2 mb-4">
+                                <div className="flex flex-wrap gap-2 mb-4">
                                     <button
                                         className="btn btn-secondary flex items-center gap-2"
                                         onClick={() => previewCustomersMutation.mutate()}
@@ -531,12 +575,27 @@ export default function Settings() {
                                     <button
                                         className="btn btn-primary flex items-center gap-2"
                                         onClick={() => syncCustomersMutation.mutate(syncLimit)}
-                                        disabled={syncCustomersMutation.isPending}
+                                        disabled={syncCustomersMutation.isPending || syncAllCustomersMutation.isPending}
                                     >
                                         <Play size={16} />
                                         {syncCustomersMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} Customers`}
                                     </button>
+                                    <button
+                                        className="btn bg-blue-700 text-white hover:bg-blue-800 flex items-center gap-2"
+                                        onClick={() => {
+                                            if (confirm('This will sync ALL customers from Shopify (only those with at least 1 order). This may take several minutes for large datasets. Continue?')) {
+                                                syncAllCustomersMutation.mutate();
+                                            }
+                                        }}
+                                        disabled={syncCustomersMutation.isPending || syncAllCustomersMutation.isPending}
+                                    >
+                                        <RefreshCw size={16} className={syncAllCustomersMutation.isPending ? 'animate-spin' : ''} />
+                                        {syncAllCustomersMutation.isPending ? 'Syncing All...' : 'Sync All Customers'}
+                                    </button>
                                 </div>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    Only customers with at least 1 order are synced.
+                                </p>
 
                                 {/* Customer Preview - Raw Data */}
                                 {customerPreview && (
@@ -558,10 +617,154 @@ export default function Settings() {
                                         <p className="text-green-700">
                                             Created: {syncCustomersMutation.data.data.results?.created || 0},{' '}
                                             Updated: {syncCustomersMutation.data.data.results?.updated || 0}
+                                            {syncCustomersMutation.data.data.results?.skippedNoOrders > 0 && (
+                                                <span className="text-gray-500"> | Skipped (no orders): {syncCustomersMutation.data.data.results.skippedNoOrders}</span>
+                                            )}
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Bulk sync result */}
+                                {syncAllCustomersMutation.data && (
+                                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
+                                        <p className="font-medium text-green-800">
+                                            Bulk sync completed! (Total in Shopify: {syncAllCustomersMutation.data.data.totalInShopify}, Fetched: {syncAllCustomersMutation.data.data.results?.totalFetched || 0})
+                                        </p>
+                                        <p className="text-green-700">
+                                            Created: {syncAllCustomersMutation.data.data.results?.created || 0},{' '}
+                                            Updated: {syncAllCustomersMutation.data.data.results?.updated || 0}
+                                            {syncAllCustomersMutation.data.data.results?.skippedNoOrders > 0 && (
+                                                <span className="text-gray-500"> | Skipped (no orders): {syncAllCustomersMutation.data.data.results.skippedNoOrders}</span>
+                                            )}
                                         </p>
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {/* Webhooks Section */}
+                    {config?.hasAccessToken && (
+                        <div className="card">
+                            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                <Webhook size={20} /> Webhook Endpoints
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Configure these webhooks in Shopify Admin to receive real-time updates. Go to{' '}
+                                <span className="font-medium">Settings → Notifications → Webhooks</span>.
+                            </p>
+
+                            {/* Base URL */}
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Your API Base URL</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        className="input flex-1 font-mono text-sm bg-gray-50"
+                                        value={window.location.origin + '/api/webhooks'}
+                                        readOnly
+                                    />
+                                    <button
+                                        className="btn btn-secondary flex items-center gap-1"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(window.location.origin + '/api/webhooks');
+                                            setCopiedWebhook('base');
+                                            setTimeout(() => setCopiedWebhook(null), 2000);
+                                        }}
+                                    >
+                                        {copiedWebhook === 'base' ? <CheckCircle size={16} className="text-green-600" /> : <Copy size={16} />}
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Use this as the base URL. Add the endpoint path for each webhook topic.
+                                </p>
+                            </div>
+
+                            {/* Webhook Endpoints Table */}
+                            <div className="border rounded-lg overflow-hidden">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left font-medium text-gray-700">Shopify Topic</th>
+                                            <th className="px-4 py-2 text-left font-medium text-gray-700">Endpoint URL</th>
+                                            <th className="px-4 py-2 text-left font-medium text-gray-700">Description</th>
+                                            <th className="px-4 py-2 w-12"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {[
+                                            { topic: 'orders/create', path: '/shopify/orders/create', desc: 'New order placed' },
+                                            { topic: 'orders/updated', path: '/shopify/orders/updated', desc: 'Order modified' },
+                                            { topic: 'orders/cancelled', path: '/shopify/orders/cancelled', desc: 'Order cancelled' },
+                                            { topic: 'orders/fulfilled', path: '/shopify/orders/fulfilled', desc: 'Order shipped/fulfilled' },
+                                            { topic: 'customers/create', path: '/shopify/customers/create', desc: 'New customer registered' },
+                                            { topic: 'customers/update', path: '/shopify/customers/update', desc: 'Customer info updated' },
+                                        ].map((webhook) => (
+                                            <tr key={webhook.topic} className="hover:bg-gray-50">
+                                                <td className="px-4 py-2">
+                                                    <code className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs">
+                                                        {webhook.topic}
+                                                    </code>
+                                                </td>
+                                                <td className="px-4 py-2">
+                                                    <code className="text-xs text-gray-600 font-mono">
+                                                        {window.location.origin}/api/webhooks{webhook.path}
+                                                    </code>
+                                                </td>
+                                                <td className="px-4 py-2 text-gray-600">{webhook.desc}</td>
+                                                <td className="px-4 py-2">
+                                                    <button
+                                                        className="p-1 hover:bg-gray-100 rounded"
+                                                        onClick={() => {
+                                                            navigator.clipboard.writeText(window.location.origin + '/api/webhooks' + webhook.path);
+                                                            setCopiedWebhook(webhook.topic);
+                                                            setTimeout(() => setCopiedWebhook(null), 2000);
+                                                        }}
+                                                        title="Copy URL"
+                                                    >
+                                                        {copiedWebhook === webhook.topic ? (
+                                                            <CheckCircle size={14} className="text-green-600" />
+                                                        ) : (
+                                                            <Copy size={14} className="text-gray-400" />
+                                                        )}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Setup Instructions */}
+                            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p className="text-sm font-medium text-blue-800 mb-2">Setup Instructions:</p>
+                                <ol className="text-sm text-blue-700 list-decimal list-inside space-y-1">
+                                    <li>Go to Shopify Admin → Settings → Notifications → Webhooks</li>
+                                    <li>Click "Create webhook"</li>
+                                    <li>Select the event (e.g., "Order creation")</li>
+                                    <li>Paste the corresponding URL from the table above</li>
+                                    <li>Set format to JSON</li>
+                                    <li>Save the webhook</li>
+                                </ol>
+                                <p className="text-sm text-blue-600 mt-3">
+                                    <strong>Note:</strong> Webhooks require your server to be publicly accessible (not localhost).
+                                </p>
+                            </div>
+
+                            {/* Link to Shopify */}
+                            {shopDomain && (
+                                <div className="mt-4">
+                                    <a
+                                        href={`https://${shopDomain.replace('.myshopify.com', '')}.myshopify.com/admin/settings/notifications`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="btn btn-secondary inline-flex items-center gap-2"
+                                    >
+                                        <ExternalLink size={16} />
+                                        Open Shopify Webhook Settings
+                                    </a>
+                                </div>
+                            )}
                         </div>
                     )}
 

@@ -163,6 +163,10 @@ export const shopifyApi = {
         api.post('/shopify/sync/orders', data || {}),
     syncCustomers: (data?: { since_id?: string; created_at_min?: string; limit?: number }) =>
         api.post('/shopify/sync/customers', data || {}),
+    syncAllOrders: (data?: { status?: string }) =>
+        api.post('/shopify/sync/orders/all', data || {}),
+    syncAllCustomers: () =>
+        api.post('/shopify/sync/customers/all'),
 };
 
 // Import/Export

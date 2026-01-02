@@ -228,6 +228,89 @@ class ShopifyClient {
         return response.data.count;
     }
 
+    /**
+     * Fetch ALL orders using pagination (for bulk sync)
+     * @param {Function} onProgress - Callback for progress updates (fetched, total)
+     * @param {Object} options - Query options
+     */
+    async getAllOrders(onProgress, options = {}) {
+        if (!this.isConfigured()) {
+            throw new Error('Shopify is not configured');
+        }
+
+        const allOrders = [];
+        let sinceId = null;
+        const limit = 250; // Max allowed by Shopify
+        const totalCount = await this.getOrderCount(options);
+
+        while (true) {
+            const params = {
+                status: options.status || 'any',
+                limit,
+            };
+            if (sinceId) params.since_id = sinceId;
+            if (options.created_at_min) params.created_at_min = options.created_at_min;
+
+            const response = await this.client.get('/orders.json', { params });
+            const orders = response.data.orders;
+
+            if (orders.length === 0) break;
+
+            allOrders.push(...orders);
+            sinceId = orders[orders.length - 1].id;
+
+            if (onProgress) {
+                onProgress(allOrders.length, totalCount);
+            }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 250));
+
+            if (orders.length < limit) break;
+        }
+
+        return allOrders;
+    }
+
+    /**
+     * Fetch ALL customers using pagination (for bulk sync)
+     * @param {Function} onProgress - Callback for progress updates (fetched, total)
+     */
+    async getAllCustomers(onProgress) {
+        if (!this.isConfigured()) {
+            throw new Error('Shopify is not configured');
+        }
+
+        const allCustomers = [];
+        let sinceId = null;
+        const limit = 250; // Max allowed by Shopify
+        const totalCount = await this.getCustomerCount();
+
+        while (true) {
+            const params = { limit };
+            if (sinceId) params.since_id = sinceId;
+
+            const response = await this.client.get('/customers.json', { params });
+            const customers = response.data.customers;
+
+            if (customers.length === 0) break;
+
+            allCustomers.push(...customers);
+            sinceId = customers[customers.length - 1].id;
+
+            if (onProgress) {
+                onProgress(allCustomers.length, totalCount);
+            }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 250));
+
+            if (customers.length < limit) break;
+        }
+
+        return allCustomers;
+    }
+
     // ============================================
     // PRODUCTS (for SKU matching)
     // ============================================

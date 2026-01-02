@@ -673,6 +673,121 @@ router.post('/sync/customers', authenticateToken, async (req, res) => {
     }
 });
 
+// Sync ALL customers (paginated bulk sync)
+router.post('/sync/customers/all', authenticateToken, async (req, res) => {
+    try {
+        if (!shopifyClient.isConfigured()) {
+            return res.status(400).json({ error: 'Shopify is not configured' });
+        }
+
+        const results = {
+            created: 0,
+            updated: 0,
+            skipped: 0,
+            skippedNoOrders: 0,
+            errors: [],
+            totalFetched: 0,
+        };
+
+        // Get total count first
+        const totalCount = await shopifyClient.getCustomerCount();
+        console.log(`Starting bulk customer sync: ${totalCount} total customers in Shopify`);
+
+        // Process in batches using pagination
+        let sinceId = null;
+        const limit = 250;
+        let batchNumber = 0;
+
+        while (true) {
+            batchNumber++;
+            const shopifyCustomers = await shopifyClient.getCustomers({
+                since_id: sinceId,
+                limit,
+            });
+
+            if (shopifyCustomers.length === 0) break;
+
+            results.totalFetched += shopifyCustomers.length;
+            console.log(`Processing batch ${batchNumber}: ${shopifyCustomers.length} customers (${results.totalFetched}/${totalCount})`);
+
+            // Filter to only customers with orders
+            const customersWithOrders = shopifyCustomers.filter(c => (c.orders_count || 0) > 0);
+            results.skippedNoOrders += shopifyCustomers.length - customersWithOrders.length;
+
+            for (const shopifyCustomer of customersWithOrders) {
+                try {
+                    const shopifyCustomerId = String(shopifyCustomer.id);
+                    const email = shopifyCustomer.email?.toLowerCase();
+
+                    if (!email) {
+                        results.skipped++;
+                        continue;
+                    }
+
+                    let existingCustomer = await req.prisma.customer.findFirst({
+                        where: {
+                            OR: [
+                                { shopifyCustomerId },
+                                { email },
+                            ],
+                        },
+                    });
+
+                    const customerData = {
+                        shopifyCustomerId,
+                        email,
+                        phone: shopifyCustomer.phone || null,
+                        firstName: shopifyCustomer.first_name || null,
+                        lastName: shopifyCustomer.last_name || null,
+                        defaultAddress: shopifyCustomer.default_address
+                            ? JSON.stringify(shopifyClient.formatAddress(shopifyCustomer.default_address))
+                            : null,
+                        tags: shopifyCustomer.tags || null,
+                        acceptsMarketing: shopifyCustomer.accepts_marketing || false,
+                    };
+
+                    if (existingCustomer) {
+                        await req.prisma.customer.update({
+                            where: { id: existingCustomer.id },
+                            data: customerData,
+                        });
+                        results.updated++;
+                    } else {
+                        await req.prisma.customer.create({
+                            data: customerData,
+                        });
+                        results.created++;
+                    }
+                } catch (customerError) {
+                    results.errors.push(`Customer ${shopifyCustomer.id}: ${customerError.message}`);
+                    results.skipped++;
+                }
+            }
+
+            sinceId = shopifyCustomers[shopifyCustomers.length - 1].id;
+
+            // Rate limit delay
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            if (shopifyCustomers.length < limit) break;
+        }
+
+        console.log(`Bulk customer sync completed:`, results);
+
+        res.json({
+            message: 'Bulk customer sync completed',
+            totalInShopify: totalCount,
+            results,
+        });
+    } catch (error) {
+        console.error('Bulk customer sync error:', error);
+        res.status(500).json({
+            error: 'Failed to sync all customers',
+            details: error.response?.data?.errors || error.message,
+        });
+    }
+});
+
 // ============================================
 // ORDER SYNC
 // ============================================
@@ -898,6 +1013,250 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
         console.error('Shopify order sync error:', error);
         res.status(500).json({
             error: 'Failed to sync orders',
+            details: error.response?.data?.errors || error.message,
+        });
+    }
+});
+
+// Sync ALL orders (paginated bulk sync)
+router.post('/sync/orders/all', authenticateToken, async (req, res) => {
+    try {
+        if (!shopifyClient.isConfigured()) {
+            return res.status(400).json({ error: 'Shopify is not configured' });
+        }
+
+        const { status = 'any' } = req.body;
+
+        const results = {
+            created: { orders: 0, customers: 0 },
+            updated: 0,
+            skipped: 0,
+            errors: [],
+            totalFetched: 0,
+        };
+
+        // Get total count first
+        const totalCount = await shopifyClient.getOrderCount({ status });
+        console.log(`Starting bulk order sync: ${totalCount} total orders in Shopify`);
+
+        // Process in batches using pagination
+        let sinceId = null;
+        const limit = 250;
+        let batchNumber = 0;
+
+        while (true) {
+            batchNumber++;
+            const shopifyOrders = await shopifyClient.getOrders({
+                since_id: sinceId,
+                status,
+                limit,
+            });
+
+            if (shopifyOrders.length === 0) break;
+
+            results.totalFetched += shopifyOrders.length;
+            console.log(`Processing batch ${batchNumber}: ${shopifyOrders.length} orders (${results.totalFetched}/${totalCount})`);
+
+            for (const shopifyOrder of shopifyOrders) {
+                try {
+                    const shopifyOrderId = String(shopifyOrder.id);
+
+                    // Check if order already exists
+                    const existingOrder = await req.prisma.order.findUnique({
+                        where: { shopifyOrderId },
+                    });
+
+                    if (existingOrder) {
+                        // Update status if changed
+                        const newStatus = shopifyClient.mapOrderStatus(shopifyOrder);
+                        const newFulfillmentStatus = shopifyOrder.fulfillment_status || 'unfulfilled';
+
+                        // Extract tracking info
+                        let newAwbNumber = existingOrder.awbNumber;
+                        let newCourier = existingOrder.courier;
+                        let newShippedAt = existingOrder.shippedAt;
+                        if (shopifyOrder.fulfillments && shopifyOrder.fulfillments.length > 0) {
+                            const fulfillmentWithTracking = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
+                            newAwbNumber = fulfillmentWithTracking.tracking_number || newAwbNumber;
+                            newCourier = fulfillmentWithTracking.tracking_company || newCourier;
+                            if (fulfillmentWithTracking.created_at && !existingOrder.shippedAt) {
+                                newShippedAt = new Date(fulfillmentWithTracking.created_at);
+                            }
+                        }
+
+                        const needsUpdate = existingOrder.status !== newStatus ||
+                            existingOrder.shopifyFulfillmentStatus !== newFulfillmentStatus ||
+                            existingOrder.awbNumber !== newAwbNumber ||
+                            existingOrder.courier !== newCourier;
+
+                        if (needsUpdate) {
+                            await req.prisma.order.update({
+                                where: { id: existingOrder.id },
+                                data: {
+                                    status: newStatus,
+                                    shopifyFulfillmentStatus: newFulfillmentStatus,
+                                    awbNumber: newAwbNumber,
+                                    courier: newCourier,
+                                    shippedAt: newShippedAt,
+                                    syncedAt: new Date(),
+                                },
+                            });
+                            results.updated++;
+                        } else {
+                            results.skipped++;
+                        }
+                        continue;
+                    }
+
+                    // Find or create customer
+                    let customerId = null;
+                    if (shopifyOrder.customer) {
+                        const customerEmail = shopifyOrder.customer.email?.toLowerCase();
+                        const shopifyCustomerId = String(shopifyOrder.customer.id);
+
+                        if (customerEmail) {
+                            let customer = await req.prisma.customer.findFirst({
+                                where: {
+                                    OR: [
+                                        { shopifyCustomerId },
+                                        { email: customerEmail },
+                                    ],
+                                },
+                            });
+
+                            if (!customer) {
+                                customer = await req.prisma.customer.create({
+                                    data: {
+                                        shopifyCustomerId,
+                                        email: customerEmail,
+                                        phone: shopifyOrder.customer.phone || null,
+                                        firstName: shopifyOrder.customer.first_name || null,
+                                        lastName: shopifyOrder.customer.last_name || null,
+                                        defaultAddress: shopifyOrder.shipping_address
+                                            ? JSON.stringify(shopifyClient.formatAddress(shopifyOrder.shipping_address))
+                                            : null,
+                                        firstOrderDate: new Date(shopifyOrder.created_at),
+                                    },
+                                });
+                                results.created.customers++;
+                            }
+                            customerId = customer.id;
+
+                            // Update customer's last order date
+                            await req.prisma.customer.update({
+                                where: { id: customer.id },
+                                data: { lastOrderDate: new Date(shopifyOrder.created_at) },
+                            });
+                        }
+                    }
+
+                    // Build order lines
+                    const orderLines = [];
+                    let hasMatchedSku = false;
+
+                    for (const lineItem of shopifyOrder.line_items || []) {
+                        let sku = null;
+
+                        if (lineItem.variant_id) {
+                            sku = await req.prisma.sku.findFirst({
+                                where: { shopifyVariantId: String(lineItem.variant_id) },
+                            });
+                        }
+
+                        if (!sku && lineItem.sku) {
+                            sku = await req.prisma.sku.findFirst({
+                                where: { skuCode: lineItem.sku },
+                            });
+                        }
+
+                        if (sku) {
+                            hasMatchedSku = true;
+                            orderLines.push({
+                                shopifyLineId: String(lineItem.id),
+                                skuId: sku.id,
+                                qty: lineItem.quantity,
+                                unitPrice: parseFloat(lineItem.price) || 0,
+                            });
+                        }
+                    }
+
+                    // Skip orders with no matched SKUs
+                    if (!hasMatchedSku) {
+                        results.skipped++;
+                        continue;
+                    }
+
+                    // Create order
+                    const customerName = shopifyOrder.customer
+                        ? `${shopifyOrder.customer.first_name || ''} ${shopifyOrder.customer.last_name || ''}`.trim()
+                        : shopifyOrder.shipping_address?.name || 'Unknown';
+
+                    // Extract tracking info
+                    let awbNumber = null;
+                    let courier = null;
+                    let shippedAt = null;
+                    if (shopifyOrder.fulfillments && shopifyOrder.fulfillments.length > 0) {
+                        const fulfillmentWithTracking = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
+                        awbNumber = fulfillmentWithTracking.tracking_number || null;
+                        courier = fulfillmentWithTracking.tracking_company || null;
+                        if (fulfillmentWithTracking.created_at) {
+                            shippedAt = new Date(fulfillmentWithTracking.created_at);
+                        }
+                    }
+
+                    await req.prisma.order.create({
+                        data: {
+                            orderNumber: String(shopifyOrder.order_number),
+                            shopifyOrderId,
+                            channel: shopifyClient.mapOrderChannel(shopifyOrder),
+                            ...(customerId ? { customer: { connect: { id: customerId } } } : {}),
+                            customerName: customerName || 'Unknown',
+                            customerEmail: shopifyOrder.email || null,
+                            customerPhone: shopifyOrder.phone || shopifyOrder.shipping_address?.phone || null,
+                            shippingAddress: shopifyOrder.shipping_address
+                                ? JSON.stringify(shopifyClient.formatAddress(shopifyOrder.shipping_address))
+                                : null,
+                            orderDate: new Date(shopifyOrder.created_at),
+                            customerNotes: shopifyOrder.note || null,
+                            status: shopifyClient.mapOrderStatus(shopifyOrder),
+                            shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
+                            awbNumber,
+                            courier,
+                            shippedAt,
+                            totalAmount: parseFloat(shopifyOrder.total_price) || 0,
+                            syncedAt: new Date(),
+                            orderLines: {
+                                create: orderLines,
+                            },
+                        },
+                    });
+
+                    results.created.orders++;
+                } catch (orderError) {
+                    results.errors.push(`Order ${shopifyOrder.order_number}: ${orderError.message}`);
+                    results.skipped++;
+                }
+            }
+
+            sinceId = shopifyOrders[shopifyOrders.length - 1].id;
+
+            // Rate limit delay
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            if (shopifyOrders.length < limit) break;
+        }
+
+        console.log(`Bulk order sync completed:`, results);
+
+        res.json({
+            message: 'Bulk order sync completed',
+            totalInShopify: totalCount,
+            results,
+        });
+    } catch (error) {
+        console.error('Bulk order sync error:', error);
+        res.status(500).json({
+            error: 'Failed to sync all orders',
             details: error.response?.data?.errors || error.message,
         });
     }
