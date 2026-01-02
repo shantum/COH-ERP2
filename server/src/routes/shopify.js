@@ -199,13 +199,31 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
             });
         }
 
+        // Pre-fetch all metafields in parallel (with concurrency limit)
+        console.log('Fetching metafields for all products...');
+        const CONCURRENCY_LIMIT = 10;
+        const productMetafieldsMap = {};
+
+        for (let i = 0; i < shopifyProducts.length; i += CONCURRENCY_LIMIT) {
+            const batch = shopifyProducts.slice(i, i + CONCURRENCY_LIMIT);
+            const metafieldPromises = batch.map(async (product) => {
+                const metafields = await shopifyClient.getProductMetafields(product.id);
+                return { productId: product.id, metafields };
+            });
+            const batchResults = await Promise.all(metafieldPromises);
+            batchResults.forEach(result => {
+                productMetafieldsMap[result.productId] = result.metafields;
+            });
+        }
+        console.log('Metafields fetched, processing products...');
+
         for (const shopifyProduct of shopifyProducts) {
             try {
                 // Get main product image URL
                 const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
 
-                // Fetch metafields to get gender
-                const metafields = await shopifyClient.getProductMetafields(shopifyProduct.id);
+                // Get pre-fetched metafields
+                const metafields = productMetafieldsMap[shopifyProduct.id] || [];
                 const gender = shopifyClient.extractGenderFromMetafields(metafields);
 
                 // Build variant-to-image mapping
