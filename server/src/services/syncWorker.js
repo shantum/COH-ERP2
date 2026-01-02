@@ -226,12 +226,18 @@ class SyncWorker {
             batchNumber++;
 
             // Fetch batch from Shopify
-            const shopifyOrders = await shopifyClient.getOrders({
-                since_id: sinceId,
-                created_at_min: dateFilter,
-                status: 'any',
-                limit: this.batchSize,
-            });
+            let shopifyOrders;
+            try {
+                shopifyOrders = await shopifyClient.getOrders({
+                    since_id: sinceId,
+                    created_at_min: sinceId ? null : dateFilter, // Don't combine date filter with since_id
+                    status: 'any',
+                    limit: this.batchSize,
+                });
+            } catch (fetchError) {
+                console.error(`[Job ${jobId}] Shopify API error:`, fetchError.response?.data || fetchError.message);
+                throw new Error(`Shopify API: ${fetchError.response?.data?.errors || fetchError.message}`);
+            }
 
             if (shopifyOrders.length === 0) {
                 break;

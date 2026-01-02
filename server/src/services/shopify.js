@@ -138,10 +138,17 @@ class ShopifyClient {
         const params = {
             status: options.status || 'any',
             limit: Math.min(options.limit || 50, 250),
-            order: 'created_at asc', // Oldest first for proper since_id pagination
         };
 
-        if (options.since_id) params.since_id = options.since_id;
+        // Note: Shopify doesn't allow 'order' param when using since_id
+        // since_id already implies ordering by ID (ascending)
+        if (options.since_id) {
+            params.since_id = options.since_id;
+        } else {
+            // Only use order param when not using since_id
+            params.order = 'created_at asc';
+        }
+
         if (options.created_at_min) params.created_at_min = options.created_at_min;
         if (options.created_at_max) params.created_at_max = options.created_at_max;
 
