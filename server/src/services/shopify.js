@@ -318,6 +318,54 @@ class ShopifyClient {
         return response.data.count;
     }
 
+    /**
+     * Fetch metafields for a product
+     * @param {string} productId - Shopify product ID
+     */
+    async getProductMetafields(productId) {
+        if (!this.isConfigured()) {
+            throw new Error('Shopify is not configured');
+        }
+
+        try {
+            const response = await this.client.get(`/products/${productId}/metafields.json`);
+            return response.data.metafields || [];
+        } catch (error) {
+            console.error(`Failed to fetch metafields for product ${productId}:`, error.message);
+            return [];
+        }
+    }
+
+    /**
+     * Extract gender from product metafields
+     * @param {Array} metafields - Array of metafield objects
+     * @returns {string} - Gender value or 'unisex' as default
+     */
+    extractGenderFromMetafields(metafields) {
+        // Look for gender in my_fields namespace
+        const genderField = metafields.find(
+            mf => mf.namespace === 'my_fields' && mf.key === 'gender'
+        );
+
+        if (genderField?.value) {
+            const value = genderField.value.toLowerCase().trim();
+            // Normalize gender values
+            if (value.includes('women') || value.includes('female') || value === 'f') {
+                return 'women';
+            }
+            if (value.includes('men') || value.includes('male') || value === 'm') {
+                return 'men';
+            }
+            if (value.includes('unisex') || value.includes('all')) {
+                return 'unisex';
+            }
+            // Return as-is if it's a valid value
+            return value;
+        }
+
+        return 'unisex';
+    }
+
     // ============================================
     // UTILITY METHODS
     // ============================================

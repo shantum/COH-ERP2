@@ -204,6 +204,10 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                 // Get main product image URL
                 const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
 
+                // Fetch metafields to get gender
+                const metafields = await shopifyClient.getProductMetafields(shopifyProduct.id);
+                const gender = shopifyClient.extractGenderFromMetafields(metafields);
+
                 // Build variant-to-image mapping
                 const variantImageMap = {};
                 for (const img of shopifyProduct.images || []) {
@@ -223,18 +227,24 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                             name: shopifyProduct.title,
                             category: shopifyProduct.product_type?.toLowerCase() || 'dress',
                             productType: 'basic',
-                            gender: 'unisex',
+                            gender: gender,
                             baseProductionTimeMins: 60,
                             imageUrl: mainImageUrl,
                         },
                     });
                     results.created.products++;
                 } else {
-                    // Update existing product with image if changed
-                    if (mainImageUrl && product.imageUrl !== mainImageUrl) {
+                    // Update existing product with image and gender if changed
+                    const needsUpdate = (mainImageUrl && product.imageUrl !== mainImageUrl) ||
+                        (gender && product.gender !== gender);
+
+                    if (needsUpdate) {
                         await req.prisma.product.update({
                             where: { id: product.id },
-                            data: { imageUrl: mainImageUrl },
+                            data: {
+                                ...(mainImageUrl && product.imageUrl !== mainImageUrl ? { imageUrl: mainImageUrl } : {}),
+                                ...(gender && product.gender !== gender ? { gender: gender } : {}),
+                            },
                         });
                         results.updated.products++;
                     }
