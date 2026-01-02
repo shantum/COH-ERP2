@@ -12,7 +12,7 @@ import {
 
 export default function Settings() {
     const queryClient = useQueryClient();
-    const [activeTab, setActiveTab] = useState<'general' | 'shopify' | 'importExport' | 'database'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'shopify' | 'importExport' | 'database' | 'inspector'>('general');
 
     // Shopify config state
     const [shopDomain, setShopDomain] = useState('');
@@ -24,7 +24,14 @@ export default function Settings() {
     const [orderPreview, setOrderPreview] = useState<any>(null);
     const [customerPreview, setCustomerPreview] = useState<any>(null);
     const [syncLimit, setSyncLimit] = useState(20);
+    const [syncDays, setSyncDays] = useState(90);
     const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+
+    // Inspector state
+    const [inspectorTable, setInspectorTable] = useState<'orders' | 'customers' | 'products' | 'skus'>('orders');
+    const [inspectorLimit, setInspectorLimit] = useState(50);
+    const [inspectorData, setInspectorData] = useState<any>(null);
+    const [inspectorLoading, setInspectorLoading] = useState(false);
 
     // Import state
     const [importFile, setImportFile] = useState<File | null>(null);
@@ -109,7 +116,7 @@ export default function Settings() {
 
     // Bulk sync mutations
     const syncAllOrdersMutation = useMutation({
-        mutationFn: () => shopifyApi.syncAllOrders(),
+        mutationFn: (days: number) => shopifyApi.syncAllOrders({ days }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
             queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -122,6 +129,34 @@ export default function Settings() {
             queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
             queryClient.invalidateQueries({ queryKey: ['customers'] });
         },
+    });
+
+    // Background sync jobs
+    const { data: syncJobs, refetch: refetchJobs } = useQuery({
+        queryKey: ['syncJobs'],
+        queryFn: () => shopifyApi.getSyncJobs(10).then(r => r.data),
+        refetchInterval: 3000, // Poll every 3 seconds when jobs are running
+    });
+
+    const startJobMutation = useMutation({
+        mutationFn: ({ jobType, days }: { jobType: string; days: number }) =>
+            shopifyApi.startSyncJob(jobType, days),
+        onSuccess: () => {
+            refetchJobs();
+        },
+        onError: (error: any) => {
+            alert(error.response?.data?.error || 'Failed to start sync job');
+        },
+    });
+
+    const cancelJobMutation = useMutation({
+        mutationFn: (jobId: string) => shopifyApi.cancelSyncJob(jobId),
+        onSuccess: () => refetchJobs(),
+    });
+
+    const resumeJobMutation = useMutation({
+        mutationFn: (jobId: string) => shopifyApi.resumeSyncJob(jobId),
+        onSuccess: () => refetchJobs(),
     });
 
     // Import mutation
@@ -223,6 +258,12 @@ export default function Settings() {
                     onClick={() => setActiveTab('database')}
                 >
                     <Database size={18} /> Database
+                </button>
+                <button
+                    className={`px-4 py-2 font-medium flex items-center gap-2 ${activeTab === 'inspector' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`}
+                    onClick={() => setActiveTab('inspector')}
+                >
+                    <Eye size={18} /> Data Inspector
                 </button>
             </div>
 
@@ -471,7 +512,7 @@ export default function Settings() {
                                     <ShoppingCart size={18} /> Orders
                                 </h3>
 
-                                <div className="flex flex-wrap gap-2 mb-4">
+                                <div className="flex flex-wrap items-center gap-2 mb-4">
                                     <button
                                         className="btn btn-secondary flex items-center gap-2"
                                         onClick={() => previewOrdersMutation.mutate()}
@@ -486,21 +527,38 @@ export default function Settings() {
                                         disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
                                     >
                                         <Play size={16} />
-                                        {syncOrdersMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} Orders`}
+                                        {syncOrdersMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} New`}
                                     </button>
-                                    <button
-                                        className="btn bg-blue-700 text-white hover:bg-blue-800 flex items-center gap-2"
-                                        onClick={() => {
-                                            if (confirm('This will sync ALL orders from Shopify. This may take several minutes for large datasets. Continue?')) {
-                                                syncAllOrdersMutation.mutate();
-                                            }
-                                        }}
-                                        disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
-                                    >
-                                        <RefreshCw size={16} className={syncAllOrdersMutation.isPending ? 'animate-spin' : ''} />
-                                        {syncAllOrdersMutation.isPending ? 'Syncing All...' : 'Sync All Orders'}
-                                    </button>
+                                    <div className="flex items-center gap-1">
+                                        <select
+                                            value={syncDays}
+                                            onChange={(e) => setSyncDays(Number(e.target.value))}
+                                            className="input py-1.5 text-sm w-28"
+                                        >
+                                            <option value={30}>Last 30 days</option>
+                                            <option value={60}>Last 60 days</option>
+                                            <option value={90}>Last 90 days</option>
+                                            <option value={180}>Last 6 months</option>
+                                            <option value={365}>Last year</option>
+                                            <option value={9999}>All time</option>
+                                        </select>
+                                        <button
+                                            className="btn bg-blue-700 text-white hover:bg-blue-800 flex items-center gap-2"
+                                            onClick={() => {
+                                                if (confirm(`This will sync orders from the last ${syncDays} days. Continue?`)) {
+                                                    syncAllOrdersMutation.mutate(syncDays);
+                                                }
+                                            }}
+                                            disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
+                                        >
+                                            <RefreshCw size={16} className={syncAllOrdersMutation.isPending ? 'animate-spin' : ''} />
+                                            {syncAllOrdersMutation.isPending ? 'Syncing...' : 'Bulk Sync'}
+                                        </button>
+                                    </div>
                                 </div>
+                                <p className="text-xs text-gray-500 mb-3">
+                                    "Sync New" continues from last synced order. "Bulk Sync" fetches orders within date range.
+                                </p>
 
                                 {/* Order Preview - Raw Data */}
                                 {orderPreview && (
@@ -517,15 +575,29 @@ export default function Settings() {
 
                                 {/* Sync result */}
                                 {syncOrdersMutation.data && (
-                                    <div className={`mt-3 p-3 rounded-lg text-sm ${syncOrdersMutation.data.data.results?.errors?.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
-                                        <p className={`font-medium ${syncOrdersMutation.data.data.results?.errors?.length > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
-                                            Sync completed! (Fetched: {syncOrdersMutation.data.data.fetched})
+                                    <div className={`mt-3 p-3 rounded-lg text-sm ${
+                                        syncOrdersMutation.data.data.fetched === 0
+                                            ? 'bg-blue-50 border border-blue-200'
+                                            : syncOrdersMutation.data.data.results?.errors?.length > 0
+                                                ? 'bg-yellow-50 border border-yellow-200'
+                                                : 'bg-green-50 border border-green-200'
+                                    }`}>
+                                        <p className={`font-medium ${
+                                            syncOrdersMutation.data.data.fetched === 0
+                                                ? 'text-blue-800'
+                                                : syncOrdersMutation.data.data.results?.errors?.length > 0
+                                                    ? 'text-yellow-800'
+                                                    : 'text-green-800'
+                                        }`}>
+                                            {syncOrdersMutation.data.data.message || 'Sync completed!'} (Fetched: {syncOrdersMutation.data.data.fetched})
                                         </p>
-                                        <p className="text-green-700">
-                                            Created: {syncOrdersMutation.data.data.results?.created?.orders || 0} orders,{' '}
-                                            Updated: {syncOrdersMutation.data.data.results?.updated || 0},
-                                            Skipped: {syncOrdersMutation.data.data.results?.skipped || 0}
-                                        </p>
+                                        {syncOrdersMutation.data.data.fetched > 0 && (
+                                            <p className="text-green-700">
+                                                Created: {syncOrdersMutation.data.data.results?.created?.orders || 0} orders,{' '}
+                                                Updated: {syncOrdersMutation.data.data.results?.updated || 0},
+                                                Skipped: {syncOrdersMutation.data.data.results?.skipped || 0}
+                                            </p>
+                                        )}
                                         {syncOrdersMutation.data.data.results?.errors?.length > 0 && (
                                             <div className="mt-2 text-yellow-700">
                                                 <p className="font-medium">Skipped reasons:</p>
@@ -546,12 +618,17 @@ export default function Settings() {
                                 {syncAllOrdersMutation.data && (
                                     <div className={`mt-3 p-3 rounded-lg text-sm ${syncAllOrdersMutation.data.data.results?.errors?.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
                                         <p className="font-medium text-green-800">
-                                            Bulk sync completed! (Total in Shopify: {syncAllOrdersMutation.data.data.totalInShopify}, Fetched: {syncAllOrdersMutation.data.data.results?.totalFetched || 0})
+                                            Bulk sync completed! ({syncAllOrdersMutation.data.data.results?.dateFilter || 'All'}) - Total: {syncAllOrdersMutation.data.data.totalInShopify}, Fetched: {syncAllOrdersMutation.data.data.results?.totalFetched || 0}
                                         </p>
                                         <p className="text-green-700">
-                                            Created: {syncAllOrdersMutation.data.data.results?.created?.orders || 0} orders, {syncAllOrdersMutation.data.data.results?.created?.customers || 0} customers |{' '}
-                                            Updated: {syncAllOrdersMutation.data.data.results?.updated || 0} |
+                                            Created: {syncAllOrdersMutation.data.data.results?.created?.orders || 0} orders |{' '}
+                                            Updated: {syncAllOrdersMutation.data.data.results?.updated || 0} |{' '}
                                             Skipped: {syncAllOrdersMutation.data.data.results?.skipped || 0}
+                                            {(syncAllOrdersMutation.data.data.results?.skippedExisting > 0 || syncAllOrdersMutation.data.data.results?.skippedNoSku > 0) && (
+                                                <span className="text-gray-500 text-xs ml-1">
+                                                    (existing: {syncAllOrdersMutation.data.data.results?.skippedExisting || 0}, no SKU: {syncAllOrdersMutation.data.data.results?.skippedNoSku || 0})
+                                                </span>
+                                            )}
                                         </p>
                                     </div>
                                 )}
@@ -769,6 +846,163 @@ export default function Settings() {
                         </div>
                     )}
 
+                    {/* Background Sync Jobs */}
+                    {config?.hasAccessToken && (
+                        <div className="card">
+                            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                <RefreshCw size={20} /> Background Sync Jobs
+                            </h2>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Start background sync jobs that process data in batches with automatic checkpointing.
+                                Jobs can be resumed if interrupted.
+                            </p>
+
+                            {/* Start New Job */}
+                            <div className="flex flex-wrap items-center gap-3 mb-6 p-4 bg-gray-50 rounded-lg">
+                                <span className="text-sm font-medium text-gray-700">Start new sync:</span>
+                                <select
+                                    className="input w-36"
+                                    value={syncDays}
+                                    onChange={(e) => setSyncDays(Number(e.target.value))}
+                                >
+                                    <option value={30}>Last 30 days</option>
+                                    <option value={60}>Last 60 days</option>
+                                    <option value={90}>Last 90 days</option>
+                                    <option value={180}>Last 6 months</option>
+                                    <option value={365}>Last year</option>
+                                    <option value={730}>Last 2 years</option>
+                                    <option value={9999}>All time</option>
+                                </select>
+                                <button
+                                    className="btn btn-primary flex items-center gap-2"
+                                    onClick={() => startJobMutation.mutate({ jobType: 'orders', days: syncDays })}
+                                    disabled={startJobMutation.isPending}
+                                >
+                                    <ShoppingCart size={16} />
+                                    Sync Orders
+                                </button>
+                                <button
+                                    className="btn btn-secondary flex items-center gap-2"
+                                    onClick={() => startJobMutation.mutate({ jobType: 'customers', days: syncDays })}
+                                    disabled={startJobMutation.isPending}
+                                >
+                                    <Users size={16} />
+                                    Sync Customers
+                                </button>
+                                <button
+                                    className="btn btn-secondary flex items-center gap-2"
+                                    onClick={() => startJobMutation.mutate({ jobType: 'products', days: syncDays })}
+                                    disabled={startJobMutation.isPending}
+                                >
+                                    <Package size={16} />
+                                    Sync Products
+                                </button>
+                            </div>
+
+                            {/* Jobs List */}
+                            {syncJobs && syncJobs.length > 0 && (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-100">
+                                            <tr>
+                                                <th className="px-3 py-2 text-left">Type</th>
+                                                <th className="px-3 py-2 text-left">Status</th>
+                                                <th className="px-3 py-2 text-left">Progress</th>
+                                                <th className="px-3 py-2 text-left">Created/Updated</th>
+                                                <th className="px-3 py-2 text-left">Started</th>
+                                                <th className="px-3 py-2 text-left">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {syncJobs.map((job: any) => {
+                                                const progress = job.totalRecords
+                                                    ? Math.round((job.processed / job.totalRecords) * 100)
+                                                    : 0;
+                                                return (
+                                                    <tr key={job.id} className="hover:bg-gray-50">
+                                                        <td className="px-3 py-2 capitalize font-medium">{job.jobType}</td>
+                                                        <td className="px-3 py-2">
+                                                            <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                                                job.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                                job.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                                                                job.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                                                job.status === 'cancelled' ? 'bg-gray-100 text-gray-700' :
+                                                                'bg-yellow-100 text-yellow-700'
+                                                            }`}>
+                                                                {job.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                                    <div
+                                                                        className={`h-full transition-all ${
+                                                                            job.status === 'completed' ? 'bg-green-500' :
+                                                                            job.status === 'failed' ? 'bg-red-500' :
+                                                                            'bg-blue-500'
+                                                                        }`}
+                                                                        style={{ width: `${progress}%` }}
+                                                                    />
+                                                                </div>
+                                                                <span className="text-xs text-gray-600 whitespace-nowrap">
+                                                                    {job.processed}/{job.totalRecords || '?'}
+                                                                    {job.status !== 'pending' && (
+                                                                        <span className="text-gray-400 ml-1">
+                                                                            (+{job.created} / ~{job.updated} / !{job.errors})
+                                                                        </span>
+                                                                    )}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-xs text-gray-500">
+                                                            {new Date(job.createdAt).toLocaleString()}
+                                                        </td>
+                                                        <td className="px-3 py-2 text-xs text-gray-500">
+                                                            {job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '-'}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            {(job.status === 'running' || job.status === 'pending') && (
+                                                                <button
+                                                                    className="text-red-600 hover:text-red-800 text-xs"
+                                                                    onClick={() => cancelJobMutation.mutate(job.id)}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            )}
+                                                            {(job.status === 'failed' || job.status === 'cancelled') && (
+                                                                <button
+                                                                    className="text-blue-600 hover:text-blue-800 text-xs"
+                                                                    onClick={() => resumeJobMutation.mutate(job.id)}
+                                                                >
+                                                                    Resume
+                                                                </button>
+                                                            )}
+                                                            {job.lastError && (
+                                                                <span className="text-xs text-red-500 ml-2" title={job.lastError}>
+                                                                    ⚠
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            {(!syncJobs || syncJobs.length === 0) && (
+                                <p className="text-gray-500 text-sm text-center py-4">
+                                    No sync jobs yet. Start one above.
+                                </p>
+                            )}
+
+                            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                                <strong>Legend:</strong> Progress shows (processed/total) with (+created / ~updated / !errors)
+                            </div>
+                        </div>
+                    )}
+
                     {/* Warning if not configured */}
                     {!config?.hasAccessToken && (
                         <div className="flex items-center gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -898,6 +1132,104 @@ export default function Settings() {
             {/* Database Tab */}
             {activeTab === 'database' && (
                 <DatabaseTab queryClient={queryClient} />
+            )}
+
+            {/* Data Inspector Tab */}
+            {activeTab === 'inspector' && (
+                <div className="space-y-6">
+                    <div className="card">
+                        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                            <Database size={20} /> Database Inspector
+                        </h2>
+
+                        <div className="flex flex-wrap items-center gap-3 mb-4">
+                            <select
+                                value={inspectorTable}
+                                onChange={(e) => {
+                                    setInspectorTable(e.target.value as any);
+                                    setInspectorData(null);
+                                }}
+                                className="input w-40"
+                            >
+                                <option value="orders">Orders</option>
+                                <option value="customers">Customers</option>
+                                <option value="products">Products</option>
+                                <option value="skus">SKUs</option>
+                            </select>
+
+                            <select
+                                value={inspectorLimit}
+                                onChange={(e) => setInspectorLimit(Number(e.target.value))}
+                                className="input w-36"
+                            >
+                                <option value={50}>50 rows</option>
+                                <option value={100}>100 rows</option>
+                                <option value={250}>250 rows</option>
+                                <option value={500}>500 rows</option>
+                                <option value={1000}>1,000 rows</option>
+                                <option value={2000}>2,000 rows</option>
+                                <option value={5000}>5,000 rows</option>
+                            </select>
+
+                            <button
+                                className="btn btn-primary flex items-center gap-2"
+                                onClick={async () => {
+                                    setInspectorLoading(true);
+                                    try {
+                                        const apiCall = {
+                                            orders: () => adminApi.inspectOrders(inspectorLimit),
+                                            customers: () => adminApi.inspectCustomers(inspectorLimit),
+                                            products: () => adminApi.inspectProducts(inspectorLimit),
+                                            skus: () => adminApi.inspectSkus(inspectorLimit),
+                                        }[inspectorTable];
+                                        const res = await apiCall();
+                                        setInspectorData(res.data);
+                                    } catch (err) {
+                                        console.error(err);
+                                        alert('Failed to fetch data');
+                                    } finally {
+                                        setInspectorLoading(false);
+                                    }
+                                }}
+                                disabled={inspectorLoading}
+                            >
+                                <Eye size={16} />
+                                {inspectorLoading ? 'Loading...' : 'Fetch Data'}
+                            </button>
+                        </div>
+
+                        {inspectorData && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-sm text-gray-600">
+                                    <span>
+                                        Showing {inspectorData.data?.length || 0} of {inspectorData.total || 0} records
+                                    </span>
+                                    <button
+                                        className="text-blue-600 hover:underline"
+                                        onClick={() => setInspectorData(null)}
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+
+                                <div className="border rounded-lg overflow-hidden">
+                                    <div className="bg-gray-50 px-3 py-2 text-sm font-medium border-b">
+                                        {inspectorTable.charAt(0).toUpperCase() + inspectorTable.slice(1)} Table
+                                    </div>
+                                    <div className="max-h-[700px] overflow-auto">
+                                        <InspectorTable table={inspectorTable} data={inspectorData.data} />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {!inspectorData && (
+                            <p className="text-gray-500 text-sm">
+                                Select a table and click "Fetch Data" to inspect database records.
+                            </p>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );
@@ -1604,5 +1936,102 @@ npx prisma generate`}
                 </div>
             </div>
         </div>
+    );
+}
+
+// Inspector Table component for table view
+function InspectorTable({ table, data }: { table: string; data: any[] }) {
+    if (!data || data.length === 0) {
+        return <p className="p-4 text-gray-500">No data found</p>;
+    }
+
+    // Define columns for each table type
+    const columnConfigs: Record<string, { key: string; label: string; render?: (val: any, row: any) => React.ReactNode }[]> = {
+        orders: [
+            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
+            { key: 'orderNumber', label: 'Order #' },
+            { key: 'shopifyOrderId', label: 'Shopify ID' },
+            { key: 'customerName', label: 'Customer' },
+            { key: 'customer', label: 'Email', render: (v) => v?.email || '-' },
+            { key: 'channel', label: 'Channel' },
+            { key: 'status', label: 'Status', render: (v) => (
+                <span className={`px-2 py-0.5 rounded-full text-xs ${
+                    v === 'delivered' ? 'bg-green-100 text-green-700' :
+                    v === 'shipped' ? 'bg-blue-100 text-blue-700' :
+                    v === 'cancelled' ? 'bg-red-100 text-red-700' :
+                    'bg-gray-100 text-gray-700'
+                }`}>{v}</span>
+            )},
+            { key: 'totalAmount', label: 'Total', render: (v) => v ? `₹${Number(v).toLocaleString()}` : '-' },
+            { key: 'orderLines', label: 'Lines', render: (v) => v?.length || 0 },
+            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        ],
+        customers: [
+            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
+            { key: 'shopifyCustomerId', label: 'Shopify ID' },
+            { key: 'firstName', label: 'First Name' },
+            { key: 'lastName', label: 'Last Name' },
+            { key: 'email', label: 'Email' },
+            { key: 'phone', label: 'Phone' },
+            { key: 'city', label: 'City' },
+            { key: 'state', label: 'State' },
+            { key: 'totalOrders', label: 'Orders' },
+            { key: 'totalSpent', label: 'Total Spent', render: (v) => v ? `₹${Number(v).toLocaleString()}` : '-' },
+            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        ],
+        products: [
+            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
+            { key: 'shopifyProductId', label: 'Shopify ID' },
+            { key: 'name', label: 'Name' },
+            { key: 'styleCode', label: 'Style Code' },
+            { key: 'category', label: 'Category' },
+            { key: 'productType', label: 'Type' },
+            { key: 'gender', label: 'Gender' },
+            { key: 'variations', label: 'Variations', render: (v) => v?.length || 0 },
+            { key: 'variations', label: 'SKUs', render: (v) => v?.reduce((sum: number, var_: any) => sum + (var_.skus?.length || 0), 0) || 0 },
+            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        ],
+        skus: [
+            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
+            { key: 'shopifyVariantId', label: 'Shopify Variant' },
+            { key: 'skuCode', label: 'SKU Code' },
+            { key: 'variation', label: 'Product', render: (v) => v?.product?.name || '-' },
+            { key: 'variation', label: 'Style', render: (v) => v?.product?.styleCode || '-' },
+            { key: 'variation', label: 'Color', render: (v) => v?.colorName || '-' },
+            { key: 'size', label: 'Size' },
+            { key: 'mrp', label: 'MRP', render: (v) => v ? `₹${Number(v).toLocaleString()}` : '-' },
+            { key: 'barcode', label: 'Barcode' },
+            { key: 'isActive', label: 'Active', render: (v) => v !== false ? '✓' : '✗' },
+            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        ],
+    };
+
+    const columns = columnConfigs[table] || [];
+
+    return (
+        <table className="w-full text-sm">
+            <thead className="bg-gray-100 sticky top-0">
+                <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">#</th>
+                    {columns.map((col, i) => (
+                        <th key={i} className="px-3 py-2 text-left font-medium text-gray-700 text-xs whitespace-nowrap">
+                            {col.label}
+                        </th>
+                    ))}
+                </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+                {data.map((row, rowIndex) => (
+                    <tr key={row.id || rowIndex} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 text-gray-400 text-xs">{rowIndex + 1}</td>
+                        {columns.map((col, colIndex) => (
+                            <td key={colIndex} className="px-3 py-2 text-gray-700 text-xs max-w-[200px] truncate">
+                                {col.render ? col.render(row[col.key], row) : (row[col.key] ?? '-')}
+                            </td>
+                        ))}
+                    </tr>
+                ))}
+            </tbody>
+        </table>
     );
 }

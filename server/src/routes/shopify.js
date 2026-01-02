@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import shopifyClient from '../services/shopify.js';
+import syncWorker from '../services/syncWorker.js';
 
 const router = Router();
 
@@ -798,7 +799,7 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
-        const { since_id, created_at_min, status = 'any', limit = 50 } = req.body;
+        const { since_id, created_at_min, status = 'any', limit = 50, continueFromLast = true } = req.body;
 
         const results = {
             created: { orders: 0, customers: 0 },
@@ -807,9 +808,23 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
             errors: [],
         };
 
+        // Auto-continue from last synced order if no since_id provided
+        let effectiveSinceId = since_id;
+        if (!effectiveSinceId && continueFromLast) {
+            const lastOrder = await req.prisma.order.findFirst({
+                where: { shopifyOrderId: { not: null } },
+                orderBy: { shopifyOrderId: 'desc' },
+                select: { shopifyOrderId: true },
+            });
+            if (lastOrder) {
+                effectiveSinceId = lastOrder.shopifyOrderId;
+                console.log(`Continuing from last synced order: ${effectiveSinceId}`);
+            }
+        }
+
         // Fetch orders from Shopify
         const shopifyOrders = await shopifyClient.getOrders({
-            since_id,
+            since_id: effectiveSinceId,
             created_at_min,
             status,
             limit,
@@ -1002,9 +1017,12 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
         }
 
         res.json({
-            message: 'Order sync completed',
+            message: shopifyOrders.length === 0 && effectiveSinceId
+                ? 'No new orders since last sync'
+                : 'Order sync completed',
             fetched: shopifyOrders.length,
             results,
+            continuedFromId: effectiveSinceId || null,
             lastSyncedId: shopifyOrders.length > 0
                 ? String(shopifyOrders[shopifyOrders.length - 1].id)
                 : null,
@@ -1025,39 +1043,53 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
-        const { status = 'any' } = req.body;
+        const { status = 'any', days = 90 } = req.body;
+
+        // Calculate date filter (default: last 90 days)
+        const created_at_min = new Date();
+        created_at_min.setDate(created_at_min.getDate() - days);
+        const dateFilter = created_at_min.toISOString();
 
         const results = {
             created: { orders: 0, customers: 0 },
             updated: 0,
             skipped: 0,
+            skippedExisting: 0,
+            skippedNoSku: 0,
             errors: [],
             totalFetched: 0,
+            dateFilter: `Last ${days} days`,
         };
 
-        // Get total count first
-        const totalCount = await shopifyClient.getOrderCount({ status });
-        console.log(`Starting bulk order sync: ${totalCount} total orders in Shopify`);
+        // Get total count first (with date filter)
+        const totalCount = await shopifyClient.getOrderCount({ status, created_at_min: dateFilter });
+        console.log(`Starting bulk order sync: ${totalCount} orders in last ${days} days`);
 
-        // Process in batches using pagination
+        // Use since_id pagination (start from beginning, not from last synced)
         let sinceId = null;
         const limit = 250;
         let batchNumber = 0;
+        const processedIds = new Set(); // Track to avoid duplicates
 
         while (true) {
             batchNumber++;
             const shopifyOrders = await shopifyClient.getOrders({
                 since_id: sinceId,
+                created_at_min: dateFilter,
                 status,
                 limit,
             });
 
             if (shopifyOrders.length === 0) break;
 
-            results.totalFetched += shopifyOrders.length;
-            console.log(`Processing batch ${batchNumber}: ${shopifyOrders.length} orders (${results.totalFetched}/${totalCount})`);
+            // Filter out any duplicates (shouldn't happen but just in case)
+            const uniqueOrders = shopifyOrders.filter(o => !processedIds.has(String(o.id)));
+            uniqueOrders.forEach(o => processedIds.add(String(o.id)));
 
-            for (const shopifyOrder of shopifyOrders) {
+            results.totalFetched += uniqueOrders.length;
+            console.log(`Processing batch ${batchNumber}: ${shopifyOrders.length} fetched, ${uniqueOrders.length} unique (${results.totalFetched}/${totalCount})`);
+
+            for (const shopifyOrder of uniqueOrders) {
                 try {
                     const shopifyOrderId = String(shopifyOrder.id);
 
@@ -1104,6 +1136,7 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                             results.updated++;
                         } else {
                             results.skipped++;
+                            results.skippedExisting++;
                         }
                         continue;
                     }
@@ -1183,6 +1216,7 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                     // Skip orders with no matched SKUs
                     if (!hasMatchedSku) {
                         results.skipped++;
+                        results.skippedNoSku++;
                         continue;
                     }
 
@@ -1236,6 +1270,12 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                     results.errors.push(`Order ${shopifyOrder.order_number}: ${orderError.message}`);
                     results.skipped++;
                 }
+            }
+
+            // Stop if we got no new unique orders (all duplicates)
+            if (uniqueOrders.length === 0) {
+                console.log('All orders in batch were duplicates, stopping');
+                break;
             }
 
             sinceId = shopifyOrders[shopifyOrders.length - 1].id;
@@ -1299,6 +1339,75 @@ router.get('/sync/history', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Get sync history error:', error);
         res.status(500).json({ error: 'Failed to get sync history' });
+    }
+});
+
+// ============================================
+// BACKGROUND SYNC JOBS
+// ============================================
+
+// Start a new background sync job
+router.post('/sync/jobs/start', authenticateToken, async (req, res) => {
+    try {
+        const { jobType, days = 90 } = req.body;
+
+        if (!['orders', 'customers', 'products'].includes(jobType)) {
+            return res.status(400).json({ error: 'Invalid job type. Must be: orders, customers, or products' });
+        }
+
+        const job = await syncWorker.startJob(jobType, { days });
+        res.json({ message: 'Sync job started', job });
+    } catch (error) {
+        console.error('Start sync job error:', error);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// List all sync jobs
+router.get('/sync/jobs', authenticateToken, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 20;
+        const jobs = await syncWorker.listJobs(limit);
+        res.json(jobs);
+    } catch (error) {
+        console.error('List sync jobs error:', error);
+        res.status(500).json({ error: 'Failed to list sync jobs' });
+    }
+});
+
+// Get sync job status
+router.get('/sync/jobs/:id', authenticateToken, async (req, res) => {
+    try {
+        const job = await syncWorker.getJobStatus(req.params.id);
+        if (!job) {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+        res.json(job);
+    } catch (error) {
+        console.error('Get sync job error:', error);
+        res.status(500).json({ error: 'Failed to get sync job' });
+    }
+});
+
+// Resume a failed/cancelled job
+router.post('/sync/jobs/:id/resume', authenticateToken, async (req, res) => {
+    try {
+        const job = await syncWorker.resumeJob(req.params.id);
+        res.json({ message: 'Job resumed', job });
+    } catch (error) {
+        console.error('Resume sync job error:', error);
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// Cancel a running job
+router.post('/sync/jobs/:id/cancel', authenticateToken, async (req, res) => {
+    try {
+        const job = await syncWorker.cancelJob(req.params.id);
+        res.json({ message: 'Job cancelled', job });
+    } catch (error) {
+        console.error('Cancel sync job error:', error);
+        res.status(400).json({ error: error.message });
     }
 });
 

@@ -419,4 +419,112 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
     }
 });
 
+// ============================================
+// DATABASE INSPECTOR (Admin only)
+// ============================================
+
+// Inspect orders table
+router.get('/inspect/orders', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const [data, total] = await Promise.all([
+            req.prisma.order.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    orderLines: {
+                        include: { sku: { select: { skuCode: true } } }
+                    },
+                    customer: { select: { email: true, firstName: true, lastName: true } }
+                }
+            }),
+            req.prisma.order.count()
+        ]);
+
+        res.json({ data, total, limit, offset });
+    } catch (error) {
+        console.error('Inspect orders error:', error);
+        res.status(500).json({ error: 'Failed to inspect orders' });
+    }
+});
+
+// Inspect customers table
+router.get('/inspect/customers', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const [data, total] = await Promise.all([
+            req.prisma.customer.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { createdAt: 'desc' }
+            }),
+            req.prisma.customer.count()
+        ]);
+
+        res.json({ data, total, limit, offset });
+    } catch (error) {
+        console.error('Inspect customers error:', error);
+        res.status(500).json({ error: 'Failed to inspect customers' });
+    }
+});
+
+// Inspect products table
+router.get('/inspect/products', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const [data, total] = await Promise.all([
+            req.prisma.product.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    variations: {
+                        include: { skus: true }
+                    }
+                }
+            }),
+            req.prisma.product.count()
+        ]);
+
+        res.json({ data, total, limit, offset });
+    } catch (error) {
+        console.error('Inspect products error:', error);
+        res.status(500).json({ error: 'Failed to inspect products' });
+    }
+});
+
+// Inspect SKUs table
+router.get('/inspect/skus', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const [data, total] = await Promise.all([
+            req.prisma.sku.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    variation: {
+                        include: { product: { select: { name: true, styleCode: true } } }
+                    }
+                }
+            }),
+            req.prisma.sku.count()
+        ]);
+
+        res.json({ data, total, limit, offset });
+    } catch (error) {
+        console.error('Inspect SKUs error:', error);
+        res.status(500).json({ error: 'Failed to inspect SKUs' });
+    }
+});
+
 export default router;

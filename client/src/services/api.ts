@@ -163,10 +163,21 @@ export const shopifyApi = {
         api.post('/shopify/sync/orders', data || {}),
     syncCustomers: (data?: { since_id?: string; created_at_min?: string; limit?: number }) =>
         api.post('/shopify/sync/customers', data || {}),
-    syncAllOrders: (data?: { status?: string }) =>
+    syncAllOrders: (data?: { status?: string; days?: number }) =>
         api.post('/shopify/sync/orders/all', data || {}),
     syncAllCustomers: () =>
         api.post('/shopify/sync/customers/all'),
+    // Background sync jobs
+    startSyncJob: (jobType: string, days?: number) =>
+        api.post('/shopify/sync/jobs/start', { jobType, days }),
+    getSyncJobs: (limit?: number) =>
+        api.get('/shopify/sync/jobs', { params: { limit } }),
+    getSyncJobStatus: (jobId: string) =>
+        api.get(`/shopify/sync/jobs/${jobId}`),
+    resumeSyncJob: (jobId: string) =>
+        api.post(`/shopify/sync/jobs/${jobId}/resume`),
+    cancelSyncJob: (jobId: string) =>
+        api.post(`/shopify/sync/jobs/${jobId}/cancel`),
 };
 
 // Import/Export
@@ -205,6 +216,15 @@ export const adminApi = {
     updateUser: (id: string, data: { email?: string; name?: string; role?: string; isActive?: boolean; password?: string }) =>
         api.put(`/admin/users/${id}`, data),
     deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
+    // Database inspector
+    inspectOrders: (limit?: number, offset?: number) =>
+        api.get('/admin/inspect/orders', { params: { limit, offset } }),
+    inspectCustomers: (limit?: number, offset?: number) =>
+        api.get('/admin/inspect/customers', { params: { limit, offset } }),
+    inspectProducts: (limit?: number, offset?: number) =>
+        api.get('/admin/inspect/products', { params: { limit, offset } }),
+    inspectSkus: (limit?: number, offset?: number) =>
+        api.get('/admin/inspect/skus', { params: { limit, offset } }),
 };
 
 export default api;

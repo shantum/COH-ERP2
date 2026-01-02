@@ -138,6 +138,7 @@ class ShopifyClient {
         const params = {
             status: options.status || 'any',
             limit: Math.min(options.limit || 50, 250),
+            order: 'created_at asc', // Oldest first for proper since_id pagination
         };
 
         if (options.since_id) params.since_id = options.since_id;
