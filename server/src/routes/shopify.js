@@ -351,10 +351,28 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                                 where: { id: sku.id },
                                 data: updateData,
                             });
+
+                            // Update Shopify inventory cache
+                            if (variant.inventory_item_id && typeof variant.inventory_quantity === 'number') {
+                                await req.prisma.shopifyInventoryCache.upsert({
+                                    where: { skuId: sku.id },
+                                    update: {
+                                        shopifyInventoryItemId: String(variant.inventory_item_id),
+                                        availableQty: variant.inventory_quantity,
+                                        lastSynced: new Date(),
+                                    },
+                                    create: {
+                                        skuId: sku.id,
+                                        shopifyInventoryItemId: String(variant.inventory_item_id),
+                                        availableQty: variant.inventory_quantity,
+                                    },
+                                });
+                            }
+
                             results.updated.skus++;
                         } else {
                             // Create new SKU
-                            await req.prisma.sku.create({
+                            const newSku = await req.prisma.sku.create({
                                 data: {
                                     variationId: variation.id,
                                     skuCode,
@@ -367,6 +385,18 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                                     shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
                                 },
                             });
+
+                            // Create Shopify inventory cache for new SKU
+                            if (variant.inventory_item_id && typeof variant.inventory_quantity === 'number') {
+                                await req.prisma.shopifyInventoryCache.create({
+                                    data: {
+                                        skuId: newSku.id,
+                                        shopifyInventoryItemId: String(variant.inventory_item_id),
+                                        availableQty: variant.inventory_quantity,
+                                    },
+                                });
+                            }
+
                             results.created.skus++;
                         }
                     }
