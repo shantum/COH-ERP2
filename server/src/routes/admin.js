@@ -58,26 +58,47 @@ router.post('/clear', requireAdmin, async (req, res) => {
         const results = {};
 
         // Clear in correct order to respect foreign key constraints
+        // Tables with FK to SKU/Variation/Product must be deleted first
         const clearOrder = [
+            // Return-related (references orders, SKUs)
+            'returnStatusHistory',
+            'returnShipping',
             'returnRequestLines',
             'returnRequests',
+            // Order-related (references customers, SKUs)
             'orderLines',
             'orders',
+            // Production (references SKUs)
+            'productionBatches',
+            // Inventory (references SKUs)
             'inventoryTransactions',
             'productInventory',
-            'skuCostings',
             'shopifyInventoryCache',
+            'stockAlerts',
+            // Feedback (references SKUs, products, variations)
+            'feedbackProductLinks',
+            'feedbackMedia',
+            'feedbackTags',
+            'feedbackContents',
+            'feedbackRatings',
+            'feedback',
+            // SKU related
+            'skuCostings',
             'skus',
+            // Variations and Products
             'variations',
             'products',
+            // Customers
             'customers',
+            // Fabric related
+            'fabricTransactions',
+            'fabricOrders',
             'fabricInventory',
             'fabrics',
             'fabricTypes',
-            'productionBatches',
+            // Other
             'tailors',
-            'feedback',
-            'stockAlerts',
+            'suppliers',
         ];
 
         for (const table of clearOrder) {
@@ -85,6 +106,15 @@ router.post('/clear', requireAdmin, async (req, res) => {
                 try {
                     let count = 0;
                     switch (table) {
+                        // Return related
+                        case 'returnStatusHistory':
+                            count = await req.prisma.returnStatusHistory.count();
+                            await req.prisma.returnStatusHistory.deleteMany();
+                            break;
+                        case 'returnShipping':
+                            count = await req.prisma.returnShipping.count();
+                            await req.prisma.returnShipping.deleteMany();
+                            break;
                         case 'returnRequestLines':
                             count = await req.prisma.returnRequestLine.count();
                             await req.prisma.returnRequestLine.deleteMany();
@@ -93,6 +123,7 @@ router.post('/clear', requireAdmin, async (req, res) => {
                             count = await req.prisma.returnRequest.count();
                             await req.prisma.returnRequest.deleteMany();
                             break;
+                        // Order related
                         case 'orderLines':
                             count = await req.prisma.orderLine.count();
                             await req.prisma.orderLine.deleteMany();
@@ -101,6 +132,12 @@ router.post('/clear', requireAdmin, async (req, res) => {
                             count = await req.prisma.order.count();
                             await req.prisma.order.deleteMany();
                             break;
+                        // Production
+                        case 'productionBatches':
+                            count = await req.prisma.productionBatch.count();
+                            await req.prisma.productionBatch.deleteMany();
+                            break;
+                        // Inventory
                         case 'inventoryTransactions':
                             count = await req.prisma.inventoryTransaction.count();
                             await req.prisma.inventoryTransaction.deleteMany();
@@ -109,18 +146,49 @@ router.post('/clear', requireAdmin, async (req, res) => {
                             count = await req.prisma.productInventory.count();
                             await req.prisma.productInventory.deleteMany();
                             break;
-                        case 'skuCostings':
-                            count = await req.prisma.skuCosting.count();
-                            await req.prisma.skuCosting.deleteMany();
-                            break;
                         case 'shopifyInventoryCache':
                             count = await req.prisma.shopifyInventoryCache.count();
                             await req.prisma.shopifyInventoryCache.deleteMany();
+                            break;
+                        case 'stockAlerts':
+                            count = await req.prisma.stockAlert.count();
+                            await req.prisma.stockAlert.deleteMany();
+                            break;
+                        // Feedback related
+                        case 'feedbackProductLinks':
+                            count = await req.prisma.feedbackProductLink.count();
+                            await req.prisma.feedbackProductLink.deleteMany();
+                            break;
+                        case 'feedbackMedia':
+                            count = await req.prisma.feedbackMedia.count();
+                            await req.prisma.feedbackMedia.deleteMany();
+                            break;
+                        case 'feedbackTags':
+                            count = await req.prisma.feedbackTag.count();
+                            await req.prisma.feedbackTag.deleteMany();
+                            break;
+                        case 'feedbackContents':
+                            count = await req.prisma.feedbackContent.count();
+                            await req.prisma.feedbackContent.deleteMany();
+                            break;
+                        case 'feedbackRatings':
+                            count = await req.prisma.feedbackRating.count();
+                            await req.prisma.feedbackRating.deleteMany();
+                            break;
+                        case 'feedback':
+                            count = await req.prisma.feedback.count();
+                            await req.prisma.feedback.deleteMany();
+                            break;
+                        // SKU related
+                        case 'skuCostings':
+                            count = await req.prisma.skuCosting.count();
+                            await req.prisma.skuCosting.deleteMany();
                             break;
                         case 'skus':
                             count = await req.prisma.sku.count();
                             await req.prisma.sku.deleteMany();
                             break;
+                        // Variations and Products
                         case 'variations':
                             count = await req.prisma.variation.count();
                             await req.prisma.variation.deleteMany();
@@ -129,9 +197,19 @@ router.post('/clear', requireAdmin, async (req, res) => {
                             count = await req.prisma.product.count();
                             await req.prisma.product.deleteMany();
                             break;
+                        // Customers
                         case 'customers':
                             count = await req.prisma.customer.count();
                             await req.prisma.customer.deleteMany();
+                            break;
+                        // Fabric related
+                        case 'fabricTransactions':
+                            count = await req.prisma.fabricTransaction.count();
+                            await req.prisma.fabricTransaction.deleteMany();
+                            break;
+                        case 'fabricOrders':
+                            count = await req.prisma.fabricOrder.count();
+                            await req.prisma.fabricOrder.deleteMany();
                             break;
                         case 'fabricInventory':
                             count = await req.prisma.fabricInventory.count();
@@ -145,21 +223,14 @@ router.post('/clear', requireAdmin, async (req, res) => {
                             count = await req.prisma.fabricType.count();
                             await req.prisma.fabricType.deleteMany();
                             break;
-                        case 'productionBatches':
-                            count = await req.prisma.productionBatch.count();
-                            await req.prisma.productionBatch.deleteMany();
-                            break;
+                        // Other
                         case 'tailors':
                             count = await req.prisma.tailor.count();
                             await req.prisma.tailor.deleteMany();
                             break;
-                        case 'feedback':
-                            count = await req.prisma.feedback.count();
-                            await req.prisma.feedback.deleteMany();
-                            break;
-                        case 'stockAlerts':
-                            count = await req.prisma.stockAlert.count();
-                            await req.prisma.stockAlert.deleteMany();
+                        case 'suppliers':
+                            count = await req.prisma.supplier.count();
+                            await req.prisma.supplier.deleteMany();
                             break;
                     }
                     results[table] = count;
