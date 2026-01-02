@@ -3,7 +3,7 @@ import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi, adminA
 import { useState, useMemo, useCallback } from 'react';
 import { Plus, X, Trash2, Check, Undo2, ChevronDown, Search, Package, Palette, Layers, ShoppingBag, Calendar, Crown, Medal, Mail, Phone, Pencil, Ban, StickyNote, Archive } from 'lucide-react';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef, ICellRendererParams, RowStyle } from 'ag-grid-community';
+import type { ColDef, ICellRendererParams, RowStyle, ValueFormatterParams, ValueGetterParams, ValueSetterParams, CellClassParams, EditableCallbackParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
 
 // Register AG Grid modules
@@ -509,7 +509,7 @@ export default function Orders() {
             headerName: getHeaderName('orderDate'),
             field: 'orderDate',
             width: 130,
-            valueFormatter: (params) => {
+            valueFormatter: (params: ValueFormatterParams) => {
                 if (!params.data?.isFirstLine) return '';
                 const dt = formatDateTime(params.value);
                 return `${dt.date} ${dt.time}`;
@@ -521,7 +521,7 @@ export default function Orders() {
             headerName: getHeaderName('orderNumber'),
             field: 'orderNumber',
             width: 110,
-            valueFormatter: (params) => params.data?.isFirstLine ? params.value : '',
+            valueFormatter: (params: ValueFormatterParams) => params.data?.isFirstLine ? params.value : '',
             cellClass: 'text-xs font-mono text-gray-600',
         },
         {
@@ -556,7 +556,7 @@ export default function Orders() {
             headerName: getHeaderName('city'),
             field: 'city',
             width: 80,
-            valueFormatter: (params) => params.data?.isFirstLine ? (params.value || '') : '',
+            valueFormatter: (params: ValueFormatterParams) => params.data?.isFirstLine ? (params.value || '') : '',
             cellClass: 'text-xs text-gray-500',
         },
         {
@@ -564,7 +564,7 @@ export default function Orders() {
             headerName: getHeaderName('customerOrderCount'),
             field: 'customerOrderCount',
             width: 40,
-            valueFormatter: (params) => params.data?.isFirstLine ? params.value : '',
+            valueFormatter: (params: ValueFormatterParams) => params.data?.isFirstLine ? params.value : '',
             cellClass: 'text-xs text-center text-gray-500',
             headerTooltip: 'Customer Order Count',
         },
@@ -573,7 +573,7 @@ export default function Orders() {
             headerName: getHeaderName('customerLtv'),
             field: 'customerLtv',
             width: 70,
-            valueFormatter: (params) => {
+            valueFormatter: (params: ValueFormatterParams) => {
                 if (!params.data?.isFirstLine) return '';
                 return `₹${(params.value / 1000).toFixed(0)}k`;
             },
@@ -593,7 +593,7 @@ export default function Orders() {
             field: 'productName',
             flex: 1,
             minWidth: 180,
-            valueFormatter: (params) => `${params.value} - ${params.data?.colorName} - ${params.data?.size}`,
+            valueFormatter: (params: ValueFormatterParams) => `${params.value} - ${params.data?.colorName} - ${params.data?.size}`,
             cellClass: 'text-xs',
         },
         {
@@ -619,7 +619,7 @@ export default function Orders() {
             headerName: getHeaderName('fabricBalance'),
             field: 'fabricBalance',
             width: 55,
-            valueFormatter: (params) => `${params.value?.toFixed(0)}m`,
+            valueFormatter: (params: ValueFormatterParams) => `${params.value?.toFixed(0)}m`,
             cellClass: 'text-xs text-center text-gray-500',
         },
         {
@@ -742,15 +742,15 @@ export default function Orders() {
             colId: 'notes',
             headerName: getHeaderName('notes'),
             width: 120,
-            editable: (params) => params.data?.isFirstLine,
-            valueGetter: (params) => params.data?.isFirstLine ? (params.data.order?.internalNotes || '') : '',
-            valueSetter: (params) => {
+            editable: (params: EditableCallbackParams) => params.data?.isFirstLine,
+            valueGetter: (params: ValueGetterParams) => params.data?.isFirstLine ? (params.data.order?.internalNotes || '') : '',
+            valueSetter: (params: ValueSetterParams) => {
                 if (params.data?.isFirstLine && params.data?.order) {
                     updateOrderNotes.mutate({ id: params.data.order.id, notes: params.newValue });
                 }
                 return true;
             },
-            cellClass: (params) => {
+            cellClass: (params: CellClassParams) => {
                 if (!params.data?.isFirstLine) return 'text-transparent';
                 return params.data?.order?.internalNotes ? 'text-xs text-yellow-700 bg-yellow-50' : 'text-xs text-gray-400';
             },
@@ -818,7 +818,7 @@ export default function Orders() {
             headerName: getHeaderName('awb'),
             field: 'order.awbNumber',
             width: 100,
-            valueFormatter: (params) => params.data?.isFirstLine ? (params.data.order?.awbNumber || '') : '',
+            valueFormatter: (params: ValueFormatterParams) => params.data?.isFirstLine ? (params.data.order?.awbNumber || '') : '',
             cellClass: 'text-xs font-mono text-gray-500',
         },
         {
@@ -826,7 +826,7 @@ export default function Orders() {
             headerName: getHeaderName('courier'),
             field: 'order.courier',
             width: 80,
-            valueFormatter: (params) => params.data?.isFirstLine ? (params.data.order?.courier || '') : '',
+            valueFormatter: (params: ValueFormatterParams) => params.data?.isFirstLine ? (params.data.order?.courier || '') : '',
             cellClass: 'text-xs text-blue-600',
         },
         {
