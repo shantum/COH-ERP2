@@ -5,7 +5,7 @@ nixPkgs = ["nodejs_20"]
 cmds = ["cd client && npm install", "cd server && npm install"]
 
 [phases.build]
-cmds = ["cd client && npm run build", "cd server && npx prisma generate"]
+cmds = ["cd client && npm run build", "cd server && npx prisma generate", "cd server && npx prisma db push --skip-generate"]
 
 [start]
 cmd = "cd server && npm start"
