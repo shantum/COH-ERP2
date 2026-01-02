@@ -1,6 +1,11 @@
+// Load environment variables FIRST before any other imports
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
@@ -28,13 +33,44 @@ import shopifyRoutes from './routes/shopify.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 
-dotenv.config();
-
 const app = express();
 const prisma = new PrismaClient();
 
-// Middleware
-app.use(cors());
+// Security middleware
+app.use(helmet({
+    contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+}));
+
+// Rate limiting - general API
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // Limit each IP to 1000 requests per windowMs
+    message: { error: 'Too many requests, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Stricter rate limiting for auth endpoints
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // Limit each IP to 20 login attempts per windowMs
+    message: { error: 'Too many login attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Apply rate limiting
+app.use('/api', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+
+// CORS configuration
+app.use(cors({
+    origin: process.env.NODE_ENV === 'production'
+        ? process.env.CORS_ORIGIN || true  // Allow same origin in production
+        : true, // Allow all origins in development
+    credentials: true,
+}));
 
 // Capture raw body for webhook signature verification
 app.use('/api/webhooks', express.json({

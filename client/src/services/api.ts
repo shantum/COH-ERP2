@@ -37,6 +37,8 @@ export const authApi = {
     login: (email: string, password: string) => api.post('/auth/login', { email, password }),
     register: (data: { email: string; password: string; name: string }) => api.post('/auth/register', data),
     me: () => api.get('/auth/me'),
+    changePassword: (data: { currentPassword: string; newPassword: string }) =>
+        api.post('/auth/change-password', data),
 };
 
 // Products
@@ -192,6 +194,13 @@ export const adminApi = {
     getChannels: () => api.get('/admin/channels'),
     updateChannels: (channels: { id: string; name: string }[]) =>
         api.put('/admin/channels', { channels }),
+    // User management
+    getUsers: () => api.get('/admin/users'),
+    createUser: (data: { email: string; password: string; name: string; role: string }) =>
+        api.post('/admin/users', data),
+    updateUser: (id: string, data: { email?: string; name?: string; role?: string; isActive?: boolean; password?: string }) =>
+        api.put(`/admin/users/${id}`, data),
+    deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
 };
 
 export default api;

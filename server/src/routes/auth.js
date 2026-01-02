@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { requireAdmin } from '../middleware/auth.js';
+import { validatePassword } from '../utils/validation.js';
 
 const router = Router();
 
-// Register new user
-router.post('/register', async (req, res) => {
+// Register new user (Admin only - use admin/users endpoint for user management)
+router.post('/register', requireAdmin, async (req, res) => {
     try {
         const { email, password, name, role = 'staff' } = req.body;
 
@@ -120,6 +122,62 @@ router.get('/me', async (req, res) => {
         res.json(user);
     } catch (error) {
         res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+// Change password
+router.post('/change-password', async (req, res) => {
+    try {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+
+        if (!token) {
+            return res.status(401).json({ error: 'No token provided' });
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const { currentPassword, newPassword } = req.body;
+
+        // Validate input
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current password and new password are required' });
+        }
+
+        // Validate password strength
+        const passwordValidation = validatePassword(newPassword);
+        if (!passwordValidation.isValid) {
+            return res.status(400).json({ error: passwordValidation.errors[0] });
+        }
+
+        // Get user with password
+        const user = await req.prisma.user.findUnique({
+            where: { id: decoded.id },
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Verify current password
+        const validPassword = await bcrypt.compare(currentPassword, user.password);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+
+        // Hash and update new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await req.prisma.user.update({
+            where: { id: user.id },
+            data: { password: hashedPassword },
+        });
+
+        res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+        if (error.name === 'JsonWebTokenError') {
+            return res.status(401).json({ error: 'Invalid token' });
+        }
+        console.error('Change password error:', error);
+        res.status(500).json({ error: 'Failed to change password' });
     }
 });
 

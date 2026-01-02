@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
+import { encrypt, decrypt } from '../utils/encryption.js';
 
 const prisma = new PrismaClient();
 
@@ -68,7 +69,8 @@ class ShopifyClient {
                 this.shopDomain = domainSetting.value;
             }
             if (tokenSetting?.value) {
-                this.accessToken = tokenSetting.value;
+                // Decrypt the access token
+                this.accessToken = decrypt(tokenSetting.value);
             }
 
             this.initializeClient();
@@ -89,10 +91,12 @@ class ShopifyClient {
 
         // Only update token if a new one is provided
         if (accessToken && accessToken !== 'KEEP_EXISTING') {
+            // Encrypt the access token before storing
+            const encryptedToken = encrypt(accessToken);
             await prisma.systemSetting.upsert({
                 where: { key: 'shopify_access_token' },
-                update: { value: accessToken },
-                create: { key: 'shopify_access_token', value: accessToken },
+                update: { value: encryptedToken },
+                create: { key: 'shopify_access_token', value: encryptedToken },
             });
             this.accessToken = accessToken;
         }
