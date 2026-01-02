@@ -176,6 +176,47 @@ router.post('/shopify/customers/update', verifyWebhook, async (req, res) => {
     }
 });
 
+// Inventory Levels - Updated
+router.post('/shopify/inventory_levels/update', verifyWebhook, async (req, res) => {
+    try {
+        const inventoryUpdate = req.body;
+        const inventoryItemId = String(inventoryUpdate.inventory_item_id);
+        const available = inventoryUpdate.available;
+
+        console.log(`Webhook: inventory_levels/update - Item ${inventoryItemId}, Available: ${available}`);
+
+        // Find SKU by shopifyInventoryItemId
+        const sku = await req.prisma.sku.findFirst({
+            where: { shopifyInventoryItemId: inventoryItemId }
+        });
+
+        if (sku) {
+            // Update the Shopify inventory cache
+            await req.prisma.shopifyInventoryCache.upsert({
+                where: { skuId: sku.id },
+                update: {
+                    availableQty: available,
+                    lastSynced: new Date(),
+                },
+                create: {
+                    skuId: sku.id,
+                    shopifyInventoryItemId: inventoryItemId,
+                    availableQty: available,
+                }
+            });
+
+            console.log(`Updated Shopify inventory cache for SKU ${sku.skuCode}: ${available}`);
+            res.status(200).json({ received: true, updated: true, skuCode: sku.skuCode });
+        } else {
+            console.log(`No SKU found for inventory item ${inventoryItemId}`);
+            res.status(200).json({ received: true, updated: false, reason: 'SKU not found' });
+        }
+    } catch (error) {
+        console.error('Webhook inventory_levels/update error:', error);
+        res.status(200).json({ received: true, error: error.message });
+    }
+});
+
 // ============================================
 // WEBHOOK MANAGEMENT
 // ============================================
@@ -200,6 +241,7 @@ router.get('/status', async (req, res) => {
                 orders_fulfilled: '/api/webhooks/shopify/orders/fulfilled',
                 customers_create: '/api/webhooks/shopify/customers/create',
                 customers_update: '/api/webhooks/shopify/customers/update',
+                inventory_levels_update: '/api/webhooks/shopify/inventory_levels/update',
             },
             recentLogs: logs
         });

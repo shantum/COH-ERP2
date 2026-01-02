@@ -699,6 +699,7 @@ export default function Settings() {
                                             { topic: 'orders/fulfilled', path: '/shopify/orders/fulfilled', desc: 'Order shipped/fulfilled' },
                                             { topic: 'customers/create', path: '/shopify/customers/create', desc: 'New customer registered' },
                                             { topic: 'customers/update', path: '/shopify/customers/update', desc: 'Customer info updated' },
+                                            { topic: 'inventory_levels/update', path: '/shopify/inventory_levels/update', desc: 'Inventory quantity changed' },
                                         ].map((webhook) => (
                                             <tr key={webhook.topic} className="hover:bg-gray-50">
                                                 <td className="px-4 py-2">
