@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi, adminApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, X, Trash2, ChevronRight, Check, ChevronLeft, Undo2, ChevronDown, Search } from 'lucide-react';
+import { Plus, X, Trash2, ChevronRight, Check, Undo2, ChevronDown, Search } from 'lucide-react';
 
 export default function Orders() {
     const queryClient = useQueryClient();
@@ -21,10 +21,10 @@ export default function Orders() {
     const [allocatingLines, setAllocatingLines] = useState<Set<string>>(new Set());
     const [shippingChecked, setShippingChecked] = useState<Set<string>>(new Set());
     const [pendingShipOrder, setPendingShipOrder] = useState<any>(null);
-    const [page, setPage] = useState(1);
-    const [pageSize] = useState(25);
     const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
     const [searchQuery, setSearchQuery] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
 
     const invalidateAll = () => {
         queryClient.invalidateQueries({ queryKey: ['openOrders'] });
@@ -148,16 +148,20 @@ export default function Orders() {
     const formatDateTime = (dateStr: string) => {
         const date = new Date(dateStr);
         return {
-            date: date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+            date: date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
             time: date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
         };
     };
 
-    // Flatten orders into order lines for table display
+    // Flatten orders into order lines for table display (sorted by newest first)
     const flattenOrders = (orders: any[]) => {
         if (!orders) return [];
+        // Sort orders by date descending (newest first)
+        const sortedOrders = [...orders].sort((a, b) =>
+            new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()
+        );
         const rows: any[] = [];
-        orders.forEach(order => {
+        sortedOrders.forEach(order => {
             order.orderLines?.forEach((line: any, idx: number) => {
                 const fabricId = line.sku?.variation?.fabric?.id;
                 const skuStock = getSkuBalance(line.skuId);
@@ -261,32 +265,46 @@ export default function Orders() {
     const openRows = flattenOrders(openOrders);
     const shippedRows = flattenOrders(shippedOrders);
 
-    // Filter by search query (order number)
-    const filterBySearch = (rows: any[]) => {
-        if (!searchQuery.trim()) return rows;
-        const query = searchQuery.toLowerCase();
-        return rows.filter(row => row.orderNumber?.toLowerCase().includes(query));
+    // Filter by search query and date range
+    const filterRows = (rows: any[]) => {
+        let filtered = rows;
+
+        // Filter by search query (order number)
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            filtered = filtered.filter(row => row.orderNumber?.toLowerCase().includes(query));
+        }
+
+        // Filter by date range (open orders only)
+        if (tab === 'open') {
+            if (dateFrom) {
+                const fromDate = new Date(dateFrom);
+                fromDate.setHours(0, 0, 0, 0);
+                filtered = filtered.filter(row => new Date(row.orderDate) >= fromDate);
+            }
+            if (dateTo) {
+                const toDate = new Date(dateTo);
+                toDate.setHours(23, 59, 59, 999);
+                filtered = filtered.filter(row => new Date(row.orderDate) <= toDate);
+            }
+        }
+
+        return filtered;
     };
 
-    const filteredOpenRows = filterBySearch(openRows);
-    const filteredShippedRows = filterBySearch(shippedRows);
+    const filteredOpenRows = filterRows(openRows);
+    const filteredShippedRows = filterRows(shippedRows);
 
     // Filter shipped orders for accordion view
     const filteredShippedOrders = searchQuery.trim()
         ? shippedOrders?.filter((order: any) => order.orderNumber?.toLowerCase().includes(searchQuery.toLowerCase()))
         : shippedOrders;
 
-    // Pagination logic
-    const currentRows = tab === 'open' ? filteredOpenRows : filteredShippedRows;
-    const totalRows = currentRows.length;
-    const totalPages = Math.ceil(totalRows / pageSize);
-    const startIndex = (page - 1) * pageSize;
-    const paginatedRows = currentRows.slice(startIndex, startIndex + pageSize);
+    // Count unique orders for display
+    const uniqueOpenOrderCount = new Set(filteredOpenRows.map(r => r.orderId)).size;
 
-    // Reset page when switching tabs
     const handleTabChange = (newTab: 'open' | 'shipped') => {
         setTab(newTab);
-        setPage(1);
     };
 
     return (
@@ -300,7 +318,7 @@ export default function Orders() {
                             type="text"
                             placeholder="Search order #..."
                             value={searchQuery}
-                            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             className="pl-9 pr-3 py-1.5 text-sm border rounded-lg w-48 focus:outline-none focus:ring-2 focus:ring-gray-200"
                         />
                         {searchQuery && (
@@ -316,14 +334,44 @@ export default function Orders() {
                 </div>
             </div>
 
-            {/* Tabs */}
-            <div className="flex gap-4 border-b text-sm">
-                <button className={`pb-2 font-medium ${tab === 'open' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => handleTabChange('open')}>
-                    Open <span className="text-gray-400 ml-1">({searchQuery ? `${new Set(filteredOpenRows.map(r => r.orderId)).size}/` : ''}{openOrders?.length || 0})</span>
-                </button>
-                <button className={`pb-2 font-medium ${tab === 'shipped' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => handleTabChange('shipped')}>
-                    Shipped <span className="text-gray-400 ml-1">({searchQuery ? `${filteredShippedOrders?.length || 0}/` : ''}{shippedOrders?.length || 0})</span>
-                </button>
+            {/* Tabs and Date Filter */}
+            <div className="flex items-center justify-between border-b">
+                <div className="flex gap-4 text-sm">
+                    <button className={`pb-2 font-medium ${tab === 'open' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => handleTabChange('open')}>
+                        Open <span className="text-gray-400 ml-1">({(searchQuery || dateFrom || dateTo) ? `${uniqueOpenOrderCount}/` : ''}{openOrders?.length || 0})</span>
+                    </button>
+                    <button className={`pb-2 font-medium ${tab === 'shipped' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => handleTabChange('shipped')}>
+                        Shipped <span className="text-gray-400 ml-1">({searchQuery ? `${filteredShippedOrders?.length || 0}/` : ''}{shippedOrders?.length || 0})</span>
+                    </button>
+                </div>
+                {tab === 'open' && (
+                    <div className="flex items-center gap-2 pb-2">
+                        <span className="text-xs text-gray-500">Date range:</span>
+                        <input
+                            type="date"
+                            value={dateFrom}
+                            onChange={(e) => setDateFrom(e.target.value)}
+                            className="text-xs border rounded px-2 py-1 w-32"
+                            placeholder="From"
+                        />
+                        <span className="text-gray-400">-</span>
+                        <input
+                            type="date"
+                            value={dateTo}
+                            onChange={(e) => setDateTo(e.target.value)}
+                            className="text-xs border rounded px-2 py-1 w-32"
+                            placeholder="To"
+                        />
+                        {(dateFrom || dateTo) && (
+                            <button
+                                onClick={() => { setDateFrom(''); setDateTo(''); }}
+                                className="text-xs text-gray-400 hover:text-gray-600"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
             {isLoading && <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div></div>}
@@ -352,7 +400,7 @@ export default function Orders() {
                             </tr>
                         </thead>
                         <tbody>
-                            {paginatedRows.map((row, idx) => {
+                            {filteredOpenRows.map((row, idx) => {
                                 const dt = formatDateTime(row.orderDate);
                                 const hasStock = row.skuStock >= row.qty;
                                 const isAllocated = row.lineStatus === 'allocated' || row.lineStatus === 'picked' || row.lineStatus === 'packed';
@@ -393,8 +441,8 @@ export default function Orders() {
                                         <td className="py-2 pr-3">
                                             {row.isFirstLine ? (
                                                 <div>
-                                                    <span className="text-gray-900">{dt.date}</span>
-                                                    <span className="text-gray-400 ml-1 text-xs">{dt.time}</span>
+                                                    <div className="text-gray-900">{dt.date}</div>
+                                                    <div className="text-gray-400 text-xs">{dt.time}</div>
                                                 </div>
                                             ) : null}
                                         </td>
@@ -559,59 +607,9 @@ export default function Orders() {
                             })}
                         </tbody>
                     </table>
-                    {totalRows === 0 && (
-                        <div className="text-center text-gray-400 py-12">No orders</div>
-                    )}
-
-                    {/* Pagination Controls */}
-                    {totalRows > 0 && (
-                        <div className="flex items-center justify-between border-t pt-3 mt-3">
-                            <div className="text-sm text-gray-500">
-                                Showing {startIndex + 1}-{Math.min(startIndex + pageSize, totalRows)} of {totalRows} items
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                                    disabled={page === 1}
-                                    className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                    <ChevronLeft size={16} />
-                                </button>
-                                <div className="flex items-center gap-1">
-                                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                        let pageNum;
-                                        if (totalPages <= 5) {
-                                            pageNum = i + 1;
-                                        } else if (page <= 3) {
-                                            pageNum = i + 1;
-                                        } else if (page >= totalPages - 2) {
-                                            pageNum = totalPages - 4 + i;
-                                        } else {
-                                            pageNum = page - 2 + i;
-                                        }
-                                        return (
-                                            <button
-                                                key={pageNum}
-                                                onClick={() => setPage(pageNum)}
-                                                className={`w-8 h-8 rounded text-sm ${
-                                                    page === pageNum
-                                                        ? 'bg-gray-900 text-white'
-                                                        : 'hover:bg-gray-100'
-                                                }`}
-                                            >
-                                                {pageNum}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                <button
-                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                                    disabled={page === totalPages}
-                                    className="p-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                    <ChevronRight size={16} />
-                                </button>
-                            </div>
+                    {filteredOpenRows.length === 0 && (
+                        <div className="text-center text-gray-400 py-12">
+                            {(searchQuery || dateFrom || dateTo) ? 'No orders match your filters' : 'No open orders'}
                         </div>
                     )}
                 </div>
