@@ -662,16 +662,37 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                 });
 
                 if (existingOrder) {
-                    // Update status and fulfillment status if changed
+                    // Update status, fulfillment status, and tracking info if changed
                     const newStatus = shopifyClient.mapOrderStatus(shopifyOrder);
                     const newFulfillmentStatus = shopifyOrder.fulfillment_status || 'unfulfilled';
 
-                    if (existingOrder.status !== newStatus || existingOrder.shopifyFulfillmentStatus !== newFulfillmentStatus) {
+                    // Extract tracking info from fulfillments
+                    let newAwbNumber = existingOrder.awbNumber;
+                    let newCourier = existingOrder.courier;
+                    let newShippedAt = existingOrder.shippedAt;
+                    if (shopifyOrder.fulfillments && shopifyOrder.fulfillments.length > 0) {
+                        const fulfillmentWithTracking = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
+                        newAwbNumber = fulfillmentWithTracking.tracking_number || newAwbNumber;
+                        newCourier = fulfillmentWithTracking.tracking_company || newCourier;
+                        if (fulfillmentWithTracking.created_at && !existingOrder.shippedAt) {
+                            newShippedAt = new Date(fulfillmentWithTracking.created_at);
+                        }
+                    }
+
+                    const needsUpdate = existingOrder.status !== newStatus ||
+                        existingOrder.shopifyFulfillmentStatus !== newFulfillmentStatus ||
+                        existingOrder.awbNumber !== newAwbNumber ||
+                        existingOrder.courier !== newCourier;
+
+                    if (needsUpdate) {
                         await req.prisma.order.update({
                             where: { id: existingOrder.id },
                             data: {
                                 status: newStatus,
                                 shopifyFulfillmentStatus: newFulfillmentStatus,
+                                awbNumber: newAwbNumber,
+                                courier: newCourier,
+                                shippedAt: newShippedAt,
                                 syncedAt: new Date(),
                             },
                         });
@@ -769,12 +790,26 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                     ? `${shopifyOrder.customer.first_name || ''} ${shopifyOrder.customer.last_name || ''}`.trim()
                     : shopifyOrder.shipping_address?.name || 'Unknown';
 
+                // Extract tracking info from fulfillments
+                let awbNumber = null;
+                let courier = null;
+                let shippedAt = null;
+                if (shopifyOrder.fulfillments && shopifyOrder.fulfillments.length > 0) {
+                    // Get the most recent fulfillment with tracking info
+                    const fulfillmentWithTracking = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
+                    awbNumber = fulfillmentWithTracking.tracking_number || null;
+                    courier = fulfillmentWithTracking.tracking_company || null;
+                    if (fulfillmentWithTracking.created_at) {
+                        shippedAt = new Date(fulfillmentWithTracking.created_at);
+                    }
+                }
+
                 await req.prisma.order.create({
                     data: {
                         orderNumber: String(shopifyOrder.order_number),
                         shopifyOrderId,
                         channel: shopifyClient.mapOrderChannel(shopifyOrder),
-                        customerId,
+                        ...(customerId ? { customer: { connect: { id: customerId } } } : {}),
                         customerName: customerName || 'Unknown',
                         customerEmail: shopifyOrder.email || null,
                         customerPhone: shopifyOrder.phone || shopifyOrder.shipping_address?.phone || null,
@@ -785,6 +820,9 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                         customerNotes: shopifyOrder.note || null,
                         status: shopifyClient.mapOrderStatus(shopifyOrder),
                         shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
+                        awbNumber,
+                        courier,
+                        shippedAt,
                         totalAmount: parseFloat(shopifyOrder.total_price) || 0,
                         syncedAt: new Date(),
                         orderLines: {

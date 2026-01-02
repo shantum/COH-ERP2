@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// In production, use relative URL; in development, use localhost
+const API_BASE_URL = import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? '/api' : 'http://localhost:3001/api');
 
 const api = axios.create({
     baseURL: API_BASE_URL,
@@ -93,6 +95,7 @@ export const ordersApi = {
     packLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pack`),
     unpackLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpack`),
     ship: (id: string, data: any) => api.post(`/orders/${id}/ship`, data),
+    unship: (id: string) => api.post(`/orders/${id}/unship`),
     deliver: (id: string) => api.post(`/orders/${id}/deliver`),
 };
 

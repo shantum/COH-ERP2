@@ -1,0 +1,14 @@
+{
+  "name": "coh-erp",
+  "version": "1.0.0",
+  "description": "Creatures of Habit ERP System",
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm install && npm run build && cd ../server && npm install && npx prisma generate",
+    "start": "cd server && npm start",
+    "dev": "cd server && npm run dev"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -9,6 +9,7 @@ import Orders from './pages/Orders';
 import Customers from './pages/Customers';
 import Returns from './pages/Returns';
 import Production from './pages/Production';
+import Picklist from './pages/Picklist';
 import Ledgers from './pages/Ledgers';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
@@ -62,6 +63,7 @@ function App() {
               <Route path="customers" element={<Customers />} />
               <Route path="returns" element={<Returns />} />
               <Route path="production" element={<Production />} />
+              <Route path="picklist" element={<Picklist />} />
               <Route path="ledgers" element={<Ledgers />} />
               <Route path="settings" element={<Settings />} />
             </Route>

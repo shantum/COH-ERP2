@@ -272,6 +272,7 @@ model Order {
   totalAmount     Float
   createdAt       DateTime  @default(now())
   syncedAt        DateTime?
+  shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
 
   customer       Customer?       @relation(fields: [customerId], references: [id])
   orderLines     OrderLine[]

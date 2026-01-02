@@ -507,12 +507,13 @@ router.post('/:id/ship', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        // Check all lines are packed
-        const notPacked = order.orderLines.filter((l) => l.lineStatus !== 'packed');
-        if (notPacked.length > 0) {
+        // Check all lines are at least allocated (allow skipping pick/pack steps)
+        const validStatuses = ['allocated', 'picked', 'packed'];
+        const notReady = order.orderLines.filter((l) => !validStatuses.includes(l.lineStatus));
+        if (notReady.length > 0) {
             return res.status(400).json({
-                error: 'Not all lines are packed',
-                notPackedCount: notPacked.length,
+                error: 'Not all lines are allocated',
+                notReadyCount: notReady.length,
             });
         }
 
@@ -584,6 +585,78 @@ router.post('/:id/deliver', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Deliver order error:', error);
         res.status(500).json({ error: 'Failed to mark delivered' });
+    }
+});
+
+// Unship order (move back to open)
+router.post('/:id/unship', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status !== 'shipped') {
+            return res.status(400).json({ error: 'Order is not shipped' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Update order back to open
+            await tx.order.update({
+                where: { id: req.params.id },
+                data: {
+                    status: 'open',
+                    awbNumber: null,
+                    courier: null,
+                    shippedAt: null,
+                },
+            });
+
+            // Update all lines back to allocated
+            await tx.orderLine.updateMany({
+                where: { orderId: req.params.id },
+                data: { lineStatus: 'allocated', shippedAt: null },
+            });
+
+            // Reverse inventory transactions for each line
+            for (const line of order.orderLines) {
+                // Delete the sale outward transaction
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: line.id,
+                        txnType: 'outward',
+                        reason: 'sale',
+                    },
+                });
+
+                // Re-create the reserved transaction (allocation)
+                await tx.inventoryTransaction.create({
+                    data: {
+                        skuId: line.skuId,
+                        txnType: 'reserved',
+                        qty: line.qty,
+                        reason: 'order_allocation',
+                        referenceId: line.id,
+                        notes: `Order ${order.orderNumber} - unshipped`,
+                        createdById: req.user.id,
+                    },
+                });
+            }
+        });
+
+        const updated = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Unship order error:', error);
+        res.status(500).json({ error: 'Failed to unship order' });
     }
 });
 

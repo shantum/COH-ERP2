@@ -10,9 +10,14 @@ node_modules/
 dist/
 build/
 
-# Database
-*.db
+# Database (keep dev.db for deployment)
+# *.db
 *.sqlite
+
+# Migration data (temporary export files)
+server/prisma/migration_data/
+server/prisma/migrate-to-supabase.js
+server/prisma/generate-sql.js
 
 # Logs
 logs
