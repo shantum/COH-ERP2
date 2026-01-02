@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { calculateFabricBalance } from '../utils/queryPatterns.js';
 
 const router = Router();
 
@@ -415,31 +416,6 @@ router.post('/orders/:id/receive', authenticateToken, async (req, res) => {
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
-
-async function calculateFabricBalance(prisma, fabricId) {
-    const result = await prisma.fabricTransaction.groupBy({
-        by: ['txnType'],
-        where: { fabricId },
-        _sum: { qty: true },
-    });
-
-    let totalInward = 0;
-    let totalOutward = 0;
-
-    result.forEach((r) => {
-        if (r.txnType === 'inward') {
-            totalInward = Number(r._sum.qty) || 0;
-        } else {
-            totalOutward = Number(r._sum.qty) || 0;
-        }
-    });
-
-    return {
-        totalInward,
-        totalOutward,
-        currentBalance: totalInward - totalOutward,
-    };
-}
 
 async function calculateAvgDailyConsumption(prisma, fabricId) {
     const thirtyDaysAgo = new Date();

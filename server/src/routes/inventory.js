@@ -1,26 +1,8 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { calculateInventoryBalance, calculateAllInventoryBalances, calculateAllFabricBalances, getEffectiveFabricConsumption } from '../utils/queryPatterns.js';
 
 const router = Router();
-
-// Helper to get effective fabric consumption (SKU-specific or Product-level fallback)
-const getEffectiveFabricConsumption = (sku, product) => {
-    const skuConsumption = Number(sku.fabricConsumption);
-    const DEFAULT_SKU_CONSUMPTION = 1.5; // Schema default
-
-    // If SKU has a non-default consumption value, use it
-    if (skuConsumption !== DEFAULT_SKU_CONSUMPTION) {
-        return skuConsumption;
-    }
-
-    // Otherwise, use Product-level default if set
-    if (product.defaultFabricConsumption) {
-        return Number(product.defaultFabricConsumption);
-    }
-
-    // Final fallback to SKU value
-    return skuConsumption;
-};
 
 // ============================================
 // INVENTORY DASHBOARD
@@ -44,37 +26,39 @@ router.get('/balance', authenticateToken, async (req, res) => {
             },
         });
 
-        const balances = await Promise.all(
-            skus.map(async (sku) => {
-                const balance = await calculateInventoryBalance(req.prisma, sku.id);
+        // Calculate all balances in a single query (fixes N+1)
+        const skuIds = skus.map(sku => sku.id);
+        const balanceMap = await calculateAllInventoryBalances(req.prisma, skuIds);
 
-                // Get image URL from variation or product
-                const imageUrl = sku.variation.imageUrl || sku.variation.product.imageUrl || null;
+        const balances = skus.map((sku) => {
+            const balance = balanceMap.get(sku.id) || { totalInward: 0, totalOutward: 0, totalReserved: 0, currentBalance: 0, availableBalance: 0 };
 
-                return {
-                    skuId: sku.id,
-                    skuCode: sku.skuCode,
-                    productId: sku.variation.product.id,
-                    productName: sku.variation.product.name,
-                    productType: sku.variation.product.productType,
-                    gender: sku.variation.product.gender,
-                    colorName: sku.variation.colorName,
-                    variationId: sku.variation.id,
-                    size: sku.size,
-                    category: sku.variation.product.category,
-                    imageUrl,
-                    currentBalance: balance.currentBalance,
-                    reservedBalance: balance.totalReserved,
-                    availableBalance: balance.availableBalance,
-                    totalInward: balance.totalInward,
-                    totalOutward: balance.totalOutward,
-                    targetStockQty: sku.targetStockQty,
-                    status: balance.availableBalance < sku.targetStockQty ? 'below_target' : 'ok',
-                    mrp: sku.mrp,
-                    shopifyQty: sku.shopifyInventoryCache?.availableQty ?? null,
-                };
-            })
-        );
+            // Get image URL from variation or product
+            const imageUrl = sku.variation.imageUrl || sku.variation.product.imageUrl || null;
+
+            return {
+                skuId: sku.id,
+                skuCode: sku.skuCode,
+                productId: sku.variation.product.id,
+                productName: sku.variation.product.name,
+                productType: sku.variation.product.productType,
+                gender: sku.variation.product.gender,
+                colorName: sku.variation.colorName,
+                variationId: sku.variation.id,
+                size: sku.size,
+                category: sku.variation.product.category,
+                imageUrl,
+                currentBalance: balance.currentBalance,
+                reservedBalance: balance.totalReserved,
+                availableBalance: balance.availableBalance,
+                totalInward: balance.totalInward,
+                totalOutward: balance.totalOutward,
+                targetStockQty: sku.targetStockQty,
+                status: balance.availableBalance < sku.targetStockQty ? 'below_target' : 'ok',
+                mrp: sku.mrp,
+                shopifyQty: sku.shopifyInventoryCache?.availableQty ?? null,
+            };
+        });
 
         let filteredBalances = balances;
 
@@ -305,33 +289,26 @@ router.get('/alerts', authenticateToken, async (req, res) => {
             },
         });
 
+        // Calculate all balances in single queries (fixes N+1)
+        const skuIds = skus.map(sku => sku.id);
+        const inventoryBalanceMap = await calculateAllInventoryBalances(req.prisma, skuIds);
+        const fabricBalanceMap = await calculateAllFabricBalances(req.prisma);
+
         const alerts = [];
 
         for (const sku of skus) {
-            const balance = await calculateInventoryBalance(req.prisma, sku.id);
+            const balance = inventoryBalanceMap.get(sku.id) || { currentBalance: 0 };
 
             if (balance.currentBalance < sku.targetStockQty) {
                 const shortage = sku.targetStockQty - balance.currentBalance;
 
                 // Get effective fabric consumption (SKU or Product-level fallback)
-                const consumptionPerUnit = getEffectiveFabricConsumption(
-                    sku,
-                    sku.variation.product
-                );
+                const consumptionPerUnit = getEffectiveFabricConsumption(sku);
                 const fabricNeeded = shortage * consumptionPerUnit;
 
-                // Check fabric availability
-                const fabricBalance = await req.prisma.fabricTransaction.groupBy({
-                    by: ['txnType'],
-                    where: { fabricId: sku.variation.fabricId },
-                    _sum: { qty: true },
-                });
-
-                let fabricAvailable = 0;
-                fabricBalance.forEach((r) => {
-                    if (r.txnType === 'inward') fabricAvailable += Number(r._sum.qty) || 0;
-                    else fabricAvailable -= Number(r._sum.qty) || 0;
-                });
+                // Get fabric availability from pre-calculated map
+                const fabricBalance = fabricBalanceMap.get(sku.variation.fabricId) || { currentBalance: 0 };
+                const fabricAvailable = fabricBalance.currentBalance;
 
                 const canProduce = Math.floor(fabricAvailable / consumptionPerUnit);
 
@@ -362,42 +339,5 @@ router.get('/alerts', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch stock alerts' });
     }
 });
-
-// ============================================
-// HELPER FUNCTIONS
-// ============================================
-
-async function calculateInventoryBalance(prisma, skuId) {
-    const result = await prisma.inventoryTransaction.groupBy({
-        by: ['txnType'],
-        where: { skuId },
-        _sum: { qty: true },
-    });
-
-    let totalInward = 0;
-    let totalOutward = 0;
-    let totalReserved = 0;
-
-    result.forEach((r) => {
-        if (r.txnType === 'inward') {
-            totalInward = r._sum.qty || 0;
-        } else if (r.txnType === 'outward') {
-            totalOutward = r._sum.qty || 0;
-        } else if (r.txnType === 'reserved') {
-            totalReserved = r._sum.qty || 0;
-        }
-    });
-
-    const currentBalance = totalInward - totalOutward;
-    const availableBalance = currentBalance - totalReserved;
-
-    return {
-        totalInward,
-        totalOutward,
-        totalReserved,
-        currentBalance,
-        availableBalance,
-    };
-}
 
 export default router;

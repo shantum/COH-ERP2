@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { calculateInventoryBalance, ORDER_FULL_INCLUDE } from '../utils/queryPatterns.js';
 
 const router = Router();
 
@@ -58,7 +59,7 @@ router.get('/', async (req, res) => {
 router.get('/open', async (req, res) => {
     try {
         const orders = await req.prisma.order.findMany({
-            where: { status: 'open' },
+            where: { status: 'open', isArchived: false },
             include: {
                 customer: true,
                 orderLines: {
@@ -588,6 +589,52 @@ router.post('/:id/deliver', authenticateToken, async (req, res) => {
     }
 });
 
+// Update order details
+router.put('/:id', authenticateToken, async (req, res) => {
+    try {
+        const {
+            customerName,
+            customerEmail,
+            customerPhone,
+            shippingAddress,
+            internalNotes,
+        } = req.body;
+
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Build update data - only include fields that are provided
+        const updateData = {};
+        if (customerName !== undefined) updateData.customerName = customerName;
+        if (customerEmail !== undefined) updateData.customerEmail = customerEmail;
+        if (customerPhone !== undefined) updateData.customerPhone = customerPhone;
+        if (shippingAddress !== undefined) updateData.shippingAddress = shippingAddress;
+        if (internalNotes !== undefined) updateData.internalNotes = internalNotes;
+
+        const updated = await req.prisma.order.update({
+            where: { id: req.params.id },
+            data: updateData,
+            include: {
+                orderLines: {
+                    include: {
+                        sku: { include: { variation: { include: { product: true } } } },
+                    },
+                },
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Update order error:', error);
+        res.status(500).json({ error: 'Failed to update order' });
+    }
+});
+
 // Unship order (move back to open)
 router.post('/:id/unship', authenticateToken, async (req, res) => {
     try {
@@ -665,18 +712,444 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
     try {
         const { reason } = req.body;
 
-        const updated = await req.prisma.order.update({
+        const order = await req.prisma.order.findUnique({
             where: { id: req.params.id },
-            data: {
-                status: 'cancelled',
-                internalNotes: reason,
-            },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status === 'cancelled') {
+            return res.status(400).json({ error: 'Order is already cancelled' });
+        }
+
+        if (order.status === 'shipped' || order.status === 'delivered') {
+            return res.status(400).json({ error: 'Cannot cancel shipped or delivered orders' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Release reserved inventory for allocated lines
+            for (const line of order.orderLines) {
+                if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
+                    // Delete the reserved transaction
+                    await tx.inventoryTransaction.deleteMany({
+                        where: {
+                            referenceId: line.id,
+                            txnType: 'reserved',
+                            reason: 'order_allocation',
+                        },
+                    });
+                }
+            }
+
+            // Update all lines to cancelled
+            await tx.orderLine.updateMany({
+                where: { orderId: req.params.id },
+                data: { lineStatus: 'pending' },
+            });
+
+            // Update order status
+            await tx.order.update({
+                where: { id: req.params.id },
+                data: {
+                    status: 'cancelled',
+                    internalNotes: reason
+                        ? (order.internalNotes ? `${order.internalNotes}\n\nCancelled: ${reason}` : `Cancelled: ${reason}`)
+                        : order.internalNotes,
+                },
+            });
+        });
+
+        const updated = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
         });
 
         res.json(updated);
     } catch (error) {
         console.error('Cancel order error:', error);
         res.status(500).json({ error: 'Failed to cancel order' });
+    }
+});
+
+// Uncancel order (restore to open)
+router.post('/:id/uncancel', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status !== 'cancelled') {
+            return res.status(400).json({ error: 'Order is not cancelled' });
+        }
+
+        await req.prisma.order.update({
+            where: { id: req.params.id },
+            data: { status: 'open' },
+        });
+
+        const updated = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Uncancel order error:', error);
+        res.status(500).json({ error: 'Failed to restore order' });
+    }
+});
+
+// Get archived orders
+router.get('/status/archived', async (req, res) => {
+    try {
+        const orders = await req.prisma.order.findMany({
+            where: { isArchived: true },
+            include: {
+                customer: true,
+                orderLines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true, fabric: true } },
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: { archivedAt: 'desc' },
+        });
+
+        res.json(orders);
+    } catch (error) {
+        console.error('Get archived orders error:', error);
+        res.status(500).json({ error: 'Failed to fetch archived orders' });
+    }
+});
+
+// Get cancelled orders
+router.get('/status/cancelled', async (req, res) => {
+    try {
+        const orders = await req.prisma.order.findMany({
+            where: { status: 'cancelled', isArchived: false },
+            include: {
+                customer: true,
+                orderLines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true, fabric: true } },
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        res.json(orders);
+    } catch (error) {
+        console.error('Get cancelled orders error:', error);
+        res.status(500).json({ error: 'Failed to fetch cancelled orders' });
+    }
+});
+
+// Archive order
+router.post('/:id/archive', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.isArchived) {
+            return res.status(400).json({ error: 'Order is already archived' });
+        }
+
+        const updated = await req.prisma.order.update({
+            where: { id: req.params.id },
+            data: {
+                isArchived: true,
+                archivedAt: new Date(),
+            },
+            include: { orderLines: true },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Archive order error:', error);
+        res.status(500).json({ error: 'Failed to archive order' });
+    }
+});
+
+// Unarchive order
+router.post('/:id/unarchive', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (!order.isArchived) {
+            return res.status(400).json({ error: 'Order is not archived' });
+        }
+
+        const updated = await req.prisma.order.update({
+            where: { id: req.params.id },
+            data: {
+                isArchived: false,
+                archivedAt: null,
+            },
+            include: { orderLines: true },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Unarchive order error:', error);
+        res.status(500).json({ error: 'Failed to unarchive order' });
+    }
+});
+
+// Cancel a single order line (keeps line visible but marked as cancelled)
+router.post('/lines/:lineId/cancel', authenticateToken, async (req, res) => {
+    try {
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+            include: { order: true },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (line.lineStatus === 'shipped') {
+            return res.status(400).json({ error: 'Cannot cancel shipped line' });
+        }
+
+        if (line.lineStatus === 'cancelled') {
+            return res.status(400).json({ error: 'Line is already cancelled' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Release reserved inventory if allocated
+            if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: line.id,
+                        txnType: 'reserved',
+                        reason: 'order_allocation',
+                    },
+                });
+            }
+
+            // Mark line as cancelled (don't delete)
+            await tx.orderLine.update({
+                where: { id: req.params.lineId },
+                data: { lineStatus: 'cancelled' },
+            });
+
+            // Check if all lines are now cancelled
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId: line.orderId },
+            });
+            const activeLines = allLines.filter(l => l.id === req.params.lineId ? false : l.lineStatus !== 'cancelled');
+
+            if (activeLines.length === 0) {
+                // All lines cancelled - cancel the entire order
+                await tx.order.update({
+                    where: { id: line.orderId },
+                    data: { status: 'cancelled', totalAmount: 0 },
+                });
+            } else {
+                // Recalculate order total (excluding cancelled lines)
+                const newTotal = activeLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0);
+                await tx.order.update({
+                    where: { id: line.orderId },
+                    data: { totalAmount: newTotal },
+                });
+            }
+        });
+
+        const updated = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Cancel line error:', error);
+        res.status(500).json({ error: 'Failed to cancel line' });
+    }
+});
+
+// Uncancel a single order line (restore to pending)
+router.post('/lines/:lineId/uncancel', authenticateToken, async (req, res) => {
+    try {
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+            include: { order: true },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (line.lineStatus !== 'cancelled') {
+            return res.status(400).json({ error: 'Line is not cancelled' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Restore line to pending
+            await tx.orderLine.update({
+                where: { id: req.params.lineId },
+                data: { lineStatus: 'pending' },
+            });
+
+            // Recalculate order total (include this line now)
+            const newTotal = (line.order.totalAmount || 0) + (line.qty * line.unitPrice);
+
+            // If order was cancelled, restore it to open
+            const updateData = { totalAmount: newTotal };
+            if (line.order.status === 'cancelled') {
+                updateData.status = 'open';
+            }
+
+            await tx.order.update({
+                where: { id: line.orderId },
+                data: updateData,
+            });
+        });
+
+        const updated = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Uncancel line error:', error);
+        res.status(500).json({ error: 'Failed to restore line' });
+    }
+});
+
+// Update order line (change qty)
+router.put('/lines/:lineId', authenticateToken, async (req, res) => {
+    try {
+        const { qty, unitPrice } = req.body;
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+            include: { order: true },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (line.lineStatus !== 'pending') {
+            return res.status(400).json({ error: 'Can only edit pending lines' });
+        }
+
+        const updateData = {};
+        if (qty !== undefined) updateData.qty = qty;
+        if (unitPrice !== undefined) updateData.unitPrice = unitPrice;
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: req.params.lineId },
+                data: updateData,
+            });
+
+            // Recalculate order total
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId: line.orderId },
+            });
+            const newTotal = allLines.reduce((sum, l) => {
+                const lineQty = l.id === req.params.lineId ? (qty ?? l.qty) : l.qty;
+                const linePrice = l.id === req.params.lineId ? (unitPrice ?? l.unitPrice) : l.unitPrice;
+                return sum + (lineQty * linePrice);
+            }, 0);
+            await tx.order.update({
+                where: { id: line.orderId },
+                data: { totalAmount: newTotal },
+            });
+        });
+
+        const updated = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Update line error:', error);
+        res.status(500).json({ error: 'Failed to update line' });
+    }
+});
+
+// Add line to order
+router.post('/:id/lines', authenticateToken, async (req, res) => {
+    try {
+        const { skuId, qty, unitPrice } = req.body;
+
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status !== 'open') {
+            return res.status(400).json({ error: 'Can only add lines to open orders' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.orderLine.create({
+                data: {
+                    orderId: req.params.id,
+                    skuId,
+                    qty,
+                    unitPrice,
+                    lineStatus: 'pending',
+                },
+            });
+
+            // Recalculate order total
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId: req.params.id },
+            });
+            const newTotal = allLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0);
+            await tx.order.update({
+                where: { id: req.params.id },
+                data: { totalAmount: newTotal },
+            });
+        });
+
+        const updated = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: {
+                orderLines: {
+                    include: {
+                        sku: { include: { variation: { include: { product: true } } } },
+                    },
+                },
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Add line error:', error);
+        res.status(500).json({ error: 'Failed to add line' });
     }
 });
 
@@ -737,32 +1210,5 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         res.status(500).json({ error: 'Failed to delete order' });
     }
 });
-
-// ============================================
-// HELPER
-// ============================================
-
-async function calculateInventoryBalance(prisma, skuId) {
-    const result = await prisma.inventoryTransaction.groupBy({
-        by: ['txnType'],
-        where: { skuId },
-        _sum: { qty: true },
-    });
-
-    let totalInward = 0;
-    let totalOutward = 0;
-    let totalReserved = 0;
-
-    result.forEach((r) => {
-        if (r.txnType === 'inward') totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') totalOutward = r._sum.qty || 0;
-        else if (r.txnType === 'reserved') totalReserved = r._sum.qty || 0;
-    });
-
-    const currentBalance = totalInward - totalOutward;
-    const availableBalance = currentBalance - totalReserved;
-
-    return { totalInward, totalOutward, totalReserved, currentBalance, availableBalance };
-}
 
 export default router;

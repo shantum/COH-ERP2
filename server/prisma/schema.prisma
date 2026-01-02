@@ -48,6 +48,9 @@ model Product {
 
   fabricType FabricType? @relation(fields: [fabricTypeId], references: [id])
   variations Variation[]
+
+  @@index([fabricTypeId])
+  @@index([category])
 }
 
 model Variation {
@@ -65,6 +68,8 @@ model Variation {
   skus    Sku[]
 
   @@unique([productId, colorName])
+  @@index([productId])
+  @@index([fabricId])
 }
 
 model Sku {
@@ -91,6 +96,8 @@ model Sku {
   exchangeRequestLines  ReturnRequestLine[]    @relation("ExchangeSku")
   feedbackProductLinks  FeedbackProductLink[]
   shopifyInventoryCache ShopifyInventoryCache?
+
+  @@index([variationId])
 }
 
 model SkuCosting {
@@ -147,6 +154,9 @@ model Fabric {
   variations   Variation[]
   transactions FabricTransaction[]
   fabricOrders FabricOrder[]
+
+  @@index([fabricTypeId])
+  @@index([supplierId])
 }
 
 model Supplier {
@@ -184,6 +194,7 @@ model FabricTransaction {
 
   @@index([fabricId])
   @@index([txnType])
+  @@index([createdAt])
 }
 
 model FabricOrder {
@@ -203,6 +214,10 @@ model FabricOrder {
 
   fabric   Fabric   @relation(fields: [fabricId], references: [id])
   supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([fabricId])
+  @@index([supplierId])
+  @@index([status])
 }
 
 // ============================================
@@ -271,6 +286,8 @@ model Order {
   customerNotes   String?
   internalNotes   String?
   status          String    @default("open") // open, shipped, delivered, cancelled, returned
+  isArchived      Boolean   @default(false)
+  archivedAt      DateTime?
   awbNumber       String?
   courier         String?
   shippedAt       DateTime?
@@ -287,6 +304,7 @@ model Order {
   @@index([customerId])
   @@index([status])
   @@index([orderDate])
+  @@index([isArchived])
 }
 
 model OrderLine {
@@ -313,6 +331,7 @@ model OrderLine {
   @@index([orderId])
   @@index([skuId])
   @@index([lineStatus])
+  @@index([productionBatchId])
 }
 
 // ============================================
@@ -338,6 +357,10 @@ model ReturnRequest {
   lines         ReturnRequestLine[]
   shipping      ReturnShipping[]
   statusHistory ReturnStatusHistory[]
+
+  @@index([originalOrderId])
+  @@index([customerId])
+  @@index([status])
 }
 
 model ReturnRequestLine {
@@ -355,6 +378,9 @@ model ReturnRequestLine {
   originalOrderLine OrderLine?    @relation(fields: [originalOrderLineId], references: [id])
   sku               Sku           @relation("ReturnedSku", fields: [skuId], references: [id])
   exchangeSku       Sku?          @relation("ExchangeSku", fields: [exchangeSkuId], references: [id])
+
+  @@index([requestId])
+  @@index([skuId])
 }
 
 model ReturnShipping {
@@ -373,6 +399,8 @@ model ReturnShipping {
   notes             String?
 
   request ReturnRequest @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])
 }
 
 model ReturnStatusHistory {
@@ -386,6 +414,8 @@ model ReturnStatusHistory {
 
   request   ReturnRequest @relation(fields: [requestId], references: [id])
   changedBy User          @relation(fields: [changedById], references: [id])
+
+  @@index([requestId])
 }
 
 // ============================================
@@ -409,6 +439,9 @@ model Feedback {
   media        FeedbackMedia[]
   productLinks FeedbackProductLink[]
   tags         FeedbackTag[]
+
+  @@index([customerId])
+  @@index([status])
 }
 
 model FeedbackRating {
@@ -494,6 +527,11 @@ model ProductionBatch {
   tailor     Tailor?     @relation(fields: [tailorId], references: [id])
   sku        Sku         @relation(fields: [skuId], references: [id])
   orderLines OrderLine[]
+
+  @@index([skuId])
+  @@index([tailorId])
+  @@index([batchDate])
+  @@index([status])
 }
 
 // ============================================
@@ -516,6 +554,9 @@ model StockAlert {
   details   String?
   createdAt DateTime @default(now())
   resolved  Boolean  @default(false)
+
+  @@index([skuId])
+  @@index([resolved])
 }
 
 // ============================================
@@ -565,4 +606,5 @@ model SyncJob {
 
   @@index([status])
   @@index([jobType])
+  @@index([createdAt])
 }
