@@ -40,6 +40,7 @@ router.get('/balance', authenticateToken, async (req, res) => {
                         fabric: true,
                     },
                 },
+                shopifyInventoryCache: true,
             },
         });
 
@@ -47,13 +48,20 @@ router.get('/balance', authenticateToken, async (req, res) => {
             skus.map(async (sku) => {
                 const balance = await calculateInventoryBalance(req.prisma, sku.id);
 
+                // Get image URL from variation or product
+                const imageUrl = sku.variation.imageUrl || sku.variation.product.imageUrl || null;
+
                 return {
                     skuId: sku.id,
                     skuCode: sku.skuCode,
+                    productId: sku.variation.product.id,
                     productName: sku.variation.product.name,
+                    productType: sku.variation.product.productType,
                     colorName: sku.variation.colorName,
+                    variationId: sku.variation.id,
                     size: sku.size,
                     category: sku.variation.product.category,
+                    imageUrl,
                     currentBalance: balance.currentBalance,
                     reservedBalance: balance.totalReserved,
                     availableBalance: balance.availableBalance,
@@ -62,6 +70,7 @@ router.get('/balance', authenticateToken, async (req, res) => {
                     targetStockQty: sku.targetStockQty,
                     status: balance.availableBalance < sku.targetStockQty ? 'below_target' : 'ok',
                     mrp: sku.mrp,
+                    shopifyQty: sku.shopifyInventoryCache?.availableQty ?? null,
                 };
             })
         );
