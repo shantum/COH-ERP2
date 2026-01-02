@@ -8,7 +8,7 @@ cmds = ["cd client && npm install", "cd server && npm install"]
 cmds = ["cd client && npm run build", "cd server && npx prisma generate", "cd server && npx prisma db push --skip-generate"]
 
 [start]
-cmd = "cd server && npm start"
+cmd = "cd server && npx prisma db push --skip-generate && npm start"
 
 [variables]
 NODE_ENV = "production"
