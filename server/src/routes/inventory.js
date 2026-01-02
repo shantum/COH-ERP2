@@ -57,6 +57,7 @@ router.get('/balance', authenticateToken, async (req, res) => {
                     productId: sku.variation.product.id,
                     productName: sku.variation.product.name,
                     productType: sku.variation.product.productType,
+                    gender: sku.variation.product.gender,
                     colorName: sku.variation.colorName,
                     variationId: sku.variation.id,
                     size: sku.size,

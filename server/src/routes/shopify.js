@@ -215,35 +215,52 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
                     }
                 }
 
-                // Find or create product
+                // Find or create product by name AND gender (to keep Men/Women variants separate)
                 let product = await req.prisma.product.findFirst({
-                    where: { name: shopifyProduct.title },
+                    where: {
+                        name: shopifyProduct.title,
+                        gender: gender || 'unisex',
+                    },
                 });
 
                 if (!product) {
-                    product = await req.prisma.product.create({
-                        data: {
-                            name: shopifyProduct.title,
-                            category: shopifyProduct.product_type?.toLowerCase() || 'dress',
-                            productType: 'basic',
-                            gender: gender,
-                            baseProductionTimeMins: 60,
-                            imageUrl: mainImageUrl,
-                        },
+                    // Also check if there's a product with same name but no/different gender
+                    // that should be updated instead of creating a duplicate
+                    const existingByName = await req.prisma.product.findFirst({
+                        where: { name: shopifyProduct.title },
                     });
-                    results.created.products++;
-                } else {
-                    // Update existing product with image and gender if changed
-                    const needsUpdate = (mainImageUrl && product.imageUrl !== mainImageUrl) ||
-                        (gender && product.gender !== gender);
 
-                    if (needsUpdate) {
+                    if (existingByName && !existingByName.gender) {
+                        // Update existing product that has no gender set
+                        product = await req.prisma.product.update({
+                            where: { id: existingByName.id },
+                            data: {
+                                gender: gender || 'unisex',
+                                imageUrl: mainImageUrl || existingByName.imageUrl,
+                                category: shopifyProduct.product_type?.toLowerCase() || existingByName.category,
+                            },
+                        });
+                        results.updated.products++;
+                    } else {
+                        // Create new product (different gender or no existing product)
+                        product = await req.prisma.product.create({
+                            data: {
+                                name: shopifyProduct.title,
+                                category: shopifyProduct.product_type?.toLowerCase() || 'dress',
+                                productType: 'basic',
+                                gender: gender || 'unisex',
+                                baseProductionTimeMins: 60,
+                                imageUrl: mainImageUrl,
+                            },
+                        });
+                        results.created.products++;
+                    }
+                } else {
+                    // Update existing product with image if changed
+                    if (mainImageUrl && product.imageUrl !== mainImageUrl) {
                         await req.prisma.product.update({
                             where: { id: product.id },
-                            data: {
-                                ...(mainImageUrl && product.imageUrl !== mainImageUrl ? { imageUrl: mainImageUrl } : {}),
-                                ...(gender && product.gender !== gender ? { gender: gender } : {}),
-                            },
+                            data: { imageUrl: mainImageUrl },
                         });
                         results.updated.products++;
                     }

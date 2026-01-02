@@ -9,6 +9,7 @@ interface InventoryItem {
     productId: string;
     productName: string;
     productType: string;
+    gender: string | null;
     colorName: string;
     variationId: string;
     size: string;
@@ -29,6 +30,7 @@ interface GroupedInventory {
     productName: string;
     productId: string;
     productType: string;
+    gender: string | null;
     imageUrl: string | null;
     colors: {
         colorName: string;
@@ -114,6 +116,7 @@ export default function Inventory() {
                     productName: item.productName,
                     productId: item.productId,
                     productType: item.productType,
+                    gender: item.gender,
                     imageUrl: item.imageUrl,
                     colors: [],
                     totalStock: 0,
@@ -313,7 +316,18 @@ export default function Inventory() {
                                 )}
 
                                 <div className="flex-1">
-                                    <h3 className="font-semibold text-gray-900">{product.productName}</h3>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-semibold text-gray-900">{product.productName}</h3>
+                                        {product.gender && product.gender !== 'unisex' && (
+                                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                                product.gender === 'women' ? 'bg-pink-100 text-pink-700' :
+                                                product.gender === 'men' ? 'bg-blue-100 text-blue-700' :
+                                                'bg-gray-100 text-gray-600'
+                                            }`}>
+                                                {product.gender.charAt(0).toUpperCase() + product.gender.slice(1)}
+                                            </span>
+                                        )}
+                                    </div>
                                     <p className="text-xs text-gray-500">{product.colors.length} colors • {product.colors.reduce((sum, c) => sum + c.items.length, 0)} SKUs</p>
                                 </div>
 
