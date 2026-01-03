@@ -7,7 +7,8 @@ import { useState, useMemo, useCallback } from 'react';
 import { Plus, X, Search, ChevronDown, Undo2 } from 'lucide-react';
 
 // Custom hooks
-import { useOrdersData, OrderTab } from '../hooks/useOrdersData';
+import { useOrdersData } from '../hooks/useOrdersData';
+import type { OrderTab } from '../hooks/useOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 
 // Utilities

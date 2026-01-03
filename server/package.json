@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
+    "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
@@ -29,6 +32,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "jest": "^30.2.0",
     "nodemon": "^3.1.7",
     "prisma": "^5.22.0"
   }

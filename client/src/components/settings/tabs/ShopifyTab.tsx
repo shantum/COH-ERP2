@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { shopifyApi } from '../../../services/api';
 import JsonViewer from '../../JsonViewer';
 import {
-    Store, Key, CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
+    Key, CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
     AlertCircle, Package, Webhook, Copy, ExternalLink
 } from 'lucide-react';
 

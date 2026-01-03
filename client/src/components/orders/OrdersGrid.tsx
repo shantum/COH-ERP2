@@ -17,7 +17,8 @@ import type {
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
 import { Check, X, Pencil, Ban, Archive, Undo2 } from 'lucide-react';
-import { formatDateTime, DEFAULT_HEADERS, FlattenedOrderRow } from '../../utils/orderHelpers';
+import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
+import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
