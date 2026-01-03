@@ -851,7 +851,7 @@ router.get('/status/cancelled', async (req, res) => {
                     },
                 },
             },
-            orderBy: { updatedAt: 'desc' },
+            orderBy: { createdAt: 'desc' },
         });
 
         res.json(orders);
