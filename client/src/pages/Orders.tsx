@@ -98,10 +98,12 @@ const EditableHeader = (props: any) => {
 export default function Orders() {
     const queryClient = useQueryClient();
     const [tab, setTab] = useState<'open' | 'shipped' | 'cancelled' | 'archived'>('open');
-    const { data: openOrders, isLoading: loadingOpen } = useQuery({ queryKey: ['openOrders'], queryFn: () => ordersApi.getOpen().then(r => r.data) });
-    const { data: shippedOrders, isLoading: loadingShipped } = useQuery({ queryKey: ['shippedOrders'], queryFn: () => ordersApi.getShipped().then(r => r.data) });
-    const { data: cancelledOrders, isLoading: loadingCancelled } = useQuery({ queryKey: ['cancelledOrders'], queryFn: () => ordersApi.getCancelled().then(r => r.data) });
-    const { data: archivedOrders, isLoading: loadingArchived } = useQuery({ queryKey: ['archivedOrders'], queryFn: () => ordersApi.getArchived().then(r => r.data) });
+    // Poll every 30 seconds to catch webhook updates
+    const POLL_INTERVAL = 30000;
+    const { data: openOrders, isLoading: loadingOpen } = useQuery({ queryKey: ['openOrders'], queryFn: () => ordersApi.getOpen().then(r => r.data), refetchInterval: tab === 'open' ? POLL_INTERVAL : false });
+    const { data: shippedOrders, isLoading: loadingShipped } = useQuery({ queryKey: ['shippedOrders'], queryFn: () => ordersApi.getShipped().then(r => r.data), refetchInterval: tab === 'shipped' ? POLL_INTERVAL : false });
+    const { data: cancelledOrders, isLoading: loadingCancelled } = useQuery({ queryKey: ['cancelledOrders'], queryFn: () => ordersApi.getCancelled().then(r => r.data), refetchInterval: tab === 'cancelled' ? POLL_INTERVAL : false });
+    const { data: archivedOrders, isLoading: loadingArchived } = useQuery({ queryKey: ['archivedOrders'], queryFn: () => ordersApi.getArchived().then(r => r.data), refetchInterval: tab === 'archived' ? POLL_INTERVAL : false });
     const { data: allSkus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });
     const { data: inventoryBalance } = useQuery({ queryKey: ['inventoryBalance'], queryFn: () => inventoryApi.getBalance().then(r => r.data) });
     const { data: fabricStock } = useQuery({ queryKey: ['fabricStock'], queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data) });
