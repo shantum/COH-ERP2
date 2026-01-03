@@ -1,6 +1,16 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { calculateInventoryBalance, ORDER_FULL_INCLUDE } from '../utils/queryPatterns.js';
+import {
+    calculateInventoryBalance,
+    ORDER_FULL_INCLUDE,
+    TXN_TYPE,
+    TXN_REASON,
+    releaseReservedInventory,
+    createReservedTransaction,
+    createSaleTransaction,
+    deleteSaleTransactions,
+    findOrCreateCustomer,
+} from '../utils/queryPatterns.js';
 
 const router = Router();
 
@@ -210,39 +220,13 @@ router.post('/', authenticateToken, async (req, res) => {
         // Find or create customer
         let customerId = null;
         if (customerEmail || customerPhone) {
-            let customer = null;
-
-            // Try to find by email first
-            if (customerEmail) {
-                customer = await req.prisma.customer.findUnique({ where: { email: customerEmail } });
-            }
-
-            // If no email or not found, try to find by phone
-            if (!customer && customerPhone) {
-                customer = await req.prisma.customer.findFirst({ where: { phone: customerPhone } });
-            }
-
-            // Create new customer if not found
-            if (!customer) {
-                // Use email if provided, otherwise generate one from phone
-                const email = customerEmail || `${customerPhone.replace(/\D/g, '')}@phone.local`;
-                customer = await req.prisma.customer.create({
-                    data: {
-                        email,
-                        firstName: customerName?.split(' ')[0],
-                        lastName: customerName?.split(' ').slice(1).join(' '),
-                        phone: customerPhone,
-                        defaultAddress: shippingAddress,
-                    },
-                });
-            } else if (customerPhone && !customer.phone) {
-                // Update phone if customer exists but doesn't have phone
-                customer = await req.prisma.customer.update({
-                    where: { id: customer.id },
-                    data: { phone: customerPhone },
-                });
-            }
-
+            const customer = await findOrCreateCustomer(req.prisma, {
+                email: customerEmail,
+                phone: customerPhone,
+                firstName: customerName?.split(' ')[0],
+                lastName: customerName?.split(' ').slice(1).join(' '),
+                defaultAddress: shippingAddress,
+            });
             customerId = customer.id;
         }
 
@@ -312,16 +296,11 @@ router.post('/lines/:lineId/allocate', authenticateToken, async (req, res) => {
         // Create reserved transaction and update line in a transaction
         await req.prisma.$transaction(async (tx) => {
             // Create reserved inventory transaction
-            await tx.inventoryTransaction.create({
-                data: {
-                    skuId: line.skuId,
-                    txnType: 'reserved',
-                    qty: line.qty,
-                    reason: 'order_allocation',
-                    referenceId: line.id,
-                    notes: `Reserved for order ${line.order.orderNumber}`,
-                    createdById: req.user.id,
-                },
+            await createReservedTransaction(tx, {
+                skuId: line.skuId,
+                qty: line.qty,
+                orderLineId: line.id,
+                userId: req.user.id,
             });
 
             // Update order line status
@@ -372,14 +351,8 @@ router.post('/lines/:lineId/unallocate', authenticateToken, async (req, res) => 
         }
 
         await req.prisma.$transaction(async (tx) => {
-            // Delete the reserved transaction
-            await tx.inventoryTransaction.deleteMany({
-                where: {
-                    referenceId: line.id,
-                    txnType: 'reserved',
-                    reason: 'order_allocation',
-                },
-            });
+            // Release reserved inventory
+            await releaseReservedInventory(tx, line.id);
 
             // Update order line status back to pending
             await tx.orderLine.update({
@@ -539,26 +512,15 @@ router.post('/:id/ship', authenticateToken, async (req, res) => {
 
             // Create inventory outward transactions for each line and remove reservations
             for (const line of order.orderLines) {
-                // Delete the reserved transaction (allocation is now fulfilled)
-                await tx.inventoryTransaction.deleteMany({
-                    where: {
-                        referenceId: line.id,
-                        txnType: 'reserved',
-                        reason: 'order_allocation',
-                    },
-                });
+                // Release reserved inventory (allocation is now fulfilled)
+                await releaseReservedInventory(tx, line.id);
 
                 // Create the actual outward transaction for the sale
-                await tx.inventoryTransaction.create({
-                    data: {
-                        skuId: line.skuId,
-                        txnType: 'outward',
-                        qty: line.qty,
-                        reason: 'sale',
-                        referenceId: line.id,
-                        notes: `Order ${order.orderNumber}`,
-                        createdById: req.user.id,
-                    },
+                await createSaleTransaction(tx, {
+                    skuId: line.skuId,
+                    qty: line.qty,
+                    orderLineId: line.id,
+                    userId: req.user.id,
                 });
             }
         });
@@ -672,25 +634,14 @@ router.post('/:id/unship', authenticateToken, async (req, res) => {
             // Reverse inventory transactions for each line
             for (const line of order.orderLines) {
                 // Delete the sale outward transaction
-                await tx.inventoryTransaction.deleteMany({
-                    where: {
-                        referenceId: line.id,
-                        txnType: 'outward',
-                        reason: 'sale',
-                    },
-                });
+                await deleteSaleTransactions(tx, line.id);
 
                 // Re-create the reserved transaction (allocation)
-                await tx.inventoryTransaction.create({
-                    data: {
-                        skuId: line.skuId,
-                        txnType: 'reserved',
-                        qty: line.qty,
-                        reason: 'order_allocation',
-                        referenceId: line.id,
-                        notes: `Order ${order.orderNumber} - unshipped`,
-                        createdById: req.user.id,
-                    },
+                await createReservedTransaction(tx, {
+                    skuId: line.skuId,
+                    qty: line.qty,
+                    orderLineId: line.id,
+                    userId: req.user.id,
                 });
             }
         });
@@ -733,14 +684,7 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
             // Release reserved inventory for allocated lines
             for (const line of order.orderLines) {
                 if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
-                    // Delete the reserved transaction
-                    await tx.inventoryTransaction.deleteMany({
-                        where: {
-                            referenceId: line.id,
-                            txnType: 'reserved',
-                            reason: 'order_allocation',
-                        },
-                    });
+                    await releaseReservedInventory(tx, line.id);
                 }
             }
 
@@ -985,13 +929,7 @@ router.post('/lines/:lineId/cancel', authenticateToken, async (req, res) => {
         await req.prisma.$transaction(async (tx) => {
             // Release reserved inventory if allocated
             if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
-                await tx.inventoryTransaction.deleteMany({
-                    where: {
-                        referenceId: line.id,
-                        txnType: 'reserved',
-                        reason: 'order_allocation',
-                    },
-                });
+                await releaseReservedInventory(tx, line.id);
             }
 
             // Mark line as cancelled (don't delete)

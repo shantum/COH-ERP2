@@ -4,6 +4,40 @@
  */
 
 // ============================================
+// TRANSACTION CONSTANTS
+// ============================================
+
+/**
+ * Inventory transaction types
+ */
+export const TXN_TYPE = {
+    INWARD: 'inward',
+    OUTWARD: 'outward',
+    RESERVED: 'reserved',
+};
+
+/**
+ * Inventory transaction reasons
+ */
+export const TXN_REASON = {
+    ORDER_ALLOCATION: 'order_allocation',
+    PRODUCTION: 'production',
+    SALE: 'sale',
+    RETURN_RECEIPT: 'return_receipt',
+    DAMAGE: 'damage',
+    ADJUSTMENT: 'adjustment',
+    TRANSFER: 'transfer',
+};
+
+/**
+ * Fabric transaction types
+ */
+export const FABRIC_TXN_TYPE = {
+    INWARD: 'inward',
+    OUTWARD: 'outward',
+};
+
+// ============================================
 // ORDER INCLUDES
 // ============================================
 
@@ -388,4 +422,98 @@ export async function findOrCreateCustomer(prisma, { email, phone, firstName, la
     }
 
     return customer;
+}
+
+// ============================================
+// INVENTORY TRANSACTION HELPERS
+// ============================================
+
+/**
+ * Release reserved inventory for an order line
+ * Used when unallocating, shipping, or cancelling an order line
+ * @param {PrismaClient} prisma - Prisma client (or transaction)
+ * @param {string} orderLineId - Order line ID
+ * @returns {number} Number of transactions deleted
+ */
+export async function releaseReservedInventory(prisma, orderLineId) {
+    const result = await prisma.inventoryTransaction.deleteMany({
+        where: {
+            referenceId: orderLineId,
+            txnType: TXN_TYPE.RESERVED,
+            reason: TXN_REASON.ORDER_ALLOCATION,
+        },
+    });
+    return result.count;
+}
+
+/**
+ * Release reserved inventory for multiple order lines
+ * @param {PrismaClient} prisma - Prisma client (or transaction)
+ * @param {string[]} orderLineIds - Array of order line IDs
+ * @returns {number} Number of transactions deleted
+ */
+export async function releaseReservedInventoryBatch(prisma, orderLineIds) {
+    const result = await prisma.inventoryTransaction.deleteMany({
+        where: {
+            referenceId: { in: orderLineIds },
+            txnType: TXN_TYPE.RESERVED,
+            reason: TXN_REASON.ORDER_ALLOCATION,
+        },
+    });
+    return result.count;
+}
+
+/**
+ * Create a reserved inventory transaction for order allocation
+ * @param {PrismaClient} prisma - Prisma client (or transaction)
+ * @param {Object} params - Transaction parameters
+ * @returns {Object} Created transaction
+ */
+export async function createReservedTransaction(prisma, { skuId, qty, orderLineId, userId }) {
+    return prisma.inventoryTransaction.create({
+        data: {
+            skuId,
+            txnType: TXN_TYPE.RESERVED,
+            qty,
+            reason: TXN_REASON.ORDER_ALLOCATION,
+            referenceId: orderLineId,
+            createdById: userId,
+        },
+    });
+}
+
+/**
+ * Create a sale (outward) transaction when shipping
+ * @param {PrismaClient} prisma - Prisma client (or transaction)
+ * @param {Object} params - Transaction parameters
+ * @returns {Object} Created transaction
+ */
+export async function createSaleTransaction(prisma, { skuId, qty, orderLineId, userId }) {
+    return prisma.inventoryTransaction.create({
+        data: {
+            skuId,
+            txnType: TXN_TYPE.OUTWARD,
+            qty,
+            reason: TXN_REASON.SALE,
+            referenceId: orderLineId,
+            createdById: userId,
+        },
+    });
+}
+
+/**
+ * Delete sale transactions for an order line (used when unshipping)
+ * @param {PrismaClient} prisma - Prisma client (or transaction)
+ * @param {string} orderLineId - Order line ID
+ * @returns {number} Number of transactions deleted
+ */
+export async function deleteSaleTransactions(prisma, orderLineId) {
+    const result = await prisma.inventoryTransaction.deleteMany({
+        where: {
+            referenceId: orderLineId,
+            txnType: TXN_TYPE.OUTWARD,
+            reason: TXN_REASON.SALE,
+        },
+    });
+    return result.count;
 }

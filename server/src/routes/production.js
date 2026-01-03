@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { calculateAllInventoryBalances, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
 
 const router = Router();
 
@@ -206,7 +207,7 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
 
             // Create inventory inward with batch code for tracking
             await tx.inventoryTransaction.create({
-                data: { skuId: batch.skuId, txnType: 'inward', qty: qtyCompleted, reason: 'production', referenceId: batch.id, notes: `Production ${batch.batchCode || batch.id}`, createdById: req.user.id },
+                data: { skuId: batch.skuId, txnType: TXN_TYPE.INWARD, qty: qtyCompleted, reason: TXN_REASON.PRODUCTION, referenceId: batch.id, notes: `Production ${batch.batchCode || batch.id}`, createdById: req.user.id },
             });
 
             // Get effective fabric consumption (SKU or Product-level fallback)
@@ -248,12 +249,12 @@ router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
 
             // Delete inventory inward transaction
             await tx.inventoryTransaction.deleteMany({
-                where: { referenceId: batch.id, reason: 'production', txnType: 'inward' }
+                where: { referenceId: batch.id, reason: TXN_REASON.PRODUCTION, txnType: TXN_TYPE.INWARD }
             });
 
             // Delete fabric outward transaction
             await tx.fabricTransaction.deleteMany({
-                where: { referenceId: batch.id, reason: 'production', txnType: 'outward' }
+                where: { referenceId: batch.id, reason: TXN_REASON.PRODUCTION, txnType: 'outward' }
             });
         });
 
@@ -403,22 +404,14 @@ router.get('/requirements', authenticateToken, async (req, res) => {
             orderBy: { orderDate: 'asc' }
         });
 
-        // Get current inventory for all SKUs
-        const inventoryTxns = await req.prisma.inventoryTransaction.groupBy({
-            by: ['skuId', 'txnType'],
-            _sum: { qty: true }
-        });
+        // Get current inventory for all SKUs (using shared helper)
+        const balanceMap = await calculateAllInventoryBalances(req.prisma);
 
-        // Calculate inventory balance per SKU
+        // Convert to simple object for lookup (use availableBalance for production planning)
         const inventoryBalance = {};
-        inventoryTxns.forEach(txn => {
-            if (!inventoryBalance[txn.skuId]) inventoryBalance[txn.skuId] = 0;
-            if (txn.txnType === 'inward') {
-                inventoryBalance[txn.skuId] += txn._sum.qty || 0;
-            } else {
-                inventoryBalance[txn.skuId] -= txn._sum.qty || 0;
-            }
-        });
+        for (const [skuId, balance] of balanceMap) {
+            inventoryBalance[skuId] = balance.availableBalance;
+        }
 
         // Get planned/in-progress production batches per SKU
         const plannedBatches = await req.prisma.productionBatch.findMany({
