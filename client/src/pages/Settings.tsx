@@ -608,9 +608,9 @@ export default function Settings() {
                                         </p>
                                         <p className="text-purple-700">
                                             Updated: {backfillOrdersMutation.data?.data.results?.updated || backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillOrdersMutation.data?.data.results?.total || backfillFromCacheMutation.data?.data.results?.total || 0} orders
-                                            {backfillFromCacheMutation.data?.data.results?.noCache > 0 && (
+                                            {(backfillFromCacheMutation.data?.data?.results?.noCache ?? 0) > 0 && (
                                                 <span className="ml-2 text-orange-600">
-                                                    ({backfillFromCacheMutation.data.data.results.noCache} orders had no cached data)
+                                                    ({backfillFromCacheMutation.data?.data?.results?.noCache} orders had no cached data)
                                                 </span>
                                             )}
                                         </p>
