@@ -98,53 +98,29 @@ export default function Settings() {
         },
     });
 
-    // Sync mutations
-    const syncOrdersMutation = useMutation({
-        mutationFn: (params: { limit: number; skipSkuMatching: boolean }) =>
-            shopifyApi.syncOrders({ limit: params.limit, skipSkuMatching: params.skipSkuMatching }),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
-        },
-    });
-
-    const syncCustomersMutation = useMutation({
-        mutationFn: (limit: number) => shopifyApi.syncCustomers({ limit }),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
-        },
-    });
-
-    // Bulk sync mutations
-    const syncAllOrdersMutation = useMutation({
-        mutationFn: (days: number) => shopifyApi.syncAllOrders({ days }),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
-        },
-    });
-
-    const syncAllCustomersMutation = useMutation({
-        mutationFn: () => shopifyApi.syncAllCustomers(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
-            queryClient.invalidateQueries({ queryKey: ['customers'] });
-        },
-    });
-
-    const backfillOrdersMutation = useMutation({
-        mutationFn: () => shopifyApi.backfillOrders(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
-            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
-        },
-    });
-
+    // Cache-related mutations
     const backfillFromCacheMutation = useMutation({
         mutationFn: () => shopifyApi.backfillFromCache(),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['orders'] });
             queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
         },
+    });
+
+    const reprocessCacheMutation = useMutation({
+        mutationFn: () => shopifyApi.reprocessCache(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
+        },
+    });
+
+    // Cache status
+    const { data: cacheStatus } = useQuery({
+        queryKey: ['cacheStatus'],
+        queryFn: () => shopifyApi.getCacheStatus().then(r => r.data),
+        refetchInterval: 10000, // Poll every 10 seconds
     });
 
     // Background sync jobs
@@ -539,80 +515,75 @@ export default function Settings() {
                                     </button>
                                     <button
                                         className="btn btn-primary flex items-center gap-2"
-                                        onClick={() => syncOrdersMutation.mutate({ limit: syncLimit, skipSkuMatching: false })}
-                                        disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
+                                        onClick={() => startJobMutation.mutate({ jobType: 'orders', days: syncDays })}
+                                        disabled={startJobMutation.isPending}
                                     >
                                         <Play size={16} />
-                                        {syncOrdersMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} New`}
+                                        {startJobMutation.isPending ? 'Starting...' : 'Sync Orders'}
                                     </button>
-                                    <div className="flex items-center gap-1">
-                                        <select
-                                            value={syncDays}
-                                            onChange={(e) => setSyncDays(Number(e.target.value))}
-                                            className="input py-1.5 text-sm w-28"
-                                        >
-                                            <option value={30}>Last 30 days</option>
-                                            <option value={60}>Last 60 days</option>
-                                            <option value={90}>Last 90 days</option>
-                                            <option value={180}>Last 6 months</option>
-                                            <option value={365}>Last year</option>
-                                            <option value={9999}>All time</option>
-                                        </select>
-                                        <button
-                                            className="btn bg-blue-700 text-white hover:bg-blue-800 flex items-center gap-2"
-                                            onClick={() => {
-                                                if (confirm(`This will sync orders from the last ${syncDays} days. Continue?`)) {
-                                                    syncAllOrdersMutation.mutate(syncDays);
-                                                }
-                                            }}
-                                            disabled={syncOrdersMutation.isPending || syncAllOrdersMutation.isPending}
-                                        >
-                                            <RefreshCw size={16} className={syncAllOrdersMutation.isPending ? 'animate-spin' : ''} />
-                                            {syncAllOrdersMutation.isPending ? 'Syncing...' : 'Bulk Sync'}
-                                        </button>
-                                    </div>
-                                    <button
-                                        className="btn bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-2"
-                                        onClick={() => {
-                                            if (confirm('This will update existing orders with missing payment method data from Shopify API. May hit rate limits. Continue?')) {
-                                                backfillOrdersMutation.mutate();
-                                            }
-                                        }}
-                                        disabled={backfillOrdersMutation.isPending}
+                                    <select
+                                        value={syncDays}
+                                        onChange={(e) => setSyncDays(Number(e.target.value))}
+                                        className="input py-1.5 text-sm w-32"
                                     >
-                                        <RefreshCw size={16} className={backfillOrdersMutation.isPending ? 'animate-spin' : ''} />
-                                        {backfillOrdersMutation.isPending ? 'Backfilling...' : 'Backfill (API)'}
-                                    </button>
-                                    <button
-                                        className="btn bg-green-600 text-white hover:bg-green-700 flex items-center gap-2"
-                                        onClick={() => {
-                                            if (confirm('This will update payment method from cached Shopify data. No API calls, no rate limits. Continue?')) {
-                                                backfillFromCacheMutation.mutate();
-                                            }
-                                        }}
-                                        disabled={backfillFromCacheMutation.isPending}
-                                    >
-                                        <RefreshCw size={16} className={backfillFromCacheMutation.isPending ? 'animate-spin' : ''} />
-                                        {backfillFromCacheMutation.isPending ? 'Processing...' : 'Backfill (Cache)'}
-                                    </button>
+                                        <option value={30}>Last 30 days</option>
+                                        <option value={60}>Last 60 days</option>
+                                        <option value={90}>Last 90 days</option>
+                                        <option value={180}>Last 6 months</option>
+                                        <option value={365}>Last year</option>
+                                    </select>
                                 </div>
-                                <p className="text-xs text-gray-500 mb-3">
-                                    "Backfill (API)" fetches from Shopify (may hit rate limits). "Backfill (Cache)" uses stored data (faster, no limits).
-                                </p>
 
-                                {/* Backfill result */}
-                                {(backfillOrdersMutation.data || backfillFromCacheMutation.data) && (
-                                    <div className="mt-3 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
+                                {/* Cache Status */}
+                                {cacheStatus && (
+                                    <div className="mb-4 p-3 bg-gray-50 rounded-lg flex flex-wrap items-center gap-3 text-sm">
+                                        <span className="font-medium text-gray-700">Cache:</span>
+                                        <span className="text-gray-600">{cacheStatus.totalCached || 0} orders</span>
+                                        {(cacheStatus.failed || 0) > 0 && (
+                                            <span className="text-red-600">{cacheStatus.failed} failed</span>
+                                        )}
+                                        {(cacheStatus.pending || 0) > 0 && (
+                                            <span className="text-yellow-600">{cacheStatus.pending} pending</span>
+                                        )}
+                                        {(cacheStatus.failed || 0) > 0 && (
+                                            <button
+                                                className="btn btn-sm bg-orange-500 text-white hover:bg-orange-600 flex items-center gap-1"
+                                                onClick={() => reprocessCacheMutation.mutate()}
+                                                disabled={reprocessCacheMutation.isPending}
+                                            >
+                                                <RefreshCw size={14} className={reprocessCacheMutation.isPending ? 'animate-spin' : ''} />
+                                                Retry Failed
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Backfill from cache (for missing payment methods) */}
+                                {backfillFromCacheMutation.data && (
+                                    <div className="mb-4 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
                                         <p className="font-medium text-purple-800">
-                                            {backfillOrdersMutation.data?.data.message || backfillFromCacheMutation.data?.data.message}
+                                            {backfillFromCacheMutation.data?.data.message}
                                         </p>
                                         <p className="text-purple-700">
-                                            Updated: {backfillOrdersMutation.data?.data.results?.updated || backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillOrdersMutation.data?.data.results?.total || backfillFromCacheMutation.data?.data.results?.total || 0} orders
+                                            Updated: {backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillFromCacheMutation.data?.data.results?.total || 0} orders
                                             {(backfillFromCacheMutation.data?.data?.results?.noCache ?? 0) > 0 && (
                                                 <span className="ml-2 text-orange-600">
                                                     ({backfillFromCacheMutation.data?.data?.results?.noCache} orders had no cached data)
                                                 </span>
                                             )}
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Reprocess result */}
+                                {reprocessCacheMutation.data && (
+                                    <div className="mb-4 p-3 rounded-lg text-sm bg-green-50 border border-green-200">
+                                        <p className="font-medium text-green-800">
+                                            Reprocessed {reprocessCacheMutation.data?.data?.processed || 0} orders
+                                        </p>
+                                        <p className="text-green-700">
+                                            Succeeded: {reprocessCacheMutation.data?.data?.succeeded || 0},
+                                            Failed: {reprocessCacheMutation.data?.data?.failed || 0}
                                         </p>
                                     </div>
                                 )}
@@ -627,66 +598,6 @@ export default function Settings() {
                                             </button>
                                         </div>
                                         <JsonViewer data={orderPreview.orders} rootName="orders" />
-                                    </div>
-                                )}
-
-                                {/* Sync result */}
-                                {syncOrdersMutation.data && (
-                                    <div className={`mt-3 p-3 rounded-lg text-sm ${
-                                        syncOrdersMutation.data.data.fetched === 0
-                                            ? 'bg-blue-50 border border-blue-200'
-                                            : syncOrdersMutation.data.data.results?.errors?.length > 0
-                                                ? 'bg-yellow-50 border border-yellow-200'
-                                                : 'bg-green-50 border border-green-200'
-                                    }`}>
-                                        <p className={`font-medium ${
-                                            syncOrdersMutation.data.data.fetched === 0
-                                                ? 'text-blue-800'
-                                                : syncOrdersMutation.data.data.results?.errors?.length > 0
-                                                    ? 'text-yellow-800'
-                                                    : 'text-green-800'
-                                        }`}>
-                                            {syncOrdersMutation.data.data.message || 'Sync completed!'} (Fetched: {syncOrdersMutation.data.data.fetched})
-                                        </p>
-                                        {syncOrdersMutation.data.data.fetched > 0 && (
-                                            <p className="text-green-700">
-                                                Created: {syncOrdersMutation.data.data.results?.created?.orders || 0} orders,{' '}
-                                                Updated: {syncOrdersMutation.data.data.results?.updated || 0},
-                                                Skipped: {syncOrdersMutation.data.data.results?.skipped || 0}
-                                            </p>
-                                        )}
-                                        {syncOrdersMutation.data.data.results?.errors?.length > 0 && (
-                                            <div className="mt-2 text-yellow-700">
-                                                <p className="font-medium">Skipped reasons:</p>
-                                                <ul className="list-disc list-inside text-xs max-h-24 overflow-y-auto">
-                                                    {syncOrdersMutation.data.data.results.errors.slice(0, 5).map((err: string, i: number) => (
-                                                        <li key={i}>{err}</li>
-                                                    ))}
-                                                    {syncOrdersMutation.data.data.results.errors.length > 5 && (
-                                                        <li>...and {syncOrdersMutation.data.data.results.errors.length - 5} more</li>
-                                                    )}
-                                                </ul>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Bulk sync result */}
-                                {syncAllOrdersMutation.data && (
-                                    <div className={`mt-3 p-3 rounded-lg text-sm ${syncAllOrdersMutation.data.data.results?.errors?.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
-                                        <p className="font-medium text-green-800">
-                                            Bulk sync completed! ({syncAllOrdersMutation.data.data.results?.dateFilter || 'All'}) - Total: {syncAllOrdersMutation.data.data.totalInShopify}, Fetched: {syncAllOrdersMutation.data.data.results?.totalFetched || 0}
-                                        </p>
-                                        <p className="text-green-700">
-                                            Created: {syncAllOrdersMutation.data.data.results?.created?.orders || 0} orders |{' '}
-                                            Updated: {syncAllOrdersMutation.data.data.results?.updated || 0} |{' '}
-                                            Skipped: {syncAllOrdersMutation.data.data.results?.skipped || 0}
-                                            {(syncAllOrdersMutation.data.data.results?.skippedExisting > 0 || syncAllOrdersMutation.data.data.results?.skippedNoSku > 0) && (
-                                                <span className="text-gray-500 text-xs ml-1">
-                                                    (existing: {syncAllOrdersMutation.data.data.results?.skippedExisting || 0}, no SKU: {syncAllOrdersMutation.data.data.results?.skippedNoSku || 0})
-                                                </span>
-                                            )}
-                                        </p>
                                     </div>
                                 )}
                             </div>
@@ -708,23 +619,11 @@ export default function Settings() {
                                     </button>
                                     <button
                                         className="btn btn-primary flex items-center gap-2"
-                                        onClick={() => syncCustomersMutation.mutate(syncLimit)}
-                                        disabled={syncCustomersMutation.isPending || syncAllCustomersMutation.isPending}
+                                        onClick={() => startJobMutation.mutate({ jobType: 'customers', days: 9999 })}
+                                        disabled={startJobMutation.isPending}
                                     >
                                         <Play size={16} />
-                                        {syncCustomersMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} Customers`}
-                                    </button>
-                                    <button
-                                        className="btn bg-blue-700 text-white hover:bg-blue-800 flex items-center gap-2"
-                                        onClick={() => {
-                                            if (confirm('This will sync ALL customers from Shopify (only those with at least 1 order). This may take several minutes for large datasets. Continue?')) {
-                                                syncAllCustomersMutation.mutate();
-                                            }
-                                        }}
-                                        disabled={syncCustomersMutation.isPending || syncAllCustomersMutation.isPending}
-                                    >
-                                        <RefreshCw size={16} className={syncAllCustomersMutation.isPending ? 'animate-spin' : ''} />
-                                        {syncAllCustomersMutation.isPending ? 'Syncing All...' : 'Sync All Customers'}
+                                        {startJobMutation.isPending ? 'Starting...' : 'Sync Customers'}
                                     </button>
                                 </div>
                                 <p className="text-xs text-gray-500 mb-3">
@@ -741,36 +640,6 @@ export default function Settings() {
                                             </button>
                                         </div>
                                         <JsonViewer data={customerPreview.customers} rootName="customers" />
-                                    </div>
-                                )}
-
-                                {/* Sync result */}
-                                {syncCustomersMutation.data && (
-                                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
-                                        <p className="font-medium text-green-800">Sync completed!</p>
-                                        <p className="text-green-700">
-                                            Created: {syncCustomersMutation.data.data.results?.created || 0},{' '}
-                                            Updated: {syncCustomersMutation.data.data.results?.updated || 0}
-                                            {syncCustomersMutation.data.data.results?.skippedNoOrders > 0 && (
-                                                <span className="text-gray-500"> | Skipped (no orders): {syncCustomersMutation.data.data.results.skippedNoOrders}</span>
-                                            )}
-                                        </p>
-                                    </div>
-                                )}
-
-                                {/* Bulk sync result */}
-                                {syncAllCustomersMutation.data && (
-                                    <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
-                                        <p className="font-medium text-green-800">
-                                            Bulk sync completed! (Total in Shopify: {syncAllCustomersMutation.data.data.totalInShopify}, Fetched: {syncAllCustomersMutation.data.data.results?.totalFetched || 0})
-                                        </p>
-                                        <p className="text-green-700">
-                                            Created: {syncAllCustomersMutation.data.data.results?.created || 0},{' '}
-                                            Updated: {syncAllCustomersMutation.data.data.results?.updated || 0}
-                                            {syncAllCustomersMutation.data.data.results?.skippedNoOrders > 0 && (
-                                                <span className="text-gray-500"> | Skipped (no orders): {syncAllCustomersMutation.data.data.results.skippedNoOrders}</span>
-                                            )}
-                                        </p>
                                     </div>
                                 )}
                             </div>

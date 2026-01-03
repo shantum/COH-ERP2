@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
+import { cacheAndProcessOrder } from '../services/shopifyOrderProcessor.js';
 
 const router = Router();
 
@@ -269,218 +270,20 @@ router.put('/secret', async (req, res) => {
 
 /**
  * Unified order webhook handler - handles create, update, cancel, and fulfill
- * This single function processes any order webhook from Shopify
- *
- * CACHE-FIRST APPROACH:
- * 1. Upsert raw Shopify data to ShopifyOrderCache (always succeeds)
- * 2. Process to Order table (may fail on SKU matching, etc.)
- * 3. Update cache with processedAt on success or processingError on failure
+ * Uses shared shopifyOrderProcessor module for cache-first processing
  */
 async function processShopifyOrderWebhook(prisma, shopifyOrder, webhookTopic = 'orders/updated') {
-    const shopifyOrderId = String(shopifyOrder.id);
-    const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrderId;
+    const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrder.id;
+    console.log(`Processing webhook for Order #${orderName}`);
 
-    // ========================================
-    // STEP 1: Cache raw Shopify data first
-    // ========================================
-    await prisma.shopifyOrderCache.upsert({
-        where: { id: shopifyOrderId },
-        create: {
-            id: shopifyOrderId,
-            rawData: JSON.stringify(shopifyOrder),
-            orderNumber: shopifyOrder.name || null,
-            financialStatus: shopifyOrder.financial_status || null,
-            fulfillmentStatus: shopifyOrder.fulfillment_status || null,
-            webhookTopic,
-            lastWebhookAt: new Date(),
-        },
-        update: {
-            rawData: JSON.stringify(shopifyOrder),
-            orderNumber: shopifyOrder.name || null,
-            financialStatus: shopifyOrder.financial_status || null,
-            fulfillmentStatus: shopifyOrder.fulfillment_status || null,
-            webhookTopic,
-            lastWebhookAt: new Date(),
-            // Clear any previous processing error since we have new data
-            processingError: null,
-        }
-    });
-    console.log(`Cache: Order ${orderName} stored in ShopifyOrderCache`);
-
-    // ========================================
-    // STEP 2: Process to Order table
-    // ========================================
-    let result;
-    try {
-        result = await processShopifyOrderToERP(prisma, shopifyOrder);
-
-        // STEP 3a: Mark as successfully processed
-        await prisma.shopifyOrderCache.update({
-            where: { id: shopifyOrderId },
-            data: { processedAt: new Date(), processingError: null }
-        });
-
-        console.log(`Order ${orderName}: ${result.action}`);
-        return result;
-    } catch (error) {
-        // STEP 3b: Record processing error but don't throw
-        // Raw data is preserved in cache for retry
-        await prisma.shopifyOrderCache.update({
-            where: { id: shopifyOrderId },
-            data: { processingError: error.message }
-        });
-        console.error(`Order ${orderName}: Processing failed - ${error.message}`);
-
-        // Return error info instead of throwing
-        return { action: 'cache_only', error: error.message, cached: true };
-    }
-}
-
-/**
- * Process Shopify order data to ERP Order table
- * Extracted from processShopifyOrderWebhook for reuse in reprocessing
- */
-async function processShopifyOrderToERP(prisma, shopifyOrder) {
-    const shopifyOrderId = String(shopifyOrder.id);
-    const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrderId;
-
-    // Check if order exists
-    let existingOrder = await prisma.order.findFirst({
-        where: { shopifyOrderId },
-        include: { orderLines: true }
+    // Use shared processor with cache-first approach
+    // This caches raw data first, then processes to ERP
+    const result = await cacheAndProcessOrder(prisma, shopifyOrder, webhookTopic, {
+        skipNoSku: false // Webhooks should create orders even without SKU matches
     });
 
-    // Extract customer info
-    const customer = shopifyOrder.customer;
-    const shippingAddress = shopifyOrder.shipping_address;
-
-    // Find or create customer
-    let customerId = null;
-    if (customer) {
-        const shopifyCustomerId = String(customer.id);
-        let dbCustomer = await prisma.customer.findFirst({
-            where: {
-                OR: [
-                    { shopifyCustomerId },
-                    { email: customer.email }
-                ].filter(Boolean)
-            }
-        });
-
-        if (!dbCustomer && customer.email) {
-            dbCustomer = await prisma.customer.create({
-                data: {
-                    email: customer.email,
-                    firstName: customer.first_name,
-                    lastName: customer.last_name,
-                    phone: customer.phone,
-                    shopifyCustomerId,
-                    defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-                }
-            });
-        }
-        customerId = dbCustomer?.id;
-    }
-
-    // Determine order status based on Shopify fields
-    let status = 'open';
-    if (shopifyOrder.cancelled_at) {
-        status = 'cancelled';
-    } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
-        // If fulfilled in Shopify and we have it as shipped locally, keep it shipped
-        if (existingOrder?.status === 'shipped') {
-            status = 'shipped';
-        }
-    }
-
-    // Determine payment method (COD vs Prepaid)
-    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-    const paymentMethod = isPrepaidGateway ? 'Prepaid' :
-        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
-
-    // Build order data
-    const orderData = {
-        shopifyOrderId,
-        orderNumber: shopifyOrder.name || `SHOP-${shopifyOrderId.slice(-8)}`,
-        shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data (legacy, kept for compatibility)
-        channel: 'shopify',
-        status,
-        customerId,
-        customerName: shippingAddress
-            ? `${shippingAddress.first_name || ''} ${shippingAddress.last_name || ''}`.trim()
-            : customer?.first_name ? `${customer.first_name} ${customer.last_name || ''}`.trim() : 'Unknown',
-        customerEmail: customer?.email || shopifyOrder.email,
-        customerPhone: shippingAddress?.phone || customer?.phone,
-        shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-        totalAmount: parseFloat(shopifyOrder.total_price) || 0,
-        shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
-        orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
-        customerNotes: shopifyOrder.note || null,
-        paymentMethod,
-    };
-
-    // Add cancellation note if cancelled
-    if (shopifyOrder.cancelled_at && !existingOrder?.internalNotes?.includes('Cancelled via Shopify')) {
-        orderData.internalNotes = existingOrder?.internalNotes
-            ? `${existingOrder.internalNotes}\nCancelled via Shopify at ${shopifyOrder.cancelled_at}`
-            : `Cancelled via Shopify at ${shopifyOrder.cancelled_at}`;
-    }
-
-    if (existingOrder) {
-        // Update existing order
-        await prisma.order.update({
-            where: { id: existingOrder.id },
-            data: orderData
-        });
-
-        // Determine what changed for logging
-        let changeType = 'updated';
-        if (shopifyOrder.cancelled_at && existingOrder.status !== 'cancelled') {
-            changeType = 'cancelled';
-        } else if (shopifyOrder.fulfillment_status === 'fulfilled' && existingOrder.shopifyFulfillmentStatus !== 'fulfilled') {
-            changeType = 'fulfilled';
-        }
-
-        return { action: changeType, orderId: existingOrder.id };
-    } else {
-        // Create new order with lines
-        const lineItems = shopifyOrder.line_items || [];
-        const orderLines = [];
-
-        for (const item of lineItems) {
-            const shopifyVariantId = item.variant_id ? String(item.variant_id) : null;
-
-            // Try to find matching SKU
-            let sku = null;
-            if (shopifyVariantId) {
-                sku = await prisma.sku.findFirst({ where: { shopifyVariantId } });
-            }
-            if (!sku && item.sku) {
-                sku = await prisma.sku.findFirst({ where: { skuCode: item.sku } });
-            }
-
-            if (sku) {
-                orderLines.push({
-                    skuId: sku.id,
-                    qty: item.quantity,
-                    unitPrice: parseFloat(item.price) || 0,
-                    lineStatus: 'pending',
-                });
-            }
-        }
-
-        const newOrder = await prisma.order.create({
-            data: {
-                ...orderData,
-                orderLines: {
-                    create: orderLines
-                }
-            }
-        });
-
-        return { action: 'created', orderId: newOrder.id, linesCreated: orderLines.length };
-    }
+    console.log(`Order ${orderName}: ${result.action}`);
+    return result;
 }
 
 // Legacy wrapper for backward compatibility

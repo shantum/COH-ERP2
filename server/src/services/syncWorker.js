@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import shopifyClient from './shopify.js';
+import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
 
 const prisma = new PrismaClient();
 
@@ -301,174 +302,28 @@ class SyncWorker {
 
     /**
      * Sync a single order from Shopify
+     * Uses shared processor with cache-first approach
      */
     async syncSingleOrder(shopifyOrder) {
-        const shopifyOrderId = String(shopifyOrder.id);
-
-        // Check if exists
-        const existingOrder = await prisma.order.findUnique({
-            where: { shopifyOrderId }
+        // Use shared processor - caches first, then processes to ERP
+        const result = await cacheAndProcessOrder(prisma, shopifyOrder, 'api_sync', {
+            skipNoSku: true // Bulk sync should skip orders with no matching SKUs
         });
 
-        if (existingOrder) {
-            // Update if status changed
-            const newStatus = shopifyClient.mapOrderStatus(shopifyOrder);
-            const newFulfillmentStatus = shopifyOrder.fulfillment_status || 'unfulfilled';
-
-            // Extract tracking info
-            let newAwbNumber = existingOrder.awbNumber;
-            let newCourier = existingOrder.courier;
-            let newShippedAt = existingOrder.shippedAt;
-
-            if (shopifyOrder.fulfillments?.length > 0) {
-                const f = shopifyOrder.fulfillments.find(x => x.tracking_number) || shopifyOrder.fulfillments[0];
-                newAwbNumber = f.tracking_number || newAwbNumber;
-                newCourier = f.tracking_company || newCourier;
-                if (f.created_at && !existingOrder.shippedAt) {
-                    newShippedAt = new Date(f.created_at);
-                }
-            }
-
-            const needsUpdate = existingOrder.status !== newStatus ||
-                existingOrder.shopifyFulfillmentStatus !== newFulfillmentStatus ||
-                existingOrder.awbNumber !== newAwbNumber ||
-                existingOrder.courier !== newCourier;
-
-            if (needsUpdate) {
-                await prisma.order.update({
-                    where: { id: existingOrder.id },
-                    data: {
-                        status: newStatus,
-                        shopifyFulfillmentStatus: newFulfillmentStatus,
-                        awbNumber: newAwbNumber,
-                        courier: newCourier,
-                        shippedAt: newShippedAt,
-                        syncedAt: new Date(),
-                    }
-                });
-                return 'updated';
+        // Map result.action to legacy return values for job tracking
+        if (result.action === 'created') return 'created';
+        if (result.action === 'updated' || result.action === 'cancelled' || result.action === 'fulfilled') return 'updated';
+        if (result.action === 'skipped') {
+            if (result.reason === 'no_matching_skus') {
+                throw new Error('No matching SKUs found');
             }
             return 'skipped';
         }
-
-        // Find or create customer
-        let customerId = null;
-        if (shopifyOrder.customer) {
-            const customerEmail = shopifyOrder.customer.email?.toLowerCase();
-            const shopifyCustomerId = String(shopifyOrder.customer.id);
-
-            if (customerEmail) {
-                let customer = await prisma.customer.findFirst({
-                    where: {
-                        OR: [
-                            { shopifyCustomerId },
-                            { email: customerEmail },
-                        ],
-                    },
-                });
-
-                if (!customer) {
-                    customer = await prisma.customer.create({
-                        data: {
-                            shopifyCustomerId,
-                            email: customerEmail,
-                            phone: shopifyOrder.customer.phone || null,
-                            firstName: shopifyOrder.customer.first_name || null,
-                            lastName: shopifyOrder.customer.last_name || null,
-                            defaultAddress: shopifyOrder.shipping_address
-                                ? JSON.stringify(shopifyClient.formatAddress(shopifyOrder.shipping_address))
-                                : null,
-                            firstOrderDate: new Date(shopifyOrder.created_at),
-                        },
-                    });
-                }
-                customerId = customer.id;
-
-                await prisma.customer.update({
-                    where: { id: customer.id },
-                    data: { lastOrderDate: new Date(shopifyOrder.created_at) },
-                });
-            }
+        if (result.action === 'cache_only') {
+            throw new Error(result.error || 'Processing failed');
         }
 
-        // Build order lines
-        const orderLines = [];
-        let hasMatchedSku = false;
-
-        for (const lineItem of shopifyOrder.line_items || []) {
-            let sku = null;
-
-            if (lineItem.variant_id) {
-                sku = await prisma.sku.findFirst({
-                    where: { shopifyVariantId: String(lineItem.variant_id) },
-                });
-            }
-
-            if (!sku && lineItem.sku) {
-                sku = await prisma.sku.findFirst({
-                    where: { skuCode: lineItem.sku },
-                });
-            }
-
-            if (sku) {
-                hasMatchedSku = true;
-                orderLines.push({
-                    shopifyLineId: String(lineItem.id),
-                    skuId: sku.id,
-                    qty: lineItem.quantity,
-                    unitPrice: parseFloat(lineItem.price) || 0,
-                });
-            }
-        }
-
-        if (!hasMatchedSku) {
-            throw new Error('No matching SKUs found');
-        }
-
-        // Extract tracking info
-        let awbNumber = null;
-        let courier = null;
-        let shippedAt = null;
-
-        if (shopifyOrder.fulfillments?.length > 0) {
-            const f = shopifyOrder.fulfillments.find(x => x.tracking_number) || shopifyOrder.fulfillments[0];
-            awbNumber = f.tracking_number || null;
-            courier = f.tracking_company || null;
-            if (f.created_at) shippedAt = new Date(f.created_at);
-        }
-
-        const customerName = shopifyOrder.customer
-            ? `${shopifyOrder.customer.first_name || ''} ${shopifyOrder.customer.last_name || ''}`.trim()
-            : shopifyOrder.shipping_address?.name || 'Unknown';
-
-        await prisma.order.create({
-            data: {
-                orderNumber: String(shopifyOrder.order_number),
-                shopifyOrderId,
-                channel: shopifyClient.mapOrderChannel(shopifyOrder),
-                ...(customerId ? { customer: { connect: { id: customerId } } } : {}),
-                customerName: customerName || 'Unknown',
-                customerEmail: shopifyOrder.email || null,
-                customerPhone: shopifyOrder.phone || shopifyOrder.shipping_address?.phone || null,
-                shippingAddress: shopifyOrder.shipping_address
-                    ? JSON.stringify(shopifyClient.formatAddress(shopifyOrder.shipping_address))
-                    : null,
-                orderDate: new Date(shopifyOrder.created_at),
-                customerNotes: shopifyOrder.note || null,
-                status: shopifyClient.mapOrderStatus(shopifyOrder),
-                shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
-                awbNumber,
-                courier,
-                shippedAt,
-                totalAmount: parseFloat(shopifyOrder.total_price) || 0,
-                syncedAt: new Date(),
-                orderLines: {
-                    create: orderLines,
-                },
-            },
-        });
-
-        return 'created';
+        return 'skipped';
     }
 
     /**

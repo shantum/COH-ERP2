@@ -194,23 +194,21 @@ export const shopifyApi = {
     testConnection: () => api.post('/shopify/test-connection'),
     getStatus: () => api.get('/shopify/status'),
     getSyncHistory: () => api.get('/shopify/sync/history'),
+    // Preview endpoints
     previewProducts: (limit?: number) => api.post('/shopify/preview/products', { limit }),
     previewOrders: (limit?: number) => api.post('/shopify/preview/orders', { limit }),
     previewCustomers: (limit?: number) => api.post('/shopify/preview/customers', { limit }),
+    // Direct sync (products and customers only - orders use background jobs)
     syncProducts: (data?: { limit?: number; syncAll?: boolean }) => api.post('/shopify/sync/products', data || {}),
-    syncOrders: (data?: { since_id?: string; created_at_min?: string; limit?: number; skipSkuMatching?: boolean }) =>
-        api.post('/shopify/sync/orders', data || {}),
     syncCustomers: (data?: { since_id?: string; created_at_min?: string; limit?: number }) =>
         api.post('/shopify/sync/customers', data || {}),
-    syncAllOrders: (data?: { status?: string; days?: number }) =>
-        api.post('/shopify/sync/orders/all', data || {}),
-    backfillOrders: () => api.post('/shopify/sync/orders/backfill'),
+    syncAllCustomers: () =>
+        api.post('/shopify/sync/customers/all'),
+    // Cache utilities (use cached data, no API rate limits)
     backfillFromCache: () => api.post('/shopify/sync/backfill-from-cache'),
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
     getCacheStatus: () => api.get('/shopify/sync/cache-status'),
-    syncAllCustomers: () =>
-        api.post('/shopify/sync/customers/all'),
-    // Background sync jobs
+    // Background sync jobs (recommended for orders sync)
     startSyncJob: (jobType: string, days?: number) =>
         api.post('/shopify/sync/jobs/start', { jobType, days }),
     getSyncJobs: (limit?: number) =>
