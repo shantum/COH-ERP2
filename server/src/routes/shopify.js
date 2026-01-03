@@ -857,10 +857,19 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                         }
                     }
 
+                    // Calculate payment method for update
+                    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                    const newPaymentMethod = isPrepaidGateway ? 'Prepaid' :
+                        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+                    const newCustomerNotes = shopifyOrder.note || null;
+
                     const needsUpdate = existingOrder.status !== newStatus ||
                         existingOrder.shopifyFulfillmentStatus !== newFulfillmentStatus ||
                         existingOrder.awbNumber !== newAwbNumber ||
-                        existingOrder.courier !== newCourier;
+                        existingOrder.courier !== newCourier ||
+                        existingOrder.paymentMethod !== newPaymentMethod ||
+                        existingOrder.customerNotes !== newCustomerNotes;
 
                     if (needsUpdate) {
                         await req.prisma.order.update({
@@ -871,6 +880,8 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                                 awbNumber: newAwbNumber,
                                 courier: newCourier,
                                 shippedAt: newShippedAt,
+                                paymentMethod: newPaymentMethod,
+                                customerNotes: newCustomerNotes,
                                 syncedAt: new Date(),
                             },
                         });
@@ -1123,10 +1134,19 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                             }
                         }
 
+                        // Calculate payment method for update
+                        const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                        const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                        const newPaymentMethod = isPrepaidGateway ? 'Prepaid' :
+                            (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+                        const newCustomerNotes = shopifyOrder.note || null;
+
                         const needsUpdate = existingOrder.status !== newStatus ||
                             existingOrder.shopifyFulfillmentStatus !== newFulfillmentStatus ||
                             existingOrder.awbNumber !== newAwbNumber ||
-                            existingOrder.courier !== newCourier;
+                            existingOrder.courier !== newCourier ||
+                            existingOrder.paymentMethod !== newPaymentMethod ||
+                            existingOrder.customerNotes !== newCustomerNotes;
 
                         if (needsUpdate) {
                             await req.prisma.order.update({
@@ -1137,6 +1157,8 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                                     awbNumber: newAwbNumber,
                                     courier: newCourier,
                                     shippedAt: newShippedAt,
+                                    paymentMethod: newPaymentMethod,
+                                    customerNotes: newCustomerNotes,
                                     syncedAt: new Date(),
                                 },
                             });
