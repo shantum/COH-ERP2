@@ -204,6 +204,7 @@ export const shopifyApi = {
         api.post('/shopify/sync/customers', data || {}),
     syncAllOrders: (data?: { status?: string; days?: number }) =>
         api.post('/shopify/sync/orders/all', data || {}),
+    backfillOrders: () => api.post('/shopify/sync/orders/backfill'),
     syncAllCustomers: () =>
         api.post('/shopify/sync/customers/all'),
     // Background sync jobs

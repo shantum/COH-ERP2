@@ -131,6 +131,14 @@ export default function Settings() {
         },
     });
 
+    const backfillOrdersMutation = useMutation({
+        mutationFn: () => shopifyApi.backfillOrders(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+        },
+    });
+
     // Background sync jobs
     const { data: syncJobs, refetch: refetchJobs } = useQuery({
         queryKey: ['syncJobs'],
@@ -555,10 +563,34 @@ export default function Settings() {
                                             {syncAllOrdersMutation.isPending ? 'Syncing...' : 'Bulk Sync'}
                                         </button>
                                     </div>
+                                    <button
+                                        className="btn bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-2"
+                                        onClick={() => {
+                                            if (confirm('This will update existing orders with missing payment method data from Shopify. Continue?')) {
+                                                backfillOrdersMutation.mutate();
+                                            }
+                                        }}
+                                        disabled={backfillOrdersMutation.isPending}
+                                    >
+                                        <RefreshCw size={16} className={backfillOrdersMutation.isPending ? 'animate-spin' : ''} />
+                                        {backfillOrdersMutation.isPending ? 'Backfilling...' : 'Backfill Missing Data'}
+                                    </button>
                                 </div>
                                 <p className="text-xs text-gray-500 mb-3">
-                                    "Sync New" continues from last synced order. "Bulk Sync" fetches orders within date range.
+                                    "Sync New" continues from last synced order. "Bulk Sync" fetches orders within date range. "Backfill" updates existing orders with missing payment/notes data.
                                 </p>
+
+                                {/* Backfill result */}
+                                {backfillOrdersMutation.data && (
+                                    <div className="mt-3 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
+                                        <p className="font-medium text-purple-800">
+                                            {backfillOrdersMutation.data.data.message}
+                                        </p>
+                                        <p className="text-purple-700">
+                                            Updated: {backfillOrdersMutation.data.data.results?.updated || 0} of {backfillOrdersMutation.data.data.results?.total || 0} orders
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* Order Preview - Raw Data */}
                                 {orderPreview && (
