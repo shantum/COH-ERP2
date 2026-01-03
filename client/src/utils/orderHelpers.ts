@@ -77,10 +77,10 @@ export interface FlattenedOrderRow {
     colorName: string;
     size: string;
     skuCode: string;
-    skuId: string;
+    skuId: string | null;
     qty: number;
-    lineId: string;
-    lineStatus: string;
+    lineId: string | null;
+    lineStatus: string | null;
     skuStock: number;
     fabricBalance: number;
     shopifyStatus: string;
@@ -115,8 +115,41 @@ export function flattenOrders(
     sortedOrders.forEach(order => {
         const customerKey = order.customerEmail || order.customerName || 'unknown';
         const custStats = customerStats[customerKey] || { orderCount: 0, ltv: 0 };
+        const orderLines = order.orderLines || [];
 
-        order.orderLines?.forEach((line: any, idx: number) => {
+        // Handle orders with no items (test orders)
+        if (orderLines.length === 0) {
+            rows.push({
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                orderDate: order.orderDate,
+                customerName: order.customerName,
+                city: parseCity(order.shippingAddress),
+                customerOrderCount: custStats.orderCount,
+                customerLtv: custStats.ltv,
+                productName: '(no items)',
+                colorName: '-',
+                size: '-',
+                skuCode: '-',
+                skuId: null,
+                qty: 0,
+                lineId: null,
+                lineStatus: null,
+                skuStock: 0,
+                fabricBalance: 0,
+                shopifyStatus: order.shopifyFulfillmentStatus || '-',
+                productionBatch: null,
+                productionBatchId: null,
+                productionDate: null,
+                isFirstLine: true,
+                totalLines: 0,
+                fulfillmentStage: order.fulfillmentStage,
+                order: order
+            });
+            return;
+        }
+
+        orderLines.forEach((line: any, idx: number) => {
             const fabricId = line.sku?.variation?.fabric?.id;
             const skuStock = getSkuBalance(inventoryBalance, line.skuId);
             const fabricBal = fabricId ? getFabricBalance(fabricStock, fabricId) : 0;
@@ -145,7 +178,7 @@ export function flattenOrders(
                 productionBatchId: productionBatch?.id || null,
                 productionDate: productionBatch?.batchDate?.split('T')[0] || null,
                 isFirstLine: idx === 0,
-                totalLines: order.orderLines.length,
+                totalLines: orderLines.length,
                 fulfillmentStage: order.fulfillmentStage,
                 order: order
             });

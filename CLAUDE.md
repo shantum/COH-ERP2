@@ -27,6 +27,14 @@ npm run build    # TypeScript compile + Vite production build
 npm run lint     # Run ESLint
 ```
 
+### Testing
+```bash
+cd server
+npm test           # Run Jest tests
+npm test:watch     # Watch mode
+npm test:coverage  # Coverage report
+```
+
 ### First-time Setup
 ```bash
 # Server
@@ -56,10 +64,16 @@ Default login: `admin@coh.com` / `admin123`
 ### Database Schema (Prisma)
 Located at `server/prisma/schema.prisma`. Key models:
 - **Product Hierarchy**: Product → Variation → SKU (with imageUrl, barcode fields)
-- **Inventory**: FabricInventory/ProductInventory with InventoryTransaction ledger
+- **Inventory**: `InventoryTransaction` ledger (inward/outward/reserved)
 - **Orders**: Order → OrderLine with fulfillment status tracking and Shopify sync fields
 - **Returns**: ReturnRequest with multi-step workflow states
 - **Production**: ProductionBatch for date-wise manufacturing scheduling
+
+### Key Business Logic Files
+Critical files to understand before making changes:
+- `server/src/utils/queryPatterns.js` - Shared Prisma patterns, inventory calculations
+- `server/src/services/shopifyOrderProcessor.js` - Order sync logic (cache-first pattern)
+- `client/src/types/index.ts` - All TypeScript types for entities
 
 ### API Routes
 All routes in `server/src/routes/`. Base URL: `/api`
@@ -136,7 +150,34 @@ Shopify credentials stored in database via Settings UI (not env vars).
 
 ## Important Notes
 - Backend is JavaScript (ES modules), frontend is TypeScript
-- No test framework is currently configured
+- Jest testing framework configured with 30+ essential tests
 - SQLite is the default database (file: `server/prisma/dev.db`)
 - Product/Variation models include `imageUrl` for Shopify thumbnails
 - SKU model includes `barcode` (unique, 8-digit) and Shopify variant IDs
+
+## Inventory System
+Transaction-based ledger with three types:
+- `inward` - Stock additions (production, returns)
+- `outward` - Stock removals (sales)
+- `reserved` - Soft holds for allocated orders
+
+```
+Balance = inward - outward
+Available = balance - reserved
+```
+
+## Order Fulfillment Flow
+```
+pending → allocated → picked → packed → [ship order] → shipped
+```
+
+Actions and their inventory effects:
+- **Allocate**: Creates `reserved` transaction
+- **Ship**: Deletes `reserved`, creates `outward`
+- **Unship**: Reverses the above
+
+## Common Gotchas
+- Shopify orders use cache-first pattern (check `ShopifyOrderCache` table)
+- Production completion creates both inventory inward AND fabric outward
+- `getEffectiveFabricConsumption()` has fallback logic: SKU → Product → 1.5
+- `dev.db` is gitignored - don't commit database files
