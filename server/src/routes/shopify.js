@@ -1126,6 +1126,96 @@ router.post('/sync/orders/backfill', authenticateToken, async (req, res) => {
     }
 });
 
+// Backfill payment method from ShopifyOrderCache (no API calls!)
+router.post('/sync/backfill-from-cache', authenticateToken, async (req, res) => {
+    try {
+        // Find orders missing payment method that have cached Shopify data
+        const ordersToBackfill = await req.prisma.order.findMany({
+            where: {
+                shopifyOrderId: { not: null },
+                OR: [
+                    { paymentMethod: null },
+                    { paymentMethod: '' },
+                ],
+            },
+            select: { id: true, shopifyOrderId: true, orderNumber: true },
+        });
+
+        console.log(`Found ${ordersToBackfill.length} orders missing payment method`);
+
+        const results = {
+            updated: 0,
+            skipped: 0,
+            errors: [],
+            total: ordersToBackfill.length,
+            noCache: 0,
+        };
+
+        for (const order of ordersToBackfill) {
+            try {
+                // Try to get data from ShopifyOrderCache first
+                let shopifyOrder = null;
+
+                const cachedOrder = await req.prisma.shopifyOrderCache.findUnique({
+                    where: { id: order.shopifyOrderId },
+                });
+
+                if (cachedOrder && cachedOrder.rawData) {
+                    shopifyOrder = JSON.parse(cachedOrder.rawData);
+                    console.log(`Using cached data for order ${order.orderNumber}`);
+                } else {
+                    // Fall back to Order.shopifyData if available
+                    const orderWithData = await req.prisma.order.findUnique({
+                        where: { id: order.id },
+                        select: { shopifyData: true },
+                    });
+
+                    if (orderWithData?.shopifyData) {
+                        shopifyOrder = JSON.parse(orderWithData.shopifyData);
+                        console.log(`Using order.shopifyData for order ${order.orderNumber}`);
+                    }
+                }
+
+                if (!shopifyOrder) {
+                    console.log(`No cached data for order ${order.orderNumber}`);
+                    results.noCache++;
+                    continue;
+                }
+
+                // Calculate payment method
+                const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                const paymentMethod = isPrepaidGateway ? 'Prepaid' :
+                    (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+
+                console.log(`  Order ${order.orderNumber}: Gateway="${gatewayNames}", Financial=${shopifyOrder.financial_status} => ${paymentMethod}`);
+
+                // Update order
+                await req.prisma.order.update({
+                    where: { id: order.id },
+                    data: {
+                        paymentMethod,
+                        customerNotes: shopifyOrder.note || null,
+                    },
+                });
+                results.updated++;
+            } catch (orderError) {
+                console.error(`Error processing ${order.orderNumber}: ${orderError.message}`);
+                results.errors.push(`Order ${order.orderNumber}: ${orderError.message}`);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Backfilled ${results.updated} orders from cache`,
+            results,
+        });
+    } catch (error) {
+        console.error('Backfill from cache error:', error);
+        res.status(500).json({ error: 'Failed to backfill from cache', details: error.message });
+    }
+});
+
 // Reprocess failed cache entries
 router.post('/sync/reprocess-cache', authenticateToken, async (req, res) => {
     try {

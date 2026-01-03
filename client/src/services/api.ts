@@ -205,6 +205,7 @@ export const shopifyApi = {
     syncAllOrders: (data?: { status?: string; days?: number }) =>
         api.post('/shopify/sync/orders/all', data || {}),
     backfillOrders: () => api.post('/shopify/sync/orders/backfill'),
+    backfillFromCache: () => api.post('/shopify/sync/backfill-from-cache'),
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
     getCacheStatus: () => api.get('/shopify/sync/cache-status'),
     syncAllCustomers: () =>

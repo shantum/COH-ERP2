@@ -139,6 +139,14 @@ export default function Settings() {
         },
     });
 
+    const backfillFromCacheMutation = useMutation({
+        mutationFn: () => shopifyApi.backfillFromCache(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+        },
+    });
+
     // Background sync jobs
     const { data: syncJobs, refetch: refetchJobs } = useQuery({
         queryKey: ['syncJobs'],
@@ -566,28 +574,45 @@ export default function Settings() {
                                     <button
                                         className="btn bg-purple-600 text-white hover:bg-purple-700 flex items-center gap-2"
                                         onClick={() => {
-                                            if (confirm('This will update existing orders with missing payment method data from Shopify. Continue?')) {
+                                            if (confirm('This will update existing orders with missing payment method data from Shopify API. May hit rate limits. Continue?')) {
                                                 backfillOrdersMutation.mutate();
                                             }
                                         }}
                                         disabled={backfillOrdersMutation.isPending}
                                     >
                                         <RefreshCw size={16} className={backfillOrdersMutation.isPending ? 'animate-spin' : ''} />
-                                        {backfillOrdersMutation.isPending ? 'Backfilling...' : 'Backfill Missing Data'}
+                                        {backfillOrdersMutation.isPending ? 'Backfilling...' : 'Backfill (API)'}
+                                    </button>
+                                    <button
+                                        className="btn bg-green-600 text-white hover:bg-green-700 flex items-center gap-2"
+                                        onClick={() => {
+                                            if (confirm('This will update payment method from cached Shopify data. No API calls, no rate limits. Continue?')) {
+                                                backfillFromCacheMutation.mutate();
+                                            }
+                                        }}
+                                        disabled={backfillFromCacheMutation.isPending}
+                                    >
+                                        <RefreshCw size={16} className={backfillFromCacheMutation.isPending ? 'animate-spin' : ''} />
+                                        {backfillFromCacheMutation.isPending ? 'Processing...' : 'Backfill (Cache)'}
                                     </button>
                                 </div>
                                 <p className="text-xs text-gray-500 mb-3">
-                                    "Sync New" continues from last synced order. "Bulk Sync" fetches orders within date range. "Backfill" updates existing orders with missing payment/notes data.
+                                    "Backfill (API)" fetches from Shopify (may hit rate limits). "Backfill (Cache)" uses stored data (faster, no limits).
                                 </p>
 
                                 {/* Backfill result */}
-                                {backfillOrdersMutation.data && (
+                                {(backfillOrdersMutation.data || backfillFromCacheMutation.data) && (
                                     <div className="mt-3 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
                                         <p className="font-medium text-purple-800">
-                                            {backfillOrdersMutation.data.data.message}
+                                            {backfillOrdersMutation.data?.data.message || backfillFromCacheMutation.data?.data.message}
                                         </p>
                                         <p className="text-purple-700">
-                                            Updated: {backfillOrdersMutation.data.data.results?.updated || 0} of {backfillOrdersMutation.data.data.results?.total || 0} orders
+                                            Updated: {backfillOrdersMutation.data?.data.results?.updated || backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillOrdersMutation.data?.data.results?.total || backfillFromCacheMutation.data?.data.results?.total || 0} orders
+                                            {backfillFromCacheMutation.data?.data.results?.noCache > 0 && (
+                                                <span className="ml-2 text-orange-600">
+                                                    ({backfillFromCacheMutation.data.data.results.noCache} orders had no cached data)
+                                                </span>
+                                            )}
                                         </p>
                                     </div>
                                 )}
