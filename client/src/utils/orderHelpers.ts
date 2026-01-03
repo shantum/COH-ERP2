@@ -112,6 +112,12 @@ export function flattenOrders(
 
     const rows: FlattenedOrderRow[] = [];
 
+    // Debug: log orders with 0 items
+    const zeroItemOrders = sortedOrders.filter(o => !o.orderLines || o.orderLines.length === 0);
+    if (zeroItemOrders.length > 0) {
+        console.log('[flattenOrders] Orders with 0 items:', zeroItemOrders.map(o => o.orderNumber));
+    }
+
     sortedOrders.forEach(order => {
         const customerKey = order.customerEmail || order.customerName || 'unknown';
         const custStats = customerStats[customerKey] || { orderCount: 0, ltv: 0 };
