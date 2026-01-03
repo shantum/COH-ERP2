@@ -39,3 +39,4 @@ prisma/migrations/
 
 # Debug
 *.trace
+server/prisma/dev.db
