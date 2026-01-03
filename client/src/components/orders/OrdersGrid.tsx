@@ -242,7 +242,9 @@ export function OrdersGrid({
             {
                 colId: 'customerNotes',
                 headerName: getHeaderName('customerNotes'),
-                width: 100,
+                width: 180,
+                autoHeight: true,
+                wrapText: true,
                 valueGetter: (params: ValueGetterParams) =>
                     params.data?.isFirstLine ? params.data.order?.customerNotes || '' : '',
                 cellRenderer: (params: ICellRendererParams) => {
@@ -250,8 +252,8 @@ export function OrdersGrid({
                     const notes = params.data.order?.customerNotes || '';
                     if (!notes) return null;
                     return (
-                        <span className="text-xs text-purple-600" title={notes}>
-                            {notes.length > 12 ? notes.substring(0, 12) + '...' : notes}
+                        <span className="text-xs text-purple-600 whitespace-pre-wrap break-words">
+                            {notes}
                         </span>
                     );
                 },
@@ -271,12 +273,43 @@ export function OrdersGrid({
                 colId: 'customerLtv',
                 headerName: getHeaderName('customerLtv'),
                 field: 'customerLtv',
-                width: 70,
-                valueFormatter: (params: ValueFormatterParams) => {
-                    if (!params.data?.isFirstLine) return '';
-                    return `₹${(params.value / 1000).toFixed(0)}k`;
+                width: 75,
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const orderCount = params.data.customerOrderCount || 0;
+                    const ltv = params.data.customerLtv || 0;
+                    const tier = params.data.order?.customerTier || 'bronze';
+
+                    // First order customer
+                    if (orderCount <= 1) {
+                        return (
+                            <span
+                                className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700"
+                                title={`First order - ₹${ltv.toLocaleString()}`}
+                            >
+                                1st
+                            </span>
+                        );
+                    }
+
+                    // Returning customer - show tier badge
+                    const tierStyles: Record<string, string> = {
+                        platinum: 'bg-purple-100 text-purple-700',
+                        gold: 'bg-yellow-100 text-yellow-700',
+                        silver: 'bg-gray-200 text-gray-700',
+                        bronze: 'bg-orange-100 text-orange-700',
+                    };
+
+                    return (
+                        <span
+                            className={`px-1.5 py-0.5 rounded text-xs font-medium ${tierStyles[tier] || tierStyles.bronze}`}
+                            title={`${tier.charAt(0).toUpperCase() + tier.slice(1)} - ₹${ltv.toLocaleString()} (${orderCount} orders)`}
+                        >
+                            {tier === 'platinum' ? '⭐' : ''}{`₹${(ltv / 1000).toFixed(0)}k`}
+                        </span>
+                    );
                 },
-                cellClass: 'text-xs text-right text-gray-500',
+                cellClass: 'text-xs',
                 headerTooltip: 'Customer Lifetime Value',
             },
             {
@@ -332,7 +365,7 @@ export function OrdersGrid({
                 width: 40,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    if (!row) return null;
+                    if (!row || row.lineStatus === 'cancelled') return null;
                     const hasStock = row.skuStock >= row.qty;
                     const isAllocated =
                         row.lineStatus === 'allocated' ||
@@ -360,22 +393,26 @@ export function OrdersGrid({
                                 <Check size={10} />
                             </button>
                         );
-                    } else if (canAllocate) {
-                        return (
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onAllocate(row.lineId);
-                                }}
-                                disabled={isToggling}
-                                className="w-4 h-4 rounded border border-gray-300 hover:border-purple-400 hover:bg-purple-50 flex items-center justify-center mx-auto"
-                                title="Allocate"
-                            >
-                                {isToggling ? <span className="animate-spin">·</span> : null}
-                            </button>
-                        );
                     }
-                    return <span className="text-gray-300">-</span>;
+
+                    // Show checkbox - active if can allocate, inactive otherwise
+                    return (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (canAllocate) onAllocate(row.lineId);
+                            }}
+                            disabled={isToggling || !canAllocate}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
+                                canAllocate
+                                    ? 'border-gray-300 hover:border-purple-400 hover:bg-purple-50 cursor-pointer'
+                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            }`}
+                            title={canAllocate ? 'Allocate' : 'No stock available'}
+                        >
+                            {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+                        </button>
+                    );
                 },
                 cellClass: 'text-center',
             },
@@ -413,6 +450,11 @@ export function OrdersGrid({
                                         min={new Date().toISOString().split('T')[0]}
                                         onClick={(e) => e.stopPropagation()}
                                         onChange={(e) => {
+                                            if (!e.target.value) {
+                                                // Clear date - delete the batch
+                                                onDeleteBatch(row.productionBatchId);
+                                                return;
+                                            }
                                             if (isDateLocked(e.target.value)) {
                                                 alert(`Production date ${e.target.value} is locked.`);
                                                 return;
@@ -507,31 +549,49 @@ export function OrdersGrid({
                 width: 35,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    if (!row) return null;
-                    if (row.lineStatus === 'cancelled')
-                        return <span className="text-gray-300">-</span>;
+                    if (!row || row.lineStatus === 'cancelled') return null;
                     const isToggling = allocatingLines.has(row.lineId);
-                    if (row.lineStatus === 'allocated' || row.lineStatus === 'picked') {
+                    const canPick = row.lineStatus === 'allocated';
+                    const isPicked = row.lineStatus === 'picked' || row.lineStatus === 'packed';
+
+                    if (isPicked) {
                         return (
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    row.lineStatus === 'picked'
-                                        ? onUnpick(row.lineId)
-                                        : onPick(row.lineId);
+                                    if (row.lineStatus === 'picked') onUnpick(row.lineId);
                                 }}
-                                disabled={isToggling}
+                                disabled={isToggling || row.lineStatus !== 'picked'}
                                 className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${
                                     row.lineStatus === 'picked'
-                                        ? 'bg-green-500 text-white'
-                                        : 'border border-gray-300 hover:border-green-400'
+                                        ? 'bg-green-500 text-white hover:bg-green-600'
+                                        : 'bg-green-500 text-white'
                                 }`}
+                                title={row.lineStatus === 'picked' ? 'Unpick' : 'Packed'}
                             >
-                                {row.lineStatus === 'picked' && <Check size={10} />}
+                                <Check size={10} />
                             </button>
                         );
                     }
-                    return null;
+
+                    // Show checkbox - active if allocated, inactive otherwise
+                    return (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (canPick) onPick(row.lineId);
+                            }}
+                            disabled={isToggling || !canPick}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
+                                canPick
+                                    ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
+                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            }`}
+                            title={canPick ? 'Pick' : 'Not allocated yet'}
+                        >
+                            {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+                        </button>
+                    );
                 },
                 cellClass: 'text-center',
             },
@@ -541,27 +601,71 @@ export function OrdersGrid({
                 width: 35,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    if (!row) return null;
-                    const allLinesAllocated = row.order?.orderLines?.every(
+                    if (!row || row.lineStatus === 'cancelled') return null;
+
+                    const activeLines = row.order?.orderLines?.filter(
+                        (line: any) => line.lineStatus !== 'cancelled'
+                    ) || [];
+                    const allLinesPicked = activeLines.length > 0 && activeLines.every(
+                        (line: any) => line.lineStatus === 'picked' || line.lineStatus === 'packed'
+                    );
+                    const allLinesAllocated = activeLines.length > 0 && activeLines.every(
                         (line: any) =>
                             line.lineStatus === 'allocated' ||
                             line.lineStatus === 'picked' ||
                             line.lineStatus === 'packed'
                     );
-                    if (allLinesAllocated) {
-                        return (
-                            <input
-                                type="checkbox"
-                                checked={shippingChecked.has(row.lineId)}
-                                onChange={() => onShippingCheck(row.lineId, row.order)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-3 h-3 rounded border-gray-300 text-green-600 cursor-pointer"
-                            />
-                        );
-                    }
-                    return null;
+                    const isChecked = shippingChecked.has(row.lineId);
+
+                    // Show checkbox - active only if all lines are picked
+                    return (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (allLinesPicked) onShippingCheck(row.lineId, row.order);
+                            }}
+                            disabled={!allLinesPicked}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
+                                isChecked
+                                    ? 'bg-green-500 border-green-500 text-white'
+                                    : allLinesPicked
+                                        ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
+                                        : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            }`}
+                            title={allLinesPicked ? 'Mark for shipping' : allLinesAllocated ? 'Pick all items first' : 'Allocate all items first'}
+                        >
+                            {isChecked && <Check size={10} />}
+                        </button>
+                    );
                 },
                 cellClass: 'text-center',
+            },
+            {
+                colId: 'shopifyStatus',
+                headerName: 'Shopify',
+                width: 80,
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const status = params.data.shopifyStatus || params.data.order?.shopifyFulfillmentStatus;
+                    if (!status || status === '-') return null;
+
+                    const statusStyles: Record<string, string> = {
+                        fulfilled: 'bg-green-100 text-green-700',
+                        partial: 'bg-yellow-100 text-yellow-700',
+                        unfulfilled: 'bg-gray-100 text-gray-600',
+                        null: 'bg-gray-100 text-gray-500',
+                    };
+
+                    const displayStatus = status?.toLowerCase() || 'unfulfilled';
+                    const style = statusStyles[displayStatus] || statusStyles.unfulfilled;
+
+                    return (
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${style}`}>
+                            {displayStatus === 'unfulfilled' ? 'pending' : displayStatus}
+                        </span>
+                    );
+                },
+                cellClass: 'text-xs',
             },
             {
                 colId: 'awb',
@@ -737,22 +841,52 @@ export function OrdersGrid({
         return undefined;
     }, []);
 
+    // Add class for non-first lines to hide row separator
+    const getRowClass = useCallback((params: any): string => {
+        const row = params.data;
+        if (!row) return '';
+        return row.isFirstLine ? 'order-first-line' : 'order-continuation-line';
+    }, []);
+
     return {
         gridComponent: (
-            <div className="border rounded" style={{ height: '600px', width: '100%' }}>
-                <AgGridReact
-                    key={JSON.stringify(customHeaders)}
-                    rowData={rows}
-                    columnDefs={columnDefs}
-                    defaultColDef={defaultColDef}
-                    getRowStyle={getRowStyle}
-                    theme={compactTheme}
-                    rowSelection="multiple"
-                    enableCellTextSelection={true}
-                    ensureDomOrder={true}
-                    cellSelection={true}
-                />
-            </div>
+            <>
+                <style>{`
+                    /* Hide all row bottom borders by default */
+                    .ag-row {
+                        border-bottom-color: transparent !important;
+                    }
+                    /* Show border only on first line of each order */
+                    .ag-row.order-first-line {
+                        border-top: 1px solid #e5e7eb !important;
+                    }
+                    /* First row in grid doesn't need top border */
+                    .ag-row.order-first-line[row-index="0"] {
+                        border-top-color: transparent !important;
+                    }
+                `}</style>
+                <div className="border rounded" style={{ height: '600px', width: '100%' }}>
+                    <AgGridReact
+                        key={JSON.stringify(customHeaders)}
+                        rowData={rows}
+                        columnDefs={columnDefs}
+                        defaultColDef={defaultColDef}
+                        getRowStyle={getRowStyle}
+                        getRowClass={getRowClass}
+                        theme={compactTheme}
+                        rowSelection={{
+                            mode: 'multiRow',
+                            checkboxes: true,
+                            headerCheckbox: true,
+                            enableClickSelection: true,
+                        }}
+                        enableCellTextSelection={true}
+                        ensureDomOrder={true}
+                        suppressRowClickSelection={false}
+                        suppressRowHoverHighlight={true}
+                    />
+                </div>
+            </>
         ),
         customHeaders,
         resetHeaders,
