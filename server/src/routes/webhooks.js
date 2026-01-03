@@ -66,9 +66,10 @@ router.post('/shopify/orders', verifyWebhook, async (req, res) => {
     try {
         const shopifyOrder = req.body;
         const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrder.id;
+        const webhookTopic = req.get('X-Shopify-Topic') || 'orders/updated';
         console.log(`Webhook: orders (unified) - Order #${orderName}`);
 
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder);
+        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, webhookTopic);
 
         res.status(200).json({ received: true, ...result });
     } catch (error) {
@@ -87,7 +88,7 @@ router.post('/shopify/orders/create', verifyWebhook, async (req, res) => {
     try {
         const shopifyOrder = req.body;
         console.log(`Webhook: orders/create (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder);
+        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/create');
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/create error:', error);
@@ -100,7 +101,7 @@ router.post('/shopify/orders/updated', verifyWebhook, async (req, res) => {
     try {
         const shopifyOrder = req.body;
         console.log(`Webhook: orders/updated (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder);
+        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/updated');
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/updated error:', error);
@@ -113,7 +114,7 @@ router.post('/shopify/orders/cancelled', verifyWebhook, async (req, res) => {
     try {
         const shopifyOrder = req.body;
         console.log(`Webhook: orders/cancelled (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder);
+        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/cancelled');
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/cancelled error:', error);
@@ -126,7 +127,7 @@ router.post('/shopify/orders/fulfilled', verifyWebhook, async (req, res) => {
     try {
         const shopifyOrder = req.body;
         console.log(`Webhook: orders/fulfilled (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder);
+        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/fulfilled');
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/fulfilled error:', error);
@@ -269,8 +270,77 @@ router.put('/secret', async (req, res) => {
 /**
  * Unified order webhook handler - handles create, update, cancel, and fulfill
  * This single function processes any order webhook from Shopify
+ *
+ * CACHE-FIRST APPROACH:
+ * 1. Upsert raw Shopify data to ShopifyOrderCache (always succeeds)
+ * 2. Process to Order table (may fail on SKU matching, etc.)
+ * 3. Update cache with processedAt on success or processingError on failure
  */
-async function processShopifyOrderWebhook(prisma, shopifyOrder) {
+async function processShopifyOrderWebhook(prisma, shopifyOrder, webhookTopic = 'orders/updated') {
+    const shopifyOrderId = String(shopifyOrder.id);
+    const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrderId;
+
+    // ========================================
+    // STEP 1: Cache raw Shopify data first
+    // ========================================
+    await prisma.shopifyOrderCache.upsert({
+        where: { id: shopifyOrderId },
+        create: {
+            id: shopifyOrderId,
+            rawData: JSON.stringify(shopifyOrder),
+            orderNumber: shopifyOrder.name || null,
+            financialStatus: shopifyOrder.financial_status || null,
+            fulfillmentStatus: shopifyOrder.fulfillment_status || null,
+            webhookTopic,
+            lastWebhookAt: new Date(),
+        },
+        update: {
+            rawData: JSON.stringify(shopifyOrder),
+            orderNumber: shopifyOrder.name || null,
+            financialStatus: shopifyOrder.financial_status || null,
+            fulfillmentStatus: shopifyOrder.fulfillment_status || null,
+            webhookTopic,
+            lastWebhookAt: new Date(),
+            // Clear any previous processing error since we have new data
+            processingError: null,
+        }
+    });
+    console.log(`Cache: Order ${orderName} stored in ShopifyOrderCache`);
+
+    // ========================================
+    // STEP 2: Process to Order table
+    // ========================================
+    let result;
+    try {
+        result = await processShopifyOrderToERP(prisma, shopifyOrder);
+
+        // STEP 3a: Mark as successfully processed
+        await prisma.shopifyOrderCache.update({
+            where: { id: shopifyOrderId },
+            data: { processedAt: new Date(), processingError: null }
+        });
+
+        console.log(`Order ${orderName}: ${result.action}`);
+        return result;
+    } catch (error) {
+        // STEP 3b: Record processing error but don't throw
+        // Raw data is preserved in cache for retry
+        await prisma.shopifyOrderCache.update({
+            where: { id: shopifyOrderId },
+            data: { processingError: error.message }
+        });
+        console.error(`Order ${orderName}: Processing failed - ${error.message}`);
+
+        // Return error info instead of throwing
+        return { action: 'cache_only', error: error.message, cached: true };
+    }
+}
+
+/**
+ * Process Shopify order data to ERP Order table
+ * Extracted from processShopifyOrderWebhook for reuse in reprocessing
+ */
+async function processShopifyOrderToERP(prisma, shopifyOrder) {
     const shopifyOrderId = String(shopifyOrder.id);
     const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrderId;
 
@@ -333,7 +403,7 @@ async function processShopifyOrderWebhook(prisma, shopifyOrder) {
     const orderData = {
         shopifyOrderId,
         orderNumber: shopifyOrder.name || `SHOP-${shopifyOrderId.slice(-8)}`,
-        shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data
+        shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data (legacy, kept for compatibility)
         channel: 'shopify',
         status,
         customerId,
@@ -372,7 +442,6 @@ async function processShopifyOrderWebhook(prisma, shopifyOrder) {
             changeType = 'fulfilled';
         }
 
-        console.log(`Order ${orderName}: ${changeType}`);
         return { action: changeType, orderId: existingOrder.id };
     } else {
         // Create new order with lines
@@ -410,7 +479,6 @@ async function processShopifyOrderWebhook(prisma, shopifyOrder) {
             }
         });
 
-        console.log(`Order ${orderName}: created with ${orderLines.length} lines`);
         return { action: 'created', orderId: newOrder.id, linesCreated: orderLines.length };
     }
 }

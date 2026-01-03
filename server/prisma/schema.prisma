@@ -610,3 +610,24 @@ model SyncJob {
   @@index([jobType])
   @@index([createdAt])
 }
+
+// ============================================
+// SHOPIFY ORDER CACHE
+// ============================================
+
+model ShopifyOrderCache {
+  id                String    @id // shopifyOrderId
+  rawData           String    // Complete Shopify order JSON
+  orderNumber       String?   // Extracted for quick lookup
+  financialStatus   String?   // For payment method detection
+  fulfillmentStatus String?   // For status tracking
+  lastWebhookAt     DateTime  @default(now())
+  webhookTopic      String?   // orders/create, orders/updated, etc.
+  processedAt       DateTime? // When synced to Order table
+  processingError   String?   // If sync failed, store error
+  createdAt         DateTime  @default(now())
+
+  @@index([orderNumber])
+  @@index([processedAt])
+  @@index([lastWebhookAt])
+}
