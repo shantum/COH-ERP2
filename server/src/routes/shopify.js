@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import shopifyClient from '../services/shopify.js';
 import syncWorker from '../services/syncWorker.js';
+import { syncAllProducts } from '../services/productSyncService.js';
+import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
 
 const router = Router();
 
@@ -161,256 +163,11 @@ router.post('/sync/products', authenticateToken, async (req, res) => {
 
         const { limit = 50, syncAll = false } = req.body;
 
-        const results = {
-            created: { products: 0, variations: 0, skus: 0 },
-            updated: { products: 0, variations: 0, skus: 0 },
-            skipped: 0,
-            errors: [],
-        };
-
-        // Fetch products from Shopify - all or limited
-        let shopifyProducts;
-        if (syncAll) {
-            console.log('Fetching ALL products from Shopify...');
-            shopifyProducts = await shopifyClient.getAllProducts();
-            console.log(`Fetched ${shopifyProducts.length} products total`);
-        } else {
-            shopifyProducts = await shopifyClient.getProducts({ limit });
-        }
-
-        // Need a default fabric for variations
-        let defaultFabric = await req.prisma.fabric.findFirst();
-        if (!defaultFabric) {
-            // Create a placeholder fabric if none exists
-            let fabricType = await req.prisma.fabricType.findFirst();
-            if (!fabricType) {
-                fabricType = await req.prisma.fabricType.create({
-                    data: { name: 'Default', composition: 'Unknown', unit: 'meter', avgShrinkagePct: 0 }
-                });
-            }
-            defaultFabric = await req.prisma.fabric.create({
-                data: {
-                    fabricTypeId: fabricType.id,
-                    name: 'Default Fabric',
-                    colorName: 'Default',
-                    costPerUnit: 0,
-                    leadTimeDays: 14,
-                    minOrderQty: 1
-                }
-            });
-        }
-
-        for (const shopifyProduct of shopifyProducts) {
-            try {
-                // Get main product image URL
-                const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
-
-                // Extract gender from product_type (e.g., "Women Co-ord Set" -> "women")
-                const gender = shopifyClient.normalizeGender(shopifyProduct.product_type);
-
-                // Build variant-to-image mapping
-                const variantImageMap = {};
-                for (const img of shopifyProduct.images || []) {
-                    for (const variantId of img.variant_ids || []) {
-                        variantImageMap[variantId] = img.src;
-                    }
-                }
-
-                // Find or create product by name AND gender (to keep Men/Women variants separate)
-                let product = await req.prisma.product.findFirst({
-                    where: {
-                        name: shopifyProduct.title,
-                        gender: gender || 'unisex',
-                    },
-                });
-
-                if (!product) {
-                    // Also check if there's a product with same name but no/different gender
-                    // that should be updated instead of creating a duplicate
-                    const existingByName = await req.prisma.product.findFirst({
-                        where: { name: shopifyProduct.title },
-                    });
-
-                    if (existingByName && !existingByName.gender) {
-                        // Update existing product that has no gender set
-                        product = await req.prisma.product.update({
-                            where: { id: existingByName.id },
-                            data: {
-                                gender: gender || 'unisex',
-                                imageUrl: mainImageUrl || existingByName.imageUrl,
-                                category: shopifyProduct.product_type?.toLowerCase() || existingByName.category,
-                            },
-                        });
-                        results.updated.products++;
-                    } else {
-                        // Create new product (different gender or no existing product)
-                        product = await req.prisma.product.create({
-                            data: {
-                                name: shopifyProduct.title,
-                                category: shopifyProduct.product_type?.toLowerCase() || 'dress',
-                                productType: 'basic',
-                                gender: gender || 'unisex',
-                                baseProductionTimeMins: 60,
-                                imageUrl: mainImageUrl,
-                            },
-                        });
-                        results.created.products++;
-                    }
-                } else {
-                    // Update existing product with image if changed
-                    if (mainImageUrl && product.imageUrl !== mainImageUrl) {
-                        await req.prisma.product.update({
-                            where: { id: product.id },
-                            data: { imageUrl: mainImageUrl },
-                        });
-                        results.updated.products++;
-                    }
-                }
-
-                // Get option names from product (e.g., "Color", "Size")
-                const option1Name = shopifyProduct.options?.[0]?.name || 'Color';
-                const option2Name = shopifyProduct.options?.[1]?.name || 'Size';
-
-                // Group variants by first option (usually color/style)
-                const variantsByOption = {};
-                for (const variant of shopifyProduct.variants || []) {
-                    const colorOption = variant.option1 || 'Default';
-                    if (!variantsByOption[colorOption]) {
-                        variantsByOption[colorOption] = [];
-                    }
-                    variantsByOption[colorOption].push(variant);
-                }
-
-                // Create variations and SKUs
-                for (const [colorName, variants] of Object.entries(variantsByOption)) {
-                    // Get image for this color variant
-                    const firstVariantId = variants[0]?.id;
-                    const variationImageUrl = variantImageMap[firstVariantId] || mainImageUrl;
-
-                    // Find or create variation
-                    let variation = await req.prisma.variation.findFirst({
-                        where: {
-                            productId: product.id,
-                            colorName: colorName,
-                        },
-                    });
-
-                    if (!variation) {
-                        variation = await req.prisma.variation.create({
-                            data: {
-                                productId: product.id,
-                                colorName: colorName,
-                                fabricId: defaultFabric.id,
-                                imageUrl: variationImageUrl,
-                            },
-                        });
-                        results.created.variations++;
-                    } else {
-                        // Update variation with image if changed
-                        if (variationImageUrl && variation.imageUrl !== variationImageUrl) {
-                            await req.prisma.variation.update({
-                                where: { id: variation.id },
-                                data: { imageUrl: variationImageUrl },
-                            });
-                            results.updated.variations++;
-                        }
-                    }
-
-                    // Create SKUs for each variant
-                    for (const variant of variants) {
-                        const shopifyVariantId = String(variant.id);
-
-                        // Use Shopify SKU if available, otherwise generate one
-                        const skuCode = variant.sku && variant.sku.trim()
-                            ? variant.sku.trim()
-                            : `${shopifyProduct.handle}-${colorName}-${variant.option2 || 'OS'}`.replace(/\s+/g, '-').toUpperCase();
-
-                        // Determine size from option2 or variant title and normalize
-                        const rawSize = variant.option2 || variant.option3 || 'One Size';
-                        // Normalize sizes: XXL -> 2XL, XXXL -> 3XL, XXXXL -> 4XL
-                        const size = rawSize
-                            .replace(/^XXXXL$/i, '4XL')
-                            .replace(/^XXXL$/i, '3XL')
-                            .replace(/^XXL$/i, '2XL');
-
-                        // Check if SKU exists by shopifyVariantId or skuCode
-                        let sku = await req.prisma.sku.findFirst({
-                            where: {
-                                OR: [
-                                    { shopifyVariantId },
-                                    { skuCode },
-                                ],
-                            },
-                        });
-
-                        // Note: Duplicate barcodes are allowed - they will be flagged in the UI
-
-                        if (sku) {
-                            // Update existing SKU with Shopify data
-                            const updateData = {
-                                shopifyVariantId,
-                                shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
-                                mrp: parseFloat(variant.price) || sku.mrp,
-                            };
-
-                            await req.prisma.sku.update({
-                                where: { id: sku.id },
-                                data: updateData,
-                            });
-
-                            // Update Shopify inventory cache
-                            if (variant.inventory_item_id && typeof variant.inventory_quantity === 'number') {
-                                await req.prisma.shopifyInventoryCache.upsert({
-                                    where: { skuId: sku.id },
-                                    update: {
-                                        shopifyInventoryItemId: String(variant.inventory_item_id),
-                                        availableQty: variant.inventory_quantity,
-                                        lastSynced: new Date(),
-                                    },
-                                    create: {
-                                        skuId: sku.id,
-                                        shopifyInventoryItemId: String(variant.inventory_item_id),
-                                        availableQty: variant.inventory_quantity,
-                                    },
-                                });
-                            }
-
-                            results.updated.skus++;
-                        } else {
-                            // Create new SKU
-                            const newSku = await req.prisma.sku.create({
-                                data: {
-                                    variationId: variation.id,
-                                    skuCode,
-                                    size,
-                                    mrp: parseFloat(variant.price) || 0,
-                                    fabricConsumption: 1.5,
-                                    targetStockQty: 10,
-                                    shopifyVariantId,
-                                    shopifyInventoryItemId: variant.inventory_item_id ? String(variant.inventory_item_id) : null,
-                                },
-                            });
-
-                            // Create Shopify inventory cache for new SKU
-                            if (variant.inventory_item_id && typeof variant.inventory_quantity === 'number') {
-                                await req.prisma.shopifyInventoryCache.create({
-                                    data: {
-                                        skuId: newSku.id,
-                                        shopifyInventoryItemId: String(variant.inventory_item_id),
-                                        availableQty: variant.inventory_quantity,
-                                    },
-                                });
-                            }
-
-                            results.created.skus++;
-                        }
-                    }
-                }
-            } catch (productError) {
-                results.errors.push(`Product ${shopifyProduct.title}: ${productError.message}`);
-                results.skipped++;
-            }
-        }
+        // Use shared service for product sync
+        const { shopifyProducts, results } = await syncAllProducts(req.prisma, {
+            limit,
+            syncAll,
+        });
 
         res.json({
             message: 'Product sync completed',
@@ -577,93 +334,34 @@ router.post('/preview/customers', authenticateToken, async (req, res) => {
 
 router.post('/sync/customers', authenticateToken, async (req, res) => {
     try {
+        await shopifyClient.loadFromDatabase();
+
         if (!shopifyClient.isConfigured()) {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
         const { since_id, created_at_min, limit = 50 } = req.body;
 
-        const results = {
-            created: 0,
-            updated: 0,
-            skipped: 0,
-            skippedNoOrders: 0,
-            errors: [],
-        };
-
-        // Fetch customers from Shopify
-        const allShopifyCustomers = await shopifyClient.getCustomers({
+        // Use shared service for customer sync
+        const results = await syncCustomers(req.prisma, {
             since_id,
             created_at_min,
             limit,
+            skipNoOrders: true,
         });
-
-        // Only sync customers who have placed at least 1 order
-        const shopifyCustomers = allShopifyCustomers.filter(c => (c.orders_count || 0) > 0);
-        results.skippedNoOrders = allShopifyCustomers.length - shopifyCustomers.length;
-
-        for (const shopifyCustomer of shopifyCustomers) {
-            try {
-                const shopifyCustomerId = String(shopifyCustomer.id);
-                const email = shopifyCustomer.email?.toLowerCase();
-
-                if (!email) {
-                    results.skipped++;
-                    results.errors.push(`Customer ${shopifyCustomerId}: No email address`);
-                    continue;
-                }
-
-                // Check if customer exists by shopifyCustomerId or email
-                let existingCustomer = await req.prisma.customer.findFirst({
-                    where: {
-                        OR: [
-                            { shopifyCustomerId },
-                            { email },
-                        ],
-                    },
-                });
-
-                const customerData = {
-                    shopifyCustomerId,
-                    email,
-                    phone: shopifyCustomer.phone || null,
-                    firstName: shopifyCustomer.first_name || null,
-                    lastName: shopifyCustomer.last_name || null,
-                    defaultAddress: shopifyCustomer.default_address
-                        ? JSON.stringify(shopifyClient.formatAddress(shopifyCustomer.default_address))
-                        : null,
-                    tags: shopifyCustomer.tags || null,
-                    acceptsMarketing: shopifyCustomer.accepts_marketing || false,
-                };
-
-                if (existingCustomer) {
-                    // Update existing customer
-                    await req.prisma.customer.update({
-                        where: { id: existingCustomer.id },
-                        data: customerData,
-                    });
-                    results.updated++;
-                } else {
-                    // Create new customer
-                    await req.prisma.customer.create({
-                        data: customerData,
-                    });
-                    results.created++;
-                }
-            } catch (customerError) {
-                results.errors.push(`Customer ${shopifyCustomer.id}: ${customerError.message}`);
-                results.skipped++;
-            }
-        }
 
         res.json({
             message: 'Customer sync completed',
-            fetched: allShopifyCustomers.length,
-            withOrders: shopifyCustomers.length,
-            results,
-            lastSyncedId: allShopifyCustomers.length > 0
-                ? String(allShopifyCustomers[allShopifyCustomers.length - 1].id)
-                : null,
+            fetched: results.totalFetched,
+            withOrders: results.totalFetched - results.skippedNoOrders,
+            results: {
+                created: results.created,
+                updated: results.updated,
+                skipped: results.skipped,
+                skippedNoOrders: results.skippedNoOrders,
+                errors: results.errors,
+            },
+            lastSyncedId: results.lastSyncedId,
         });
     } catch (error) {
         console.error('Shopify customer sync error:', error);
@@ -677,103 +375,14 @@ router.post('/sync/customers', authenticateToken, async (req, res) => {
 // Sync ALL customers (paginated bulk sync)
 router.post('/sync/customers/all', authenticateToken, async (req, res) => {
     try {
+        await shopifyClient.loadFromDatabase();
+
         if (!shopifyClient.isConfigured()) {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
-        const results = {
-            created: 0,
-            updated: 0,
-            skipped: 0,
-            skippedNoOrders: 0,
-            errors: [],
-            totalFetched: 0,
-        };
-
-        // Get total count first
-        const totalCount = await shopifyClient.getCustomerCount();
-        console.log(`Starting bulk customer sync: ${totalCount} total customers in Shopify`);
-
-        // Process in batches using pagination
-        let sinceId = null;
-        const limit = 250;
-        let batchNumber = 0;
-
-        while (true) {
-            batchNumber++;
-            const shopifyCustomers = await shopifyClient.getCustomers({
-                since_id: sinceId,
-                limit,
-            });
-
-            if (shopifyCustomers.length === 0) break;
-
-            results.totalFetched += shopifyCustomers.length;
-            console.log(`Processing batch ${batchNumber}: ${shopifyCustomers.length} customers (${results.totalFetched}/${totalCount})`);
-
-            // Filter to only customers with orders
-            const customersWithOrders = shopifyCustomers.filter(c => (c.orders_count || 0) > 0);
-            results.skippedNoOrders += shopifyCustomers.length - customersWithOrders.length;
-
-            for (const shopifyCustomer of customersWithOrders) {
-                try {
-                    const shopifyCustomerId = String(shopifyCustomer.id);
-                    const email = shopifyCustomer.email?.toLowerCase();
-
-                    if (!email) {
-                        results.skipped++;
-                        continue;
-                    }
-
-                    let existingCustomer = await req.prisma.customer.findFirst({
-                        where: {
-                            OR: [
-                                { shopifyCustomerId },
-                                { email },
-                            ],
-                        },
-                    });
-
-                    const customerData = {
-                        shopifyCustomerId,
-                        email,
-                        phone: shopifyCustomer.phone || null,
-                        firstName: shopifyCustomer.first_name || null,
-                        lastName: shopifyCustomer.last_name || null,
-                        defaultAddress: shopifyCustomer.default_address
-                            ? JSON.stringify(shopifyClient.formatAddress(shopifyCustomer.default_address))
-                            : null,
-                        tags: shopifyCustomer.tags || null,
-                        acceptsMarketing: shopifyCustomer.accepts_marketing || false,
-                    };
-
-                    if (existingCustomer) {
-                        await req.prisma.customer.update({
-                            where: { id: existingCustomer.id },
-                            data: customerData,
-                        });
-                        results.updated++;
-                    } else {
-                        await req.prisma.customer.create({
-                            data: customerData,
-                        });
-                        results.created++;
-                    }
-                } catch (customerError) {
-                    results.errors.push(`Customer ${shopifyCustomer.id}: ${customerError.message}`);
-                    results.skipped++;
-                }
-            }
-
-            sinceId = shopifyCustomers[shopifyCustomers.length - 1].id;
-
-            // Rate limit delay
-            await new Promise(resolve => setTimeout(resolve, 300));
-
-            if (shopifyCustomers.length < limit) break;
-        }
-
-        console.log(`Bulk customer sync completed:`, results);
+        // Use shared service for bulk customer sync
+        const { totalCount, results } = await syncAllCustomers(req.prisma);
 
         res.json({
             message: 'Bulk customer sync completed',
