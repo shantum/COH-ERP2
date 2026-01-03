@@ -330,7 +330,6 @@ async function processShopifyOrderWebhook(prisma, shopifyOrder) {
     // Build order data
     const orderData = {
         shopifyOrderId,
-        shopifyOrderNumber: shopifyOrder.order_number ? String(shopifyOrder.order_number) : null,
         orderNumber: shopifyOrder.name || `SHOP-${shopifyOrderId.slice(-8)}`,
         channel: 'shopify',
         status,
