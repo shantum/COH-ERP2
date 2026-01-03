@@ -89,10 +89,17 @@ Shopify credentials stored in `SystemSetting` table (keys: `shopify_shop_domain`
 
 ### Webhooks
 Webhook endpoints for real-time Shopify updates:
+
+**Recommended - Unified Order Endpoint:**
+- `POST /api/webhooks/shopify/orders` - Handles create, update, cancel, fulfill (use with `orders/updated` topic)
+
+**Legacy Endpoints (still supported):**
 - `POST /api/webhooks/shopify/orders/create`
 - `POST /api/webhooks/shopify/orders/updated`
 - `POST /api/webhooks/shopify/orders/cancelled`
 - `POST /api/webhooks/shopify/orders/fulfilled`
+
+**Other Endpoints:**
 - `POST /api/webhooks/shopify/customers/create`
 - `POST /api/webhooks/shopify/customers/update`
 
