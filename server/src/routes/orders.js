@@ -923,6 +923,45 @@ router.post('/:id/unarchive', authenticateToken, async (req, res) => {
     }
 });
 
+// Auto-archive shipped orders older than 90 days
+export async function autoArchiveOldOrders(prisma) {
+    try {
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+        const result = await prisma.order.updateMany({
+            where: {
+                status: 'shipped',
+                isArchived: false,
+                shippedAt: { lt: ninetyDaysAgo },
+            },
+            data: {
+                isArchived: true,
+                archivedAt: new Date(),
+            },
+        });
+
+        if (result.count > 0) {
+            console.log(`Auto-archived ${result.count} shipped orders older than 90 days`);
+        }
+        return result.count;
+    } catch (error) {
+        console.error('Auto-archive error:', error);
+        return 0;
+    }
+}
+
+// Manual trigger for auto-archive (admin endpoint)
+router.post('/auto-archive', authenticateToken, async (req, res) => {
+    try {
+        const count = await autoArchiveOldOrders(req.prisma);
+        res.json({ message: `Archived ${count} orders`, count });
+    } catch (error) {
+        console.error('Auto-archive endpoint error:', error);
+        res.status(500).json({ error: 'Failed to auto-archive orders' });
+    }
+});
+
 // Cancel a single order line (keeps line visible but marked as cancelled)
 router.post('/lines/:lineId/cancel', authenticateToken, async (req, res) => {
     try {

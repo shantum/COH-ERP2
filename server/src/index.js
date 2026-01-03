@@ -21,7 +21,7 @@ await initDb();
 import productRoutes from './routes/products.js';
 import fabricRoutes from './routes/fabrics.js';
 import inventoryRoutes from './routes/inventory.js';
-import orderRoutes from './routes/orders.js';
+import orderRoutes, { autoArchiveOldOrders } from './routes/orders.js';
 import customerRoutes from './routes/customers.js';
 import returnRoutes from './routes/returns.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -141,8 +141,11 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 COH ERP Server running on http://localhost:${PORT}`);
+
+  // Auto-archive shipped orders older than 90 days on startup
+  await autoArchiveOldOrders(prisma);
 });
 
 // Graceful shutdown
