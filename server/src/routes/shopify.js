@@ -882,6 +882,7 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                                 shippedAt: newShippedAt,
                                 paymentMethod: newPaymentMethod,
                                 customerNotes: newCustomerNotes,
+                                shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data
                                 syncedAt: new Date(),
                             },
                         });
@@ -1003,6 +1004,7 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                     data: {
                         orderNumber: String(shopifyOrder.order_number),
                         shopifyOrderId,
+                        shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data
                         channel: shopifyClient.mapOrderChannel(shopifyOrder),
                         ...(customerId ? { customer: { connect: { id: customerId } } } : {}),
                         customerName: customerName || 'Unknown',
@@ -1159,6 +1161,7 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                                     shippedAt: newShippedAt,
                                     paymentMethod: newPaymentMethod,
                                     customerNotes: newCustomerNotes,
+                                    shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data
                                     syncedAt: new Date(),
                                 },
                             });
@@ -1277,6 +1280,7 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                         data: {
                             orderNumber: String(shopifyOrder.order_number),
                             shopifyOrderId,
+                            shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data
                             channel: shopifyClient.mapOrderChannel(shopifyOrder),
                             ...(customerId ? { customer: { connect: { id: customerId } } } : {}),
                             customerName: customerName || 'Unknown',

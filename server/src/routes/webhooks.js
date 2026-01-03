@@ -333,6 +333,7 @@ async function processShopifyOrderWebhook(prisma, shopifyOrder) {
     const orderData = {
         shopifyOrderId,
         orderNumber: shopifyOrder.name || `SHOP-${shopifyOrderId.slice(-8)}`,
+        shopifyData: JSON.stringify(shopifyOrder), // Store raw Shopify data
         channel: 'shopify',
         status,
         customerId,

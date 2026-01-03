@@ -297,6 +297,7 @@ model Order {
   createdAt       DateTime  @default(now())
   syncedAt        DateTime?
   shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
+  shopifyData     String?   // Raw Shopify order JSON for flexible access to all fields
 
   customer       Customer?       @relation(fields: [customerId], references: [id])
   orderLines     OrderLine[]
