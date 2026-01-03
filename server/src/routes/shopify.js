@@ -1056,6 +1056,64 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
     }
 });
 
+// Backfill missing data for existing orders
+router.post('/sync/orders/backfill', authenticateToken, async (req, res) => {
+    try {
+        if (!shopifyClient.isConfigured()) {
+            return res.status(400).json({ error: 'Shopify is not configured' });
+        }
+
+        // Find orders with missing paymentMethod
+        const ordersToBackfill = await req.prisma.order.findMany({
+            where: {
+                shopifyOrderId: { not: null },
+                paymentMethod: null,
+            },
+            select: { id: true, shopifyOrderId: true, orderNumber: true },
+        });
+
+        const results = { updated: 0, errors: [], total: ordersToBackfill.length };
+
+        for (const order of ordersToBackfill) {
+            try {
+                // Fetch order from Shopify
+                const shopifyOrder = await shopifyClient.getOrder(order.shopifyOrderId);
+
+                if (shopifyOrder) {
+                    // Calculate payment method
+                    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                    const paymentMethod = isPrepaidGateway ? 'Prepaid' :
+                        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+
+                    // Update order
+                    await req.prisma.order.update({
+                        where: { id: order.id },
+                        data: {
+                            paymentMethod,
+                            customerNotes: shopifyOrder.note || null,
+                            shopifyData: JSON.stringify(shopifyOrder),
+                            syncedAt: new Date(),
+                        },
+                    });
+                    results.updated++;
+                }
+            } catch (orderError) {
+                results.errors.push(`Order ${order.orderNumber}: ${orderError.message}`);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Backfilled ${results.updated} orders`,
+            results,
+        });
+    } catch (error) {
+        console.error('Backfill error:', error);
+        res.status(500).json({ error: 'Failed to backfill orders', details: error.message });
+    }
+});
+
 // Sync ALL orders (paginated bulk sync)
 router.post('/sync/orders/all', authenticateToken, async (req, res) => {
     try {
