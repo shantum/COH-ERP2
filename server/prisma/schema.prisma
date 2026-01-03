@@ -285,6 +285,7 @@ model Order {
   orderDate       DateTime  @default(now())
   customerNotes   String?
   internalNotes   String?
+  paymentMethod   String?   // COD, Prepaid, etc.
   status          String    @default("open") // open, shipped, delivered, cancelled, returned
   isArchived      Boolean   @default(false)
   archivedAt      DateTime?

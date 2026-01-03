@@ -24,6 +24,8 @@ const DEFAULT_HEADERS: Record<string, string> = {
     orderNumber: 'Order',
     customerName: 'Customer',
     city: 'City',
+    paymentMethod: 'Pay',
+    customerNotes: 'Order Notes',
     customerOrderCount: '#',
     customerLtv: 'LTV',
     skuCode: 'SKU',
@@ -558,6 +560,41 @@ export default function Orders() {
             width: 80,
             valueFormatter: (params: ValueFormatterParams) => params.data?.isFirstLine ? (params.value || '') : '',
             cellClass: 'text-xs text-gray-500',
+        },
+        {
+            colId: 'paymentMethod',
+            headerName: getHeaderName('paymentMethod'),
+            width: 70,
+            valueGetter: (params: ValueGetterParams) => params.data?.isFirstLine ? (params.data.order?.paymentMethod || '') : '',
+            cellRenderer: (params: ICellRendererParams) => {
+                if (!params.data?.isFirstLine) return null;
+                const method = params.data.order?.paymentMethod || '';
+                if (!method) return null;
+                const isCod = method.toLowerCase().includes('cod');
+                return (
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isCod ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                        {isCod ? 'COD' : 'Prepaid'}
+                    </span>
+                );
+            },
+            cellClass: 'text-center',
+        },
+        {
+            colId: 'customerNotes',
+            headerName: getHeaderName('customerNotes'),
+            width: 100,
+            valueGetter: (params: ValueGetterParams) => params.data?.isFirstLine ? (params.data.order?.customerNotes || '') : '',
+            cellRenderer: (params: ICellRendererParams) => {
+                if (!params.data?.isFirstLine) return null;
+                const notes = params.data.order?.customerNotes || '';
+                if (!notes) return null;
+                return (
+                    <span className="text-xs text-purple-600" title={notes}>
+                        {notes.length > 12 ? notes.substring(0, 12) + '...' : notes}
+                    </span>
+                );
+            },
+            cellClass: 'text-xs',
         },
         {
             colId: 'customerOrderCount',

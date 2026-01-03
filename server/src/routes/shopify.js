@@ -982,6 +982,10 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                     }
                 }
 
+                // Determine payment method (COD vs Prepaid)
+                const paymentMethod = shopifyOrder.financial_status === 'pending' ? 'COD' :
+                    (shopifyOrder.payment_gateway_names?.join(', ') || 'Prepaid');
+
                 await req.prisma.order.create({
                     data: {
                         orderNumber: String(shopifyOrder.order_number),
@@ -996,6 +1000,7 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                             : null,
                         orderDate: new Date(shopifyOrder.created_at),
                         customerNotes: shopifyOrder.note || null,
+                        paymentMethod,
                         status: shopifyClient.mapOrderStatus(shopifyOrder),
                         shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
                         awbNumber,
@@ -1238,6 +1243,10 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                         }
                     }
 
+                    // Determine payment method (COD vs Prepaid)
+                    const paymentMethod = shopifyOrder.financial_status === 'pending' ? 'COD' :
+                        (shopifyOrder.payment_gateway_names?.join(', ') || 'Prepaid');
+
                     await req.prisma.order.create({
                         data: {
                             orderNumber: String(shopifyOrder.order_number),
@@ -1252,6 +1261,7 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                                 : null,
                             orderDate: new Date(shopifyOrder.created_at),
                             customerNotes: shopifyOrder.note || null,
+                            paymentMethod,
                             status: shopifyClient.mapOrderStatus(shopifyOrder),
                             shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
                             awbNumber,
