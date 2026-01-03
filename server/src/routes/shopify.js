@@ -1063,20 +1063,26 @@ router.post('/sync/orders/backfill', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Shopify is not configured' });
         }
 
-        // Find orders with missing paymentMethod
+        // Find orders with missing paymentMethod (null or empty string)
         const ordersToBackfill = await req.prisma.order.findMany({
             where: {
                 shopifyOrderId: { not: null },
-                paymentMethod: null,
+                OR: [
+                    { paymentMethod: null },
+                    { paymentMethod: '' },
+                ],
             },
             select: { id: true, shopifyOrderId: true, orderNumber: true },
         });
+
+        console.log(`Found ${ordersToBackfill.length} orders to backfill`);
 
         const results = { updated: 0, errors: [], total: ordersToBackfill.length };
 
         for (const order of ordersToBackfill) {
             try {
                 // Fetch order from Shopify
+                console.log(`Backfilling order ${order.orderNumber} (Shopify ID: ${order.shopifyOrderId})`);
                 const shopifyOrder = await shopifyClient.getOrder(order.shopifyOrderId);
 
                 if (shopifyOrder) {
@@ -1085,6 +1091,8 @@ router.post('/sync/orders/backfill', authenticateToken, async (req, res) => {
                     const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
                     const paymentMethod = isPrepaidGateway ? 'Prepaid' :
                         (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+
+                    console.log(`  Gateway: "${gatewayNames}", Financial: ${shopifyOrder.financial_status}, Result: ${paymentMethod}`);
 
                     // Update order
                     await req.prisma.order.update({
@@ -1097,8 +1105,12 @@ router.post('/sync/orders/backfill', authenticateToken, async (req, res) => {
                         },
                     });
                     results.updated++;
+                } else {
+                    console.log(`  No Shopify data returned for order ${order.orderNumber}`);
+                    results.errors.push(`Order ${order.orderNumber}: No data returned from Shopify`);
                 }
             } catch (orderError) {
+                console.error(`  Error backfilling ${order.orderNumber}: ${orderError.message}`);
                 results.errors.push(`Order ${order.orderNumber}: ${orderError.message}`);
             }
         }
