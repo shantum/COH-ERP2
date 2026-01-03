@@ -324,8 +324,10 @@ async function processShopifyOrderWebhook(prisma, shopifyOrder) {
     }
 
     // Determine payment method (COD vs Prepaid)
-    const paymentMethod = shopifyOrder.financial_status === 'pending' ? 'COD' :
-        (shopifyOrder.payment_gateway_names?.join(', ') || 'Prepaid');
+    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+    const paymentMethod = isPrepaidGateway ? 'Prepaid' :
+        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
 
     // Build order data
     const orderData = {

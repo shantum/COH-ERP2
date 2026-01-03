@@ -983,8 +983,10 @@ router.post('/sync/orders', authenticateToken, async (req, res) => {
                 }
 
                 // Determine payment method (COD vs Prepaid)
-                const paymentMethod = shopifyOrder.financial_status === 'pending' ? 'COD' :
-                    (shopifyOrder.payment_gateway_names?.join(', ') || 'Prepaid');
+                const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                const paymentMethod = isPrepaidGateway ? 'Prepaid' :
+                    (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
 
                 await req.prisma.order.create({
                     data: {
@@ -1244,8 +1246,10 @@ router.post('/sync/orders/all', authenticateToken, async (req, res) => {
                     }
 
                     // Determine payment method (COD vs Prepaid)
-                    const paymentMethod = shopifyOrder.financial_status === 'pending' ? 'COD' :
-                        (shopifyOrder.payment_gateway_names?.join(', ') || 'Prepaid');
+                    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                    const paymentMethod = isPrepaidGateway ? 'Prepaid' :
+                        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
 
                     await req.prisma.order.create({
                         data: {
