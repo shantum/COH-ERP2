@@ -11,6 +11,7 @@ import {
     deleteSaleTransactions,
     findOrCreateCustomer,
 } from '../utils/queryPatterns.js';
+import { getCustomerLtvMap, getTierThresholds, calculateTier } from '../utils/tierUtils.js';
 
 const router = Router();
 
@@ -86,31 +87,40 @@ router.get('/open', async (req, res) => {
             orderBy: { orderDate: 'asc' },
         });
 
-        // Enrich with fulfillment status
-        const enrichedOrders = await Promise.all(
-            orders.map(async (order) => {
-                const lineStatuses = order.orderLines.map((l) => l.lineStatus);
+        // Get customer LTV data for all orders
+        const customerIds = [...new Set(orders.map(o => o.customerId).filter(Boolean))];
+        const [customerLtvMap, thresholds] = await Promise.all([
+            getCustomerLtvMap(req.prisma, customerIds),
+            getTierThresholds(req.prisma)
+        ]);
 
-                let fulfillmentStage = 'pending';
-                if (lineStatuses.every((s) => s === 'packed')) {
-                    fulfillmentStage = 'ready_to_ship';
-                } else if (lineStatuses.some((s) => ['picked', 'packed'].includes(s))) {
-                    fulfillmentStage = 'in_progress';
-                } else if (lineStatuses.every((s) => s === 'allocated')) {
-                    fulfillmentStage = 'allocated';
-                }
+        // Enrich with fulfillment status and customer LTV
+        const enrichedOrders = orders.map((order) => {
+            const lineStatuses = order.orderLines.map((l) => l.lineStatus);
 
-                return {
-                    ...order,
-                    totalLines: order.orderLines.length,
-                    pendingLines: lineStatuses.filter((s) => s === 'pending').length,
-                    allocatedLines: lineStatuses.filter((s) => s === 'allocated').length,
-                    pickedLines: lineStatuses.filter((s) => s === 'picked').length,
-                    packedLines: lineStatuses.filter((s) => s === 'packed').length,
-                    fulfillmentStage,
-                };
-            })
-        );
+            let fulfillmentStage = 'pending';
+            if (lineStatuses.every((s) => s === 'packed')) {
+                fulfillmentStage = 'ready_to_ship';
+            } else if (lineStatuses.some((s) => ['picked', 'packed'].includes(s))) {
+                fulfillmentStage = 'in_progress';
+            } else if (lineStatuses.every((s) => s === 'allocated')) {
+                fulfillmentStage = 'allocated';
+            }
+
+            const customerLtv = customerLtvMap[order.customerId] || 0;
+
+            return {
+                ...order,
+                totalLines: order.orderLines.length,
+                pendingLines: lineStatuses.filter((s) => s === 'pending').length,
+                allocatedLines: lineStatuses.filter((s) => s === 'allocated').length,
+                pickedLines: lineStatuses.filter((s) => s === 'picked').length,
+                packedLines: lineStatuses.filter((s) => s === 'packed').length,
+                fulfillmentStage,
+                customerLtv,
+                customerTier: calculateTier(customerLtv, thresholds),
+            };
+        });
 
         res.json(enrichedOrders);
     } catch (error) {
@@ -140,6 +150,13 @@ router.get('/shipped', async (req, res) => {
             orderBy: { shippedAt: 'desc' },
         });
 
+        // Get customer LTV data for all orders
+        const customerIds = [...new Set(orders.map(o => o.customerId).filter(Boolean))];
+        const [customerLtvMap, thresholds] = await Promise.all([
+            getCustomerLtvMap(req.prisma, customerIds),
+            getTierThresholds(req.prisma)
+        ]);
+
         const enriched = orders.map((order) => {
             const daysInTransit = order.shippedAt
                 ? Math.floor((Date.now() - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
@@ -152,10 +169,14 @@ router.get('/shipped', async (req, res) => {
                 trackingStatus = 'delivery_delayed';
             }
 
+            const customerLtv = customerLtvMap[order.customerId] || 0;
+
             return {
                 ...order,
                 daysInTransit,
                 trackingStatus,
+                customerLtv,
+                customerTier: calculateTier(customerLtv, thresholds),
             };
         });
 

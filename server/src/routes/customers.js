@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { getTierThresholds, calculateTier, calculateLTV } from '../utils/tierUtils.js';
 
 const router = Router();
 
@@ -10,6 +11,9 @@ const router = Router();
 router.get('/', async (req, res) => {
     try {
         const { tier, search, limit = 50, offset = 0 } = req.query;
+
+        // Get configurable tier thresholds
+        const thresholds = await getTierThresholds(req.prisma);
 
         let where = {};
         if (search) {
@@ -26,6 +30,7 @@ router.get('/', async (req, res) => {
             include: {
                 orders: {
                     select: { id: true, totalAmount: true, orderDate: true, status: true },
+                    orderBy: { orderDate: 'desc' },
                 },
                 returnRequests: {
                     select: { id: true, requestType: true },
@@ -38,19 +43,20 @@ router.get('/', async (req, res) => {
 
         // Enrich with metrics
         const enriched = customers.map((customer) => {
-            const orders = customer.orders.filter((o) => o.status !== 'cancelled');
-            const totalOrders = orders.length;
-            const lifetimeValue = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
+            const lifetimeValue = calculateLTV(customer.orders);
+            const validOrders = customer.orders.filter((o) => o.status !== 'cancelled');
+            const totalOrders = validOrders.length;
             const avgOrderValue = totalOrders > 0 ? lifetimeValue / totalOrders : 0;
 
             const returns = customer.returnRequests.filter((r) => r.requestType === 'return').length;
             const exchanges = customer.returnRequests.filter((r) => r.requestType === 'exchange').length;
             const returnRate = totalOrders > 0 ? (returns / totalOrders) * 100 : 0;
 
-            let customerTier = 'bronze';
-            if (lifetimeValue >= 50000) customerTier = 'platinum';
-            else if (lifetimeValue >= 25000) customerTier = 'gold';
-            else if (lifetimeValue >= 10000) customerTier = 'silver';
+            // Use shared tier calculation
+            const customerTier = calculateTier(lifetimeValue, thresholds);
+
+            // Orders are now sorted by date desc, so first = most recent, last = oldest
+            const sortedOrders = validOrders;
 
             return {
                 id: customer.id,
@@ -60,14 +66,14 @@ router.get('/', async (req, res) => {
                 phone: customer.phone,
                 tags: customer.tags,
                 totalOrders,
-                lifetimeValue: lifetimeValue.toFixed(2),
-                avgOrderValue: avgOrderValue.toFixed(2),
+                lifetimeValue,
+                avgOrderValue,
                 returns,
                 exchanges,
-                returnRate: returnRate.toFixed(1),
+                returnRate: parseFloat(returnRate.toFixed(1)),
                 customerTier,
-                firstOrderDate: orders.length > 0 ? orders[orders.length - 1].orderDate : null,
-                lastOrderDate: orders.length > 0 ? orders[0].orderDate : null,
+                firstOrderDate: sortedOrders.length > 0 ? sortedOrders[sortedOrders.length - 1].orderDate : null,
+                lastOrderDate: sortedOrders.length > 0 ? sortedOrders[0].orderDate : null,
             };
         });
 
@@ -129,15 +135,16 @@ router.get('/:id', async (req, res) => {
             return res.status(404).json({ error: 'Customer not found' });
         }
 
-        // Calculate metrics
-        const orders = customer.orders.filter((o) => o.status !== 'cancelled');
-        const totalOrders = orders.length;
-        const lifetimeValue = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
+        // Get configurable tier thresholds
+        const thresholds = await getTierThresholds(req.prisma);
 
-        let customerTier = 'bronze';
-        if (lifetimeValue >= 50000) customerTier = 'platinum';
-        else if (lifetimeValue >= 25000) customerTier = 'gold';
-        else if (lifetimeValue >= 10000) customerTier = 'silver';
+        // Calculate metrics using shared utilities
+        const lifetimeValue = calculateLTV(customer.orders);
+        const validOrders = customer.orders.filter((o) => o.status !== 'cancelled');
+        const totalOrders = validOrders.length;
+
+        // Use shared tier calculation
+        const customerTier = calculateTier(lifetimeValue, thresholds);
 
         // Product affinity
         const productCounts = {};
@@ -146,18 +153,17 @@ router.get('/:id', async (req, res) => {
         // Fabric affinity (by fabric type)
         const fabricCounts = {};
 
-        orders.forEach((order) => {
+        validOrders.forEach((order) => {
             order.orderLines.forEach((line) => {
-                const variation = line.sku.variation;
-                const productName = variation.product.name;
+                const variation = line.sku?.variation;
+                if (!variation) return;
+                const productName = variation.product?.name;
                 const colorKey = variation.standardColor || variation.colorName;
                 const fabricType = variation.fabric?.fabricType?.name;
 
-                productCounts[productName] = (productCounts[productName] || 0) + line.qty;
-                colorCounts[colorKey] = (colorCounts[colorKey] || 0) + line.qty;
-                if (fabricType) {
-                    fabricCounts[fabricType] = (fabricCounts[fabricType] || 0) + line.qty;
-                }
+                if (productName) productCounts[productName] = (productCounts[productName] || 0) + line.qty;
+                if (colorKey) colorCounts[colorKey] = (colorCounts[colorKey] || 0) + line.qty;
+                if (fabricType) fabricCounts[fabricType] = (fabricCounts[fabricType] || 0) + line.qty;
             });
         });
 
@@ -179,7 +185,7 @@ router.get('/:id', async (req, res) => {
         res.json({
             ...customer,
             totalOrders,
-            lifetimeValue: lifetimeValue.toFixed(2),
+            lifetimeValue,
             customerTier,
             productAffinity,
             colorAffinity,
@@ -238,6 +244,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // High-value customers (platinum + gold)
 router.get('/analytics/high-value', async (req, res) => {
     try {
+        const thresholds = await getTierThresholds(req.prisma);
+
         const customers = await req.prisma.customer.findMany({
             include: {
                 orders: { select: { totalAmount: true, status: true } },
@@ -246,11 +254,11 @@ router.get('/analytics/high-value', async (req, res) => {
 
         const highValue = customers
             .map((c) => {
-                const orders = c.orders.filter((o) => o.status !== 'cancelled');
-                const ltv = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
-                return { ...c, lifetimeValue: ltv };
+                const lifetimeValue = calculateLTV(c.orders);
+                const customerTier = calculateTier(lifetimeValue, thresholds);
+                return { ...c, lifetimeValue, customerTier };
             })
-            .filter((c) => c.lifetimeValue >= 25000)
+            .filter((c) => c.lifetimeValue >= thresholds.gold) // Gold and above
             .sort((a, b) => b.lifetimeValue - a.lifetimeValue);
 
         res.json(highValue);
@@ -298,8 +306,7 @@ router.get('/analytics/frequent-returners', async (req, res) => {
 // At-risk customers (high LTV but no order in 90+ days)
 router.get('/analytics/at-risk', async (req, res) => {
     try {
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const thresholds = await getTierThresholds(req.prisma);
 
         const customers = await req.prisma.customer.findMany({
             include: {
@@ -309,22 +316,24 @@ router.get('/analytics/at-risk', async (req, res) => {
 
         const atRisk = customers
             .map((c) => {
-                const orders = c.orders.filter((o) => o.status !== 'cancelled');
-                const ltv = orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
-                const lastOrder = orders.length > 0 ? new Date(Math.max(...orders.map((o) => new Date(o.orderDate)))) : null;
+                const lifetimeValue = calculateLTV(c.orders);
+                const validOrders = c.orders.filter((o) => o.status !== 'cancelled');
+                const lastOrder = validOrders.length > 0 ? new Date(Math.max(...validOrders.map((o) => new Date(o.orderDate)))) : null;
                 const daysSinceLastOrder = lastOrder ? Math.floor((Date.now() - lastOrder.getTime()) / (1000 * 60 * 60 * 24)) : null;
+                const customerTier = calculateTier(lifetimeValue, thresholds);
 
                 return {
                     id: c.id,
                     email: c.email,
                     firstName: c.firstName,
                     lastName: c.lastName,
-                    lifetimeValue: ltv.toFixed(2),
+                    lifetimeValue,
+                    customerTier,
                     lastOrderDate: lastOrder,
                     daysSinceLastOrder,
                 };
             })
-            .filter((c) => Number(c.lifetimeValue) >= 10000 && c.daysSinceLastOrder > 90)
+            .filter((c) => c.lifetimeValue >= thresholds.silver && c.daysSinceLastOrder > 90) // Silver+ inactive 90+ days
             .sort((a, b) => b.daysSinceLastOrder - a.daysSinceLastOrder);
 
         res.json(atRisk);

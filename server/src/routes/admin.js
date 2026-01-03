@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '../utils/validation.js';
+import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
 
 const router = Router();
 
@@ -175,6 +176,52 @@ router.put('/channels', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Update channels error:', error);
         res.status(500).json({ error: 'Failed to update channels' });
+    }
+});
+
+// Get tier thresholds
+router.get('/tier-thresholds', authenticateToken, async (req, res) => {
+    try {
+        const setting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'tier_thresholds' }
+        });
+
+        const thresholds = setting?.value ? JSON.parse(setting.value) : DEFAULT_TIER_THRESHOLDS;
+        res.json(thresholds);
+    } catch (error) {
+        console.error('Get tier thresholds error:', error);
+        res.status(500).json({ error: 'Failed to get tier thresholds' });
+    }
+});
+
+// Update tier thresholds
+router.put('/tier-thresholds', requireAdmin, async (req, res) => {
+    try {
+        const { platinum, gold, silver } = req.body;
+
+        // Validate thresholds
+        if (typeof platinum !== 'number' || typeof gold !== 'number' || typeof silver !== 'number') {
+            return res.status(400).json({ error: 'All thresholds must be numbers' });
+        }
+
+        if (platinum <= gold || gold <= silver || silver <= 0) {
+            return res.status(400).json({
+                error: 'Thresholds must be: platinum > gold > silver > 0'
+            });
+        }
+
+        const thresholds = { platinum, gold, silver };
+
+        await req.prisma.systemSetting.upsert({
+            where: { key: 'tier_thresholds' },
+            update: { value: JSON.stringify(thresholds) },
+            create: { key: 'tier_thresholds', value: JSON.stringify(thresholds) }
+        });
+
+        res.json({ success: true, thresholds });
+    } catch (error) {
+        console.error('Update tier thresholds error:', error);
+        res.status(500).json({ error: 'Failed to update tier thresholds' });
     }
 });
 

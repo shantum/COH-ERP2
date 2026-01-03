@@ -9,7 +9,7 @@ import { adminApi, authApi } from '../../../services/api';
 import { useAuth } from '../../../hooks/useAuth';
 import {
     Lock, Users, UserPlus, Edit2, Shield, Trash2, RefreshCw, Plus, X,
-    ShoppingCart, CheckCircle
+    ShoppingCart, CheckCircle, Star
 } from 'lucide-react';
 
 export function GeneralTab() {
@@ -21,6 +21,11 @@ export function GeneralTab() {
     const [passwordData, setPasswordData] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
     const [passwordError, setPasswordError] = useState('');
     const [passwordSuccess, setPasswordSuccess] = useState('');
+
+    // Tier thresholds state
+    const [tierThresholds, setTierThresholds] = useState({ platinum: 50000, gold: 25000, silver: 10000 });
+    const [tierError, setTierError] = useState('');
+    const [tierSuccess, setTierSuccess] = useState('');
 
     // User management state
     const [showAddUser, setShowAddUser] = useState(false);
@@ -36,6 +41,31 @@ export function GeneralTab() {
         queryKey: ['users'],
         queryFn: () => adminApi.getUsers().then(r => r.data),
         enabled: user?.role === 'admin',
+    });
+
+    // Tier thresholds query
+    const { data: tierData, isLoading: tierLoading } = useQuery({
+        queryKey: ['tierThresholds'],
+        queryFn: async () => {
+            const res = await adminApi.getTierThresholds();
+            setTierThresholds(res.data);
+            return res.data;
+        },
+        enabled: user?.role === 'admin',
+    });
+
+    const updateTierMutation = useMutation({
+        mutationFn: (thresholds: { platinum: number; gold: number; silver: number }) =>
+            adminApi.updateTierThresholds(thresholds),
+        onSuccess: () => {
+            setTierSuccess('Tier thresholds updated successfully!');
+            setTierError('');
+            queryClient.invalidateQueries({ queryKey: ['tierThresholds'] });
+        },
+        onError: (error: any) => {
+            setTierError(error.response?.data?.error || 'Failed to update thresholds');
+            setTierSuccess('');
+        },
     });
 
     const updateChannelsMutation = useMutation({
@@ -146,6 +176,19 @@ export function GeneralTab() {
         if (!confirm('Remove this channel?')) return;
         const updatedChannels = channels?.filter((c: any) => c.id !== id) || [];
         updateChannelsMutation.mutate(updatedChannels);
+    };
+
+    const handleSaveTierThresholds = () => {
+        setTierError('');
+        setTierSuccess('');
+
+        const { platinum, gold, silver } = tierThresholds;
+        if (platinum <= gold || gold <= silver || silver <= 0) {
+            setTierError('Thresholds must be: Platinum > Gold > Silver > 0');
+            return;
+        }
+
+        updateTierMutation.mutate(tierThresholds);
     };
 
     return (
@@ -520,6 +563,101 @@ export function GeneralTab() {
                     </>
                 )}
             </div>
+
+            {/* Customer Tier Thresholds (Admin only) */}
+            {user?.role === 'admin' && (
+                <div className="card">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <Star size={20} /> Customer Tier Thresholds
+                    </h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Configure the lifetime value (LTV) thresholds for customer tiers.
+                        Customers below Silver are classified as Bronze.
+                    </p>
+
+                    {tierLoading ? (
+                        <div className="flex justify-center p-4">
+                            <RefreshCw size={24} className="animate-spin text-gray-400" />
+                        </div>
+                    ) : (
+                        <div className="max-w-md space-y-4">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <span className="inline-block w-3 h-3 rounded-full bg-purple-400 mr-1"></span>
+                                        Platinum
+                                    </label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                                        <input
+                                            type="number"
+                                            className="input pl-7"
+                                            value={tierThresholds.platinum}
+                                            onChange={(e) => setTierThresholds(t => ({ ...t, platinum: Number(e.target.value) }))}
+                                            min={0}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <span className="inline-block w-3 h-3 rounded-full bg-yellow-400 mr-1"></span>
+                                        Gold
+                                    </label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                                        <input
+                                            type="number"
+                                            className="input pl-7"
+                                            value={tierThresholds.gold}
+                                            onChange={(e) => setTierThresholds(t => ({ ...t, gold: Number(e.target.value) }))}
+                                            min={0}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <span className="inline-block w-3 h-3 rounded-full bg-gray-400 mr-1"></span>
+                                        Silver
+                                    </label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                                        <input
+                                            type="number"
+                                            className="input pl-7"
+                                            value={tierThresholds.silver}
+                                            onChange={(e) => setTierThresholds(t => ({ ...t, silver: Number(e.target.value) }))}
+                                            min={0}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <p className="text-xs text-gray-500">
+                                Example: With Silver=₹10,000, customers with LTV ₹0-9,999 are Bronze, ₹10,000+ are Silver.
+                            </p>
+
+                            {tierError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                                    {tierError}
+                                </div>
+                            )}
+                            {tierSuccess && (
+                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm flex items-center gap-2">
+                                    <CheckCircle size={16} /> {tierSuccess}
+                                </div>
+                            )}
+
+                            <button
+                                onClick={handleSaveTierThresholds}
+                                className="btn btn-primary"
+                                disabled={updateTierMutation.isPending}
+                            >
+                                {updateTierMutation.isPending ? 'Saving...' : 'Save Thresholds'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

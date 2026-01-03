@@ -266,6 +266,10 @@ export const adminApi = {
         api.get('/admin/inspect/products', { params: { limit, offset } }),
     inspectSkus: (limit?: number, offset?: number) =>
         api.get('/admin/inspect/skus', { params: { limit, offset } }),
+    // Tier thresholds
+    getTierThresholds: () => api.get('/admin/tier-thresholds'),
+    updateTierThresholds: (thresholds: { platinum: number; gold: number; silver: number }) =>
+        api.put('/admin/tier-thresholds', thresholds),
 };
 
 export default api;

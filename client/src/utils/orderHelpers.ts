@@ -44,22 +44,22 @@ export function getFabricBalance(fabricStock: any[] | undefined, fabricId: strin
 }
 
 /**
- * Compute customer stats (order count and LTV) from orders
+ * Compute customer order counts from orders
+ * Note: LTV is now provided by the server for consistency
  */
 export function computeCustomerStats(
     openOrders: any[] | undefined,
     shippedOrders: any[] | undefined
-): Record<string, { orderCount: number; ltv: number }> {
-    const stats: Record<string, { orderCount: number; ltv: number }> = {};
+): Record<string, { orderCount: number }> {
+    const stats: Record<string, { orderCount: number }> = {};
     const allOrders = [...(openOrders || []), ...(shippedOrders || [])];
 
     allOrders.forEach(order => {
         const key = order.customerEmail || order.customerName || 'unknown';
         if (!stats[key]) {
-            stats[key] = { orderCount: 0, ltv: 0 };
+            stats[key] = { orderCount: 0 };
         }
         stats[key].orderCount++;
-        stats[key].ltv += Number(order.totalAmount) || 0;
     });
 
     return stats;
@@ -99,7 +99,7 @@ export interface FlattenedOrderRow {
  */
 export function flattenOrders(
     orders: any[] | undefined,
-    customerStats: Record<string, { orderCount: number; ltv: number }>,
+    customerStats: Record<string, { orderCount: number }>,
     inventoryBalance: any[] | undefined,
     fabricStock: any[] | undefined
 ): FlattenedOrderRow[] {
@@ -120,8 +120,10 @@ export function flattenOrders(
 
     sortedOrders.forEach(order => {
         const customerKey = order.customerEmail || order.customerName || 'unknown';
-        const custStats = customerStats[customerKey] || { orderCount: 0, ltv: 0 };
+        const custStats = customerStats[customerKey] || { orderCount: 0 };
         const orderLines = order.orderLines || [];
+        // Use server-provided customerLtv (calculated from all customer orders)
+        const serverLtv = order.customerLtv || 0;
 
         // Handle orders with no items (test orders)
         if (orderLines.length === 0) {
@@ -132,7 +134,7 @@ export function flattenOrders(
                 customerName: order.customerName,
                 city: parseCity(order.shippingAddress),
                 customerOrderCount: custStats.orderCount,
-                customerLtv: custStats.ltv,
+                customerLtv: serverLtv,
                 productName: '(no items)',
                 colorName: '-',
                 size: '-',
@@ -168,7 +170,7 @@ export function flattenOrders(
                 customerName: order.customerName,
                 city: parseCity(order.shippingAddress),
                 customerOrderCount: custStats.orderCount,
-                customerLtv: custStats.ltv,
+                customerLtv: serverLtv,
                 productName: line.sku?.variation?.product?.name || '-',
                 colorName: line.sku?.variation?.colorName || '-',
                 size: line.sku?.size || '-',
