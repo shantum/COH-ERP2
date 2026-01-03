@@ -44,7 +44,7 @@ export function GeneralTab() {
     });
 
     // Tier thresholds query
-    const { data: tierData, isLoading: tierLoading } = useQuery({
+    const { isLoading: tierLoading } = useQuery({
         queryKey: ['tierThresholds'],
         queryFn: async () => {
             const res = await adminApi.getTierThresholds();
