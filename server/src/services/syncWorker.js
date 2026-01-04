@@ -264,6 +264,21 @@ class SyncWorker {
         console.log(`[Job ${jobId}] Starting order sync (${syncMode || 'legacy'} mode): ${job.totalRecords || '?'} total, resuming from ID: ${job.lastProcessedId || 'start'}`);
 
         let sinceId = job.lastProcessedId;
+
+        // POPULATE optimization: Start from the last known order ID in DB
+        // This avoids fetching orders we already have
+        if (syncMode === 'populate' && !sinceId) {
+            const lastOrder = await prisma.order.findFirst({
+                where: { shopifyOrderId: { not: null } },
+                orderBy: { shopifyOrderId: 'desc' },
+                select: { shopifyOrderId: true }
+            });
+            if (lastOrder) {
+                sinceId = lastOrder.shopifyOrderId;
+                console.log(`[Job ${jobId}] POPULATE optimization: Starting from last known order ID ${sinceId}`);
+            }
+        }
+
         let batchNumber = job.currentBatch;
         const errorLog = job.errorLog ? JSON.parse(job.errorLog) : [];
 
