@@ -1,10 +1,10 @@
-// Creatures of Habit ERP - Database Schema (SQLite Compatible)
+// Creatures of Habit ERP - Database Schema (PostgreSQL)
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

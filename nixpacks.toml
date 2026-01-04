@@ -10,7 +10,7 @@ cmds = ["cd client && npm run build", "cd server && npx prisma generate"]
 dependsOn = ["install"]
 
 [start]
-cmd = "cd server && npx prisma db push --skip-generate --accept-data-loss && npm start"
+cmd = "cd server && npx prisma migrate deploy && npm start"
 
 [variables]
 NODE_ENV = "production"
