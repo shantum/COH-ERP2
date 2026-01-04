@@ -119,11 +119,10 @@ export function flattenOrders(
     }
 
     sortedOrders.forEach(order => {
-        const customerKey = order.customerEmail || order.customerName || 'unknown';
-        const custStats = customerStats[customerKey] || { orderCount: 0 };
         const orderLines = order.orderLines || [];
-        // Use server-provided customerLtv (calculated from all customer orders)
+        // Use server-provided values (calculated from ALL customer orders)
         const serverLtv = order.customerLtv || 0;
+        const serverOrderCount = order.customerOrderCount || 0;
 
         // Handle orders with no items (test orders)
         if (orderLines.length === 0) {
@@ -133,7 +132,7 @@ export function flattenOrders(
                 orderDate: order.orderDate,
                 customerName: order.customerName,
                 city: parseCity(order.shippingAddress),
-                customerOrderCount: custStats.orderCount,
+                customerOrderCount: serverOrderCount,
                 customerLtv: serverLtv,
                 productName: '(no items)',
                 colorName: '-',
@@ -169,7 +168,7 @@ export function flattenOrders(
                 orderDate: order.orderDate,
                 customerName: order.customerName,
                 city: parseCity(order.shippingAddress),
-                customerOrderCount: custStats.orderCount,
+                customerOrderCount: serverOrderCount,
                 customerLtv: serverLtv,
                 productName: line.sku?.variation?.product?.name || '-',
                 colorName: line.sku?.variation?.colorName || '-',

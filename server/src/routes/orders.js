@@ -11,7 +11,7 @@ import {
     deleteSaleTransactions,
     findOrCreateCustomer,
 } from '../utils/queryPatterns.js';
-import { getCustomerLtvMap, getTierThresholds, calculateTier } from '../utils/tierUtils.js';
+import { getCustomerStatsMap, getTierThresholds, calculateTier } from '../utils/tierUtils.js';
 
 const router = Router();
 
@@ -109,14 +109,14 @@ router.get('/open', async (req, res) => {
             orderBy: { orderDate: 'asc' },
         });
 
-        // Get customer LTV data for all orders
+        // Get customer stats (LTV and order count) for all orders
         const customerIds = [...new Set(orders.map(o => o.customerId).filter(Boolean))];
-        const [customerLtvMap, thresholds] = await Promise.all([
-            getCustomerLtvMap(req.prisma, customerIds),
+        const [customerStatsMap, thresholds] = await Promise.all([
+            getCustomerStatsMap(req.prisma, customerIds),
             getTierThresholds(req.prisma)
         ]);
 
-        // Enrich with fulfillment status and customer LTV
+        // Enrich with fulfillment status and customer stats
         const enrichedOrders = orders.map((order) => {
             const lineStatuses = order.orderLines.map((l) => l.lineStatus);
 
@@ -129,7 +129,7 @@ router.get('/open', async (req, res) => {
                 fulfillmentStage = 'allocated';
             }
 
-            const customerLtv = customerLtvMap[order.customerId] || 0;
+            const customerStats = customerStatsMap[order.customerId] || { ltv: 0, orderCount: 0 };
 
             return {
                 ...order,
@@ -139,8 +139,9 @@ router.get('/open', async (req, res) => {
                 pickedLines: lineStatuses.filter((s) => s === 'picked').length,
                 packedLines: lineStatuses.filter((s) => s === 'packed').length,
                 fulfillmentStage,
-                customerLtv,
-                customerTier: calculateTier(customerLtv, thresholds),
+                customerLtv: customerStats.ltv,
+                customerOrderCount: customerStats.orderCount,
+                customerTier: calculateTier(customerStats.ltv, thresholds),
             };
         });
 
@@ -212,10 +213,10 @@ router.get('/shipped', async (req, res) => {
             skip,
         });
 
-        // Get customer LTV data for all orders (uses ALL historical orders for each customer)
+        // Get customer stats (LTV and order count) for all orders
         const customerIds = [...new Set(orders.map(o => o.customerId).filter(Boolean))];
-        const [customerLtvMap, thresholds] = await Promise.all([
-            getCustomerLtvMap(req.prisma, customerIds),
+        const [customerStatsMap, thresholds] = await Promise.all([
+            getCustomerStatsMap(req.prisma, customerIds),
             getTierThresholds(req.prisma)
         ]);
 
@@ -231,14 +232,15 @@ router.get('/shipped', async (req, res) => {
                 trackingStatus = 'delivery_delayed';
             }
 
-            const customerLtv = customerLtvMap[order.customerId] || 0;
+            const customerStats = customerStatsMap[order.customerId] || { ltv: 0, orderCount: 0 };
 
             return {
                 ...order,
                 daysInTransit,
                 trackingStatus,
-                customerLtv,
-                customerTier: calculateTier(customerLtv, thresholds),
+                customerLtv: customerStats.ltv,
+                customerOrderCount: customerStats.orderCount,
+                customerTier: calculateTier(customerStats.ltv, thresholds),
             };
         });
 

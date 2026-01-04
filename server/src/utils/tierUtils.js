@@ -56,12 +56,12 @@ export function calculateLTV(orders) {
 }
 
 /**
- * Get LTV map for multiple customers
+ * Get LTV and order count map for multiple customers
  * @param {object} prisma - Prisma client instance
  * @param {string[]} customerIds - Array of customer IDs
- * @returns {Promise<Record<string, number>>} - Map of customerId to LTV
+ * @returns {Promise<Record<string, {ltv: number, orderCount: number}>>} - Map of customerId to stats
  */
-export async function getCustomerLtvMap(prisma, customerIds) {
+export async function getCustomerStatsMap(prisma, customerIds) {
     if (!customerIds || customerIds.length === 0) return {};
 
     const customers = await prisma.customer.findMany({
@@ -73,10 +73,24 @@ export async function getCustomerLtvMap(prisma, customerIds) {
         }
     });
 
-    const ltvMap = {};
+    const statsMap = {};
     for (const customer of customers) {
-        ltvMap[customer.id] = calculateLTV(customer.orders);
+        const validOrders = customer.orders.filter(o => o.status !== 'cancelled');
+        statsMap[customer.id] = {
+            ltv: calculateLTV(customer.orders),
+            orderCount: validOrders.length
+        };
     }
 
+    return statsMap;
+}
+
+// Backwards compatible alias
+export async function getCustomerLtvMap(prisma, customerIds) {
+    const statsMap = await getCustomerStatsMap(prisma, customerIds);
+    const ltvMap = {};
+    for (const [id, stats] of Object.entries(statsMap)) {
+        ltvMap[id] = stats.ltv;
+    }
     return ltvMap;
 }
