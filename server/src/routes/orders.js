@@ -154,7 +154,7 @@ router.get('/open', async (req, res) => {
 // Get shipped orders
 router.get('/shipped', async (req, res) => {
     try {
-        const { limit = 100, offset = 0, days = 30 } = req.query;
+        const { limit = 1000, offset = 0, days = 30 } = req.query;
 
         // Filter to recent orders by default (last 30 days)
         const sinceDate = new Date();
