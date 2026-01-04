@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { cacheAndProcessOrder } from '../services/shopifyOrderProcessor.js';
+import { cacheAndProcessProduct, handleProductDeletion } from '../services/productSyncService.js';
 
 const router = Router();
 
@@ -136,6 +137,53 @@ router.post('/shopify/orders/fulfilled', verifyWebhook, async (req, res) => {
     }
 });
 
+// ============================================
+// PRODUCT WEBHOOKS
+// ============================================
+
+// Products - Create
+router.post('/shopify/products/create', verifyWebhook, async (req, res) => {
+    try {
+        const shopifyProduct = req.body;
+        console.log(`Webhook: products/create - ${shopifyProduct.title}`);
+        const result = await cacheAndProcessProduct(req.prisma, shopifyProduct, 'products/create');
+        res.status(200).json({ received: true, ...result });
+    } catch (error) {
+        console.error('Webhook products/create error:', error);
+        res.status(200).json({ received: true, error: error.message });
+    }
+});
+
+// Products - Update
+router.post('/shopify/products/update', verifyWebhook, async (req, res) => {
+    try {
+        const shopifyProduct = req.body;
+        console.log(`Webhook: products/update - ${shopifyProduct.title}`);
+        const result = await cacheAndProcessProduct(req.prisma, shopifyProduct, 'products/update');
+        res.status(200).json({ received: true, ...result });
+    } catch (error) {
+        console.error('Webhook products/update error:', error);
+        res.status(200).json({ received: true, error: error.message });
+    }
+});
+
+// Products - Delete
+router.post('/shopify/products/delete', verifyWebhook, async (req, res) => {
+    try {
+        const shopifyProductId = String(req.body.id);
+        console.log(`Webhook: products/delete - ID ${shopifyProductId}`);
+        const result = await handleProductDeletion(req.prisma, shopifyProductId);
+        res.status(200).json({ received: true, ...result });
+    } catch (error) {
+        console.error('Webhook products/delete error:', error);
+        res.status(200).json({ received: true, error: error.message });
+    }
+});
+
+// ============================================
+// CUSTOMER WEBHOOKS
+// ============================================
+
 // Customers - Create
 router.post('/shopify/customers/create', verifyWebhook, async (req, res) => {
     try {
@@ -227,14 +275,19 @@ router.get('/status', async (req, res) => {
             endpoints: {
                 // Recommended: Single unified endpoint for all order events
                 orders_unified: '/api/webhooks/shopify/orders',
-                // Legacy endpoints (still supported, all use same handler)
+                // Legacy order endpoints (still supported, all use same handler)
                 orders_create: '/api/webhooks/shopify/orders/create',
                 orders_updated: '/api/webhooks/shopify/orders/updated',
                 orders_cancelled: '/api/webhooks/shopify/orders/cancelled',
                 orders_fulfilled: '/api/webhooks/shopify/orders/fulfilled',
-                // Customer and inventory endpoints
+                // Product endpoints
+                products_create: '/api/webhooks/shopify/products/create',
+                products_update: '/api/webhooks/shopify/products/update',
+                products_delete: '/api/webhooks/shopify/products/delete',
+                // Customer endpoints
                 customers_create: '/api/webhooks/shopify/customers/create',
                 customers_update: '/api/webhooks/shopify/customers/update',
+                // Inventory endpoints
                 inventory_levels_update: '/api/webhooks/shopify/inventory_levels/update',
             },
             recommendation: 'Use orders_unified endpoint with Shopify orders/updated topic for all order events',

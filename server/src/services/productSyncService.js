@@ -80,6 +80,7 @@ export function groupVariantsByColor(variants) {
 
 /**
  * Sync a single product from Shopify to the database
+ * Uses ID matching: shopifyProductId first, fallback to name
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {Object} shopifyProduct - Shopify product data
  * @param {string} defaultFabricId - ID of default fabric for new variations
@@ -88,24 +89,48 @@ export function groupVariantsByColor(variants) {
 export async function syncSingleProduct(prisma, shopifyProduct, defaultFabricId) {
     const result = { created: 0, updated: 0 };
 
+    const shopifyProductId = String(shopifyProduct.id);
     const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
     const gender = shopifyClient.normalizeGender(shopifyProduct.product_type);
     const variantImageMap = buildVariantImageMap(shopifyProduct);
 
-    // Find or create product
-    let product = await prisma.product.findFirst({
-        where: { name: shopifyProduct.title, gender: gender || 'unisex' },
+    // Find product by shopifyProductId first (preferred), then by name (fallback)
+    let product = await prisma.product.findUnique({
+        where: { shopifyProductId },
     });
 
     if (!product) {
+        // Fallback: find by name and gender
+        product = await prisma.product.findFirst({
+            where: { name: shopifyProduct.title, gender: gender || 'unisex' },
+        });
+
+        // If found by name, link to Shopify ID
+        if (product && !product.shopifyProductId) {
+            product = await prisma.product.update({
+                where: { id: product.id },
+                data: {
+                    shopifyProductId,
+                    shopifyHandle: shopifyProduct.handle,
+                    imageUrl: mainImageUrl || product.imageUrl,
+                },
+            });
+            result.updated++;
+        }
+    }
+
+    if (!product) {
+        // Try finding by name only (without gender)
         const existingByName = await prisma.product.findFirst({
             where: { name: shopifyProduct.title },
         });
 
-        if (existingByName && !existingByName.gender) {
+        if (existingByName && !existingByName.shopifyProductId) {
             product = await prisma.product.update({
                 where: { id: existingByName.id },
                 data: {
+                    shopifyProductId,
+                    shopifyHandle: shopifyProduct.handle,
                     gender: gender || 'unisex',
                     imageUrl: mainImageUrl || existingByName.imageUrl,
                     category: shopifyProduct.product_type?.toLowerCase() || existingByName.category,
@@ -116,6 +141,8 @@ export async function syncSingleProduct(prisma, shopifyProduct, defaultFabricId)
             product = await prisma.product.create({
                 data: {
                     name: shopifyProduct.title,
+                    shopifyProductId,
+                    shopifyHandle: shopifyProduct.handle,
                     category: shopifyProduct.product_type?.toLowerCase() || 'dress',
                     productType: 'basic',
                     gender: gender || 'unisex',
@@ -125,12 +152,19 @@ export async function syncSingleProduct(prisma, shopifyProduct, defaultFabricId)
             });
             result.created++;
         }
-    } else if (mainImageUrl && product.imageUrl !== mainImageUrl) {
-        await prisma.product.update({
-            where: { id: product.id },
-            data: { imageUrl: mainImageUrl },
-        });
-        result.updated++;
+    } else {
+        // Product exists - update if needed
+        const updates = {};
+        if (mainImageUrl && product.imageUrl !== mainImageUrl) updates.imageUrl = mainImageUrl;
+        if (shopifyProduct.handle && product.shopifyHandle !== shopifyProduct.handle) updates.shopifyHandle = shopifyProduct.handle;
+
+        if (Object.keys(updates).length > 0) {
+            await prisma.product.update({
+                where: { id: product.id },
+                data: updates,
+            });
+            result.updated++;
+        }
     }
 
     // Group variants by color and process
@@ -259,6 +293,104 @@ async function syncSingleSku(prisma, variant, variationId, productHandle, colorN
     }
 
     return result;
+}
+
+/**
+ * Cache and process a single product from Shopify webhook
+ * Similar to order processing: cache first, then sync to ERP
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {Object} shopifyProduct - Shopify product data
+ * @param {string} webhookTopic - The webhook topic (products/create, products/update)
+ * @returns {Object} Results { action, productId, error }
+ */
+export async function cacheAndProcessProduct(prisma, shopifyProduct, webhookTopic = 'products/update') {
+    const shopifyProductId = String(shopifyProduct.id);
+
+    try {
+        // Cache raw product data first
+        await prisma.shopifyProductCache.upsert({
+            where: { id: shopifyProductId },
+            update: {
+                rawData: JSON.stringify(shopifyProduct),
+                title: shopifyProduct.title,
+                handle: shopifyProduct.handle,
+                lastWebhookAt: new Date(),
+                webhookTopic,
+                processingError: null, // Clear previous error
+            },
+            create: {
+                id: shopifyProductId,
+                rawData: JSON.stringify(shopifyProduct),
+                title: shopifyProduct.title,
+                handle: shopifyProduct.handle,
+                webhookTopic,
+            },
+        });
+
+        // Ensure default fabric exists
+        const defaultFabric = await ensureDefaultFabric(prisma);
+
+        // Sync product to ERP
+        const result = await syncSingleProduct(prisma, shopifyProduct, defaultFabric.id);
+
+        // Mark as processed
+        await prisma.shopifyProductCache.update({
+            where: { id: shopifyProductId },
+            data: { processedAt: new Date() },
+        });
+
+        // Find the product to return its ID
+        const product = await prisma.product.findUnique({
+            where: { shopifyProductId },
+        });
+
+        return {
+            action: result.created > 0 ? 'created' : 'updated',
+            productId: product?.id,
+            created: result.created,
+            updated: result.updated,
+        };
+    } catch (error) {
+        // Store error in cache
+        await prisma.shopifyProductCache.update({
+            where: { id: shopifyProductId },
+            data: {
+                processingError: error.message,
+            },
+        }).catch(() => {}); // Ignore error if cache entry doesn't exist
+
+        console.error(`Error processing product ${shopifyProduct.title}:`, error);
+        return {
+            action: 'error',
+            error: error.message,
+        };
+    }
+}
+
+/**
+ * Handle product deletion from Shopify
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} shopifyProductId - Shopify product ID
+ * @returns {Object} Results { action, productId }
+ */
+export async function handleProductDeletion(prisma, shopifyProductId) {
+    const id = String(shopifyProductId);
+
+    // Mark product as inactive
+    const result = await prisma.product.updateMany({
+        where: { shopifyProductId: id },
+        data: { isActive: false },
+    });
+
+    // Remove from cache
+    await prisma.shopifyProductCache.deleteMany({
+        where: { id },
+    }).catch(() => {}); // Ignore if not in cache
+
+    return {
+        action: result.count > 0 ? 'deleted' : 'not_found',
+        count: result.count,
+    };
 }
 
 /**

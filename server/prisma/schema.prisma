@@ -46,11 +46,16 @@ model Product {
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
+  // Shopify integration
+  shopifyProductId String? @unique // Shopify product ID
+  shopifyHandle    String?         // Shopify handle (URL slug)
+
   fabricType FabricType? @relation(fields: [fabricTypeId], references: [id])
   variations Variation[]
 
   @@index([fabricTypeId])
   @@index([category])
+  @@index([shopifyHandle])
 }
 
 model Variation {
@@ -548,6 +553,22 @@ model ShopifyInventoryCache {
   lastSynced             DateTime @default(now())
 
   sku Sku @relation(fields: [skuId], references: [id])
+}
+
+model ShopifyProductCache {
+  id              String    @id // shopifyProductId
+  rawData         String    // Complete Shopify product JSON
+  title           String?   // Extracted for quick lookup
+  handle          String?   // Shopify handle
+  lastWebhookAt   DateTime  @default(now())
+  webhookTopic    String?   // products/create, products/update, etc.
+  processedAt     DateTime? // When synced to Product table
+  processingError String?   // If sync failed, store error
+  createdAt       DateTime  @default(now())
+
+  @@index([handle])
+  @@index([processedAt])
+  @@index([lastWebhookAt])
 }
 
 model StockAlert {
