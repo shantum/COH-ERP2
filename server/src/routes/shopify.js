@@ -760,17 +760,19 @@ router.get('/sync/history', authenticateToken, async (req, res) => {
  *
  * Body:
  * - jobType: 'orders' | 'customers' | 'products' (required)
- * - days: number (optional, default 90) - For created_at filter
- * - syncMode: 'populate' | 'update' (optional)
- *   - 'populate': Skip orders that already exist (fast initial import)
- *   - 'update': Only fetch orders updated in Shopify recently (incremental refresh)
+ * - syncMode: 'deep' | 'quick' | 'update' (optional for orders)
+ *   - 'deep': Full import with aggressive memory management (initial setup, recovery)
+ *   - 'quick': Missing orders only, fetches after latest DB order date (daily catch-up)
+ *   - 'update': Recently changed orders via updated_at_min (hourly refresh)
  *   - null/omitted: Legacy upsert behavior
- * - staleAfterMins: number (optional, for update mode) - Fetch orders updated within last X mins
+ * - days: number (optional, for deep mode) - For created_at filter
+ * - staleAfterMins: number (required for update mode) - Fetch orders updated within last X mins
  *
  * Examples:
- *   { "jobType": "orders", "syncMode": "populate", "days": 365 }  // Import new orders only
+ *   { "jobType": "orders", "syncMode": "deep" }  // Full import, all time
+ *   { "jobType": "orders", "syncMode": "deep", "days": 365 }  // Full import, last 365 days
+ *   { "jobType": "orders", "syncMode": "quick" }  // Missing orders only
  *   { "jobType": "orders", "syncMode": "update", "staleAfterMins": 60 }  // Refresh recently changed
- *   { "jobType": "orders", "days": 30 }  // Legacy: upsert all orders from last 30 days
  */
 router.post('/sync/jobs/start', authenticateToken, async (req, res) => {
     try {
@@ -778,6 +780,13 @@ router.post('/sync/jobs/start', authenticateToken, async (req, res) => {
 
         if (!['orders', 'customers', 'products'].includes(jobType)) {
             return res.status(400).json({ error: 'Invalid job type. Must be: orders, customers, or products' });
+        }
+
+        // Validate syncMode
+        if (syncMode && !['deep', 'quick', 'update'].includes(syncMode)) {
+            return res.status(400).json({
+                error: `Invalid syncMode: ${syncMode}. Must be 'deep', 'quick', or 'update'.`
+            });
         }
 
         // Validate syncMode-specific requirements
@@ -789,7 +798,7 @@ router.post('/sync/jobs/start', authenticateToken, async (req, res) => {
         }
 
         const job = await syncWorker.startJob(jobType, {
-            days: days || (syncMode === 'update' ? null : 90), // Default 90 days unless update mode
+            days: days || null, // Only used for deep mode
             syncMode,
             staleAfterMins
         });

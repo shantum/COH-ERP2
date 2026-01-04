@@ -10,23 +10,60 @@ const activeJobs = new Map();
 /**
  * Background Sync Worker
  * Processes sync jobs with checkpointing and resume capability
+ *
+ * Supports three sync modes for orders:
+ * - DEEP: Full import with aggressive memory management (initial setup, recovery)
+ * - QUICK: Missing orders only, fetches after latest DB order date (daily catch-up)
+ * - UPDATE: Recently changed orders only via updated_at_min (hourly refresh)
  */
 class SyncWorker {
     constructor() {
-        // Memory-optimized settings for Railway (8GB limit with 60K orders)
-        this.batchSize = 50;      // Reduced from 100 for lower peak memory
-        this.batchDelay = 1000;   // Increased for GC time
-        this.maxErrors = 20;      // Reduced from 50
-        this.gcInterval = 5;      // Request GC every N batches
-        this.disconnectInterval = 10; // Prisma disconnect every N batches
+        // Default settings (overridden per sync mode)
+        this.batchSize = 50;
+        this.batchDelay = 1000;
+        this.maxErrors = 20;
+        this.gcInterval = 5;
+        this.disconnectInterval = 10;
+    }
+
+    /**
+     * Configure settings based on sync mode
+     */
+    configureModeSettings(syncMode) {
+        switch (syncMode) {
+            case 'deep':
+                // DEEP: Maximum batch size, aggressive memory management
+                this.batchSize = 250;
+                this.batchDelay = 1500;
+                this.gcInterval = 3;
+                this.disconnectInterval = 5;
+                break;
+            case 'quick':
+            case 'update':
+                // QUICK/UPDATE: Fast, smaller batches
+                this.batchSize = 250;
+                this.batchDelay = 500;
+                this.gcInterval = 10;
+                this.disconnectInterval = 20;
+                break;
+            default:
+                // Legacy mode: conservative settings
+                this.batchSize = 50;
+                this.batchDelay = 1000;
+                this.gcInterval = 5;
+                this.disconnectInterval = 10;
+        }
     }
 
     /**
      * Start a new sync job
      * @param {string} jobType - 'orders', 'customers', 'products'
      * @param {Object} options - Job options
-     * @param {number} options.days - Number of days to sync (for created_at filter)
-     * @param {string} options.syncMode - 'populate' (skip existing) | 'update' (refresh stale) | null (legacy upsert)
+     * @param {number} options.days - Number of days to sync (for created_at filter, used by DEEP mode)
+     * @param {string} options.syncMode - 'deep' | 'quick' | 'update' | null (legacy)
+     *   - 'deep': Full import with aggressive memory management (initial setup, recovery)
+     *   - 'quick': Missing orders only, fetches after latest DB order date (daily catch-up)
+     *   - 'update': Recently changed orders via updated_at_min (hourly refresh)
      * @param {number} options.staleAfterMins - For update mode: re-sync orders updated in last X mins
      */
     async startJob(jobType, options = {}) {
@@ -50,15 +87,17 @@ class SyncWorker {
         }
 
         // Validate syncMode
-        const validModes = ['populate', 'update', null, undefined];
+        const validModes = ['deep', 'quick', 'update', null, undefined];
         if (!validModes.includes(options.syncMode)) {
-            throw new Error(`Invalid syncMode: ${options.syncMode}. Must be 'populate', 'update', or omitted for legacy mode.`);
+            throw new Error(`Invalid syncMode: ${options.syncMode}. Must be 'deep', 'quick', 'update', or omitted for legacy mode.`);
         }
 
         // Build date filter label
         let dateFilter = 'All time';
         if (options.syncMode === 'update' && options.staleAfterMins) {
             dateFilter = `Updated in last ${options.staleAfterMins} mins`;
+        } else if (options.syncMode === 'quick') {
+            dateFilter = 'Since last order';
         } else if (options.days) {
             dateFilter = `Last ${options.days} days`;
         }
@@ -211,13 +250,17 @@ class SyncWorker {
     /**
      * Process order sync with checkpointing
      * Supports three modes:
-     * - POPULATE: Skip orders that already exist in database (fast initial import)
-     * - UPDATE: Only fetch orders updated in Shopify since staleAfterMins (incremental refresh)
-     * - LEGACY (null): Upsert all orders (original behavior)
+     * - DEEP: Full import, upsert all orders (initial setup, data recovery)
+     * - QUICK: Missing orders only, skip existing (daily catch-up)
+     * - UPDATE: Only fetch orders updated in Shopify since staleAfterMins (hourly refresh)
+     * - LEGACY (null): Upsert all orders with conservative settings
      */
     async processOrderSync(jobId) {
         let job = await prisma.syncJob.findUnique({ where: { id: jobId } });
         const syncMode = job.syncMode;
+
+        // Configure batch settings based on sync mode
+        this.configureModeSettings(syncMode);
 
         // Calculate date filters based on sync mode
         let createdAtMin = null;
@@ -229,17 +272,30 @@ class SyncWorker {
             threshold.setMinutes(threshold.getMinutes() - job.staleAfterMins);
             updatedAtMin = threshold.toISOString();
             console.log(`[Job ${jobId}] UPDATE mode: fetching orders updated since ${updatedAtMin}`);
+        } else if (syncMode === 'quick') {
+            // QUICK mode: Find most recent order date in DB and fetch newer orders
+            const latestOrder = await prisma.order.findFirst({
+                where: { shopifyOrderId: { not: null } },
+                orderBy: { orderDate: 'desc' },
+                select: { orderDate: true }
+            });
+            if (latestOrder?.orderDate) {
+                createdAtMin = latestOrder.orderDate.toISOString();
+                console.log(`[Job ${jobId}] QUICK mode: fetching orders created after ${createdAtMin}`);
+            } else {
+                console.log(`[Job ${jobId}] QUICK mode: no existing orders, fetching all`);
+            }
         } else if (job.daysBack) {
-            // POPULATE or LEGACY mode: Use created_at_min
+            // DEEP or LEGACY mode: Use created_at_min with days filter
             const d = new Date();
             d.setDate(d.getDate() - job.daysBack);
             createdAtMin = d.toISOString();
         }
 
-        // For POPULATE mode, get existing order IDs upfront
+        // For QUICK mode, load existing order IDs upfront for skip logic
         let existingOrderIds = new Set();
-        if (syncMode === 'populate') {
-            console.log(`[Job ${jobId}] POPULATE mode: loading existing Shopify order IDs...`);
+        if (syncMode === 'quick') {
+            console.log(`[Job ${jobId}] QUICK mode: loading existing Shopify order IDs...`);
             const existingOrders = await prisma.order.findMany({
                 where: { shopifyOrderId: { not: null } },
                 select: { shopifyOrderId: true }
@@ -248,8 +304,8 @@ class SyncWorker {
             console.log(`[Job ${jobId}] Found ${existingOrderIds.size} existing orders to skip`);
         }
 
-        // Get total count if not set (only for non-UPDATE modes, UPDATE mode count is unpredictable)
-        if (!job.totalRecords && syncMode !== 'update') {
+        // Get total count if not set (only for DEEP/LEGACY modes; QUICK/UPDATE are unpredictable)
+        if (!job.totalRecords && syncMode !== 'update' && syncMode !== 'quick') {
             const totalCount = await shopifyClient.getOrderCount({
                 status: 'any',
                 created_at_min: createdAtMin
@@ -264,24 +320,6 @@ class SyncWorker {
         console.log(`[Job ${jobId}] Starting order sync (${syncMode || 'legacy'} mode): ${job.totalRecords || '?'} total, resuming from ID: ${job.lastProcessedId || 'start'}`);
 
         let sinceId = job.lastProcessedId;
-
-        // POPULATE optimization: Start from the last known order ID in DB
-        // This avoids fetching orders we already have
-        if (syncMode === 'populate' && !sinceId) {
-            // Use raw query to get MAX as numeric (shopifyOrderId is stored as String)
-            // SQLite uses CAST AS INTEGER, PostgreSQL uses CAST AS BIGINT
-            const result = await prisma.$queryRawUnsafe(`
-                SELECT shopifyOrderId 
-                FROM "Order" 
-                WHERE shopifyOrderId IS NOT NULL 
-                ORDER BY CAST(shopifyOrderId AS INTEGER) DESC 
-                LIMIT 1
-            `);
-            if (result && result.length > 0) {
-                sinceId = result[0].shopifyOrderId;
-                console.log(`[Job ${jobId}] POPULATE optimization: Starting from last known order ID ${sinceId}`);
-            }
-        }
 
         let batchNumber = job.currentBatch;
         const errorLog = job.errorLog ? JSON.parse(job.errorLog) : [];
@@ -330,8 +368,8 @@ class SyncWorker {
 
             for (const shopifyOrder of shopifyOrders) {
                 try {
-                    // POPULATE mode: Skip if order already exists
-                    if (syncMode === 'populate' && existingOrderIds.has(String(shopifyOrder.id))) {
+                    // QUICK mode: Skip if order already exists
+                    if (syncMode === 'quick' && existingOrderIds.has(String(shopifyOrder.id))) {
                         batchSkipped++;
                         continue;
                     }
@@ -340,7 +378,7 @@ class SyncWorker {
                     if (result === 'created') {
                         batchCreated++;
                         // Add to existing set for subsequent batches (in case of duplicates)
-                        if (syncMode === 'populate') {
+                        if (syncMode === 'quick') {
                             existingOrderIds.add(String(shopifyOrder.id));
                         }
                     } else if (result === 'updated') {

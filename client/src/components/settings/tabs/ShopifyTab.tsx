@@ -28,7 +28,7 @@ export function ShopifyTab() {
     const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
 
     // Order sync mode state
-    const [populateDays, setPopulateDays] = useState(365);
+    const [deepDays, setDeepDays] = useState(365);
     const [updateMins, setUpdateMins] = useState(60);
 
     // Fetch current config
@@ -122,7 +122,7 @@ export function ShopifyTab() {
     const startJobMutation = useMutation({
         mutationFn: (params: {
             jobType: string;
-            syncMode?: 'populate' | 'update';
+            syncMode?: 'deep' | 'quick' | 'update';
             days?: number;
             staleAfterMins?: number;
         }) => shopifyApi.startSyncJob(params),
@@ -393,7 +393,7 @@ export function ShopifyTab() {
                 </div>
             )}
 
-            {/* Order Sync - Two Mode Cards */}
+            {/* Order Sync - Three Mode Cards */}
             {config?.hasAccessToken && (
                 <div className="card">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -432,29 +432,27 @@ export function ShopifyTab() {
                         </div>
                     )}
 
-                    {/* Two Mode Cards */}
-                    <div className="grid md:grid-cols-2 gap-4">
-                        {/* POPULATE Mode */}
-                        <div className="border-2 border-blue-200 bg-blue-50/30 rounded-lg p-4">
-                            <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
-                                <Package size={18} /> POPULATE
+                    {/* Three Mode Cards */}
+                    <div className="grid md:grid-cols-3 gap-4">
+                        {/* DEEP Mode */}
+                        <div className="border-2 border-amber-200 bg-amber-50/30 rounded-lg p-4">
+                            <h3 className="font-semibold text-amber-800 mb-2 flex items-center gap-2">
+                                <Package size={18} /> DEEP SYNC
                             </h3>
-                            <p className="text-sm text-blue-700 mb-3">
-                                Import new orders only. Skips orders that already exist in the database.
+                            <p className="text-sm text-amber-700 mb-2">
+                                Full import of all orders. Use for initial setup or data recovery.
                             </p>
-                            <p className="text-xs text-blue-600 mb-4">
-                                Use for: Initial import, catching up on missed orders
+                            <p className="text-xs text-amber-600 mb-3 flex items-center gap-1">
+                                <AlertCircle size={12} /> Slow (~30min for 60K orders)
                             </p>
 
                             <div className="flex items-center gap-2 mb-3">
                                 <label className="text-sm text-gray-700">Days:</label>
                                 <select
-                                    value={populateDays}
-                                    onChange={(e) => setPopulateDays(Number(e.target.value))}
+                                    value={deepDays}
+                                    onChange={(e) => setDeepDays(Number(e.target.value))}
                                     className="input py-1.5 text-sm flex-1"
                                 >
-                                    <option value={30}>Last 30 days</option>
-                                    <option value={60}>Last 60 days</option>
                                     <option value={90}>Last 90 days</option>
                                     <option value={180}>Last 6 months</option>
                                     <option value={365}>Last year</option>
@@ -464,29 +462,62 @@ export function ShopifyTab() {
                             </div>
 
                             <button
+                                className="btn bg-amber-600 text-white hover:bg-amber-700 w-full flex items-center justify-center gap-2"
+                                onClick={() => {
+                                    if (confirm('Deep sync imports ALL orders and may take 30+ minutes. Continue?')) {
+                                        startJobMutation.mutate({
+                                            jobType: 'orders',
+                                            syncMode: 'deep',
+                                            days: deepDays === 9999 ? undefined : deepDays
+                                        });
+                                    }
+                                }}
+                                disabled={startJobMutation.isPending}
+                            >
+                                <Play size={16} />
+                                {startJobMutation.isPending ? 'Starting...' : 'Start Deep Sync'}
+                            </button>
+                        </div>
+
+                        {/* QUICK Mode */}
+                        <div className="border-2 border-blue-200 bg-blue-50/30 rounded-lg p-4">
+                            <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                                <RefreshCw size={18} /> QUICK SYNC
+                            </h3>
+                            <p className="text-sm text-blue-700 mb-2">
+                                Import missing orders only. Skips existing orders in database.
+                            </p>
+                            <p className="text-xs text-blue-600 mb-3 flex items-center gap-1">
+                                <CheckCircle size={12} /> Recommended for daily use
+                            </p>
+
+                            <div className="h-[38px] mb-3 flex items-center">
+                                <span className="text-xs text-gray-500">Fetches orders newer than latest in DB</span>
+                            </div>
+
+                            <button
                                 className="btn btn-primary w-full flex items-center justify-center gap-2"
                                 onClick={() => startJobMutation.mutate({
                                     jobType: 'orders',
-                                    syncMode: 'populate',
-                                    days: populateDays
+                                    syncMode: 'quick'
                                 })}
                                 disabled={startJobMutation.isPending}
                             >
                                 <Play size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Import New Orders'}
+                                {startJobMutation.isPending ? 'Starting...' : 'Quick Sync'}
                             </button>
                         </div>
 
                         {/* UPDATE Mode */}
                         <div className="border-2 border-green-200 bg-green-50/30 rounded-lg p-4">
                             <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2">
-                                <RefreshCw size={18} /> UPDATE
+                                <RefreshCw size={18} /> UPDATE SYNC
                             </h3>
-                            <p className="text-sm text-green-700 mb-3">
-                                Refresh recently changed orders. Uses Shopify's updated_at filter for efficiency.
+                            <p className="text-sm text-green-700 mb-2">
+                                Refresh recently changed orders (fulfillment, payment updates).
                             </p>
-                            <p className="text-xs text-green-600 mb-4">
-                                Use for: Hourly/daily sync of order status changes
+                            <p className="text-xs text-green-600 mb-3 flex items-center gap-1">
+                                <CheckCircle size={12} /> Run hourly for live updates
                             </p>
 
                             <div className="flex items-center gap-2 mb-3">
@@ -515,7 +546,7 @@ export function ShopifyTab() {
                                 disabled={startJobMutation.isPending}
                             >
                                 <RefreshCw size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Refresh Changed Orders'}
+                                {startJobMutation.isPending ? 'Starting...' : 'Refresh Changed'}
                             </button>
                         </div>
                     </div>
@@ -754,8 +785,10 @@ export function ShopifyTab() {
                                                 <td className="px-3 py-2">
                                                     {job.syncMode ? (
                                                         <span className={`px-2 py-0.5 rounded text-xs ${
-                                                            job.syncMode === 'populate' ? 'bg-blue-100 text-blue-700' :
+                                                            job.syncMode === 'deep' ? 'bg-amber-100 text-amber-700' :
+                                                            job.syncMode === 'quick' ? 'bg-blue-100 text-blue-700' :
                                                             job.syncMode === 'update' ? 'bg-green-100 text-green-700' :
+                                                            job.syncMode === 'populate' ? 'bg-blue-100 text-blue-700' :
                                                             'bg-gray-100 text-gray-600'
                                                         }`}>
                                                             {job.syncMode}

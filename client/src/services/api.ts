@@ -222,9 +222,13 @@ export const shopifyApi = {
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
     getCacheStatus: () => api.get('/shopify/sync/cache-status'),
     // Background sync jobs (recommended for orders sync)
+    // syncMode options:
+    //   'deep' - Full import, all orders (initial setup, recovery)
+    //   'quick' - Missing orders only (daily catch-up)
+    //   'update' - Recently changed orders only (hourly refresh)
     startSyncJob: (params: {
         jobType: string;
-        syncMode?: 'populate' | 'update';
+        syncMode?: 'deep' | 'quick' | 'update';
         days?: number;
         staleAfterMins?: number;
     }) => api.post('/shopify/sync/jobs/start', params),
