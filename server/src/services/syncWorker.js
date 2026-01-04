@@ -15,9 +15,12 @@ const activeJobs = new Map();
  */
 class SyncWorker {
     constructor() {
-        this.batchSize = 100; // Smaller batches for more frequent checkpoints
-        this.batchDelay = 500; // Delay between batches (ms)
-        this.maxErrors = 50; // Max errors to store in log
+        // Memory-optimized settings for Railway (8GB limit with 60K orders)
+        this.batchSize = 50;      // Reduced from 100 for lower peak memory
+        this.batchDelay = 1000;   // Increased for GC time
+        this.maxErrors = 20;      // Reduced from 50
+        this.gcInterval = 5;      // Request GC every N batches
+        this.disconnectInterval = 10; // Prisma disconnect every N batches
     }
 
     /**
@@ -284,6 +287,21 @@ class SyncWorker {
             // Rate limit delay
             await new Promise(resolve => setTimeout(resolve, this.batchDelay));
 
+            // Memory cleanup: Request GC periodically
+            if (batchNumber % this.gcInterval === 0) {
+                if (global.gc) {
+                    global.gc();
+                    console.log(`[Job ${jobId}] GC triggered after batch ${batchNumber}`);
+                }
+            }
+
+            // Prisma connection cleanup: Disconnect periodically to release memory
+            if (batchNumber % this.disconnectInterval === 0) {
+                await prisma.$disconnect();
+                console.log(`[Job ${jobId}] Prisma disconnected after batch ${batchNumber}`);
+                await new Promise(r => setTimeout(r, 500));
+            }
+
             // Stop if batch was smaller than limit (no more records)
             if (shopifyOrders.length < this.batchSize) {
                 break;
@@ -401,6 +419,17 @@ class SyncWorker {
             });
 
             await new Promise(resolve => setTimeout(resolve, this.batchDelay));
+
+            // Memory cleanup: Request GC periodically
+            if (batchNumber % this.gcInterval === 0 && global.gc) {
+                global.gc();
+            }
+
+            // Prisma connection cleanup
+            if (batchNumber % this.disconnectInterval === 0) {
+                await prisma.$disconnect();
+                await new Promise(r => setTimeout(r, 500));
+            }
 
             if (shopifyCustomers.length < this.batchSize) break;
         }

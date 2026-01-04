@@ -164,10 +164,10 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
             : 'Unknown';
 
     // Build order data
+    // NOTE: Raw Shopify data is stored in ShopifyOrderCache, not duplicated in Order
     const orderData = {
         shopifyOrderId,
         orderNumber: shopifyOrder.name || String(shopifyOrder.order_number) || `SHOP-${shopifyOrderId.slice(-8)}`,
-        shopifyData: JSON.stringify(shopifyOrder),
         channel: shopifyClient.mapOrderChannel(shopifyOrder),
         status,
         customerId,
@@ -213,7 +213,7 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
             if (shopifyOrder.cancelled_at && existingOrder.status !== 'cancelled') {
                 changeType = 'cancelled';
             } else if (shopifyOrder.fulfillment_status === 'fulfilled' &&
-                       existingOrder.shopifyFulfillmentStatus !== 'fulfilled') {
+                existingOrder.shopifyFulfillmentStatus !== 'fulfilled') {
                 changeType = 'fulfilled';
             }
 
