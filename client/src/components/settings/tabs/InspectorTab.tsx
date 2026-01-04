@@ -8,7 +8,7 @@ import { adminApi } from '../../../services/api';
 import { Database, Eye } from 'lucide-react';
 
 export function InspectorTab() {
-    const [inspectorTable, setInspectorTable] = useState<'orders' | 'customers' | 'products' | 'skus'>('orders');
+    const [inspectorTable, setInspectorTable] = useState<'orders' | 'customers' | 'products' | 'skus' | 'shopifyOrderCache' | 'shopifyProductCache'>('orders');
     const [inspectorLimit, setInspectorLimit] = useState(50);
     const [inspectorData, setInspectorData] = useState<any>(null);
     const [inspectorLoading, setInspectorLoading] = useState(false);
@@ -21,6 +21,8 @@ export function InspectorTab() {
                 customers: () => adminApi.inspectCustomers(inspectorLimit),
                 products: () => adminApi.inspectProducts(inspectorLimit),
                 skus: () => adminApi.inspectSkus(inspectorLimit),
+                shopifyOrderCache: () => adminApi.inspectShopifyOrderCache(inspectorLimit),
+                shopifyProductCache: () => adminApi.inspectShopifyProductCache(inspectorLimit),
             }[inspectorTable];
             const res = await apiCall();
             setInspectorData(res.data);
@@ -46,12 +48,14 @@ export function InspectorTab() {
                             setInspectorTable(e.target.value as any);
                             setInspectorData(null);
                         }}
-                        className="input w-40"
+                        className="input w-52"
                     >
                         <option value="orders">Orders</option>
                         <option value="customers">Customers</option>
                         <option value="products">Products</option>
                         <option value="skus">SKUs</option>
+                        <option value="shopifyOrderCache">Shopify Order Cache</option>
+                        <option value="shopifyProductCache">Shopify Product Cache</option>
                     </select>
 
                     <select
@@ -94,7 +98,14 @@ export function InspectorTab() {
 
                         <div className="border rounded-lg overflow-hidden">
                             <div className="bg-gray-50 px-3 py-2 text-sm font-medium border-b">
-                                {inspectorTable.charAt(0).toUpperCase() + inspectorTable.slice(1)} Table
+                                {{
+                                    orders: 'Orders',
+                                    customers: 'Customers',
+                                    products: 'Products',
+                                    skus: 'SKUs',
+                                    shopifyOrderCache: 'Shopify Order Cache',
+                                    shopifyProductCache: 'Shopify Product Cache',
+                                }[inspectorTable]} Table
                             </div>
                             <div className="max-h-[700px] overflow-auto">
                                 <InspectorTable data={inspectorData.data} />

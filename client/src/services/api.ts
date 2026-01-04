@@ -287,6 +287,10 @@ export const adminApi = {
         api.get('/admin/inspect/products', { params: { limit, offset } }),
     inspectSkus: (limit?: number, offset?: number) =>
         api.get('/admin/inspect/skus', { params: { limit, offset } }),
+    inspectShopifyOrderCache: (limit?: number, offset?: number) =>
+        api.get('/admin/inspect/shopify-order-cache', { params: { limit, offset } }),
+    inspectShopifyProductCache: (limit?: number, offset?: number) =>
+        api.get('/admin/inspect/shopify-product-cache', { params: { limit, offset } }),
     // Tier thresholds
     getTierThresholds: () => api.get('/admin/tier-thresholds'),
     updateTierThresholds: (thresholds: { platinum: number; gold: number; silver: number }) =>

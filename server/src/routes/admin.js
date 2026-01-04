@@ -574,4 +574,48 @@ router.get('/inspect/skus', authenticateToken, async (req, res) => {
     }
 });
 
+// Inspect Shopify Order Cache table
+router.get('/inspect/shopify-order-cache', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const [data, total] = await Promise.all([
+            req.prisma.shopifyOrderCache.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { lastWebhookAt: 'desc' }
+            }),
+            req.prisma.shopifyOrderCache.count()
+        ]);
+
+        res.json({ data, total, limit, offset });
+    } catch (error) {
+        console.error('Inspect Shopify Order Cache error:', error);
+        res.status(500).json({ error: 'Failed to inspect Shopify order cache' });
+    }
+});
+
+// Inspect Shopify Product Cache table
+router.get('/inspect/shopify-product-cache', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        const [data, total] = await Promise.all([
+            req.prisma.shopifyProductCache.findMany({
+                take: limit,
+                skip: offset,
+                orderBy: { lastWebhookAt: 'desc' }
+            }),
+            req.prisma.shopifyProductCache.count()
+        ]);
+
+        res.json({ data, total, limit, offset });
+    } catch (error) {
+        console.error('Inspect Shopify Product Cache error:', error);
+        res.status(500).json({ error: 'Failed to inspect Shopify product cache' });
+    }
+});
+
 export default router;
