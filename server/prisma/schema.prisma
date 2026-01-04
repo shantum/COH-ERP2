@@ -298,6 +298,7 @@ model Order {
   createdAt       DateTime  @default(now())
   syncedAt        DateTime?
   shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
+  shopifyData     String?   // DEPRECATED: Use ShopifyOrderCache instead. Kept for Railway migration compatibility.
 
   customer       Customer?       @relation(fields: [customerId], references: [id])
   orderLines     OrderLine[]
