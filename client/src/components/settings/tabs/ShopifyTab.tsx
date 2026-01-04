@@ -25,8 +25,11 @@ export function ShopifyTab() {
     const [orderPreview, setOrderPreview] = useState<any>(null);
     const [customerPreview, setCustomerPreview] = useState<any>(null);
     const [syncLimit, setSyncLimit] = useState(20);
-    const [syncDays, setSyncDays] = useState(90);
     const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+
+    // Order sync mode state
+    const [populateDays, setPopulateDays] = useState(365);
+    const [updateMins, setUpdateMins] = useState(60);
 
     // Fetch current config
     const { data: config, isLoading: configLoading } = useQuery({
@@ -117,8 +120,12 @@ export function ShopifyTab() {
     });
 
     const startJobMutation = useMutation({
-        mutationFn: ({ jobType, days }: { jobType: string; days: number }) =>
-            shopifyApi.startSyncJob(jobType, days),
+        mutationFn: (params: {
+            jobType: string;
+            syncMode?: 'populate' | 'update';
+            days?: number;
+            staleAfterMins?: number;
+        }) => shopifyApi.startSyncJob(params),
         onSuccess: () => refetchJobs(),
         onError: (error: any) => {
             alert(error.response?.data?.error || 'Failed to start sync job');
@@ -386,145 +393,211 @@ export function ShopifyTab() {
                 </div>
             )}
 
-            {/* Orders & Customers */}
+            {/* Order Sync - Two Mode Cards */}
             {config?.hasAccessToken && (
-                <div className="grid md:grid-cols-2 gap-6">
-                    {/* Orders */}
-                    <div className="card">
-                        <h3 className="font-semibold mb-3 flex items-center gap-2">
-                            <ShoppingCart size={18} /> Orders
-                        </h3>
+                <div className="card">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <ShoppingCart size={20} /> Order Sync
+                    </h2>
 
-                        <div className="flex flex-wrap items-center gap-2 mb-4">
+                    {/* Cache Status */}
+                    {cacheStatus && (
+                        <div className="mb-4 p-3 bg-gray-50 rounded-lg flex flex-wrap items-center gap-3 text-sm">
+                            <span className="font-medium text-gray-700">Cache:</span>
+                            <span className="text-gray-600">{cacheStatus.totalCached || 0} orders</span>
+                            {(cacheStatus.failed || 0) > 0 && (
+                                <span className="text-red-600">{cacheStatus.failed} failed</span>
+                            )}
+                            {(cacheStatus.pending || 0) > 0 && (
+                                <span className="text-yellow-600">{cacheStatus.pending} pending</span>
+                            )}
+                            {(cacheStatus.failed || 0) > 0 && (
+                                <button
+                                    className="btn btn-sm bg-orange-500 text-white hover:bg-orange-600 flex items-center gap-1"
+                                    onClick={() => reprocessCacheMutation.mutate()}
+                                    disabled={reprocessCacheMutation.isPending}
+                                >
+                                    <RefreshCw size={14} className={reprocessCacheMutation.isPending ? 'animate-spin' : ''} />
+                                    Retry Failed
+                                </button>
+                            )}
                             <button
-                                className="btn btn-secondary flex items-center gap-2"
+                                className="btn btn-secondary btn-sm flex items-center gap-1 ml-auto"
                                 onClick={() => previewOrdersMutation.mutate()}
                                 disabled={previewOrdersMutation.isPending}
                             >
-                                <Eye size={16} />
+                                <Eye size={14} />
                                 {previewOrdersMutation.isPending ? 'Loading...' : 'Preview'}
                             </button>
+                        </div>
+                    )}
+
+                    {/* Two Mode Cards */}
+                    <div className="grid md:grid-cols-2 gap-4">
+                        {/* POPULATE Mode */}
+                        <div className="border-2 border-blue-200 bg-blue-50/30 rounded-lg p-4">
+                            <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                                <Package size={18} /> POPULATE
+                            </h3>
+                            <p className="text-sm text-blue-700 mb-3">
+                                Import new orders only. Skips orders that already exist in the database.
+                            </p>
+                            <p className="text-xs text-blue-600 mb-4">
+                                Use for: Initial import, catching up on missed orders
+                            </p>
+
+                            <div className="flex items-center gap-2 mb-3">
+                                <label className="text-sm text-gray-700">Days:</label>
+                                <select
+                                    value={populateDays}
+                                    onChange={(e) => setPopulateDays(Number(e.target.value))}
+                                    className="input py-1.5 text-sm flex-1"
+                                >
+                                    <option value={30}>Last 30 days</option>
+                                    <option value={60}>Last 60 days</option>
+                                    <option value={90}>Last 90 days</option>
+                                    <option value={180}>Last 6 months</option>
+                                    <option value={365}>Last year</option>
+                                    <option value={730}>Last 2 years</option>
+                                    <option value={9999}>All time</option>
+                                </select>
+                            </div>
+
                             <button
-                                className="btn btn-primary flex items-center gap-2"
-                                onClick={() => startJobMutation.mutate({ jobType: 'orders', days: syncDays })}
+                                className="btn btn-primary w-full flex items-center justify-center gap-2"
+                                onClick={() => startJobMutation.mutate({
+                                    jobType: 'orders',
+                                    syncMode: 'populate',
+                                    days: populateDays
+                                })}
                                 disabled={startJobMutation.isPending}
                             >
                                 <Play size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Sync Orders'}
+                                {startJobMutation.isPending ? 'Starting...' : 'Import New Orders'}
                             </button>
-                            <select
-                                value={syncDays}
-                                onChange={(e) => setSyncDays(Number(e.target.value))}
-                                className="input py-1.5 text-sm w-32"
-                            >
-                                <option value={30}>Last 30 days</option>
-                                <option value={60}>Last 60 days</option>
-                                <option value={90}>Last 90 days</option>
-                                <option value={180}>Last 6 months</option>
-                                <option value={365}>Last year</option>
-                            </select>
                         </div>
 
-                        {/* Cache Status */}
-                        {cacheStatus && (
-                            <div className="mb-4 p-3 bg-gray-50 rounded-lg flex flex-wrap items-center gap-3 text-sm">
-                                <span className="font-medium text-gray-700">Cache:</span>
-                                <span className="text-gray-600">{cacheStatus.totalCached || 0} orders</span>
-                                {(cacheStatus.failed || 0) > 0 && (
-                                    <span className="text-red-600">{cacheStatus.failed} failed</span>
-                                )}
-                                {(cacheStatus.pending || 0) > 0 && (
-                                    <span className="text-yellow-600">{cacheStatus.pending} pending</span>
-                                )}
-                                {(cacheStatus.failed || 0) > 0 && (
-                                    <button
-                                        className="btn btn-sm bg-orange-500 text-white hover:bg-orange-600 flex items-center gap-1"
-                                        onClick={() => reprocessCacheMutation.mutate()}
-                                        disabled={reprocessCacheMutation.isPending}
-                                    >
-                                        <RefreshCw size={14} className={reprocessCacheMutation.isPending ? 'animate-spin' : ''} />
-                                        Retry Failed
-                                    </button>
-                                )}
+                        {/* UPDATE Mode */}
+                        <div className="border-2 border-green-200 bg-green-50/30 rounded-lg p-4">
+                            <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2">
+                                <RefreshCw size={18} /> UPDATE
+                            </h3>
+                            <p className="text-sm text-green-700 mb-3">
+                                Refresh recently changed orders. Uses Shopify's updated_at filter for efficiency.
+                            </p>
+                            <p className="text-xs text-green-600 mb-4">
+                                Use for: Hourly/daily sync of order status changes
+                            </p>
+
+                            <div className="flex items-center gap-2 mb-3">
+                                <label className="text-sm text-gray-700">Since:</label>
+                                <select
+                                    value={updateMins}
+                                    onChange={(e) => setUpdateMins(Number(e.target.value))}
+                                    className="input py-1.5 text-sm flex-1"
+                                >
+                                    <option value={30}>Last 30 mins</option>
+                                    <option value={60}>Last 1 hour</option>
+                                    <option value={120}>Last 2 hours</option>
+                                    <option value={360}>Last 6 hours</option>
+                                    <option value={720}>Last 12 hours</option>
+                                    <option value={1440}>Last 24 hours</option>
+                                </select>
                             </div>
-                        )}
 
-                        {backfillFromCacheMutation.data && (
-                            <div className="mb-4 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
-                                <p className="font-medium text-purple-800">
-                                    {backfillFromCacheMutation.data?.data.message}
-                                </p>
-                                <p className="text-purple-700">
-                                    Updated: {backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillFromCacheMutation.data?.data.results?.total || 0} orders
-                                </p>
-                            </div>
-                        )}
-
-                        {reprocessCacheMutation.data && (
-                            <div className="mb-4 p-3 rounded-lg text-sm bg-green-50 border border-green-200">
-                                <p className="font-medium text-green-800">
-                                    Reprocessed {reprocessCacheMutation.data?.data?.processed || 0} orders
-                                </p>
-                                <p className="text-green-700">
-                                    Succeeded: {reprocessCacheMutation.data?.data?.succeeded || 0},
-                                    Failed: {reprocessCacheMutation.data?.data?.failed || 0}
-                                </p>
-                            </div>
-                        )}
-
-                        {orderPreview && (
-                            <div className="border rounded-lg overflow-hidden">
-                                <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
-                                    <span>Raw Shopify Data ({orderPreview.previewCount} of {orderPreview.totalAvailable} orders)</span>
-                                    <button onClick={() => setOrderPreview(null)} className="text-gray-400 hover:text-gray-600">
-                                        <XCircle size={16} />
-                                    </button>
-                                </div>
-                                <JsonViewer data={orderPreview.orders} rootName="orders" />
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Customers */}
-                    <div className="card">
-                        <h3 className="font-semibold mb-3 flex items-center gap-2">
-                            <Users size={18} /> Customers
-                        </h3>
-
-                        <div className="flex flex-wrap gap-2 mb-4">
                             <button
-                                className="btn btn-secondary flex items-center gap-2"
-                                onClick={() => previewCustomersMutation.mutate()}
-                                disabled={previewCustomersMutation.isPending}
-                            >
-                                <Eye size={16} />
-                                {previewCustomersMutation.isPending ? 'Loading...' : 'Preview'}
-                            </button>
-                            <button
-                                className="btn btn-primary flex items-center gap-2"
-                                onClick={() => startJobMutation.mutate({ jobType: 'customers', days: 9999 })}
+                                className="btn bg-green-600 text-white hover:bg-green-700 w-full flex items-center justify-center gap-2"
+                                onClick={() => startJobMutation.mutate({
+                                    jobType: 'orders',
+                                    syncMode: 'update',
+                                    staleAfterMins: updateMins
+                                })}
                                 disabled={startJobMutation.isPending}
                             >
-                                <Play size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Sync Customers'}
+                                <RefreshCw size={16} />
+                                {startJobMutation.isPending ? 'Starting...' : 'Refresh Changed Orders'}
                             </button>
                         </div>
-                        <p className="text-xs text-gray-500 mb-3">
-                            Only customers with at least 1 order are synced.
-                        </p>
-
-                        {customerPreview && (
-                            <div className="border rounded-lg overflow-hidden">
-                                <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
-                                    <span>Raw Shopify Data ({customerPreview.previewCount} of {customerPreview.totalAvailable} customers)</span>
-                                    <button onClick={() => setCustomerPreview(null)} className="text-gray-400 hover:text-gray-600">
-                                        <XCircle size={16} />
-                                    </button>
-                                </div>
-                                <JsonViewer data={customerPreview.customers} rootName="customers" />
-                            </div>
-                        )}
                     </div>
+
+                    {/* Feedback messages */}
+                    {backfillFromCacheMutation.data && (
+                        <div className="mt-4 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
+                            <p className="font-medium text-purple-800">
+                                {backfillFromCacheMutation.data?.data.message}
+                            </p>
+                            <p className="text-purple-700">
+                                Updated: {backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillFromCacheMutation.data?.data.results?.total || 0} orders
+                            </p>
+                        </div>
+                    )}
+
+                    {reprocessCacheMutation.data && (
+                        <div className="mt-4 p-3 rounded-lg text-sm bg-green-50 border border-green-200">
+                            <p className="font-medium text-green-800">
+                                Reprocessed {reprocessCacheMutation.data?.data?.processed || 0} orders
+                            </p>
+                            <p className="text-green-700">
+                                Succeeded: {reprocessCacheMutation.data?.data?.succeeded || 0},
+                                Failed: {reprocessCacheMutation.data?.data?.failed || 0}
+                            </p>
+                        </div>
+                    )}
+
+                    {orderPreview && (
+                        <div className="mt-4 border rounded-lg overflow-hidden">
+                            <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
+                                <span>Raw Shopify Data ({orderPreview.previewCount} of {orderPreview.totalAvailable} orders)</span>
+                                <button onClick={() => setOrderPreview(null)} className="text-gray-400 hover:text-gray-600">
+                                    <XCircle size={16} />
+                                </button>
+                            </div>
+                            <JsonViewer data={orderPreview.orders} rootName="orders" />
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Customers */}
+            {config?.hasAccessToken && (
+                <div className="card">
+                    <h3 className="font-semibold mb-3 flex items-center gap-2">
+                        <Users size={18} /> Customers
+                    </h3>
+
+                    <div className="flex flex-wrap gap-2 mb-4">
+                        <button
+                            className="btn btn-secondary flex items-center gap-2"
+                            onClick={() => previewCustomersMutation.mutate()}
+                            disabled={previewCustomersMutation.isPending}
+                        >
+                            <Eye size={16} />
+                            {previewCustomersMutation.isPending ? 'Loading...' : 'Preview'}
+                        </button>
+                        <button
+                            className="btn btn-primary flex items-center gap-2"
+                            onClick={() => startJobMutation.mutate({ jobType: 'customers', days: 9999 })}
+                            disabled={startJobMutation.isPending}
+                        >
+                            <Play size={16} />
+                            {startJobMutation.isPending ? 'Starting...' : 'Sync Customers'}
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">
+                        Only customers with at least 1 order are synced.
+                    </p>
+
+                    {customerPreview && (
+                        <div className="border rounded-lg overflow-hidden">
+                            <div className="bg-gray-50 px-3 py-2 text-sm font-medium flex justify-between items-center">
+                                <span>Raw Shopify Data ({customerPreview.previewCount} of {customerPreview.totalAvailable} customers)</span>
+                                <button onClick={() => setCustomerPreview(null)} className="text-gray-400 hover:text-gray-600">
+                                    <XCircle size={16} />
+                                </button>
+                            </div>
+                            <JsonViewer data={customerPreview.customers} rootName="customers" />
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -651,53 +724,11 @@ export function ShopifyTab() {
             {config?.hasAccessToken && (
                 <div className="card">
                     <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <RefreshCw size={20} /> Background Sync Jobs
+                        <RefreshCw size={20} /> Sync Job History
                     </h2>
                     <p className="text-sm text-gray-600 mb-4">
-                        Start background sync jobs that process data in batches with automatic checkpointing.
-                        Jobs can be resumed if interrupted.
+                        Background sync jobs with automatic checkpointing. Failed jobs can be resumed.
                     </p>
-
-                    <div className="flex flex-wrap items-center gap-3 mb-6 p-4 bg-gray-50 rounded-lg">
-                        <span className="text-sm font-medium text-gray-700">Start new sync:</span>
-                        <select
-                            className="input w-36"
-                            value={syncDays}
-                            onChange={(e) => setSyncDays(Number(e.target.value))}
-                        >
-                            <option value={30}>Last 30 days</option>
-                            <option value={60}>Last 60 days</option>
-                            <option value={90}>Last 90 days</option>
-                            <option value={180}>Last 6 months</option>
-                            <option value={365}>Last year</option>
-                            <option value={730}>Last 2 years</option>
-                            <option value={9999}>All time</option>
-                        </select>
-                        <button
-                            className="btn btn-primary flex items-center gap-2"
-                            onClick={() => startJobMutation.mutate({ jobType: 'orders', days: syncDays })}
-                            disabled={startJobMutation.isPending}
-                        >
-                            <ShoppingCart size={16} />
-                            Sync Orders
-                        </button>
-                        <button
-                            className="btn btn-secondary flex items-center gap-2"
-                            onClick={() => startJobMutation.mutate({ jobType: 'customers', days: syncDays })}
-                            disabled={startJobMutation.isPending}
-                        >
-                            <Users size={16} />
-                            Sync Customers
-                        </button>
-                        <button
-                            className="btn btn-secondary flex items-center gap-2"
-                            onClick={() => startJobMutation.mutate({ jobType: 'products', days: syncDays })}
-                            disabled={startJobMutation.isPending}
-                        >
-                            <Package size={16} />
-                            Sync Products
-                        </button>
-                    </div>
 
                     {syncJobs && syncJobs.length > 0 && (
                         <div className="overflow-x-auto">
@@ -705,9 +736,9 @@ export function ShopifyTab() {
                                 <thead className="bg-gray-100">
                                     <tr>
                                         <th className="px-3 py-2 text-left">Type</th>
+                                        <th className="px-3 py-2 text-left">Mode</th>
                                         <th className="px-3 py-2 text-left">Status</th>
                                         <th className="px-3 py-2 text-left">Progress</th>
-                                        <th className="px-3 py-2 text-left">Created/Updated</th>
                                         <th className="px-3 py-2 text-left">Started</th>
                                         <th className="px-3 py-2 text-left">Actions</th>
                                     </tr>
@@ -721,6 +752,19 @@ export function ShopifyTab() {
                                             <tr key={job.id} className="hover:bg-gray-50">
                                                 <td className="px-3 py-2 capitalize font-medium">{job.jobType}</td>
                                                 <td className="px-3 py-2">
+                                                    {job.syncMode ? (
+                                                        <span className={`px-2 py-0.5 rounded text-xs ${
+                                                            job.syncMode === 'populate' ? 'bg-blue-100 text-blue-700' :
+                                                            job.syncMode === 'update' ? 'bg-green-100 text-green-700' :
+                                                            'bg-gray-100 text-gray-600'
+                                                        }`}>
+                                                            {job.syncMode}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-xs">legacy</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2">
                                                     <span className={`px-2 py-0.5 rounded-full text-xs ${
                                                         job.status === 'completed' ? 'bg-green-100 text-green-700' :
                                                         job.status === 'running' ? 'bg-blue-100 text-blue-700' :
@@ -733,7 +777,7 @@ export function ShopifyTab() {
                                                 </td>
                                                 <td className="px-3 py-2">
                                                     <div className="flex items-center gap-2">
-                                                        <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                        <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
                                                             <div
                                                                 className={`h-full transition-all ${
                                                                     job.status === 'completed' ? 'bg-green-500' :
@@ -754,10 +798,7 @@ export function ShopifyTab() {
                                                     </div>
                                                 </td>
                                                 <td className="px-3 py-2 text-xs text-gray-500">
-                                                    {new Date(job.createdAt).toLocaleString()}
-                                                </td>
-                                                <td className="px-3 py-2 text-xs text-gray-500">
-                                                    {job.startedAt ? new Date(job.startedAt).toLocaleTimeString() : '-'}
+                                                    {job.startedAt ? new Date(job.startedAt).toLocaleString() : '-'}
                                                 </td>
                                                 <td className="px-3 py-2">
                                                     {(job.status === 'running' || job.status === 'pending') && (
@@ -792,13 +833,15 @@ export function ShopifyTab() {
 
                     {(!syncJobs || syncJobs.length === 0) && (
                         <p className="text-gray-500 text-sm text-center py-4">
-                            No sync jobs yet. Start one above.
+                            No sync jobs yet. Use the Order Sync section above to start syncing.
                         </p>
                     )}
 
-                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                        <strong>Legend:</strong> Progress shows (processed/total) with (+created / ~updated / !errors)
-                    </div>
+                    {syncJobs && syncJobs.length > 0 && (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+                            <strong>Legend:</strong> Progress shows (processed/total) with (+created / ~updated / !errors)
+                        </div>
+                    )}
                 </div>
             )}
 
