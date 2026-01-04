@@ -136,53 +136,137 @@ router.post('/:id/resolve', authenticateToken, async (req, res) => {
 // RETURN INWARD - Receive returns into repacking queue
 // ============================================
 
+// Get order details with line items for return inward
+router.get('/inward/order/:orderId', authenticateToken, async (req, res) => {
+    try {
+        const { orderId } = req.params;
+
+        const order = await req.prisma.order.findUnique({
+            where: { id: orderId },
+            include: {
+                customer: true,
+                lines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: {
+                                    include: { product: true },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Format response with order items
+        const items = order.lines.map((line) => ({
+            orderLineId: line.id,
+            skuId: line.sku.id,
+            skuCode: line.sku.skuCode,
+            barcode: line.sku.barcode,
+            productName: line.sku.variation?.product?.name,
+            colorName: line.sku.variation?.colorName,
+            size: line.sku.size,
+            qty: line.qty,
+            imageUrl: line.sku.variation?.imageUrl || line.sku.variation?.product?.imageUrl,
+        }));
+
+        res.json({
+            id: order.id,
+            orderNumber: order.orderNumber,
+            shopifyOrderNumber: order.shopifyOrderNumber,
+            orderDate: order.orderDate,
+            customer: order.customer ? {
+                id: order.customer.id,
+                name: order.customer.name,
+                email: order.customer.email,
+            } : null,
+            items,
+        });
+    } catch (error) {
+        console.error('Get order for return error:', error);
+        res.status(500).json({ error: 'Failed to fetch order details' });
+    }
+});
+
 router.post('/inward', authenticateToken, async (req, res) => {
     try {
         const {
             skuId,
-            skuCode,
-            barcode,
+            orderLineId,
             qty = 1,
-            condition = 'used', // unused, used, damaged, defective, destroyed
+            condition, // correct_product, incorrect_product, damaged_product
             requestType = 'return', // return or exchange
             reasonCategory,
             originalOrderId,
-            inspectionNotes,
         } = req.body;
 
-        // Find SKU by ID, code, or barcode
-        let sku;
-        if (skuId) {
-            sku = await req.prisma.sku.findUnique({
-                where: { id: skuId },
-                include: { variation: { include: { product: true } } },
-            });
-        } else if (barcode) {
-            sku = await req.prisma.sku.findFirst({
-                where: { skuCode: barcode },
-                include: { variation: { include: { product: true } } },
-            });
-        } else if (skuCode) {
-            sku = await req.prisma.sku.findUnique({
-                where: { skuCode },
-                include: { variation: { include: { product: true } } },
+        // Validate required fields
+        if (!originalOrderId) {
+            return res.status(400).json({ error: 'Order is required for return inward' });
+        }
+
+        if (!skuId) {
+            return res.status(400).json({ error: 'SKU is required' });
+        }
+
+        if (!condition) {
+            return res.status(400).json({ error: 'Condition is required' });
+        }
+
+        // Fetch the order with lines to verify
+        const order = await req.prisma.order.findUnique({
+            where: { id: originalOrderId },
+            include: {
+                customer: true,
+                lines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Verify SKU is in the order (unless marked as incorrect product)
+        const orderLine = order.lines.find((line) => line.skuId === skuId);
+        if (!orderLine && condition !== 'incorrect_product') {
+            return res.status(400).json({
+                error: 'This SKU is not in the selected order. If this is a different product than ordered, select "Received incorrect product".',
             });
         }
+
+        // Get the SKU details
+        const sku = await req.prisma.sku.findUnique({
+            where: { id: skuId },
+            include: { variation: { include: { product: true } } },
+        });
 
         if (!sku) {
             return res.status(404).json({ error: 'SKU not found' });
         }
 
-        // Optionally find the original order
-        let order = null;
-        let customer = null;
-        if (originalOrderId) {
-            order = await req.prisma.order.findUnique({
-                where: { id: originalOrderId },
-                include: { customer: true },
-            });
-            customer = order?.customer;
-        }
+        const customer = order.customer;
+
+        // Map condition to internal values
+        const conditionMap = {
+            correct_product: 'used', // Will be inspected further in repacking queue
+            incorrect_product: 'wrong_product',
+            damaged_product: 'damaged',
+        };
+        const internalCondition = conditionMap[condition] || 'used';
 
         // Create return request and add to repacking queue in a transaction
         const result = await req.prisma.$transaction(async (prisma) => {
@@ -195,15 +279,16 @@ router.post('/inward', authenticateToken, async (req, res) => {
                 data: {
                     requestNumber,
                     requestType,
-                    originalOrderId,
+                    originalOrderId: order.id,
                     customerId: customer?.id,
-                    reasonCategory: reasonCategory || 'other',
-                    status: 'received', // Already received since we're doing inward
+                    reasonCategory: reasonCategory || (condition === 'incorrect_product' ? 'wrong_item' : condition === 'damaged_product' ? 'damaged_in_transit' : 'other'),
+                    status: 'received',
                     lines: {
                         create: [{
                             skuId: sku.id,
+                            originalOrderLineId: orderLine?.id || null,
                             qty,
-                            itemCondition: condition,
+                            itemCondition: internalCondition,
                         }],
                     },
                 },
@@ -217,7 +302,7 @@ router.post('/inward', authenticateToken, async (req, res) => {
                     fromStatus: 'requested',
                     toStatus: 'received',
                     changedById: req.user.id,
-                    notes: 'Received via return inward',
+                    notes: `Received via return inward - ${condition.replace(/_/g, ' ')}`,
                 },
             });
 
@@ -226,10 +311,10 @@ router.post('/inward', authenticateToken, async (req, res) => {
                 data: {
                     skuId: sku.id,
                     qty,
-                    condition,
+                    condition: internalCondition,
                     returnRequestId: returnRequest.id,
                     returnLineId: returnRequest.lines[0].id,
-                    inspectionNotes,
+                    inspectionNotes: `Initial condition: ${condition.replace(/_/g, ' ')}`,
                     status: 'pending',
                 },
             });
@@ -292,11 +377,11 @@ router.post('/inward', authenticateToken, async (req, res) => {
                 colorName: sku.variation?.colorName,
                 size: sku.size,
             },
-            linkedOrder: order ? {
+            linkedOrder: {
                 id: order.id,
                 orderNumber: order.orderNumber,
                 customerName: customer?.name,
-            } : null,
+            },
         });
     } catch (error) {
         console.error('Return inward error:', error);

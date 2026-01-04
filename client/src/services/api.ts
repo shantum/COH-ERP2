@@ -177,16 +177,15 @@ export const returnsApi = {
     resolve: (id: string, data: ResolveReturnData) => api.post(`/returns/${id}/resolve`, data),
     getAnalyticsByProduct: () => api.get('/returns/analytics/by-product'),
     // Return Inward - receive returns into repacking queue
+    getOrderForInward: (orderId: string) => api.get(`/returns/inward/order/${orderId}`),
     inward: (data: {
-        skuId?: string;
-        skuCode?: string;
-        barcode?: string;
+        skuId: string;
+        orderLineId?: string;
         qty?: number;
-        condition?: string;
+        condition: 'correct_product' | 'incorrect_product' | 'damaged_product';
         requestType?: 'return' | 'exchange';
         reasonCategory?: string;
-        originalOrderId?: string;
-        inspectionNotes?: string;
+        originalOrderId: string;
     }) => api.post('/returns/inward', data),
 };
 
