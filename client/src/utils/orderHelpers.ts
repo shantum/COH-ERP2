@@ -96,10 +96,12 @@ export interface FlattenedOrderRow {
 /**
  * Flatten orders into order line rows for table display
  * Sorted by newest first
+ * Note: customerStats parameter kept for API compatibility but no longer used
+ * (order count now comes from server via order.customerOrderCount)
  */
 export function flattenOrders(
     orders: any[] | undefined,
-    customerStats: Record<string, { orderCount: number }>,
+    _customerStats: Record<string, { orderCount: number }>,
     inventoryBalance: any[] | undefined,
     fabricStock: any[] | undefined
 ): FlattenedOrderRow[] {
