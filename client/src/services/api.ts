@@ -123,7 +123,8 @@ export const inventoryApi = {
 export const ordersApi = {
     getAll: (params?: Record<string, string>) => api.get('/orders', { params }),
     getOpen: () => api.get('/orders/open'),
-    getShipped: () => api.get('/orders/shipped'),
+    getShipped: (params?: { limit?: number; offset?: number; days?: number }) =>
+        api.get('/orders/shipped', { params }),
     getCancelled: () => api.get('/orders/status/cancelled'),
     getArchived: () => api.get('/orders/status/archived'),
     archive: (id: string) => api.post(`/orders/${id}/archive`),

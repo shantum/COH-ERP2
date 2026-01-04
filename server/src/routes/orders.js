@@ -71,7 +71,29 @@ router.get('/open', async (req, res) => {
     try {
         const orders = await req.prisma.order.findMany({
             where: { status: 'open', isArchived: false },
-            include: {
+            select: {
+                id: true,
+                orderNumber: true,
+                shopifyOrderId: true,
+                channel: true,
+                customerId: true,
+                customerName: true,
+                customerEmail: true,
+                customerPhone: true,
+                shippingAddress: true,
+                orderDate: true,
+                customerNotes: true,
+                internalNotes: true,
+                status: true,
+                awbNumber: true,
+                courier: true,
+                shippedAt: true,
+                deliveredAt: true,
+                totalAmount: true,
+                createdAt: true,
+                shopifyFulfillmentStatus: true,
+                paymentMethod: true,
+                // Exclude shopifyData to reduce payload size
                 customer: true,
                 orderLines: {
                     include: {
@@ -132,9 +154,40 @@ router.get('/open', async (req, res) => {
 // Get shipped orders
 router.get('/shipped', async (req, res) => {
     try {
+        const { limit = 100, offset = 0, days = 30 } = req.query;
+
+        // Filter to recent orders by default (last 30 days)
+        const sinceDate = new Date();
+        sinceDate.setDate(sinceDate.getDate() - Number(days));
+
         const orders = await req.prisma.order.findMany({
-            where: { status: { in: ['shipped', 'delivered'] } },
-            include: {
+            where: {
+                status: { in: ['shipped', 'delivered'] },
+                shippedAt: { gte: sinceDate }
+            },
+            select: {
+                id: true,
+                orderNumber: true,
+                shopifyOrderId: true,
+                channel: true,
+                customerId: true,
+                customerName: true,
+                customerEmail: true,
+                customerPhone: true,
+                shippingAddress: true,
+                orderDate: true,
+                customerNotes: true,
+                internalNotes: true,
+                status: true,
+                awbNumber: true,
+                courier: true,
+                shippedAt: true,
+                deliveredAt: true,
+                totalAmount: true,
+                createdAt: true,
+                shopifyFulfillmentStatus: true,
+                paymentMethod: true,
+                // Exclude shopifyData to reduce payload size
                 customer: true,
                 orderLines: {
                     include: {
@@ -148,6 +201,8 @@ router.get('/shipped', async (req, res) => {
                 },
             },
             orderBy: { shippedAt: 'desc' },
+            take: Number(limit),
+            skip: Number(offset),
         });
 
         // Get customer LTV data for all orders

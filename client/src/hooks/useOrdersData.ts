@@ -26,7 +26,7 @@ export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOp
 
     const shippedOrdersQuery = useQuery({
         queryKey: ['shippedOrders'],
-        queryFn: () => ordersApi.getShipped().then(r => r.data),
+        queryFn: () => ordersApi.getShipped({ days: 30 }).then(r => r.data),
         refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false
     });
 
