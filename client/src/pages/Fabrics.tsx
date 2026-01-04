@@ -1,10 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fabricsApi } from '../services/api';
 import { useState } from 'react';
-import { AlertTriangle, Plus, X, ChevronDown, ChevronRight, Package, Users, Eye, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { AlertTriangle, Plus, X, ChevronDown, ChevronRight, Package, Users, Eye, ArrowDownCircle, ArrowUpCircle, Trash2 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 export default function Fabrics() {
     const queryClient = useQueryClient();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const { data: fabricTypes, isLoading } = useQuery({ queryKey: ['fabricTypes'], queryFn: () => fabricsApi.getTypes().then(r => r.data) });
     const { data: suppliers } = useQuery({ queryKey: ['suppliers'], queryFn: () => fabricsApi.getSuppliers().then(r => r.data) });
     const { data: stockAnalysis } = useQuery({ queryKey: ['fabricStock'], queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data) });
@@ -70,6 +73,16 @@ export default function Fabrics() {
             setSupplierForm({ name: '', contactName: '', email: '', phone: '', address: '' });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to create supplier')
+    });
+
+    const deleteTransaction = useMutation({
+        mutationFn: (txnId: string) => fabricsApi.deleteTransaction(txnId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['fabricTransactions', showDetail?.id] });
+            queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
     });
 
     const toggleExpand = (id: string) => {
@@ -483,8 +496,23 @@ export default function Fabrics() {
                                                         {txn.notes && <p className="text-xs text-gray-600 mt-1">{txn.notes}</p>}
                                                     </div>
                                                 </div>
-                                                <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                    </div>
+                                                    {isAdmin && (
+                                                        <button
+                                                            onClick={() => {
+                                                                if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} ${txn.unit}?`)) {
+                                                                    deleteTransaction.mutate(txn.id);
+                                                                }
+                                                            }}
+                                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                                            title="Delete transaction (admin only)"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

@@ -216,6 +216,33 @@ router.post('/:id/transactions', authenticateToken, async (req, res) => {
     }
 });
 
+// Delete fabric transaction (admin only)
+router.delete('/transactions/:txnId', authenticateToken, async (req, res) => {
+    try {
+        // Check if user is admin
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can delete transactions' });
+        }
+
+        const transaction = await req.prisma.fabricTransaction.findUnique({
+            where: { id: req.params.txnId },
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ error: 'Transaction not found' });
+        }
+
+        await req.prisma.fabricTransaction.delete({
+            where: { id: req.params.txnId },
+        });
+
+        res.json({ message: 'Transaction deleted', id: req.params.txnId });
+    } catch (error) {
+        console.error('Delete fabric transaction error:', error);
+        res.status(500).json({ error: 'Failed to delete transaction' });
+    }
+});
+
 // ============================================
 // FABRIC BALANCE DASHBOARD
 // ============================================
@@ -410,6 +437,338 @@ router.post('/orders/:id/receive', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Receive fabric order error:', error);
         res.status(500).json({ error: 'Failed to receive order' });
+    }
+});
+
+// ============================================
+// FABRIC RECONCILIATION
+// ============================================
+
+// Get reconciliation history
+router.get('/reconciliation/history', authenticateToken, async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        const reconciliations = await req.prisma.fabricReconciliation.findMany({
+            include: {
+                items: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: Number(limit),
+        });
+
+        const history = reconciliations.map(r => ({
+            id: r.id,
+            date: r.reconcileDate,
+            status: r.status,
+            itemsCount: r.items.length,
+            adjustments: r.items.filter(i => i.variance !== 0 && i.variance !== null).length,
+            createdBy: r.createdBy,
+            createdAt: r.createdAt,
+        }));
+
+        res.json(history);
+    } catch (error) {
+        console.error('Get reconciliation history error:', error);
+        res.status(500).json({ error: 'Failed to fetch reconciliation history' });
+    }
+});
+
+// Start a new reconciliation
+router.post('/reconciliation/start', authenticateToken, async (req, res) => {
+    try {
+        // Get all active fabrics with their current balances
+        const fabrics = await req.prisma.fabric.findMany({
+            where: { isActive: true },
+            include: { fabricType: true },
+            orderBy: { name: 'asc' },
+        });
+
+        // Calculate current balances
+        const fabricsWithBalance = await Promise.all(
+            fabrics.map(async (fabric) => {
+                const balance = await calculateFabricBalance(req.prisma, fabric.id);
+                return {
+                    fabricId: fabric.id,
+                    fabricName: fabric.name,
+                    colorName: fabric.colorName,
+                    unit: fabric.fabricType.unit,
+                    systemQty: balance.currentBalance,
+                };
+            })
+        );
+
+        // Create reconciliation record
+        const reconciliation = await req.prisma.fabricReconciliation.create({
+            data: {
+                createdBy: req.user?.id || null,
+                items: {
+                    create: fabricsWithBalance.map(f => ({
+                        fabricId: f.fabricId,
+                        systemQty: f.systemQty,
+                    })),
+                },
+            },
+            include: {
+                items: {
+                    include: {
+                        fabric: { include: { fabricType: true } },
+                    },
+                },
+            },
+        });
+
+        // Format response
+        const response = {
+            id: reconciliation.id,
+            status: reconciliation.status,
+            createdAt: reconciliation.createdAt,
+            items: reconciliation.items.map(item => ({
+                id: item.id,
+                fabricId: item.fabricId,
+                fabricName: item.fabric.name,
+                colorName: item.fabric.colorName,
+                unit: item.fabric.fabricType.unit,
+                systemQty: item.systemQty,
+                physicalQty: item.physicalQty,
+                variance: item.variance,
+                adjustmentReason: item.adjustmentReason,
+                notes: item.notes,
+            })),
+        };
+
+        res.status(201).json(response);
+    } catch (error) {
+        console.error('Start reconciliation error:', error);
+        res.status(500).json({ error: 'Failed to start reconciliation' });
+    }
+});
+
+// Get a specific reconciliation
+router.get('/reconciliation/:id', authenticateToken, async (req, res) => {
+    try {
+        const reconciliation = await req.prisma.fabricReconciliation.findUnique({
+            where: { id: req.params.id },
+            include: {
+                items: {
+                    include: {
+                        fabric: { include: { fabricType: true } },
+                    },
+                },
+            },
+        });
+
+        if (!reconciliation) {
+            return res.status(404).json({ error: 'Reconciliation not found' });
+        }
+
+        const response = {
+            id: reconciliation.id,
+            status: reconciliation.status,
+            notes: reconciliation.notes,
+            createdAt: reconciliation.createdAt,
+            items: reconciliation.items.map(item => ({
+                id: item.id,
+                fabricId: item.fabricId,
+                fabricName: item.fabric.name,
+                colorName: item.fabric.colorName,
+                unit: item.fabric.fabricType.unit,
+                systemQty: item.systemQty,
+                physicalQty: item.physicalQty,
+                variance: item.variance,
+                adjustmentReason: item.adjustmentReason,
+                notes: item.notes,
+            })),
+        };
+
+        res.json(response);
+    } catch (error) {
+        console.error('Get reconciliation error:', error);
+        res.status(500).json({ error: 'Failed to fetch reconciliation' });
+    }
+});
+
+// Update reconciliation items (physical quantities)
+router.put('/reconciliation/:id', authenticateToken, async (req, res) => {
+    try {
+        const { items } = req.body;
+
+        const reconciliation = await req.prisma.fabricReconciliation.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!reconciliation) {
+            return res.status(404).json({ error: 'Reconciliation not found' });
+        }
+
+        if (reconciliation.status !== 'draft') {
+            return res.status(400).json({ error: 'Cannot update submitted reconciliation' });
+        }
+
+        // Update each item
+        for (const item of items) {
+            const variance = item.physicalQty !== null && item.physicalQty !== undefined
+                ? item.physicalQty - item.systemQty
+                : null;
+
+            await req.prisma.fabricReconciliationItem.update({
+                where: { id: item.id },
+                data: {
+                    physicalQty: item.physicalQty,
+                    variance,
+                    adjustmentReason: item.adjustmentReason || null,
+                    notes: item.notes || null,
+                },
+            });
+        }
+
+        // Return updated reconciliation
+        const updated = await req.prisma.fabricReconciliation.findUnique({
+            where: { id: req.params.id },
+            include: {
+                items: {
+                    include: {
+                        fabric: { include: { fabricType: true } },
+                    },
+                },
+            },
+        });
+
+        res.json({
+            id: updated.id,
+            status: updated.status,
+            items: updated.items.map(item => ({
+                id: item.id,
+                fabricId: item.fabricId,
+                fabricName: item.fabric.name,
+                colorName: item.fabric.colorName,
+                unit: item.fabric.fabricType.unit,
+                systemQty: item.systemQty,
+                physicalQty: item.physicalQty,
+                variance: item.variance,
+                adjustmentReason: item.adjustmentReason,
+                notes: item.notes,
+            })),
+        });
+    } catch (error) {
+        console.error('Update reconciliation error:', error);
+        res.status(500).json({ error: 'Failed to update reconciliation' });
+    }
+});
+
+// Submit reconciliation (creates adjustment transactions)
+router.post('/reconciliation/:id/submit', authenticateToken, async (req, res) => {
+    try {
+        const reconciliation = await req.prisma.fabricReconciliation.findUnique({
+            where: { id: req.params.id },
+            include: {
+                items: {
+                    include: {
+                        fabric: { include: { fabricType: true } },
+                    },
+                },
+            },
+        });
+
+        if (!reconciliation) {
+            return res.status(404).json({ error: 'Reconciliation not found' });
+        }
+
+        if (reconciliation.status !== 'draft') {
+            return res.status(400).json({ error: 'Reconciliation already submitted' });
+        }
+
+        const transactions = [];
+
+        // Create adjustment transactions for variances
+        for (const item of reconciliation.items) {
+            if (item.variance === null || item.variance === 0) continue;
+
+            if (item.physicalQty === null) {
+                return res.status(400).json({
+                    error: `Physical quantity not entered for ${item.fabric.name}`,
+                });
+            }
+
+            if (!item.adjustmentReason && item.variance !== 0) {
+                return res.status(400).json({
+                    error: `Adjustment reason required for ${item.fabric.name} (variance: ${item.variance})`,
+                });
+            }
+
+            const txnType = item.variance > 0 ? 'inward' : 'outward';
+            const qty = Math.abs(item.variance);
+            const reason = `reconciliation_${item.adjustmentReason}`;
+
+            const txn = await req.prisma.fabricTransaction.create({
+                data: {
+                    fabricId: item.fabricId,
+                    txnType,
+                    qty,
+                    unit: item.fabric.fabricType.unit,
+                    reason,
+                    referenceId: reconciliation.id,
+                    notes: item.notes || `Reconciliation adjustment: ${item.adjustmentReason}`,
+                    createdById: req.user.id,
+                },
+            });
+
+            transactions.push({
+                fabricId: item.fabricId,
+                fabricName: item.fabric.name,
+                txnType,
+                qty,
+                reason: item.adjustmentReason,
+            });
+
+            // Link transaction to item
+            await req.prisma.fabricReconciliationItem.update({
+                where: { id: item.id },
+                data: { txnId: txn.id },
+            });
+        }
+
+        // Mark reconciliation as submitted
+        await req.prisma.fabricReconciliation.update({
+            where: { id: req.params.id },
+            data: { status: 'submitted' },
+        });
+
+        res.json({
+            id: reconciliation.id,
+            status: 'submitted',
+            adjustmentsMade: transactions.length,
+            transactions,
+        });
+    } catch (error) {
+        console.error('Submit reconciliation error:', error);
+        res.status(500).json({ error: 'Failed to submit reconciliation' });
+    }
+});
+
+// Delete a draft reconciliation
+router.delete('/reconciliation/:id', authenticateToken, async (req, res) => {
+    try {
+        const reconciliation = await req.prisma.fabricReconciliation.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!reconciliation) {
+            return res.status(404).json({ error: 'Reconciliation not found' });
+        }
+
+        if (reconciliation.status !== 'draft') {
+            return res.status(400).json({ error: 'Cannot delete submitted reconciliation' });
+        }
+
+        await req.prisma.fabricReconciliation.delete({
+            where: { id: req.params.id },
+        });
+
+        res.json({ message: 'Reconciliation deleted' });
+    } catch (error) {
+        console.error('Delete reconciliation error:', error);
+        res.status(500).json({ error: 'Failed to delete reconciliation' });
     }
 });
 

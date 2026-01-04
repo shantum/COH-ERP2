@@ -1,11 +1,15 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi, fabricsApi } from '../services/api';
 import { useState } from 'react';
-import { ArrowDownCircle, ArrowUpCircle, Search, Calendar } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 type Tab = 'inventory' | 'fabric';
 
 export default function Ledgers() {
+    const queryClient = useQueryClient();
+    const { user } = useAuth();
+    const isAdmin = user?.role === 'admin';
     const [activeTab, setActiveTab] = useState<Tab>('inventory');
     const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '' });
     const [fabricFilter, setFabricFilter] = useState({ search: '', txnType: '' });
@@ -81,6 +85,15 @@ export default function Ledgers() {
     const inventoryGroups = groupByDate(filteredInventory || []);
     const fabricGroups = groupByDate(filteredFabric || []);
 
+    const deleteTransaction = useMutation({
+        mutationFn: (txnId: string) => fabricsApi.deleteTransaction(txnId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
+    });
+
     // Get unique reasons for filter dropdown
     const inventoryReasons = [...new Set(inventoryTxns?.map((t: any) => t.reason as string) || [])] as string[];
 
@@ -95,21 +108,19 @@ export default function Ledgers() {
                 <nav className="flex gap-8">
                     <button
                         onClick={() => setActiveTab('inventory')}
-                        className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                            activeTab === 'inventory'
+                        className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'inventory'
                                 ? 'border-primary-600 text-primary-600'
                                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                        }`}
+                            }`}
                     >
                         Inventory (SKU) Ledger
                     </button>
                     <button
                         onClick={() => setActiveTab('fabric')}
-                        className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                            activeTab === 'fabric'
+                        className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'fabric'
                                 ? 'border-primary-600 text-primary-600'
                                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                        }`}
+                            }`}
                     >
                         Fabric Ledger
                     </button>
@@ -307,8 +318,23 @@ export default function Ledgers() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {txn.txnType === 'inward' ? '+' : '-'}{txn.qty} {txn.unit}
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {txn.txnType === 'inward' ? '+' : '-'}{txn.qty} {txn.unit}
+                                                    </div>
+                                                    {isAdmin && (
+                                                        <button
+                                                            onClick={() => {
+                                                                if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} ${txn.unit}?`)) {
+                                                                    deleteTransaction.mutate(txn.id);
+                                                                }
+                                                            }}
+                                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                                            title="Delete transaction (admin only)"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}

@@ -1,36 +1,36 @@
 import axios from 'axios';
 import type {
-  CreateProductData,
-  UpdateProductData,
-  CreateVariationData,
-  UpdateVariationData,
-  CreateSkuData,
-  UpdateSkuData,
-  CreateFabricData,
-  CreateFabricTypeData,
-  CreateSupplierData,
-  CreateFabricTransactionData,
-  CreateInventoryInwardData,
-  CreateInventoryOutwardData,
-  QuickInwardData,
-  CreateOrderData,
-  UpdateOrderData,
-  ShipOrderData,
-  AddOrderLineData,
-  UpdateOrderLineData,
-  CreateCustomerData,
-  CreateReturnData,
-  InitiateReverseData,
-  ResolveReturnData,
-  CreateTailorData,
-  CreateBatchData,
-  UpdateBatchData,
-  CompleteBatchData,
+    CreateProductData,
+    UpdateProductData,
+    CreateVariationData,
+    UpdateVariationData,
+    CreateSkuData,
+    UpdateSkuData,
+    CreateFabricData,
+    CreateFabricTypeData,
+    CreateSupplierData,
+    CreateFabricTransactionData,
+    CreateInventoryInwardData,
+    CreateInventoryOutwardData,
+    QuickInwardData,
+    CreateOrderData,
+    UpdateOrderData,
+    ShipOrderData,
+    AddOrderLineData,
+    UpdateOrderLineData,
+    CreateCustomerData,
+    CreateReturnData,
+    InitiateReverseData,
+    ResolveReturnData,
+    CreateTailorData,
+    CreateBatchData,
+    UpdateBatchData,
+    CompleteBatchData,
 } from '../types';
 
 // In production, use relative URL; in development, use localhost
 const API_BASE_URL = import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? '/api' : 'http://localhost:3001/api');
+    (import.meta.env.PROD ? '/api' : 'http://localhost:3001/api');
 
 const api = axios.create({
     baseURL: API_BASE_URL,
@@ -96,6 +96,15 @@ export const fabricsApi = {
     getStockAnalysis: () => api.get('/fabrics/dashboard/stock-analysis'),
     createTransaction: (id: string, data: CreateFabricTransactionData) => api.post(`/fabrics/${id}/transactions`, data),
     getTransactions: (id: string) => api.get(`/fabrics/${id}/transactions`),
+    deleteTransaction: (txnId: string) => api.delete(`/fabrics/transactions/${txnId}`),
+    // Reconciliation
+    getReconciliationHistory: (limit?: number) => api.get('/fabrics/reconciliation/history', { params: { limit } }),
+    startReconciliation: () => api.post('/fabrics/reconciliation/start'),
+    getReconciliation: (id: string) => api.get(`/fabrics/reconciliation/${id}`),
+    updateReconciliation: (id: string, items: Array<{ id: string; physicalQty: number | null; systemQty: number; adjustmentReason?: string; notes?: string }>) =>
+        api.put(`/fabrics/reconciliation/${id}`, { items }),
+    submitReconciliation: (id: string) => api.post(`/fabrics/reconciliation/${id}/submit`),
+    deleteReconciliation: (id: string) => api.delete(`/fabrics/reconciliation/${id}`),
 };
 
 // Inventory

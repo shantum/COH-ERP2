@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Inventory from './pages/Inventory';
 import Fabrics from './pages/Fabrics';
+import FabricReconciliation from './pages/FabricReconciliation';
 import Orders from './pages/Orders';
 import Customers from './pages/Customers';
 import Returns from './pages/Returns';
@@ -61,6 +62,7 @@ function App() {
                 <Route path="products" element={<ErrorBoundary><Products /></ErrorBoundary>} />
                 <Route path="inventory" element={<ErrorBoundary><Inventory /></ErrorBoundary>} />
                 <Route path="fabrics" element={<ErrorBoundary><Fabrics /></ErrorBoundary>} />
+                <Route path="fabric-reconciliation" element={<ErrorBoundary><FabricReconciliation /></ErrorBoundary>} />
                 <Route path="orders" element={<ErrorBoundary><Orders /></ErrorBoundary>} />
                 <Route path="customers" element={<ErrorBoundary><Customers /></ErrorBoundary>} />
                 <Route path="returns" element={<ErrorBoundary><Returns /></ErrorBoundary>} />

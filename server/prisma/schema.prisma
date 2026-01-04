@@ -151,9 +151,10 @@ model Fabric {
 
   fabricType   FabricType          @relation(fields: [fabricTypeId], references: [id])
   supplier     Supplier?           @relation(fields: [supplierId], references: [id])
-  variations   Variation[]
-  transactions FabricTransaction[]
-  fabricOrders FabricOrder[]
+  variations          Variation[]
+  transactions        FabricTransaction[]
+  fabricOrders        FabricOrder[]
+  reconciliationItems FabricReconciliationItem[]
 
   @@index([fabricTypeId])
   @@index([supplierId])
@@ -630,4 +631,41 @@ model ShopifyOrderCache {
   @@index([orderNumber])
   @@index([processedAt])
   @@index([lastWebhookAt])
+}
+
+// ============================================
+// FABRIC RECONCILIATION
+// ============================================
+
+model FabricReconciliation {
+  id            String    @id @default(uuid())
+  reconcileDate DateTime  @default(now())
+  status        String    @default("draft") // draft, submitted
+  notes         String?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items FabricReconciliationItem[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model FabricReconciliationItem {
+  id               String  @id @default(uuid())
+  reconciliationId String
+  fabricId         String
+  systemQty        Float                   // Qty as per system at time of count
+  physicalQty      Float?                  // Qty counted physically
+  variance         Float?                  // physicalQty - systemQty
+  adjustmentReason String?                 // shrinkage, wastage, damaged, found, etc.
+  notes            String?
+  txnId            String? @unique         // Reference to created FabricTransaction
+
+  reconciliation FabricReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  fabric         Fabric               @relation(fields: [fabricId], references: [id])
+
+  @@index([reconciliationId])
+  @@index([fabricId])
 }
