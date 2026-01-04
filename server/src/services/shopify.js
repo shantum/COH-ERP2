@@ -1,8 +1,6 @@
 import axios from 'axios';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
-
-const prisma = new PrismaClient();
 
 /**
  * Shopify Admin API client for importing orders and customers

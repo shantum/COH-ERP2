@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from './lib/prisma.js';
 import { execSync } from 'child_process';
 import bcrypt from 'bcryptjs';
-
-const prisma = new PrismaClient();
 
 async function initDb() {
   try {
@@ -61,8 +59,6 @@ async function initDb() {
     } else {
       console.error('Database init error:', error);
     }
-  } finally {
-    await prisma.$disconnect();
   }
 }
 

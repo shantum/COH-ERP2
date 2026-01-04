@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PrismaClient } from '@prisma/client';
+import prisma from './lib/prisma.js';
 import initDb from './init-db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -34,7 +34,6 @@ import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 
 const app = express();
-const prisma = new PrismaClient();
 
 // Security middleware
 app.use(helmet({

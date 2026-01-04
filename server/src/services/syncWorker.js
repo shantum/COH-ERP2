@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import shopifyClient from './shopify.js';
 import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
 import { syncSingleProduct, ensureDefaultFabric } from './productSyncService.js';
 import { syncSingleCustomer } from './customerSyncService.js';
-
-const prisma = new PrismaClient();
 
 // Active jobs tracker (in-memory, single instance only)
 const activeJobs = new Map();
