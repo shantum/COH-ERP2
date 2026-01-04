@@ -176,6 +176,59 @@ export const returnsApi = {
     markReceived: (id: string) => api.post(`/returns/${id}/mark-received`),
     resolve: (id: string, data: ResolveReturnData) => api.post(`/returns/${id}/resolve`, data),
     getAnalyticsByProduct: () => api.get('/returns/analytics/by-product'),
+    // Return Inward - receive returns into repacking queue
+    inward: (data: {
+        skuId?: string;
+        skuCode?: string;
+        barcode?: string;
+        qty?: number;
+        condition?: string;
+        requestType?: 'return' | 'exchange';
+        reasonCategory?: string;
+        originalOrderId?: string;
+        inspectionNotes?: string;
+    }) => api.post('/returns/inward', data),
+};
+
+// Repacking Queue & Write-offs
+export const repackingApi = {
+    // Queue operations
+    getQueue: (params?: { status?: string; limit?: number }) => api.get('/repacking/queue', { params }),
+    getQueueStats: () => api.get('/repacking/queue/stats'),
+    addToQueue: (data: {
+        skuId?: string;
+        skuCode?: string;
+        barcode?: string;
+        qty?: number;
+        condition?: string;
+        returnRequestId?: string;
+        returnLineId?: string;
+        inspectionNotes?: string;
+    }) => api.post('/repacking/queue', data),
+    updateQueueItem: (id: string, data: { status?: string; condition?: string; inspectionNotes?: string }) =>
+        api.put(`/repacking/queue/${id}`, data),
+    deleteQueueItem: (id: string) => api.delete(`/repacking/queue/${id}`),
+    // Process - move to stock or write-off
+    process: (data: {
+        itemId: string;
+        action: 'ready' | 'write_off';
+        writeOffReason?: string;
+        notes?: string;
+    }) => api.post('/repacking/process', data),
+    // Write-offs
+    getWriteOffs: (params?: { reason?: string; sourceType?: string; startDate?: string; endDate?: string; limit?: number }) =>
+        api.get('/repacking/write-offs', { params }),
+    getWriteOffStats: (params?: { startDate?: string; endDate?: string }) =>
+        api.get('/repacking/write-offs/stats', { params }),
+    createWriteOff: (data: {
+        skuId?: string;
+        skuCode?: string;
+        qty: number;
+        reason: string;
+        sourceType?: string;
+        notes?: string;
+        costValue?: number;
+    }) => api.post('/repacking/write-offs', data),
 };
 
 // Production

@@ -32,6 +32,7 @@ import importExportRoutes from './routes/import-export.js';
 import shopifyRoutes from './routes/shopify.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
+import repackingRoutes from './routes/repacking.js';
 
 const app = express();
 
@@ -113,6 +114,7 @@ app.use('/api', importExportRoutes);
 app.use('/api/shopify', shopifyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/repacking', repackingRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -132,6 +132,178 @@ router.post('/:id/resolve', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
+// RETURN INWARD - Receive returns into repacking queue
+// ============================================
+
+router.post('/inward', authenticateToken, async (req, res) => {
+    try {
+        const {
+            skuId,
+            skuCode,
+            barcode,
+            qty = 1,
+            condition = 'used', // unused, used, damaged, defective, destroyed
+            requestType = 'return', // return or exchange
+            reasonCategory,
+            originalOrderId,
+            inspectionNotes,
+        } = req.body;
+
+        // Find SKU by ID, code, or barcode
+        let sku;
+        if (skuId) {
+            sku = await req.prisma.sku.findUnique({
+                where: { id: skuId },
+                include: { variation: { include: { product: true } } },
+            });
+        } else if (barcode) {
+            sku = await req.prisma.sku.findFirst({
+                where: { skuCode: barcode },
+                include: { variation: { include: { product: true } } },
+            });
+        } else if (skuCode) {
+            sku = await req.prisma.sku.findUnique({
+                where: { skuCode },
+                include: { variation: { include: { product: true } } },
+            });
+        }
+
+        if (!sku) {
+            return res.status(404).json({ error: 'SKU not found' });
+        }
+
+        // Optionally find the original order
+        let order = null;
+        let customer = null;
+        if (originalOrderId) {
+            order = await req.prisma.order.findUnique({
+                where: { id: originalOrderId },
+                include: { customer: true },
+            });
+            customer = order?.customer;
+        }
+
+        // Create return request and add to repacking queue in a transaction
+        const result = await req.prisma.$transaction(async (prisma) => {
+            // Generate return request number
+            const count = await prisma.returnRequest.count();
+            const requestNumber = `RET-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
+
+            // Create return request
+            const returnRequest = await prisma.returnRequest.create({
+                data: {
+                    requestNumber,
+                    requestType,
+                    originalOrderId,
+                    customerId: customer?.id,
+                    reasonCategory: reasonCategory || 'other',
+                    status: 'received', // Already received since we're doing inward
+                    lines: {
+                        create: [{
+                            skuId: sku.id,
+                            qty,
+                            itemCondition: condition,
+                        }],
+                    },
+                },
+                include: { lines: true },
+            });
+
+            // Add status history
+            await prisma.returnStatusHistory.create({
+                data: {
+                    requestId: returnRequest.id,
+                    fromStatus: 'requested',
+                    toStatus: 'received',
+                    changedById: req.user.id,
+                    notes: 'Received via return inward',
+                },
+            });
+
+            // Add to repacking queue
+            const repackingItem = await prisma.repackingQueueItem.create({
+                data: {
+                    skuId: sku.id,
+                    qty,
+                    condition,
+                    returnRequestId: returnRequest.id,
+                    returnLineId: returnRequest.lines[0].id,
+                    inspectionNotes,
+                    status: 'pending',
+                },
+            });
+
+            // Update customer stats
+            if (customer) {
+                if (requestType === 'return') {
+                    await prisma.customer.update({
+                        where: { id: customer.id },
+                        data: { returnCount: { increment: 1 } },
+                    });
+                } else if (requestType === 'exchange') {
+                    await prisma.customer.update({
+                        where: { id: customer.id },
+                        data: { exchangeCount: { increment: 1 } },
+                    });
+                }
+            }
+
+            // Update SKU stats
+            if (requestType === 'return') {
+                await prisma.sku.update({
+                    where: { id: sku.id },
+                    data: { returnCount: { increment: qty } },
+                });
+                if (sku.variation?.product?.id) {
+                    await prisma.product.update({
+                        where: { id: sku.variation.product.id },
+                        data: { returnCount: { increment: qty } },
+                    });
+                }
+            } else if (requestType === 'exchange') {
+                await prisma.sku.update({
+                    where: { id: sku.id },
+                    data: { exchangeCount: { increment: qty } },
+                });
+                if (sku.variation?.product?.id) {
+                    await prisma.product.update({
+                        where: { id: sku.variation.product.id },
+                        data: { exchangeCount: { increment: qty } },
+                    });
+                }
+            }
+
+            return {
+                returnRequest,
+                repackingItem,
+            };
+        });
+
+        res.status(201).json({
+            success: true,
+            message: `${qty} ${sku.skuCode} added to repacking queue`,
+            returnRequest: result.returnRequest,
+            repackingItem: result.repackingItem,
+            sku: {
+                id: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation?.product?.name,
+                colorName: sku.variation?.colorName,
+                size: sku.size,
+            },
+            linkedOrder: order ? {
+                id: order.id,
+                orderNumber: order.orderNumber,
+                customerName: customer?.name,
+            } : null,
+        });
+    } catch (error) {
+        console.error('Return inward error:', error);
+        res.status(500).json({ error: 'Failed to process return inward' });
+    }
+});
+
 // Analytics
 router.get('/analytics/by-product', authenticateToken, async (req, res) => {
     try {

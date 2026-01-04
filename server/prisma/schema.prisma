@@ -22,9 +22,11 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  inventoryTransactions InventoryTransaction[]
-  fabricTransactions    FabricTransaction[]
-  returnStatusHistory   ReturnStatusHistory[]
+  inventoryTransactions  InventoryTransaction[]
+  fabricTransactions     FabricTransaction[]
+  returnStatusHistory    ReturnStatusHistory[]
+  processedRepackItems   RepackingQueueItem[]   @relation("RepackingProcessor")
+  createdWriteOffs       WriteOffLog[]          @relation("WriteOffCreator")
 }
 
 // ============================================
@@ -49,6 +51,11 @@ model Product {
   // Shopify integration
   shopifyProductId String? @unique // Shopify product ID
   shopifyHandle    String?         // Shopify handle (URL slug)
+
+  // Return/exchange stats (aggregated from SKUs)
+  returnCount   Int @default(0)
+  exchangeCount Int @default(0)
+  writeOffCount Int @default(0)
 
   fabricType FabricType? @relation(fields: [fabricTypeId], references: [id])
   variations Variation[]
@@ -92,6 +99,11 @@ model Sku {
   shopifyInventoryItemId String?
   shopifyVariantId       String?
 
+  // Return/exchange stats
+  returnCount   Int @default(0)
+  exchangeCount Int @default(0)
+  writeOffCount Int @default(0)
+
   variation             Variation              @relation(fields: [variationId], references: [id])
   inventoryTransactions InventoryTransaction[]
   orderLines            OrderLine[]
@@ -101,6 +113,8 @@ model Sku {
   exchangeRequestLines  ReturnRequestLine[]    @relation("ExchangeSku")
   feedbackProductLinks  FeedbackProductLink[]
   shopifyInventoryCache ShopifyInventoryCache?
+  repackingQueueItems   RepackingQueueItem[]
+  writeOffLogs          WriteOffLog[]
 
   @@index([variationId])
 }
@@ -269,6 +283,10 @@ model Customer {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
+  // Return/exchange stats
+  returnCount   Int @default(0)
+  exchangeCount Int @default(0)
+
   orders         Order[]
   returnRequests ReturnRequest[]
   feedback       Feedback[]
@@ -360,11 +378,12 @@ model ReturnRequest {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  originalOrder Order                 @relation(fields: [originalOrderId], references: [id])
-  customer      Customer?             @relation(fields: [customerId], references: [id])
-  lines         ReturnRequestLine[]
-  shipping      ReturnShipping[]
-  statusHistory ReturnStatusHistory[]
+  originalOrder       Order                 @relation(fields: [originalOrderId], references: [id])
+  customer            Customer?             @relation(fields: [customerId], references: [id])
+  lines               ReturnRequestLine[]
+  shipping            ReturnShipping[]
+  statusHistory       ReturnStatusHistory[]
+  repackingQueueItems RepackingQueueItem[]
 
   @@index([originalOrderId])
   @@index([customerId])
@@ -540,6 +559,53 @@ model ProductionBatch {
   @@index([tailorId])
   @@index([batchDate])
   @@index([status])
+}
+
+// ============================================
+// REPACKING & WRITE-OFFS
+// ============================================
+
+model RepackingQueueItem {
+  id              String    @id @default(uuid())
+  skuId           String
+  qty             Int       @default(1)
+  returnRequestId String?   // Link to return that created this
+  returnLineId    String?   // Specific return line
+  status          String    @default("pending") // pending, inspecting, repacking, ready, write_off
+  condition       String    // unused, used, damaged, defective, destroyed
+  inspectionNotes String?
+  writeOffReason  String?   // size_issue, quality_defect, destroyed, wrong_product
+  createdAt       DateTime  @default(now())
+  processedAt     DateTime?
+  processedById   String?
+
+  sku           Sku            @relation(fields: [skuId], references: [id])
+  returnRequest ReturnRequest? @relation(fields: [returnRequestId], references: [id])
+  processedBy   User?          @relation("RepackingProcessor", fields: [processedById], references: [id])
+
+  @@index([skuId])
+  @@index([status])
+  @@index([returnRequestId])
+}
+
+model WriteOffLog {
+  id          String   @id @default(uuid())
+  skuId       String
+  qty         Int
+  reason      String   // defective, destroyed, wrong_product, expired, other
+  sourceType  String   // return, production, inventory_audit
+  sourceId    String?  // RepackingQueueItem.id or other reference
+  notes       String?
+  costValue   Float?   // For financial tracking
+  createdById String
+  createdAt   DateTime @default(now())
+
+  sku       Sku  @relation(fields: [skuId], references: [id])
+  createdBy User @relation("WriteOffCreator", fields: [createdById], references: [id])
+
+  @@index([skuId])
+  @@index([reason])
+  @@index([createdAt])
 }
 
 // ============================================
