@@ -11,6 +11,7 @@ import Orders from './pages/Orders';
 import Customers from './pages/Customers';
 import Returns from './pages/Returns';
 import Production from './pages/Production';
+import ProductionInward from './pages/ProductionInward';
 import Picklist from './pages/Picklist';
 import Ledgers from './pages/Ledgers';
 import Settings from './pages/Settings';
@@ -67,6 +68,7 @@ function App() {
                 <Route path="customers" element={<ErrorBoundary><Customers /></ErrorBoundary>} />
                 <Route path="returns" element={<ErrorBoundary><Returns /></ErrorBoundary>} />
                 <Route path="production" element={<ErrorBoundary><Production /></ErrorBoundary>} />
+                <Route path="production-inward" element={<ErrorBoundary><ProductionInward /></ErrorBoundary>} />
                 <Route path="picklist" element={<ErrorBoundary><Picklist /></ErrorBoundary>} />
                 <Route path="ledgers" element={<ErrorBoundary><Ledgers /></ErrorBoundary>} />
                 <Route path="settings" element={<ErrorBoundary><Settings /></ErrorBoundary>} />

@@ -233,17 +233,24 @@ router.post('/outward', authenticateToken, async (req, res) => {
     }
 });
 
-// Quick inward (simplified form)
+// Quick inward (simplified form) - with production batch matching
 router.post('/quick-inward', authenticateToken, async (req, res) => {
     try {
-        const { skuCode, qty, reason = 'production', notes } = req.body;
+        const { skuCode, barcode, qty, reason = 'production', notes } = req.body;
 
-        // Find SKU by code
-        const sku = await req.prisma.sku.findUnique({ where: { skuCode } });
+        // Find SKU by code or barcode
+        let sku;
+        if (barcode) {
+            sku = await req.prisma.sku.findFirst({ where: { barcode } });
+        }
+        if (!sku && skuCode) {
+            sku = await req.prisma.sku.findUnique({ where: { skuCode } });
+        }
         if (!sku) {
             return res.status(404).json({ error: 'SKU not found' });
         }
 
+        // Create inward transaction
         const transaction = await req.prisma.inventoryTransaction.create({
             data: {
                 skuId: sku.id,
@@ -262,14 +269,190 @@ router.post('/quick-inward', authenticateToken, async (req, res) => {
             },
         });
 
+        // Try to match to pending production batch
+        let matchedBatch = null;
+        if (reason === 'production') {
+            matchedBatch = await matchProductionBatch(req.prisma, sku.id, qty);
+        }
+
         const balance = await calculateInventoryBalance(req.prisma, sku.id);
 
-        res.status(201).json({ transaction, newBalance: balance.currentBalance });
+        res.status(201).json({
+            transaction,
+            newBalance: balance.currentBalance,
+            matchedBatch: matchedBatch ? {
+                id: matchedBatch.id,
+                batchCode: matchedBatch.batchCode,
+                qtyCompleted: matchedBatch.qtyCompleted,
+                qtyPlanned: matchedBatch.qtyPlanned,
+                status: matchedBatch.status,
+            } : null,
+        });
     } catch (error) {
         console.error('Quick inward error:', error);
         res.status(500).json({ error: 'Failed to create quick inward' });
     }
 });
+
+// Get inward history (for Production Inward page)
+router.get('/inward-history', authenticateToken, async (req, res) => {
+    try {
+        const { date, limit = 50 } = req.query;
+
+        // Default to today
+        let startDate, endDate;
+        if (date === 'today' || !date) {
+            startDate = new Date();
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date();
+            endDate.setHours(23, 59, 59, 999);
+        } else {
+            startDate = new Date(date);
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(date);
+            endDate.setHours(23, 59, 59, 999);
+        }
+
+        const transactions = await req.prisma.inventoryTransaction.findMany({
+            where: {
+                txnType: 'inward',
+                createdAt: { gte: startDate, lte: endDate },
+            },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+                createdBy: { select: { id: true, name: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: Number(limit),
+        });
+
+        // Get batch info for each transaction (if matched by reason)
+        const enrichedTransactions = await Promise.all(transactions.map(async (txn) => {
+            // Look for any production batch that might have been updated around the same time
+            const batch = await req.prisma.productionBatch.findFirst({
+                where: {
+                    skuId: txn.skuId,
+                    status: { in: ['in_progress', 'completed'] },
+                },
+                orderBy: { batchDate: 'desc' },
+            });
+
+            return {
+                ...txn,
+                productName: txn.sku?.variation?.product?.name,
+                colorName: txn.sku?.variation?.colorName,
+                size: txn.sku?.size,
+                imageUrl: txn.sku?.variation?.imageUrl || txn.sku?.variation?.product?.imageUrl,
+                batchCode: batch?.batchCode || null,
+            };
+        }));
+
+        res.json(enrichedTransactions);
+    } catch (error) {
+        console.error('Get inward history error:', error);
+        res.status(500).json({ error: 'Failed to fetch inward history' });
+    }
+});
+
+// Edit inward transaction
+router.put('/inward/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { qty, notes } = req.body;
+
+        const existing = await req.prisma.inventoryTransaction.findUnique({
+            where: { id },
+        });
+
+        if (!existing) {
+            return res.status(404).json({ error: 'Transaction not found' });
+        }
+
+        if (existing.txnType !== 'inward') {
+            return res.status(400).json({ error: 'Can only edit inward transactions' });
+        }
+
+        const updated = await req.prisma.inventoryTransaction.update({
+            where: { id },
+            data: {
+                qty: qty !== undefined ? qty : existing.qty,
+                notes: notes !== undefined ? notes : existing.notes,
+            },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Edit inward error:', error);
+        res.status(500).json({ error: 'Failed to edit inward transaction' });
+    }
+});
+
+// Delete inward transaction
+router.delete('/inward/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const existing = await req.prisma.inventoryTransaction.findUnique({
+            where: { id },
+        });
+
+        if (!existing) {
+            return res.status(404).json({ error: 'Transaction not found' });
+        }
+
+        if (existing.txnType !== 'inward') {
+            return res.status(400).json({ error: 'Can only delete inward transactions' });
+        }
+
+        await req.prisma.inventoryTransaction.delete({ where: { id } });
+
+        res.json({ success: true, message: 'Transaction deleted' });
+    } catch (error) {
+        console.error('Delete inward error:', error);
+        res.status(500).json({ error: 'Failed to delete inward transaction' });
+    }
+});
+
+// Helper: Match production batch for inward
+async function matchProductionBatch(prisma, skuId, quantity) {
+    // Find oldest pending/in_progress batch for this SKU that isn't fully completed
+    const batch = await prisma.productionBatch.findFirst({
+        where: {
+            skuId,
+            status: { in: ['planned', 'in_progress'] },
+        },
+        orderBy: { batchDate: 'asc' },
+    });
+
+    if (batch && batch.qtyCompleted < batch.qtyPlanned) {
+        const newCompleted = Math.min(batch.qtyCompleted + quantity, batch.qtyPlanned);
+        const isComplete = newCompleted >= batch.qtyPlanned;
+
+        const updated = await prisma.productionBatch.update({
+            where: { id: batch.id },
+            data: {
+                qtyCompleted: newCompleted,
+                status: isComplete ? 'completed' : 'in_progress',
+                completedAt: isComplete ? new Date() : null,
+            },
+        });
+
+        return updated;
+    }
+
+    return null;
+}
 
 // ============================================
 // STOCK ALERTS

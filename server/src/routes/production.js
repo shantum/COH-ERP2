@@ -489,4 +489,41 @@ router.get('/requirements', authenticateToken, async (req, res) => {
     }
 });
 
+// Get pending production batches for a SKU (for Production Inward page)
+router.get('/pending-by-sku/:skuId', authenticateToken, async (req, res) => {
+    try {
+        const { skuId } = req.params;
+
+        const batches = await req.prisma.productionBatch.findMany({
+            where: {
+                skuId,
+                status: { in: ['planned', 'in_progress'] },
+            },
+            include: {
+                tailor: { select: { id: true, name: true } },
+            },
+            orderBy: { batchDate: 'asc' },
+        });
+
+        // Calculate pending quantity for each batch
+        const pendingBatches = batches.map(batch => ({
+            id: batch.id,
+            batchCode: batch.batchCode,
+            batchDate: batch.batchDate,
+            qtyPlanned: batch.qtyPlanned,
+            qtyCompleted: batch.qtyCompleted,
+            qtyPending: batch.qtyPlanned - batch.qtyCompleted,
+            status: batch.status,
+            tailor: batch.tailor,
+        }));
+
+        const totalPending = pendingBatches.reduce((sum, b) => sum + b.qtyPending, 0);
+
+        res.json({ batches: pendingBatches, totalPending });
+    } catch (error) {
+        console.error('Get pending batches by SKU error:', error);
+        res.status(500).json({ error: 'Failed to fetch pending batches' });
+    }
+});
+
 export default router;

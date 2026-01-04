@@ -12,7 +12,6 @@ import type {
     CreateFabricTransactionData,
     CreateInventoryInwardData,
     CreateInventoryOutwardData,
-    QuickInwardData,
     CreateOrderData,
     UpdateOrderData,
     ShipOrderData,
@@ -115,8 +114,13 @@ export const inventoryApi = {
     getSkuTransactions: (skuId: string) => api.get('/inventory/transactions', { params: { skuId } }),
     createInward: (data: CreateInventoryInwardData) => api.post('/inventory/inward', data),
     createOutward: (data: CreateInventoryOutwardData) => api.post('/inventory/outward', data),
-    quickInward: (data: QuickInwardData) => api.post('/inventory/quick-inward', data),
+    quickInward: (data: { skuCode?: string; barcode?: string; qty: number; reason?: string; notes?: string }) =>
+        api.post('/inventory/quick-inward', data),
     getAlerts: () => api.get('/inventory/alerts'),
+    // Production Inward
+    getInwardHistory: (date?: string) => api.get('/inventory/inward-history', { params: { date } }),
+    editInward: (id: string, data: { qty?: number; notes?: string }) => api.put(`/inventory/inward/${id}`, data),
+    deleteInward: (id: string) => api.delete(`/inventory/inward/${id}`),
 };
 
 // Orders
@@ -190,6 +194,7 @@ export const productionApi = {
     lockDate: (date: string) => api.post('/production/lock-date', { date }),
     unlockDate: (date: string) => api.post('/production/unlock-date', { date }),
     getRequirements: () => api.get('/production/requirements'),
+    getPendingBySku: (skuId: string) => api.get(`/production/pending-by-sku/${skuId}`),
 };
 
 // Reports
