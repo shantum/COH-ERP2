@@ -97,7 +97,7 @@ export function InspectorTab() {
                                 {inspectorTable.charAt(0).toUpperCase() + inspectorTable.slice(1)} Table
                             </div>
                             <div className="max-h-[700px] overflow-auto">
-                                <InspectorTable table={inspectorTable} data={inspectorData.data} />
+                                <InspectorTable data={inspectorData.data} />
                             </div>
                         </div>
                     </div>
@@ -113,83 +113,111 @@ export function InspectorTab() {
     );
 }
 
-// Inspector Table component for table view
-function InspectorTable({ table, data }: { table: string; data: any[] }) {
+// Format cell value for display
+function formatCellValue(value: any, key: string): React.ReactNode {
+    if (value === null || value === undefined) return <span className="text-gray-400">-</span>;
+
+    // Handle booleans
+    if (typeof value === 'boolean') {
+        return value ? <span className="text-green-600">✓</span> : <span className="text-red-600">✗</span>;
+    }
+
+    // Handle dates
+    if (key.toLowerCase().includes('at') || key.toLowerCase().includes('date')) {
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+            return <span className="whitespace-nowrap">{date.toLocaleString()}</span>;
+        }
+    }
+
+    // Handle IDs (show truncated)
+    if (key === 'id' && typeof value === 'string' && value.length > 20) {
+        return <span className="font-mono text-xs" title={value}>{value.slice(0, 8)}...</span>;
+    }
+
+    // Handle objects (nested data)
+    if (typeof value === 'object') {
+        if (Array.isArray(value)) {
+            return <span className="text-blue-600">[{value.length} items]</span>;
+        }
+        // Show a preview of the object
+        const preview = JSON.stringify(value).slice(0, 50);
+        return <span className="text-purple-600 font-mono text-xs" title={JSON.stringify(value, null, 2)}>{preview}{preview.length >= 50 ? '...' : ''}</span>;
+    }
+
+    // Handle numbers (format currency-like fields)
+    if (typeof value === 'number') {
+        if (key.toLowerCase().includes('amount') || key.toLowerCase().includes('price') || key.toLowerCase().includes('cost') || key.toLowerCase().includes('mrp') || key.toLowerCase().includes('spent')) {
+            return <span className="font-mono">₹{value.toLocaleString()}</span>;
+        }
+        return <span className="font-mono">{value.toLocaleString()}</span>;
+    }
+
+    // Handle status fields
+    if (key === 'status' || key === 'lineStatus') {
+        const statusColors: Record<string, string> = {
+            open: 'bg-yellow-100 text-yellow-700',
+            pending: 'bg-yellow-100 text-yellow-700',
+            shipped: 'bg-blue-100 text-blue-700',
+            delivered: 'bg-green-100 text-green-700',
+            cancelled: 'bg-red-100 text-red-700',
+            completed: 'bg-green-100 text-green-700',
+            running: 'bg-blue-100 text-blue-700',
+            failed: 'bg-red-100 text-red-700',
+        };
+        const color = statusColors[value] || 'bg-gray-100 text-gray-700';
+        return <span className={`px-2 py-0.5 rounded-full text-xs ${color}`}>{value}</span>;
+    }
+
+    // Default: show as string (truncated if too long)
+    const str = String(value);
+    if (str.length > 100) {
+        return <span title={str}>{str.slice(0, 100)}...</span>;
+    }
+    return str;
+}
+
+// Get all unique keys from data array
+function getAllKeys(data: any[]): string[] {
+    const keySet = new Set<string>();
+    for (const row of data) {
+        for (const key of Object.keys(row)) {
+            keySet.add(key);
+        }
+    }
+    // Sort keys to put important ones first
+    const priorityKeys = ['id', 'orderNumber', 'name', 'skuCode', 'email', 'status'];
+    const sorted = Array.from(keySet).sort((a, b) => {
+        const aIndex = priorityKeys.indexOf(a);
+        const bIndex = priorityKeys.indexOf(b);
+        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+        if (aIndex !== -1) return -1;
+        if (bIndex !== -1) return 1;
+        // Put timestamps at the end
+        if (a.includes('At') || a.includes('Date')) return 1;
+        if (b.includes('At') || b.includes('Date')) return -1;
+        return a.localeCompare(b);
+    });
+    return sorted;
+}
+
+// Inspector Table component for table view - shows ALL columns dynamically
+function InspectorTable({ data }: { data: any[] }) {
     if (!data || data.length === 0) {
         return <p className="p-4 text-gray-500">No data found</p>;
     }
 
-    // Define columns for each table type
-    const columnConfigs: Record<string, { key: string; label: string; render?: (val: any, row: any) => React.ReactNode }[]> = {
-        orders: [
-            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
-            { key: 'orderNumber', label: 'Order #' },
-            { key: 'shopifyOrderId', label: 'Shopify ID' },
-            { key: 'customerName', label: 'Customer' },
-            { key: 'customer', label: 'Email', render: (v) => v?.email || '-' },
-            { key: 'channel', label: 'Channel' },
-            { key: 'status', label: 'Status', render: (v) => (
-                <span className={`px-2 py-0.5 rounded-full text-xs ${
-                    v === 'delivered' ? 'bg-green-100 text-green-700' :
-                    v === 'shipped' ? 'bg-blue-100 text-blue-700' :
-                    v === 'cancelled' ? 'bg-red-100 text-red-700' :
-                    'bg-gray-100 text-gray-700'
-                }`}>{v}</span>
-            )},
-            { key: 'totalAmount', label: 'Total', render: (v) => v ? `₹${Number(v).toLocaleString()}` : '-' },
-            { key: 'orderLines', label: 'Lines', render: (v) => v?.length || 0 },
-            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
-        ],
-        customers: [
-            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
-            { key: 'shopifyCustomerId', label: 'Shopify ID' },
-            { key: 'firstName', label: 'First Name' },
-            { key: 'lastName', label: 'Last Name' },
-            { key: 'email', label: 'Email' },
-            { key: 'phone', label: 'Phone' },
-            { key: 'city', label: 'City' },
-            { key: 'state', label: 'State' },
-            { key: 'totalOrders', label: 'Orders' },
-            { key: 'totalSpent', label: 'Total Spent', render: (v) => v ? `₹${Number(v).toLocaleString()}` : '-' },
-            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
-        ],
-        products: [
-            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
-            { key: 'shopifyProductId', label: 'Shopify ID' },
-            { key: 'name', label: 'Name' },
-            { key: 'styleCode', label: 'Style Code' },
-            { key: 'category', label: 'Category' },
-            { key: 'productType', label: 'Type' },
-            { key: 'gender', label: 'Gender' },
-            { key: 'variations', label: 'Variations', render: (v) => v?.length || 0 },
-            { key: 'variations', label: 'SKUs', render: (v) => v?.reduce((sum: number, var_: any) => sum + (var_.skus?.length || 0), 0) || 0 },
-            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
-        ],
-        skus: [
-            { key: 'id', label: 'ID', render: (v) => <span className="font-mono text-xs">{v?.slice(0, 8)}...</span> },
-            { key: 'shopifyVariantId', label: 'Shopify Variant' },
-            { key: 'skuCode', label: 'SKU Code' },
-            { key: 'variation', label: 'Product', render: (v) => v?.product?.name || '-' },
-            { key: 'variation', label: 'Style', render: (v) => v?.product?.styleCode || '-' },
-            { key: 'variation', label: 'Color', render: (v) => v?.colorName || '-' },
-            { key: 'size', label: 'Size' },
-            { key: 'mrp', label: 'MRP', render: (v) => v ? `₹${Number(v).toLocaleString()}` : '-' },
-            { key: 'barcode', label: 'Barcode' },
-            { key: 'isActive', label: 'Active', render: (v) => v !== false ? '✓' : '✗' },
-            { key: 'createdAt', label: 'Created', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
-        ],
-    };
-
-    const columns = columnConfigs[table] || [];
+    // Get all unique keys from the data
+    const columns = getAllKeys(data);
 
     return (
         <table className="w-full text-sm">
             <thead className="bg-gray-100 sticky top-0">
                 <tr>
                     <th className="px-3 py-2 text-left font-medium text-gray-700 text-xs">#</th>
-                    {columns.map((col, i) => (
-                        <th key={i} className="px-3 py-2 text-left font-medium text-gray-700 text-xs whitespace-nowrap">
-                            {col.label}
+                    {columns.map((col) => (
+                        <th key={col} className="px-3 py-2 text-left font-medium text-gray-700 text-xs whitespace-nowrap">
+                            {col}
                         </th>
                     ))}
                 </tr>
@@ -198,9 +226,9 @@ function InspectorTable({ table, data }: { table: string; data: any[] }) {
                 {data.map((row, rowIndex) => (
                     <tr key={row.id || rowIndex} className="hover:bg-gray-50">
                         <td className="px-3 py-2 text-gray-400 text-xs">{rowIndex + 1}</td>
-                        {columns.map((col, colIndex) => (
-                            <td key={colIndex} className="px-3 py-2 text-gray-700 text-xs max-w-[200px] truncate">
-                                {col.render ? col.render(row[col.key], row) : (row[col.key] ?? '-')}
+                        {columns.map((col) => (
+                            <td key={col} className="px-3 py-2 text-gray-700 text-xs max-w-[250px] truncate">
+                                {formatCellValue(row[col], col)}
                             </td>
                         ))}
                     </tr>
