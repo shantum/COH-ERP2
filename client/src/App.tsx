@@ -10,6 +10,7 @@ import FabricReconciliation from './pages/FabricReconciliation';
 import Orders from './pages/Orders';
 import Customers from './pages/Customers';
 import Returns from './pages/Returns';
+import ReturnInward from './pages/ReturnInward';
 import Production from './pages/Production';
 import ProductionInward from './pages/ProductionInward';
 import Picklist from './pages/Picklist';
@@ -67,6 +68,7 @@ function App() {
                 <Route path="orders" element={<ErrorBoundary><Orders /></ErrorBoundary>} />
                 <Route path="customers" element={<ErrorBoundary><Customers /></ErrorBoundary>} />
                 <Route path="returns" element={<ErrorBoundary><Returns /></ErrorBoundary>} />
+                <Route path="return-inward" element={<ErrorBoundary><ReturnInward /></ErrorBoundary>} />
                 <Route path="production" element={<ErrorBoundary><Production /></ErrorBoundary>} />
                 <Route path="production-inward" element={<ErrorBoundary><ProductionInward /></ErrorBoundary>} />
                 <Route path="picklist" element={<ErrorBoundary><Picklist /></ErrorBoundary>} />
