@@ -1,184 +1,200 @@
-# Shopify Sync Improvements Plan
+# Shopify Order Sync - Three Mode Architecture
 
 ## Overview
 
-Implement two distinct sync modes for orders:
+Replace current sync logic with three distinct modes optimized for different use cases.
 
-| Mode | Purpose | Behavior |
-|------|---------|----------|
-| **POPULATE** | Initial import | Import new orders, skip existing |
-| **UPDATE** | Refresh stale data | Re-sync orders not updated in X time |
-
----
-
-## Current State
-
-The existing `SyncWorker` has a single sync mode that:
-- Fetches orders using `since_id` pagination
-- Uses `cacheAndProcessOrder()` which upserts (creates or updates)
-- No distinction between "populate" and "update"
-- Re-syncs all orders every time (wasteful)
+| Mode | Use Case | Speed | Data Coverage |
+|------|----------|-------|---------------|
+| **DEEP** | Initial setup, data recovery | Slow (~30min) | All orders |
+| **QUICK** | Daily catch-up | Fast (~1min) | Missing orders only |
+| **UPDATE** | Hourly refresh | Fast (~1min) | Changed orders only |
 
 ---
 
-## Proposed Changes
+## Mode 1: DEEP SYNC (Initial Import)
 
-### 1. Add Sync Mode to Job
+**Purpose**: Import ALL orders from Shopify. Use for first-time setup or data recovery.
 
-#### [MODIFY] schema.prisma
+### Behavior
+- Fetch all orders using `since_id` pagination
+- Batch size: **250** (max Shopify allows)
+- Process every order (upsert)
+- Full checkpointing for resume capability
+- Aggressive memory management
 
-```prisma
-model SyncJob {
-  // ... existing fields
-  syncMode    String?   // 'populate' | 'update'
-  staleAfterMins Int?   // For update mode: re-sync if older than X mins
+### API Parameters
+```javascript
+{
+  syncMode: 'deep',
+  days: 365  // or null for all time
 }
 ```
 
----
-
-### 2. POPULATE Mode (New Orders Only)
-
-**Logic**: Skip orders that already exist in database.
-
+### Implementation
 ```javascript
-async processOrderSync(jobId) {
-  const job = await prisma.syncJob.findUnique({ where: { id: jobId } });
-  
-  if (job.syncMode === 'populate') {
-    // Get existing Shopify order IDs
-    const existingIds = await prisma.order.findMany({
-      where: { shopifyOrderId: { not: null } },
-      select: { shopifyOrderId: true }
-    });
-    const existingSet = new Set(existingIds.map(o => o.shopifyOrderId));
+if (syncMode === 'deep') {
+    this.batchSize = 250;
+    this.batchDelay = 1500;  // Longer delay for memory
     
-    for (const shopifyOrder of batch) {
-      if (existingSet.has(String(shopifyOrder.id))) {
-        // Skip - already exists
-        skipped++;
-        continue;
-      }
-      // Process new order
-      await cacheAndProcessOrder(prisma, shopifyOrder, 'populate_sync');
-    }
-  }
+    // Fetch all orders from Shopify
+    // Process every order (create or update)
+    // No skip logic - we want everything
 }
 ```
 
-**API Endpoint**:
-```
-POST /api/shopify/sync/jobs/start
+### Memory Safeguards
+- GC every 3 batches
+- Prisma disconnect every 5 batches
+- 1.5s delay between batches
+
+---
+
+## Mode 2: QUICK SYNC (Missing Orders)
+
+**Purpose**: Fast catch-up sync. Fetches orders newer than the most recent in DB.
+
+### Behavior
+- Find most recent `orderDate` in database
+- Fetch orders created after that date
+- Skip orders that already exist (by shopifyOrderId)
+- Much faster than DEEP since we only fetch new data
+
+### API Parameters
+```javascript
 {
-  "jobType": "orders",
-  "syncMode": "populate",
-  "days": 365
+  syncMode: 'quick'
+}
+```
+
+### Implementation
+```javascript
+if (syncMode === 'quick') {
+    this.batchSize = 250;
+    this.batchDelay = 500;
+    
+    // Find latest order date in DB
+    const latestOrder = await prisma.order.findFirst({
+        where: { shopifyOrderId: { not: null } },
+        orderBy: { orderDate: 'desc' },
+        select: { orderDate: true }
+    });
+    
+    // Fetch only orders created after this date
+    const createdAtMin = latestOrder?.orderDate?.toISOString();
+    
+    // Load existing IDs for skip check
+    const existingIds = new Set(
+        (await prisma.order.findMany({
+            where: { shopifyOrderId: { not: null } },
+            select: { shopifyOrderId: true }
+        })).map(o => o.shopifyOrderId)
+    );
+    
+    // Fetch and process, skipping existing
+    for (const order of shopifyOrders) {
+        if (existingIds.has(String(order.id))) continue;
+        await this.syncSingleOrder(order);
+    }
+}
+```
+
+### Why This Is Safe
+- Uses `created_at_min` to reduce API calls
+- Still loads `existingIds` to skip already-synced orders
+- No orders missed even if IDs are non-sequential
+
+---
+
+## Mode 3: UPDATE SYNC (Refresh Changed)
+
+**Purpose**: Re-sync orders that have been modified in Shopify (e.g., fulfillment, payment changes).
+
+### Behavior
+- Use Shopify's `updated_at_min` parameter
+- Only fetch orders modified since threshold
+- Update all matching orders in DB (no skip)
+
+### API Parameters
+```javascript
+{
+  syncMode: 'update',
+  staleAfterMins: 60  // Fetch orders updated in last 60 mins
+}
+```
+
+### Implementation
+```javascript
+if (syncMode === 'update') {
+    this.batchSize = 250;
+    this.batchDelay = 500;
+    
+    const threshold = new Date();
+    threshold.setMinutes(threshold.getMinutes() - job.staleAfterMins);
+    
+    // Fetch only orders updated since threshold
+    const shopifyOrders = await shopifyClient.getOrders({
+        updated_at_min: threshold.toISOString(),
+        status: 'any',
+        limit: 250
+    });
+    
+    // Process all - they all need updating
+    for (const order of shopifyOrders) {
+        await this.syncSingleOrder(order);
+    }
 }
 ```
 
 ---
 
-### 3. UPDATE Mode (Stale Orders)
+## Comparison
 
-Uses Shopify's `updated_at_min` parameter to fetch only orders changed since the threshold—avoiding full scans.
+| Aspect | DEEP | QUICK | UPDATE |
+|--------|------|-------|--------|
+| API Filter | none / created_at_min | created_at_min | updated_at_min |
+| Skip Logic | None (upsert all) | Skip existing | None (update all) |
+| Batch Size | 250 | 250 | 250 |
+| Expected API Calls | ~240 (60K orders) | ~5 (new only) | ~1-5 |
+| Expected Time | 30+ min | <1 min | <1 min |
+| Memory Risk | High | Low | Low |
 
-```javascript
-if (job.syncMode === 'update') {
-  const staleThreshold = new Date();
-  staleThreshold.setMinutes(staleThreshold.getMinutes() - job.staleAfterMins);
-  
-  // Only fetch orders updated in Shopify since threshold
-  const shopifyOrders = await shopifyClient.getOrders({
-    updated_at_min: staleThreshold.toISOString(),
-    status: 'any'
-  });
-  
-  // Process all - they all need updating
-  for (const order of shopifyOrders) {
-    await cacheAndProcessOrder(prisma, order, 'update_sync');
-  }
-}
+---
+
+## UI Design
+
 ```
-
-**API Endpoint**:
+┌─────────────────────────────────────────────────────────────┐
+│  📦 Order Sync                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  [DEEP SYNC]          [QUICK SYNC]        [UPDATE SYNC]    │
+│  Initial Import       Missing Orders      Changed Orders    │
+│                                                             │
+│  ⚠️ Slow, use for     ✅ Recommended      ✅ Run hourly     │
+│  first-time setup     for daily use                        │
+│                                                             │
+│  Days: [All Time ▼]                       Since: [60min ▼] │
+│                                                             │
+│  [▶ Start Deep Sync]  [▶ Quick Sync]      [▶ Refresh]      │
+└─────────────────────────────────────────────────────────────┘
 ```
-POST /api/shopify/sync/jobs/start
-{
-  "jobType": "orders",
-  "syncMode": "update",
-  "staleAfterMins": 60
-}
-```
-
-**Benefits**:
-- Fewer Shopify API calls (~5 vs ~240)
-- Faster execution (~1 min vs ~30 min)
-- Lower memory usage
 
 ---
 
 ## Implementation Checklist
 
 ### Backend
-- [ ] Add `syncMode` and `staleAfterMins` to `SyncJob` schema
-- [ ] Modify `syncWorker.startJob()` to accept new options
-- [ ] Add POPULATE logic with existing ID lookup
-- [ ] Add UPDATE logic with `updated_at_min` parameter
-- [ ] Update job logging to show mode-specific stats
+- [ ] Add `syncMode: 'deep' | 'quick' | 'update'` validation
+- [ ] Implement DEEP mode with batch 250, aggressive memory management
+- [ ] Implement QUICK mode with `created_at_min` + skip existing
+- [ ] Implement UPDATE mode with `updated_at_min`
+- [ ] Remove old POPULATE mode
 
-### API
-- [ ] Update `/sync/jobs/start` endpoint to accept `syncMode`
-- [ ] Add validation for mode-specific required fields
-- [ ] Update `/sync/jobs` list to show sync mode
+### Frontend
+- [ ] Update `api.ts` to support new modes
+- [ ] Redesign ShopifyTab with 3 action cards
+- [ ] Add tooltips explaining each mode
 
-### Frontend (Optional)
-- [ ] Add mode selector in Settings → Shopify sync UI
-- [ ] Show mode in job history table
-
----
-
-## Data Flow
-
-```mermaid
-flowchart TB
-    Start[Start Sync Job] --> Mode{Sync Mode?}
-    
-    Mode -->|POPULATE| CheckExist[Get existing order IDs from DB]
-    CheckExist --> FetchShopify1[Fetch orders from Shopify]
-    FetchShopify1 --> FilterNew[Skip if ID exists in DB]
-    FilterNew --> ProcessNew[Process new orders only]
-    
-    Mode -->|UPDATE| CalcStale[Calculate stale threshold]
-    CalcStale --> FetchUpdated[Fetch orders with updated_at_min]
-    FetchUpdated --> ProcessUpdate[Process all fetched orders]
-    
-    ProcessNew --> Complete[Update job status]
-    ProcessUpdate --> Complete
-```
-
----
-
-## Expected Behavior
-
-| Scenario | POPULATE Mode | UPDATE Mode |
-|----------|---------------|-------------|
-| Order exists, unchanged | Skip | Skip (not in Shopify response) |
-| Order exists, changed in Shopify | Skip | Update |
-| Order does not exist | Create | Create |
-| API calls to Shopify | Full scan | Incremental (updated_at_min) |
-
----
-
-## Performance Estimates
-
-| Mode | 60K Orders | API Calls | Time |
-|------|------------|-----------|------|
-| POPULATE (first run) | All new | ~240 | ~30 min |
-| POPULATE (subsequent) | Few new | ~10 | ~2 min |
-| UPDATE (hourly) | ~100 updated | ~1-5 | ~1 min |
-
----
-
-## Migration
-
-No breaking changes. Existing sync behavior remains the default if `syncMode` is not specified.
+### Schema
+- [ ] Update SyncJob.syncMode enum values
