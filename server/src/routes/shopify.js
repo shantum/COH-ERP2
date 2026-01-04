@@ -440,34 +440,18 @@ router.post('/sync/backfill-from-cache', authenticateToken, async (req, res) => 
 
         for (const order of ordersToBackfill) {
             try {
-                // Try to get data from ShopifyOrderCache first
-                let shopifyOrder = null;
-
+                // Get data from ShopifyOrderCache
                 const cachedOrder = await req.prisma.shopifyOrderCache.findUnique({
                     where: { id: order.shopifyOrderId },
                 });
 
-                if (cachedOrder && cachedOrder.rawData) {
-                    shopifyOrder = JSON.parse(cachedOrder.rawData);
-                    console.log(`Using cached data for order ${order.orderNumber}`);
-                } else {
-                    // Fall back to Order.shopifyData if available
-                    const orderWithData = await req.prisma.order.findUnique({
-                        where: { id: order.id },
-                        select: { shopifyData: true },
-                    });
-
-                    if (orderWithData?.shopifyData) {
-                        shopifyOrder = JSON.parse(orderWithData.shopifyData);
-                        console.log(`Using order.shopifyData for order ${order.orderNumber}`);
-                    }
-                }
-
-                if (!shopifyOrder) {
+                if (!cachedOrder?.rawData) {
                     console.log(`No cached data for order ${order.orderNumber}`);
                     results.noCache++;
                     continue;
                 }
+
+                const shopifyOrder = JSON.parse(cachedOrder.rawData);
 
                 // Calculate payment method
                 const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
@@ -599,7 +583,6 @@ router.post('/sync/reprocess-cache', authenticateToken, async (req, res) => {
                 const orderData = {
                     shopifyOrderId,
                     orderNumber: shopifyOrder.name || `SHOP-${shopifyOrderId.slice(-8)}`,
-                    shopifyData: JSON.stringify(shopifyOrder),
                     channel: 'shopify',
                     status,
                     customerId,
