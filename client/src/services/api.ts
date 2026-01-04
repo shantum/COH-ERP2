@@ -123,8 +123,11 @@ export const inventoryApi = {
 export const ordersApi = {
     getAll: (params?: Record<string, string>) => api.get('/orders', { params }),
     getOpen: () => api.get('/orders/open'),
-    getShipped: (params?: { limit?: number; offset?: number; days?: number }) =>
-        api.get('/orders/shipped', { params }),
+    getShipped: (params?: { limit?: number; offset?: number; days?: number; page?: number }) => {
+        const { page, limit = 100, ...rest } = params || {};
+        const offset = page ? (page - 1) * limit : rest.offset || 0;
+        return api.get('/orders/shipped', { params: { limit, offset, ...rest } });
+    },
     getCancelled: () => api.get('/orders/status/cancelled'),
     getArchived: () => api.get('/orders/status/archived'),
     archive: (id: string) => api.post(`/orders/${id}/archive`),

@@ -14,9 +14,11 @@ export type OrderTab = 'open' | 'shipped' | 'cancelled' | 'archived';
 interface UseOrdersDataOptions {
     activeTab: OrderTab;
     selectedCustomerId?: string | null;
+    shippedPage?: number;
+    shippedDays?: number;
 }
 
-export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOptions) {
+export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30 }: UseOrdersDataOptions) {
     // Order queries with conditional polling based on active tab
     const openOrdersQuery = useQuery({
         queryKey: ['openOrders'],
@@ -25,8 +27,8 @@ export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOp
     });
 
     const shippedOrdersQuery = useQuery({
-        queryKey: ['shippedOrders'],
-        queryFn: () => ordersApi.getShipped({ days: 30 }).then(r => r.data),
+        queryKey: ['shippedOrders', shippedPage, shippedDays],
+        queryFn: () => ordersApi.getShipped({ page: shippedPage, days: shippedDays }).then(r => r.data),
         refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false
     });
 
@@ -82,10 +84,16 @@ export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOp
         activeTab === 'cancelled' ? cancelledOrdersQuery.isLoading :
         archivedOrdersQuery.isLoading;
 
+    // Extract shipped orders and pagination from response
+    const shippedData = shippedOrdersQuery.data;
+    const shippedOrders = shippedData?.orders || [];
+    const shippedPagination = shippedData?.pagination || { total: 0, page: 1, totalPages: 1 };
+
     return {
         // Order data
         openOrders: openOrdersQuery.data,
-        shippedOrders: shippedOrdersQuery.data,
+        shippedOrders,
+        shippedPagination,
         cancelledOrders: cancelledOrdersQuery.data,
         archivedOrders: archivedOrdersQuery.data,
 

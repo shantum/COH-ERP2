@@ -39,6 +39,10 @@ export default function Orders() {
     const [searchQuery, setSearchQuery] = useState('');
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('');
 
+    // Shipped orders pagination state
+    const [shippedPage, setShippedPage] = useState(1);
+    const [shippedDays, setShippedDays] = useState(30);
+
     // Modal state
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
     const [showCreateOrder, setShowCreateOrder] = useState(false);
@@ -60,6 +64,7 @@ export default function Orders() {
     const {
         openOrders,
         shippedOrders,
+        shippedPagination,
         cancelledOrders,
         archivedOrders,
         allSkus,
@@ -70,7 +75,7 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId });
+    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays });
 
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
@@ -281,8 +286,7 @@ export default function Orders() {
                     >
                         Shipped{' '}
                         <span className="text-gray-400 ml-1">
-                            ({searchQuery ? `${filteredShippedOrders?.length || 0}/` : ''}
-                            {shippedOrders?.length || 0})
+                            ({shippedPagination.total})
                         </span>
                     </button>
                     <button
@@ -324,6 +328,26 @@ export default function Orders() {
                         )}
                     </div>
                 )}
+                {tab === 'shipped' && (
+                    <div className="flex items-center gap-2 pb-2">
+                        <select
+                            value={shippedDays}
+                            onChange={(e) => {
+                                setShippedDays(Number(e.target.value));
+                                setShippedPage(1);
+                            }}
+                            className="text-xs border rounded px-2 py-1 bg-white"
+                        >
+                            <option value={7}>Last 7 days</option>
+                            <option value={14}>Last 14 days</option>
+                            <option value={30}>Last 30 days</option>
+                            <option value={60}>Last 60 days</option>
+                            <option value={90}>Last 90 days</option>
+                            <option value={180}>Last 180 days</option>
+                            <option value={365}>Last 365 days</option>
+                        </select>
+                    </div>
+                )}
             </div>
 
             {/* Loading */}
@@ -343,14 +367,57 @@ export default function Orders() {
 
             {/* Shipped Orders Accordion */}
             {!isLoading && tab === 'shipped' && (
-                <ShippedOrdersSection
-                    orders={filteredShippedOrders}
-                    expandedOrders={expandedOrders}
-                    setExpandedOrders={setExpandedOrders}
-                    onUnship={(id) => mutations.unship.mutate(id)}
-                    isUnshipping={mutations.unship.isPending}
-                    searchQuery={searchQuery}
-                />
+                <>
+                    <ShippedOrdersSection
+                        orders={filteredShippedOrders}
+                        expandedOrders={expandedOrders}
+                        setExpandedOrders={setExpandedOrders}
+                        onUnship={(id) => mutations.unship.mutate(id)}
+                        isUnshipping={mutations.unship.isPending}
+                        searchQuery={searchQuery}
+                    />
+                    {/* Pagination Controls */}
+                    {shippedPagination.totalPages > 1 && (
+                        <div className="flex items-center justify-between border-t pt-4 mt-4">
+                            <div className="text-sm text-gray-500">
+                                Showing {((shippedPage - 1) * 100) + 1} - {Math.min(shippedPage * 100, shippedPagination.total)} of {shippedPagination.total} orders
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setShippedPage(1)}
+                                    disabled={shippedPage === 1}
+                                    className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    First
+                                </button>
+                                <button
+                                    onClick={() => setShippedPage(p => Math.max(1, p - 1))}
+                                    disabled={shippedPage === 1}
+                                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Prev
+                                </button>
+                                <span className="px-3 py-1 text-sm">
+                                    Page {shippedPage} of {shippedPagination.totalPages}
+                                </span>
+                                <button
+                                    onClick={() => setShippedPage(p => Math.min(shippedPagination.totalPages, p + 1))}
+                                    disabled={shippedPage >= shippedPagination.totalPages}
+                                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Next
+                                </button>
+                                <button
+                                    onClick={() => setShippedPage(shippedPagination.totalPages)}
+                                    disabled={shippedPage >= shippedPagination.totalPages}
+                                    className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Last
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </>
             )}
 
             {/* Cancelled Orders */}

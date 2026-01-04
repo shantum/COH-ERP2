@@ -154,17 +154,24 @@ router.get('/open', async (req, res) => {
 // Get shipped orders
 router.get('/shipped', async (req, res) => {
     try {
-        const { limit = 1000, offset = 0, days = 30 } = req.query;
+        const { limit = 100, offset = 0, days = 30 } = req.query;
+        const take = Number(limit);
+        const skip = Number(offset);
 
         // Filter to recent orders by default (last 30 days)
         const sinceDate = new Date();
         sinceDate.setDate(sinceDate.getDate() - Number(days));
 
+        const whereClause = {
+            status: { in: ['shipped', 'delivered'] },
+            shippedAt: { gte: sinceDate }
+        };
+
+        // Get total count for pagination
+        const totalCount = await req.prisma.order.count({ where: whereClause });
+
         const orders = await req.prisma.order.findMany({
-            where: {
-                status: { in: ['shipped', 'delivered'] },
-                shippedAt: { gte: sinceDate }
-            },
+            where: whereClause,
             select: {
                 id: true,
                 orderNumber: true,
@@ -201,11 +208,11 @@ router.get('/shipped', async (req, res) => {
                 },
             },
             orderBy: { shippedAt: 'desc' },
-            take: Number(limit),
-            skip: Number(offset),
+            take,
+            skip,
         });
 
-        // Get customer LTV data for all orders
+        // Get customer LTV data for all orders (uses ALL historical orders for each customer)
         const customerIds = [...new Set(orders.map(o => o.customerId).filter(Boolean))];
         const [customerLtvMap, thresholds] = await Promise.all([
             getCustomerLtvMap(req.prisma, customerIds),
@@ -235,7 +242,17 @@ router.get('/shipped', async (req, res) => {
             };
         });
 
-        res.json(enriched);
+        res.json({
+            orders: enriched,
+            pagination: {
+                total: totalCount,
+                limit: take,
+                offset: skip,
+                hasMore: skip + orders.length < totalCount,
+                page: Math.floor(skip / take) + 1,
+                totalPages: Math.ceil(totalCount / take)
+            }
+        });
     } catch (error) {
         console.error('Get shipped orders error:', error);
         res.status(500).json({ error: 'Failed to fetch shipped orders' });
