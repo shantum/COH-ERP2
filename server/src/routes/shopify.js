@@ -753,16 +753,51 @@ router.get('/sync/history', authenticateToken, async (req, res) => {
 // ============================================
 
 // Start a new background sync job
+/**
+ * Start a new sync job
+ *
+ * POST /api/shopify/sync/jobs/start
+ *
+ * Body:
+ * - jobType: 'orders' | 'customers' | 'products' (required)
+ * - days: number (optional, default 90) - For created_at filter
+ * - syncMode: 'populate' | 'update' (optional)
+ *   - 'populate': Skip orders that already exist (fast initial import)
+ *   - 'update': Only fetch orders updated in Shopify recently (incremental refresh)
+ *   - null/omitted: Legacy upsert behavior
+ * - staleAfterMins: number (optional, for update mode) - Fetch orders updated within last X mins
+ *
+ * Examples:
+ *   { "jobType": "orders", "syncMode": "populate", "days": 365 }  // Import new orders only
+ *   { "jobType": "orders", "syncMode": "update", "staleAfterMins": 60 }  // Refresh recently changed
+ *   { "jobType": "orders", "days": 30 }  // Legacy: upsert all orders from last 30 days
+ */
 router.post('/sync/jobs/start', authenticateToken, async (req, res) => {
     try {
-        const { jobType, days = 90 } = req.body;
+        const { jobType, days, syncMode, staleAfterMins } = req.body;
 
         if (!['orders', 'customers', 'products'].includes(jobType)) {
             return res.status(400).json({ error: 'Invalid job type. Must be: orders, customers, or products' });
         }
 
-        const job = await syncWorker.startJob(jobType, { days });
-        res.json({ message: 'Sync job started', job });
+        // Validate syncMode-specific requirements
+        if (syncMode === 'update' && !staleAfterMins) {
+            return res.status(400).json({
+                error: 'staleAfterMins is required when syncMode is "update"',
+                hint: 'Example: { "jobType": "orders", "syncMode": "update", "staleAfterMins": 60 }'
+            });
+        }
+
+        const job = await syncWorker.startJob(jobType, {
+            days: days || (syncMode === 'update' ? null : 90), // Default 90 days unless update mode
+            syncMode,
+            staleAfterMins
+        });
+
+        res.json({
+            message: `Sync job started (${syncMode || 'legacy'} mode)`,
+            job
+        });
     } catch (error) {
         console.error('Start sync job error:', error);
         res.status(400).json({ error: error.message });

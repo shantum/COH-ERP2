@@ -584,6 +584,8 @@ model SyncJob {
   // Configuration
   dateFilter    String?   // e.g., "last_90_days"
   daysBack      Int?      // Number of days to sync
+  syncMode      String?   // 'populate' (skip existing) | 'update' (refresh stale) | null (legacy upsert)
+  staleAfterMins Int?     // For update mode: re-sync orders updated in Shopify within last X mins
 
   // Progress tracking
   totalRecords  Int?      // Total records to process (from Shopify count)

@@ -126,6 +126,8 @@ class ShopifyClient {
      * @param {string} options.since_id - Only return orders after this ID
      * @param {string} options.created_at_min - Minimum creation date (ISO 8601)
      * @param {string} options.created_at_max - Maximum creation date (ISO 8601)
+     * @param {string} options.updated_at_min - Minimum update date (ISO 8601) - for incremental sync
+     * @param {string} options.updated_at_max - Maximum update date (ISO 8601)
      * @param {number} options.limit - Number of orders to return (max 250)
      */
     async getOrders(options = {}) {
@@ -149,6 +151,8 @@ class ShopifyClient {
 
         if (options.created_at_min) params.created_at_min = options.created_at_min;
         if (options.created_at_max) params.created_at_max = options.created_at_max;
+        if (options.updated_at_min) params.updated_at_min = options.updated_at_min;
+        if (options.updated_at_max) params.updated_at_max = options.updated_at_max;
 
         const response = await this.client.get('/orders.json', { params });
         return response.data.orders;

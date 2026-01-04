@@ -23,6 +23,11 @@ class SyncWorker {
 
     /**
      * Start a new sync job
+     * @param {string} jobType - 'orders', 'customers', 'products'
+     * @param {Object} options - Job options
+     * @param {number} options.days - Number of days to sync (for created_at filter)
+     * @param {string} options.syncMode - 'populate' (skip existing) | 'update' (refresh stale) | null (legacy upsert)
+     * @param {number} options.staleAfterMins - For update mode: re-sync orders updated in last X mins
      */
     async startJob(jobType, options = {}) {
         // Check for existing running job of same type
@@ -44,13 +49,29 @@ class SyncWorker {
             throw new Error('Shopify is not configured');
         }
 
+        // Validate syncMode
+        const validModes = ['populate', 'update', null, undefined];
+        if (!validModes.includes(options.syncMode)) {
+            throw new Error(`Invalid syncMode: ${options.syncMode}. Must be 'populate', 'update', or omitted for legacy mode.`);
+        }
+
+        // Build date filter label
+        let dateFilter = 'All time';
+        if (options.syncMode === 'update' && options.staleAfterMins) {
+            dateFilter = `Updated in last ${options.staleAfterMins} mins`;
+        } else if (options.days) {
+            dateFilter = `Last ${options.days} days`;
+        }
+
         // Create job record
         const job = await prisma.syncJob.create({
             data: {
                 jobType,
                 status: 'pending',
-                daysBack: options.days || 90,
-                dateFilter: options.days ? `Last ${options.days} days` : 'All time',
+                daysBack: options.days || null,
+                dateFilter,
+                syncMode: options.syncMode || null,
+                staleAfterMins: options.staleAfterMins || null,
             }
         });
 
@@ -189,22 +210,49 @@ class SyncWorker {
 
     /**
      * Process order sync with checkpointing
+     * Supports three modes:
+     * - POPULATE: Skip orders that already exist in database (fast initial import)
+     * - UPDATE: Only fetch orders updated in Shopify since staleAfterMins (incremental refresh)
+     * - LEGACY (null): Upsert all orders (original behavior)
      */
     async processOrderSync(jobId) {
         let job = await prisma.syncJob.findUnique({ where: { id: jobId } });
+        const syncMode = job.syncMode;
 
-        // Calculate date filter
-        const dateFilter = job.daysBack ? (() => {
+        // Calculate date filters based on sync mode
+        let createdAtMin = null;
+        let updatedAtMin = null;
+
+        if (syncMode === 'update' && job.staleAfterMins) {
+            // UPDATE mode: Use updated_at_min to only fetch recently modified orders
+            const threshold = new Date();
+            threshold.setMinutes(threshold.getMinutes() - job.staleAfterMins);
+            updatedAtMin = threshold.toISOString();
+            console.log(`[Job ${jobId}] UPDATE mode: fetching orders updated since ${updatedAtMin}`);
+        } else if (job.daysBack) {
+            // POPULATE or LEGACY mode: Use created_at_min
             const d = new Date();
             d.setDate(d.getDate() - job.daysBack);
-            return d.toISOString();
-        })() : null;
+            createdAtMin = d.toISOString();
+        }
 
-        // Get total count if not set
-        if (!job.totalRecords) {
+        // For POPULATE mode, get existing order IDs upfront
+        let existingOrderIds = new Set();
+        if (syncMode === 'populate') {
+            console.log(`[Job ${jobId}] POPULATE mode: loading existing Shopify order IDs...`);
+            const existingOrders = await prisma.order.findMany({
+                where: { shopifyOrderId: { not: null } },
+                select: { shopifyOrderId: true }
+            });
+            existingOrderIds = new Set(existingOrders.map(o => o.shopifyOrderId));
+            console.log(`[Job ${jobId}] Found ${existingOrderIds.size} existing orders to skip`);
+        }
+
+        // Get total count if not set (only for non-UPDATE modes, UPDATE mode count is unpredictable)
+        if (!job.totalRecords && syncMode !== 'update') {
             const totalCount = await shopifyClient.getOrderCount({
                 status: 'any',
-                created_at_min: dateFilter
+                created_at_min: createdAtMin
             });
             await prisma.syncJob.update({
                 where: { id: jobId },
@@ -213,7 +261,7 @@ class SyncWorker {
             job = await prisma.syncJob.findUnique({ where: { id: jobId } });
         }
 
-        console.log(`[Job ${jobId}] Starting order sync: ${job.totalRecords} total, resuming from ID: ${job.lastProcessedId || 'start'}`);
+        console.log(`[Job ${jobId}] Starting order sync (${syncMode || 'legacy'} mode): ${job.totalRecords || '?'} total, resuming from ID: ${job.lastProcessedId || 'start'}`);
 
         let sinceId = job.lastProcessedId;
         let batchNumber = job.currentBatch;
@@ -232,12 +280,22 @@ class SyncWorker {
             // Fetch batch from Shopify
             let shopifyOrders;
             try {
-                shopifyOrders = await shopifyClient.getOrders({
+                const fetchOptions = {
                     since_id: sinceId,
-                    created_at_min: sinceId ? null : dateFilter, // Don't combine date filter with since_id
                     status: 'any',
                     limit: this.batchSize,
-                });
+                };
+
+                // Apply date filters (don't combine with since_id for pagination)
+                if (!sinceId) {
+                    if (updatedAtMin) {
+                        fetchOptions.updated_at_min = updatedAtMin;
+                    } else if (createdAtMin) {
+                        fetchOptions.created_at_min = createdAtMin;
+                    }
+                }
+
+                shopifyOrders = await shopifyClient.getOrders(fetchOptions);
             } catch (fetchError) {
                 console.error(`[Job ${jobId}] Shopify API error:`, fetchError.response?.data || fetchError.message);
                 throw new Error(`Shopify API: ${fetchError.response?.data?.errors || fetchError.message}`);
@@ -247,16 +305,30 @@ class SyncWorker {
                 break;
             }
 
-            console.log(`[Job ${jobId}] Batch ${batchNumber}: processing ${shopifyOrders.length} orders`);
+            console.log(`[Job ${jobId}] Batch ${batchNumber}: processing ${shopifyOrders.length} orders (${syncMode || 'legacy'} mode)`);
 
             let batchCreated = 0, batchUpdated = 0, batchSkipped = 0, batchErrors = 0;
 
             for (const shopifyOrder of shopifyOrders) {
                 try {
+                    // POPULATE mode: Skip if order already exists
+                    if (syncMode === 'populate' && existingOrderIds.has(String(shopifyOrder.id))) {
+                        batchSkipped++;
+                        continue;
+                    }
+
                     const result = await this.syncSingleOrder(shopifyOrder);
-                    if (result === 'created') batchCreated++;
-                    else if (result === 'updated') batchUpdated++;
-                    else batchSkipped++;
+                    if (result === 'created') {
+                        batchCreated++;
+                        // Add to existing set for subsequent batches (in case of duplicates)
+                        if (syncMode === 'populate') {
+                            existingOrderIds.add(String(shopifyOrder.id));
+                        }
+                    } else if (result === 'updated') {
+                        batchUpdated++;
+                    } else {
+                        batchSkipped++;
+                    }
                 } catch (err) {
                     batchErrors++;
                     if (errorLog.length < this.maxErrors) {
@@ -315,7 +387,7 @@ class SyncWorker {
             }
         });
 
-        console.log(`[Job ${jobId}] Completed`);
+        console.log(`[Job ${jobId}] Completed (${syncMode || 'legacy'} mode)`);
     }
 
     /**
