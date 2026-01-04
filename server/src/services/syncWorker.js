@@ -268,13 +268,17 @@ class SyncWorker {
         // POPULATE optimization: Start from the last known order ID in DB
         // This avoids fetching orders we already have
         if (syncMode === 'populate' && !sinceId) {
-            const lastOrder = await prisma.order.findFirst({
-                where: { shopifyOrderId: { not: null } },
-                orderBy: { shopifyOrderId: 'desc' },
-                select: { shopifyOrderId: true }
-            });
-            if (lastOrder) {
-                sinceId = lastOrder.shopifyOrderId;
+            // Use raw query to get MAX as numeric (shopifyOrderId is stored as String)
+            // SQLite uses CAST AS INTEGER, PostgreSQL uses CAST AS BIGINT
+            const result = await prisma.$queryRawUnsafe(`
+                SELECT shopifyOrderId 
+                FROM "Order" 
+                WHERE shopifyOrderId IS NOT NULL 
+                ORDER BY CAST(shopifyOrderId AS INTEGER) DESC 
+                LIMIT 1
+            `);
+            if (result && result.length > 0) {
+                sinceId = result[0].shopifyOrderId;
                 console.log(`[Job ${jobId}] POPULATE optimization: Starting from last known order ID ${sinceId}`);
             }
         }
