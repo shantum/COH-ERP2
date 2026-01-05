@@ -749,6 +749,48 @@ model ShopifyOrderCache {
 }
 
 // ============================================
+// WEBHOOK MANAGEMENT
+// ============================================
+
+model WebhookLog {
+  id              String    @id @default(uuid())
+  webhookId       String    @unique // X-Shopify-Webhook-Id header (deduplication key)
+  topic           String    // orders/create, orders/updated, etc.
+  resourceId      String?   // Shopify resource ID (order/product/customer ID)
+  status          String    @default("received") // received, processing, processed, failed
+  responseCode    Int?      // HTTP response code sent back
+  processingTime  Int?      // ms to process
+  error           String?   // Error message if failed
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+
+  @@index([webhookId])
+  @@index([topic])
+  @@index([resourceId])
+  @@index([receivedAt])
+}
+
+model FailedSyncItem {
+  id            String    @id @default(uuid())
+  itemType      String    // order, product, customer
+  resourceId    String    // Shopify resource ID
+  rawData       String?   // JSON payload that failed
+  error         String    // Error message
+  retryCount    Int       @default(0)
+  maxRetries    Int       @default(5)
+  nextRetryAt   DateTime? // Exponential backoff
+  status        String    @default("pending") // pending, retrying, resolved, abandoned
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([itemType, resourceId])
+  @@index([status])
+  @@index([nextRetryAt])
+  @@index([itemType])
+}
+
+// ============================================
 // FABRIC RECONCILIATION
 // ============================================
 

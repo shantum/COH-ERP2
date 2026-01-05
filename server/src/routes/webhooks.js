@@ -2,6 +2,17 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { cacheAndProcessOrder } from '../services/shopifyOrderProcessor.js';
 import { cacheAndProcessProduct, handleProductDeletion } from '../services/productSyncService.js';
+import {
+    shopifyOrderSchema,
+    shopifyProductSchema,
+    shopifyCustomerSchema,
+    shopifyInventoryLevelSchema,
+    validateWebhookPayload,
+    checkWebhookDuplicate,
+    logWebhookReceived,
+    updateWebhookLog,
+    addToFailedQueue,
+} from '../utils/webhookUtils.js';
 
 const router = Router();
 
@@ -65,18 +76,44 @@ const verifyWebhook = async (req, res, next) => {
  * Configure this in Shopify: orders/updated topic
  */
 router.post('/shopify/orders', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
+    const webhookTopic = req.get('X-Shopify-Topic') || 'orders/updated';
+
     try {
-        const shopifyOrder = req.body;
+        // Deduplication check
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) {
+            console.log(`Webhook ${webhookId} already processed, skipping`);
+            return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+        }
+
+        // Validate payload
+        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
+        if (!validation.success) {
+            console.error(`Webhook validation failed: ${validation.error}`);
+            return res.status(200).json({ received: true, error: `Validation failed: ${validation.error}` });
+        }
+
+        const shopifyOrder = validation.data;
         const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrder.id;
-        const webhookTopic = req.get('X-Shopify-Topic') || 'orders/updated';
         console.log(`Webhook: orders (unified) - Order #${orderName}`);
 
+        // Log webhook receipt
+        await logWebhookReceived(req.prisma, webhookId, webhookTopic, shopifyOrder.id);
+
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, webhookTopic);
+
+        // Log success
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
 
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders error:', error);
-        res.status(200).json({ received: true, error: error.message }); // Always return 200 to prevent retries
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        // Add to dead letter queue for retry
+        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
+        res.status(200).json({ received: true, error: error.message }); // Always return 200 to prevent Shopify retries
     }
 });
 
@@ -87,52 +124,100 @@ router.post('/shopify/orders', verifyWebhook, async (req, res) => {
 
 // Orders - Create (legacy)
 router.post('/shopify/orders/create', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyOrder = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyOrder = validation.data;
         console.log(`Webhook: orders/create (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
+        await logWebhookReceived(req.prisma, webhookId, 'orders/create', shopifyOrder.id);
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/create');
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/create error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Orders - Updated (legacy)
 router.post('/shopify/orders/updated', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyOrder = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyOrder = validation.data;
         console.log(`Webhook: orders/updated (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
+        await logWebhookReceived(req.prisma, webhookId, 'orders/updated', shopifyOrder.id);
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/updated');
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/updated error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Orders - Cancelled (legacy)
 router.post('/shopify/orders/cancelled', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyOrder = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyOrder = validation.data;
         console.log(`Webhook: orders/cancelled (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
+        await logWebhookReceived(req.prisma, webhookId, 'orders/cancelled', shopifyOrder.id);
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/cancelled');
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/cancelled error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Orders - Fulfilled (legacy)
 router.post('/shopify/orders/fulfilled', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyOrder = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyOrder = validation.data;
         console.log(`Webhook: orders/fulfilled (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
+        await logWebhookReceived(req.prisma, webhookId, 'orders/fulfilled', shopifyOrder.id);
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/fulfilled');
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook orders/fulfilled error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
@@ -143,39 +228,71 @@ router.post('/shopify/orders/fulfilled', verifyWebhook, async (req, res) => {
 
 // Products - Create
 router.post('/shopify/products/create', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyProduct = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyProductSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyProduct = validation.data;
         console.log(`Webhook: products/create - ${shopifyProduct.title}`);
+        await logWebhookReceived(req.prisma, webhookId, 'products/create', shopifyProduct.id);
         const result = await cacheAndProcessProduct(req.prisma, shopifyProduct, 'products/create');
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook products/create error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'product', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Products - Update
 router.post('/shopify/products/update', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyProduct = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyProductSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyProduct = validation.data;
         console.log(`Webhook: products/update - ${shopifyProduct.title}`);
+        await logWebhookReceived(req.prisma, webhookId, 'products/update', shopifyProduct.id);
         const result = await cacheAndProcessProduct(req.prisma, shopifyProduct, 'products/update');
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook products/update error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'product', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Products - Delete
 router.post('/shopify/products/delete', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
         const shopifyProductId = String(req.body.id);
         console.log(`Webhook: products/delete - ID ${shopifyProductId}`);
+        await logWebhookReceived(req.prisma, webhookId, 'products/delete', shopifyProductId);
         const result = await handleProductDeletion(req.prisma, shopifyProductId);
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook products/delete error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
         res.status(200).json({ received: true, error: error.message });
     }
 });
@@ -186,42 +303,71 @@ router.post('/shopify/products/delete', verifyWebhook, async (req, res) => {
 
 // Customers - Create
 router.post('/shopify/customers/create', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyCustomer = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyCustomerSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyCustomer = validation.data;
         console.log(`Webhook: customers/create - ${shopifyCustomer.email}`);
-
+        await logWebhookReceived(req.prisma, webhookId, 'customers/create', shopifyCustomer.id);
         const result = await processShopifyCustomer(req.prisma, shopifyCustomer, 'create');
-
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook customers/create error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'customer', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Customers - Updated
 router.post('/shopify/customers/update', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const shopifyCustomer = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyCustomerSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const shopifyCustomer = validation.data;
         console.log(`Webhook: customers/update - ${shopifyCustomer.email}`);
-
+        await logWebhookReceived(req.prisma, webhookId, 'customers/update', shopifyCustomer.id);
         const result = await processShopifyCustomer(req.prisma, shopifyCustomer, 'update');
-
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
         res.status(200).json({ received: true, ...result });
     } catch (error) {
         console.error('Webhook customers/update error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
+        await addToFailedQueue(req.prisma, 'customer', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message });
     }
 });
 
 // Inventory Levels - Updated
 router.post('/shopify/inventory_levels/update', verifyWebhook, async (req, res) => {
+    const startTime = Date.now();
+    const webhookId = req.get('X-Shopify-Webhook-Id');
     try {
-        const inventoryUpdate = req.body;
+        const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
+        if (duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
+
+        const validation = validateWebhookPayload(shopifyInventoryLevelSchema, req.body);
+        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
+
+        const inventoryUpdate = validation.data;
         const inventoryItemId = String(inventoryUpdate.inventory_item_id);
         const available = inventoryUpdate.available;
 
         console.log(`Webhook: inventory_levels/update - Item ${inventoryItemId}, Available: ${available}`);
+        await logWebhookReceived(req.prisma, webhookId, 'inventory_levels/update', inventoryItemId);
 
         // Find SKU by shopifyInventoryItemId
         const sku = await req.prisma.sku.findFirst({
@@ -243,14 +389,17 @@ router.post('/shopify/inventory_levels/update', verifyWebhook, async (req, res) 
                 }
             });
 
+            await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
             console.log(`Updated Shopify inventory cache for SKU ${sku.skuCode}: ${available}`);
             res.status(200).json({ received: true, updated: true, skuCode: sku.skuCode });
         } else {
+            await updateWebhookLog(req.prisma, webhookId, 'processed', 'SKU not found', Date.now() - startTime);
             console.log(`No SKU found for inventory item ${inventoryItemId}`);
             res.status(200).json({ received: true, updated: false, reason: 'SKU not found' });
         }
     } catch (error) {
         console.error('Webhook inventory_levels/update error:', error);
+        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
         res.status(200).json({ received: true, error: error.message });
     }
 });

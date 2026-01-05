@@ -58,8 +58,7 @@ router.post('/test-connection', authenticateToken, async (req, res) => {
 
         console.log('Testing Shopify connection...');
         console.log('Shop domain:', shopifyClient.shopDomain);
-        console.log('Token exists:', !!shopifyClient.accessToken);
-        console.log('Token length:', shopifyClient.accessToken?.length);
+        console.log('Token configured:', !!shopifyClient.accessToken);
 
         if (!shopifyClient.isConfigured()) {
             return res.json({
