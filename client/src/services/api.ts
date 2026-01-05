@@ -107,7 +107,8 @@ export const fabricsApi = {
 
 // Inventory
 export const inventoryApi = {
-    getBalance: (params?: Record<string, string>) => api.get('/inventory/balance', { params }),
+    getBalance: (params?: { belowTarget?: string; search?: string; limit?: number; offset?: number }) =>
+        api.get('/inventory/balance', { params }),
     getSkuBalance: (skuId: string) => api.get(`/inventory/balance/${skuId}`),
     getTransactions: (params?: Record<string, string>) => api.get('/inventory/transactions', { params }),
     getSkuTransactions: (skuId: string) => api.get('/inventory/transactions', { params: { skuId } }),
@@ -127,7 +128,7 @@ export const inventoryApi = {
 // Orders
 export const ordersApi = {
     getAll: (params?: Record<string, string>) => api.get('/orders', { params }),
-    getOpen: () => api.get('/orders/open'),
+    getOpen: (params?: { limit?: number; offset?: number }) => api.get('/orders/open', { params }),
     getShipped: (params?: { limit?: number; offset?: number; days?: number; page?: number }) => {
         const { page, limit = 100, ...rest } = params || {};
         const offset = page ? (page - 1) * limit : rest.offset || 0;

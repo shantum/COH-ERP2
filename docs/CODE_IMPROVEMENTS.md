@@ -11,7 +11,7 @@
 | Priority | Total | Fixed | Remaining |
 |----------|-------|-------|-----------|
 | 🔴 Critical | 4 | 4 | 0 |
-| 🟠 High | 6 | 4 | 2 |
+| 🟠 High | 6 | 5 | 1 |
 | 🟡 Medium | 8 | 0 | 8 |
 | 🟢 Low | 5 | 0 | 5 |
 
@@ -87,12 +87,12 @@
 ### H3. No Pagination on Heavy Endpoints
 | Endpoint | Issue |
 |----------|-------|
-| `GET /orders` | Returns all open orders |
-| `GET /customers` | No cursor pagination |
+| `GET /orders/open` | Returns all open orders |
 | `GET /inventory/balance` | Returns all SKUs |
 
-**Fix**: Add cursor-based pagination  
-**Status**: ⬜ Pending
+**Fix**: Add limit/offset pagination with total count
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: Added pagination to `/orders/open` and `/inventory/balance` endpoints. Response now includes `{ orders/items, pagination: { total, limit, offset, hasMore } }`. Frontend updated to handle new format with backward compatibility.
 
 ---
 
@@ -233,6 +233,7 @@
 
 | ID | Issue | Fixed Date | Notes |
 |----|-------|------------|-------|
+| H3 | No Pagination on Heavy Endpoints | 2026-01-05 | Added limit/offset pagination |
 | H6 | Console.logs in Route Files | 2026-01-05 | Added Pino logger |
 | H5 | Missing Compound Indexes | 2026-01-05 | Added to schema |
 | H4 | Redundant shopifyData | 2026-01-05 | Already deprecated |
@@ -248,6 +249,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-01-05 | Fixed H3: Added pagination to /orders/open and /inventory/balance |
 | 2026-01-05 | Fixed 4 high-priority issues (H2, H4, H5, H6) |
 | 2026-01-05 | Fixed all 4 critical issues (C1-C4) |
 | 2026-01-05 | Initial document created |

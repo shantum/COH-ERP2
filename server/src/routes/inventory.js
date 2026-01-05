@@ -11,7 +11,11 @@ const router = Router();
 // Get inventory balance for all SKUs
 router.get('/balance', authenticateToken, async (req, res) => {
     try {
-        const { belowTarget, search } = req.query;
+        // Default to all SKUs (high limit) since inventory view needs complete picture
+        // Use explicit limit param for paginated requests
+        const { belowTarget, search, limit = 10000, offset = 0 } = req.query;
+        const take = Number(limit);
+        const skip = Number(offset);
 
         const skus = await req.prisma.sku.findMany({
             where: { isActive: true },
@@ -82,7 +86,19 @@ router.get('/balance', authenticateToken, async (req, res) => {
             return a.skuCode.localeCompare(b.skuCode);
         });
 
-        res.json(filteredBalances);
+        // Apply pagination after filtering and sorting
+        const totalCount = filteredBalances.length;
+        const paginatedBalances = filteredBalances.slice(skip, skip + take);
+
+        res.json({
+            items: paginatedBalances,
+            pagination: {
+                total: totalCount,
+                limit: take,
+                offset: skip,
+                hasMore: skip + paginatedBalances.length < totalCount,
+            }
+        });
     } catch (error) {
         console.error('Get inventory balance error:', error);
         res.status(500).json({ error: 'Failed to fetch inventory balance' });

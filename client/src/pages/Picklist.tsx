@@ -9,7 +9,7 @@ export default function Picklist() {
 
     const { data: openOrders, isLoading } = useQuery({
         queryKey: ['openOrders'],
-        queryFn: () => ordersApi.getOpen().then(r => r.data)
+        queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data)
     });
 
     const pickLine = useMutation({

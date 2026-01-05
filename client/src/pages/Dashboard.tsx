@@ -4,7 +4,7 @@ import { ShoppingCart, AlertTriangle, RotateCcw, TrendingUp } from 'lucide-react
 
 export default function Dashboard() {
     const { data: dashboard } = useQuery({ queryKey: ['dashboard'], queryFn: () => reportsApi.getDashboard().then(r => r.data) });
-    const { data: openOrders } = useQuery({ queryKey: ['openOrders'], queryFn: () => ordersApi.getOpen().then(r => r.data) });
+    const { data: openOrders } = useQuery({ queryKey: ['openOrders'], queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data) });
     const { data: alerts } = useQuery({ queryKey: ['stockAlerts'], queryFn: () => inventoryApi.getAlerts().then(r => r.data) });
     const { data: velocity } = useQuery({ queryKey: ['velocity'], queryFn: () => reportsApi.getSalesVelocity(7).then(r => r.data) });
 

@@ -48,7 +48,7 @@ interface GroupedInventory {
 export default function Inventory() {
     const { user } = useAuth();
     const queryClient = useQueryClient();
-    const { data: balance, isLoading } = useQuery<InventoryItem[]>({ queryKey: ['inventoryBalance'], queryFn: () => inventoryApi.getBalance().then(r => r.data) });
+    const { data: balance, isLoading } = useQuery<InventoryItem[]>({ queryKey: ['inventoryBalance'], queryFn: () => inventoryApi.getBalance().then(r => r.data.items || r.data) });
     const { data: alerts } = useQuery({ queryKey: ['stockAlerts'], queryFn: () => inventoryApi.getAlerts().then(r => r.data) });
     const { data: skus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });
     const isAdmin = user?.role === 'admin';

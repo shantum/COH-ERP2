@@ -69,8 +69,21 @@ router.get('/', async (req, res) => {
 // Get open orders with fulfillment status
 router.get('/open', async (req, res) => {
     try {
+        // Default to all orders (high limit) since fulfillment needs complete view
+        // Use explicit limit param for paginated requests
+        const { limit = 10000, offset = 0 } = req.query;
+        const take = Number(limit);
+        const skip = Number(offset);
+
+        const whereClause = { status: 'open', isArchived: false };
+
+        // Get total count for pagination
+        const totalCount = await req.prisma.order.count({ where: whereClause });
+
         const orders = await req.prisma.order.findMany({
-            where: { status: 'open', isArchived: false },
+            where: whereClause,
+            take,
+            skip,
             select: {
                 id: true,
                 orderNumber: true,
@@ -157,7 +170,15 @@ router.get('/open', async (req, res) => {
             };
         });
 
-        res.json(enrichedOrders);
+        res.json({
+            orders: enrichedOrders,
+            pagination: {
+                total: totalCount,
+                limit: take,
+                offset: skip,
+                hasMore: skip + enrichedOrders.length < totalCount,
+            }
+        });
     } catch (error) {
         console.error('Get open orders error:', error);
         res.status(500).json({ error: 'Failed to fetch open orders' });

@@ -22,7 +22,7 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     // Order queries with conditional polling based on active tab
     const openOrdersQuery = useQuery({
         queryKey: ['openOrders'],
-        queryFn: () => ordersApi.getOpen().then(r => r.data),
+        queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data),
         refetchInterval: activeTab === 'open' ? POLL_INTERVAL : false
     });
 
@@ -52,7 +52,7 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
     const inventoryBalanceQuery = useQuery({
         queryKey: ['inventoryBalance'],
-        queryFn: () => inventoryApi.getBalance().then(r => r.data)
+        queryFn: () => inventoryApi.getBalance().then(r => r.data.items || r.data)
     });
 
     const fabricStockQuery = useQuery({
