@@ -225,6 +225,7 @@ export default function Orders() {
         onEditOrder: setEditingOrder,
         onCancelOrder: (id, reason) => mutations.cancelOrder.mutate({ id, reason }),
         onArchiveOrder: (id) => mutations.archiveOrder.mutate(id),
+        onDeleteOrder: (id) => mutations.deleteOrder.mutate(id),
         onCancelLine: (lineId) => mutations.cancelLine.mutate(lineId),
         onUncancelLine: (lineId) => mutations.uncancelLine.mutate(lineId),
         onSelectCustomer: setSelectedCustomerId,
@@ -234,6 +235,7 @@ export default function Orders() {
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isArchiving: mutations.archiveOrder.isPending,
+        isDeletingOrder: mutations.deleteOrder.isPending,
     });
 
     return (

@@ -16,7 +16,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Undo2, Columns, RotateCcw } from 'lucide-react';
+import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
@@ -187,6 +187,7 @@ interface OrdersGridProps {
     onEditOrder: (order: any) => void;
     onCancelOrder: (id: string, reason?: string) => void;
     onArchiveOrder: (id: string) => void;
+    onDeleteOrder: (id: string) => void;
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
     onSelectCustomer: (customerId: string) => void;
@@ -196,6 +197,7 @@ interface OrdersGridProps {
     isCancellingLine: boolean;
     isUncancellingLine: boolean;
     isArchiving: boolean;
+    isDeletingOrder: boolean;
 }
 
 export function OrdersGrid({
@@ -214,6 +216,7 @@ export function OrdersGrid({
     onEditOrder,
     onCancelOrder,
     onArchiveOrder,
+    onDeleteOrder,
     onCancelLine,
     onUncancelLine,
     onSelectCustomer,
@@ -223,6 +226,7 @@ export function OrdersGrid({
     isCancellingLine,
     isUncancellingLine,
     isArchiving,
+    isDeletingOrder,
 }: OrdersGridProps) {
     // Custom headers state
     const [customHeaders, setCustomHeaders] = useState<Record<string, string>>(() => {
@@ -951,6 +955,25 @@ export function OrdersGrid({
                             >
                                 <Archive size={12} />
                             </button>
+                            {!order.shopifyOrderId && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (
+                                            confirm(
+                                                `DELETE order ${order.orderNumber}?\n\nThis will permanently remove it from the database.`
+                                            )
+                                        ) {
+                                            onDeleteOrder(order.id);
+                                        }
+                                    }}
+                                    disabled={isDeletingOrder}
+                                    className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-600"
+                                    title="Delete order (permanently)"
+                                >
+                                    <Trash2 size={12} />
+                                </button>
+                            )}
                             {lineAction}
                         </div>
                     );
@@ -969,6 +992,7 @@ export function OrdersGrid({
             isCancellingLine,
             isUncancellingLine,
             isArchiving,
+            isDeletingOrder,
             visibleColumns,
         ]
     );
