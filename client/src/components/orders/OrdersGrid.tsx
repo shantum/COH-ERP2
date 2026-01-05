@@ -217,14 +217,54 @@ export function OrdersGrid({
                 cellClass: 'text-xs text-gray-500',
             },
             {
+                colId: 'orderValue',
+                headerName: getHeaderName('orderValue'),
+                width: 80,
+                valueGetter: (params: ValueGetterParams) =>
+                    params.data?.isFirstLine ? params.data.order?.totalAmount || 0 : null,
+                valueFormatter: (params: ValueFormatterParams) => {
+                    if (!params.data?.isFirstLine || params.value === null) return '';
+                    return `₹${Math.round(params.value).toLocaleString('en-IN')}`;
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'discountCode',
+                headerName: getHeaderName('discountCode'),
+                width: 90,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return '';
+                    // Use shopifyCache first, fallback to order field for backward compatibility
+                    return params.data.order?.shopifyCache?.discountCodes
+                        || params.data.order?.discountCode || '';
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const code = params.data.order?.shopifyCache?.discountCodes
+                        || params.data.order?.discountCode;
+                    if (!code) return null;
+                    return (
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-purple-100 text-purple-700">
+                            {code}
+                        </span>
+                    );
+                },
+                cellClass: 'text-xs',
+            },
+            {
                 colId: 'paymentMethod',
                 headerName: getHeaderName('paymentMethod'),
                 width: 70,
-                valueGetter: (params: ValueGetterParams) =>
-                    params.data?.isFirstLine ? params.data.order?.paymentMethod || '' : '',
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return '';
+                    // Use shopifyCache first, fallback to order field for backward compatibility
+                    return params.data.order?.shopifyCache?.paymentMethod
+                        || params.data.order?.paymentMethod || '';
+                },
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
-                    const method = params.data.order?.paymentMethod || '';
+                    const method = params.data.order?.shopifyCache?.paymentMethod
+                        || params.data.order?.paymentMethod || '';
                     if (!method) return null;
                     const isCod = method.toLowerCase().includes('cod');
                     return (

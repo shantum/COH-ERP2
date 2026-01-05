@@ -487,6 +487,106 @@ router.post('/sync/backfill-from-cache', authenticateToken, async (req, res) => 
     }
 });
 
+// Backfill extracted fields in ShopifyOrderCache from rawData
+// This extracts fields like discountCodes, paymentMethod, tags, etc. for existing cache entries
+router.post('/sync/backfill-cache-fields', authenticateToken, async (req, res) => {
+    try {
+        const batchSize = parseInt(req.query.batchSize) || 5000;
+
+        // Find cache entries missing the new extracted fields
+        const cacheEntries = await req.prisma.shopifyOrderCache.findMany({
+            where: {
+                // Find entries where extracted fields are null (not yet populated)
+                discountCodes: null,
+            },
+            orderBy: { createdAt: 'desc' }, // Start with newest orders first
+            take: batchSize
+        });
+
+        console.log(`Found ${cacheEntries.length} cache entries to backfill`);
+
+        if (cacheEntries.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No more entries to backfill',
+                results: { updated: 0, errors: [], total: 0, remaining: 0 },
+            });
+        }
+
+        const results = {
+            updated: 0,
+            errors: [],
+            total: cacheEntries.length,
+        };
+
+        // Process in parallel batches of 100 for speed
+        const parallelBatchSize = 100;
+        for (let i = 0; i < cacheEntries.length; i += parallelBatchSize) {
+            const batch = cacheEntries.slice(i, i + parallelBatchSize);
+
+            await Promise.all(batch.map(async (entry) => {
+                try {
+                    const shopifyOrder = JSON.parse(entry.rawData);
+
+                    // Extract discount codes (use empty string if none, not null)
+                    const discountCodes = (shopifyOrder.discount_codes || [])
+                        .map(d => d.code).join(', ') || '';
+
+                    // Calculate payment method
+                    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+                    const isPrepaid = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+                    const paymentMethod = isPrepaid ? 'Prepaid' :
+                        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+
+                    // Extract tracking from fulfillments
+                    const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
+                        || shopifyOrder.fulfillments?.[0];
+
+                    // Extract shipping address
+                    const addr = shopifyOrder.shipping_address;
+
+                    await req.prisma.shopifyOrderCache.update({
+                        where: { id: entry.id },
+                        data: {
+                            discountCodes,
+                            customerNotes: shopifyOrder.note || null,
+                            paymentMethod,
+                            tags: shopifyOrder.tags || null,
+                            trackingNumber: fulfillment?.tracking_number || null,
+                            trackingCompany: fulfillment?.tracking_company || null,
+                            shippedAt: fulfillment?.created_at ? new Date(fulfillment.created_at) : null,
+                            shippingCity: addr?.city || null,
+                            shippingState: addr?.province || null,
+                            shippingCountry: addr?.country || null,
+                        },
+                    });
+                    results.updated++;
+                } catch (entryError) {
+                    console.error(`Error processing cache ${entry.id}: ${entryError.message}`);
+                    results.errors.push(`Cache ${entry.id}: ${entryError.message}`);
+                }
+            }));
+
+            // Log progress
+            console.log(`Backfill progress: ${Math.min(i + parallelBatchSize, cacheEntries.length)}/${cacheEntries.length}`);
+        }
+
+        // Check how many remaining
+        const remainingCount = await req.prisma.shopifyOrderCache.count({
+            where: { discountCodes: null }
+        });
+
+        res.json({
+            success: true,
+            message: `Backfilled ${results.updated} cache entries`,
+            results: { ...results, remaining: remainingCount },
+        });
+    } catch (error) {
+        console.error('Backfill cache fields error:', error);
+        res.status(500).json({ error: 'Failed to backfill cache fields', details: error.message });
+    }
+});
+
 // Reprocess failed cache entries
 router.post('/sync/reprocess-cache', authenticateToken, async (req, res) => {
     try {

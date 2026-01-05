@@ -18,7 +18,6 @@ import type {
     AddOrderLineData,
     UpdateOrderLineData,
     CreateCustomerData,
-    CreateReturnData,
     InitiateReverseData,
     ResolveReturnData,
     CreateTailorData,
@@ -121,6 +120,8 @@ export const inventoryApi = {
     getInwardHistory: (date?: string) => api.get('/inventory/inward-history', { params: { date } }),
     editInward: (id: string, data: { qty?: number; notes?: string }) => api.put(`/inventory/inward/${id}`, data),
     deleteInward: (id: string) => api.delete(`/inventory/inward/${id}`),
+    // Delete any transaction (admin only)
+    deleteTransaction: (id: string) => api.delete(`/inventory/transactions/${id}`),
 };
 
 // Orders
@@ -171,22 +172,44 @@ export const customersApi = {
 export const returnsApi = {
     getAll: (params?: Record<string, string>) => api.get('/returns', { params }),
     getById: (id: string) => api.get(`/returns/${id}`),
-    create: (data: CreateReturnData) => api.post('/returns', data),
+    create: (data: {
+        requestType: 'return' | 'exchange';
+        originalOrderId: string;
+        reasonCategory: string;
+        reasonDetails?: string;
+        lines: Array<{ skuId: string; qty?: number; exchangeSkuId?: string }>;
+        courier?: string;
+        awbNumber?: string;
+    }) => api.post('/returns', data),
+    update: (id: string, data: {
+        courier?: string;
+        awbNumber?: string;
+        reasonCategory?: string;
+        reasonDetails?: string;
+    }) => api.put(`/returns/${id}`, data),
+    delete: (id: string) => api.delete(`/returns/${id}`),
+    cancel: (id: string, reason?: string) => api.post(`/returns/${id}/cancel`, { reason }),
     initiateReverse: (id: string, data: InitiateReverseData) => api.post(`/returns/${id}/initiate-reverse`, data),
     markReceived: (id: string) => api.post(`/returns/${id}/mark-received`),
     resolve: (id: string, data: ResolveReturnData) => api.post(`/returns/${id}/resolve`, data),
     getAnalyticsByProduct: () => api.get('/returns/analytics/by-product'),
-    // Return Inward - receive returns into repacking queue
-    getOrderForInward: (orderId: string) => api.get(`/returns/inward/order/${orderId}`),
-    inward: (data: {
-        skuId: string;
-        orderLineId?: string;
-        qty?: number;
-        condition: 'correct_product' | 'incorrect_product' | 'damaged_product';
-        requestType?: 'return' | 'exchange';
-        reasonCategory?: string;
-        originalOrderId: string;
-    }) => api.post('/returns/inward', data),
+    // Pending tickets (awaiting receipt)
+    getPending: () => api.get('/returns/pending'),
+    findBySkuCode: (code: string) => api.get('/returns/pending/by-sku', { params: { code } }),
+    // Get order details for creating a return
+    getOrder: (orderIdOrNumber: string) => api.get(`/returns/order/${orderIdOrNumber}`),
+    // Receive item from a ticket
+    receiveItem: (requestId: string, data: { lineId: string; condition: 'good' | 'used' | 'damaged' | 'wrong_product' }) =>
+        api.post(`/returns/${requestId}/receive-item`, data),
+    // Undo receive - remove from QC queue
+    undoReceive: (requestId: string, lineId: string) =>
+        api.post(`/returns/${requestId}/undo-receive`, { lineId }),
+    // Add item to return request
+    addItem: (requestId: string, skuId: string, qty?: number) =>
+        api.post(`/returns/${requestId}/add-item`, { skuId, qty }),
+    // Remove item from return request
+    removeItem: (requestId: string, lineId: string) =>
+        api.delete(`/returns/${requestId}/items/${lineId}`),
 };
 
 // Repacking Queue & Write-offs
@@ -194,6 +217,8 @@ export const repackingApi = {
     // Queue operations
     getQueue: (params?: { status?: string; limit?: number }) => api.get('/repacking/queue', { params }),
     getQueueStats: () => api.get('/repacking/queue/stats'),
+    getQueueHistory: (params?: { status?: 'ready' | 'write_off'; limit?: number }) =>
+        api.get('/repacking/queue/history', { params }),
     addToQueue: (data: {
         skuId?: string;
         skuCode?: string;
@@ -212,8 +237,11 @@ export const repackingApi = {
         itemId: string;
         action: 'ready' | 'write_off';
         writeOffReason?: string;
+        qcComments?: string;
         notes?: string;
     }) => api.post('/repacking/process', data),
+    // Undo processed item
+    undoProcess: (id: string) => api.post(`/repacking/queue/${id}/undo`),
     // Write-offs
     getWriteOffs: (params?: { reason?: string; sourceType?: string; startDate?: string; endDate?: string; limit?: number }) =>
         api.get('/repacking/write-offs', { params }),
@@ -276,6 +304,7 @@ export const shopifyApi = {
         api.post('/shopify/sync/customers/all'),
     // Cache utilities (use cached data, no API rate limits)
     backfillFromCache: () => api.post('/shopify/sync/backfill-from-cache'),
+    backfillCacheFields: () => api.post('/shopify/sync/backfill-cache-fields'),
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
     getCacheStatus: () => api.get('/shopify/sync/cache-status'),
     // Background sync jobs (recommended for orders sync)

@@ -85,11 +85,20 @@ export default function Ledgers() {
     const inventoryGroups = groupByDate(filteredInventory || []);
     const fabricGroups = groupByDate(filteredFabric || []);
 
-    const deleteTransaction = useMutation({
+    const deleteFabricTransaction = useMutation({
         mutationFn: (txnId: string) => fabricsApi.deleteTransaction(txnId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
             queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
+    });
+
+    const deleteInventoryTransaction = useMutation({
+        mutationFn: (txnId: string) => inventoryApi.deleteTransaction(txnId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['allInventoryTransactions'] });
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
     });
@@ -212,8 +221,23 @@ export default function Ledgers() {
                                                         {txn.notes && <p className="text-xs text-gray-500 mt-1">{txn.notes}</p>}
                                                     </div>
                                                 </div>
-                                                <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                    </div>
+                                                    {isAdmin && (
+                                                        <button
+                                                            onClick={() => {
+                                                                if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} units?`)) {
+                                                                    deleteInventoryTransaction.mutate(txn.id);
+                                                                }
+                                                            }}
+                                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                                                            title="Delete transaction (admin only)"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
@@ -326,7 +350,7 @@ export default function Ledgers() {
                                                         <button
                                                             onClick={() => {
                                                                 if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} ${txn.unit}?`)) {
-                                                                    deleteTransaction.mutate(txn.id);
+                                                                    deleteFabricTransaction.mutate(txn.id);
                                                                 }
                                                             }}
                                                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"

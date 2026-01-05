@@ -318,12 +318,14 @@ model Order {
   shippedAt       DateTime?
   deliveredAt     DateTime?
   totalAmount     Float
+  discountCode    String?   // Discount/coupon code used on the order
   createdAt       DateTime  @default(now())
   syncedAt        DateTime?
   shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
   shopifyData     String?   // DEPRECATED: Use ShopifyOrderCache instead. Kept for Railway migration compatibility.
 
-  customer       Customer?       @relation(fields: [customerId], references: [id])
+  customer       Customer?           @relation(fields: [customerId], references: [id])
+  shopifyCache   ShopifyOrderCache?  @relation(fields: [shopifyOrderId], references: [id])
   orderLines     OrderLine[]
   returnRequests ReturnRequest[]
 
@@ -574,6 +576,7 @@ model RepackingQueueItem {
   status          String    @default("pending") // pending, inspecting, repacking, ready, write_off
   condition       String    // unused, used, damaged, defective, destroyed
   inspectionNotes String?
+  qcComments      String?   // QC comments when accepting/rejecting
   writeOffReason  String?   // size_issue, quality_defect, destroyed, wrong_product
   createdAt       DateTime  @default(now())
   processedAt     DateTime?
@@ -707,15 +710,38 @@ model SyncJob {
 
 model ShopifyOrderCache {
   id                String    @id // shopifyOrderId
-  rawData           String    // Complete Shopify order JSON
-  orderNumber       String?   // Extracted for quick lookup
-  financialStatus   String?   // For payment method detection
-  fulfillmentStatus String?   // For status tracking
+  rawData           String    // Complete Shopify order JSON (kept for rare fields)
+
+  // Extracted fields for quick lookup (no JSON parsing needed)
+  orderNumber       String?
+  financialStatus   String?   // paid, pending, refunded, etc.
+  fulfillmentStatus String?   // unfulfilled, partial, fulfilled
+
+  // Commonly-needed Shopify fields (extracted at cache time)
+  discountCodes     String?   // Comma-separated discount codes
+  customerNotes     String?   // Shopify order.note
+  paymentMethod     String?   // Calculated: COD or Prepaid
+  tags              String?   // Comma-separated order tags
+
+  // Tracking info from fulfillments
+  trackingNumber    String?   // AWB number
+  trackingCompany   String?   // Courier name
+  shippedAt         DateTime? // When fulfilled
+
+  // Shipping address (flattened for common queries)
+  shippingCity      String?
+  shippingState     String?
+  shippingCountry   String?
+
+  // Metadata
   lastWebhookAt     DateTime  @default(now())
   webhookTopic      String?   // orders/create, orders/updated, etc.
   processedAt       DateTime? // When synced to Order table
   processingError   String?   // If sync failed, store error
   createdAt         DateTime  @default(now())
+
+  // Relation to Order
+  order             Order?
 
   @@index([orderNumber])
   @@index([processedAt])

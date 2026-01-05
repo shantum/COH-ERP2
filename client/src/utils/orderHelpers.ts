@@ -310,6 +310,8 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     orderNumber: 'Order',
     customerName: 'Customer',
     city: 'City',
+    orderValue: 'Value',
+    discountCode: 'Discount',
     paymentMethod: 'Pay',
     customerNotes: 'Order Notes',
     customerOrderCount: '#',

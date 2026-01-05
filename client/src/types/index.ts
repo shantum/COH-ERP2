@@ -131,6 +131,17 @@ export type OrderStatus = 'open' | 'shipped' | 'delivered' | 'cancelled' | 'retu
 export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'cancelled';
 export type FulfillmentStage = 'pending' | 'allocated' | 'in_progress' | 'ready_to_ship';
 
+// Shopify order cache - single source of truth for Shopify data
+export interface ShopifyOrderCache {
+  discountCodes: string | null;
+  customerNotes: string | null;
+  paymentMethod: string | null;
+  tags: string | null;
+  trackingNumber: string | null;
+  trackingCompany: string | null;
+  shippedAt: string | null;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -152,11 +163,14 @@ export interface Order {
   shippedAt: string | null;
   deliveredAt: string | null;
   totalAmount: number;
+  discountCode: string | null;
   createdAt: string;
   syncedAt: string | null;
   shopifyFulfillmentStatus: string | null;
   customer?: Customer;
   orderLines?: OrderLine[];
+  // Shopify cache data (single source of truth)
+  shopifyCache?: ShopifyOrderCache | null;
   // Enriched fields
   fulfillmentStage?: FulfillmentStage;
   totalLines?: number;

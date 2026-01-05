@@ -19,24 +19,58 @@ import shopifyClient from './shopify.js';
 export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, webhookTopic = 'api_sync') {
     const orderId = String(shopifyOrderId);
 
+    // Extract discount codes (comma-separated, empty string if none)
+    const discountCodes = (shopifyOrder.discount_codes || [])
+        .map(d => d.code).join(', ') || '';
+
+    // Calculate payment method from gateway names and financial status
+    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
+    const isPrepaid = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+    const paymentMethod = isPrepaid ? 'Prepaid' :
+        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+
+    // Extract tracking info from fulfillments
+    const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
+        || shopifyOrder.fulfillments?.[0];
+    const trackingNumber = fulfillment?.tracking_number || null;
+    const trackingCompany = fulfillment?.tracking_company || null;
+    const shippedAt = fulfillment?.created_at ? new Date(fulfillment.created_at) : null;
+
+    // Extract shipping address fields
+    const addr = shopifyOrder.shipping_address;
+    const shippingCity = addr?.city || null;
+    const shippingState = addr?.province || null;
+    const shippingCountry = addr?.country || null;
+
+    const cacheData = {
+        rawData: JSON.stringify(shopifyOrder),
+        orderNumber: shopifyOrder.name || null,
+        financialStatus: shopifyOrder.financial_status || null,
+        fulfillmentStatus: shopifyOrder.fulfillment_status || null,
+        // Extracted Shopify fields
+        discountCodes,
+        customerNotes: shopifyOrder.note || null,
+        paymentMethod,
+        tags: shopifyOrder.tags || null,
+        trackingNumber,
+        trackingCompany,
+        shippedAt,
+        shippingCity,
+        shippingState,
+        shippingCountry,
+        // Metadata
+        webhookTopic,
+        lastWebhookAt: new Date(),
+    };
+
     await prisma.shopifyOrderCache.upsert({
         where: { id: orderId },
         create: {
             id: orderId,
-            rawData: JSON.stringify(shopifyOrder),
-            orderNumber: shopifyOrder.name || null,
-            financialStatus: shopifyOrder.financial_status || null,
-            fulfillmentStatus: shopifyOrder.fulfillment_status || null,
-            webhookTopic,
-            lastWebhookAt: new Date(),
+            ...cacheData,
         },
         update: {
-            rawData: JSON.stringify(shopifyOrder),
-            orderNumber: shopifyOrder.name || null,
-            financialStatus: shopifyOrder.financial_status || null,
-            fulfillmentStatus: shopifyOrder.fulfillment_status || null,
-            webhookTopic,
-            lastWebhookAt: new Date(),
+            ...cacheData,
             // Clear any previous error since we have new data
             processingError: null,
         }
@@ -163,6 +197,12 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
             ? `${customer.first_name} ${customer.last_name || ''}`.trim()
             : 'Unknown';
 
+    // Extract discount codes (join multiple codes with comma)
+    const discountCodes = shopifyOrder.discount_codes || [];
+    const discountCode = discountCodes.length > 0
+        ? discountCodes.map(d => d.code).join(', ')
+        : null;
+
     // Build order data
     // NOTE: Raw Shopify data is stored in ShopifyOrderCache, not duplicated in Order
     const orderData = {
@@ -176,6 +216,7 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
         shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
         totalAmount: parseFloat(shopifyOrder.total_price) || 0,
+        discountCode,
         shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
         orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
         customerNotes: shopifyOrder.note || null,
@@ -200,7 +241,8 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
             existingOrder.awbNumber !== awbNumber ||
             existingOrder.courier !== courier ||
             existingOrder.paymentMethod !== paymentMethod ||
-            existingOrder.customerNotes !== orderData.customerNotes;
+            existingOrder.customerNotes !== orderData.customerNotes ||
+            existingOrder.discountCode !== discountCode;
 
         if (needsUpdate) {
             await prisma.order.update({

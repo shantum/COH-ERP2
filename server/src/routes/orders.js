@@ -93,7 +93,18 @@ router.get('/open', async (req, res) => {
                 createdAt: true,
                 shopifyFulfillmentStatus: true,
                 paymentMethod: true,
-                // Exclude shopifyData to reduce payload size
+                // Shopify data from cache (single source of truth)
+                shopifyCache: {
+                    select: {
+                        discountCodes: true,
+                        customerNotes: true,
+                        paymentMethod: true,
+                        tags: true,
+                        trackingNumber: true,
+                        trackingCompany: true,
+                        shippedAt: true,
+                    },
+                },
                 customer: true,
                 orderLines: {
                     include: {
@@ -195,7 +206,18 @@ router.get('/shipped', async (req, res) => {
                 createdAt: true,
                 shopifyFulfillmentStatus: true,
                 paymentMethod: true,
-                // Exclude shopifyData to reduce payload size
+                // Shopify data from cache (single source of truth)
+                shopifyCache: {
+                    select: {
+                        discountCodes: true,
+                        customerNotes: true,
+                        paymentMethod: true,
+                        tags: true,
+                        trackingNumber: true,
+                        trackingCompany: true,
+                        shippedAt: true,
+                    },
+                },
                 customer: true,
                 orderLines: {
                     include: {

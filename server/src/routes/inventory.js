@@ -424,6 +424,76 @@ router.delete('/inward/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Delete any inventory transaction (admin only)
+router.delete('/transactions/:id', authenticateToken, async (req, res) => {
+    try {
+        // Check if user is admin
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can delete transactions' });
+        }
+
+        const { id } = req.params;
+
+        const existing = await req.prisma.inventoryTransaction.findUnique({
+            where: { id },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+            },
+        });
+
+        if (!existing) {
+            return res.status(404).json({ error: 'Transaction not found' });
+        }
+
+        let revertedQueueItem = null;
+
+        // If this is a return_receipt transaction with a referenceId, revert the repacking queue item
+        if (existing.reason === 'return_receipt' && existing.referenceId) {
+            const queueItem = await req.prisma.repackingQueueItem.findUnique({
+                where: { id: existing.referenceId },
+            });
+
+            if (queueItem && queueItem.status === 'ready') {
+                // Revert the queue item back to pending
+                await req.prisma.repackingQueueItem.update({
+                    where: { id: existing.referenceId },
+                    data: {
+                        status: 'pending',
+                        qcComments: null,
+                        processedAt: null,
+                        processedById: null,
+                    },
+                });
+                revertedQueueItem = queueItem;
+            }
+        }
+
+        await req.prisma.inventoryTransaction.delete({ where: { id } });
+
+        res.json({
+            success: true,
+            message: revertedQueueItem
+                ? 'Transaction deleted and item returned to QC queue'
+                : 'Transaction deleted',
+            deleted: {
+                id: existing.id,
+                txnType: existing.txnType,
+                qty: existing.qty,
+                skuCode: existing.sku?.skuCode,
+                productName: existing.sku?.variation?.product?.name,
+            },
+            revertedToQueue: revertedQueueItem ? true : false,
+        });
+    } catch (error) {
+        console.error('Delete inventory transaction error:', error);
+        res.status(500).json({ error: 'Failed to delete transaction' });
+    }
+});
+
 // Helper: Match production batch for inward
 async function matchProductionBatch(prisma, skuId, quantity) {
     // Find oldest pending/in_progress batch for this SKU that isn't fully completed

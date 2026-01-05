@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi, productsApi } from '../services/api';
 import { useState, useMemo } from 'react';
-import { Plus, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronRight, Package, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, X, ArrowDownCircle, ArrowUpCircle, ChevronRight, Package, AlertTriangle, Trash2 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 interface InventoryItem {
     skuId: string;
@@ -45,10 +46,12 @@ interface GroupedInventory {
 }
 
 export default function Inventory() {
+    const { user } = useAuth();
     const queryClient = useQueryClient();
     const { data: balance, isLoading } = useQuery<InventoryItem[]>({ queryKey: ['inventoryBalance'], queryFn: () => inventoryApi.getBalance().then(r => r.data) });
     const { data: alerts } = useQuery({ queryKey: ['stockAlerts'], queryFn: () => inventoryApi.getAlerts().then(r => r.data) });
     const { data: skus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });
+    const isAdmin = user?.role === 'admin';
 
     const [showInward, setShowInward] = useState(false);
     const [inwardForm, setInwardForm] = useState({ skuCode: '', qty: 1, reason: 'production', notes: '' });
@@ -67,6 +70,14 @@ export default function Inventory() {
     const quickInward = useMutation({
         mutationFn: (data: { skuCode: string; qty: number; reason: string; notes: string }) => inventoryApi.quickInward(data),
         onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] }); setShowInward(false); setInwardForm({ skuCode: '', qty: 1, reason: 'production', notes: '' }); }
+    });
+
+    const deleteTransaction = useMutation({
+        mutationFn: (txnId: string) => inventoryApi.deleteTransaction(txnId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['skuTransactions'] });
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+        }
     });
 
     // Get unique genders, product types and colors for filters
@@ -640,8 +651,24 @@ export default function Inventory() {
                                                         {txn.notes && <p className="text-xs text-gray-600 mt-1">{txn.notes}</p>}
                                                     </div>
                                                 </div>
-                                                <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
-                                                    {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`text-lg font-semibold ${txn.txnType === 'inward' ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {txn.txnType === 'inward' ? '+' : '-'}{txn.qty}
+                                                    </div>
+                                                    {isAdmin && (
+                                                        <button
+                                                            onClick={() => {
+                                                                if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} units?`)) {
+                                                                    deleteTransaction.mutate(txn.id);
+                                                                }
+                                                            }}
+                                                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                                            disabled={deleteTransaction.isPending}
+                                                            title="Delete transaction (Admin only)"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

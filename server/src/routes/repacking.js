@@ -181,10 +181,65 @@ router.put('/queue/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Get processed items history (accepted/rejected)
+router.get('/queue/history', authenticateToken, async (req, res) => {
+    try {
+        const { status, limit = 100 } = req.query;
+
+        const where = {};
+        if (status === 'ready' || status === 'write_off') {
+            where.status = status;
+        } else {
+            // Default: show all processed items
+            where.status = { in: ['ready', 'write_off'] };
+        }
+
+        const items = await req.prisma.repackingQueueItem.findMany({
+            where,
+            include: {
+                sku: {
+                    include: {
+                        variation: {
+                            include: { product: true },
+                        },
+                    },
+                },
+                returnRequest: {
+                    select: {
+                        requestNumber: true,
+                        requestType: true,
+                        reasonCategory: true,
+                    },
+                },
+                processedBy: {
+                    select: { id: true, name: true },
+                },
+            },
+            orderBy: { processedAt: 'desc' },
+            take: Number(limit),
+        });
+
+        // Enrich with additional info
+        const enrichedItems = items.map((item) => ({
+            ...item,
+            productName: item.sku?.variation?.product?.name,
+            colorName: item.sku?.variation?.colorName,
+            size: item.sku?.size,
+            skuCode: item.sku?.skuCode,
+            imageUrl: item.sku?.variation?.imageUrl || item.sku?.variation?.product?.imageUrl,
+        }));
+
+        res.json(enrichedItems);
+    } catch (error) {
+        console.error('Get queue history error:', error);
+        res.status(500).json({ error: 'Failed to fetch queue history' });
+    }
+});
+
 // Process repacking item (move to stock or write-off)
 router.post('/process', authenticateToken, async (req, res) => {
     try {
-        const { itemId, action, writeOffReason, notes } = req.body;
+        const { itemId, action, writeOffReason, qcComments, notes } = req.body;
         // action: 'ready' (add to stock) or 'write_off'
 
         const item = await req.prisma.repackingQueueItem.findUnique({
@@ -217,7 +272,7 @@ router.post('/process', authenticateToken, async (req, res) => {
                         qty: item.qty,
                         reason: 'return_receipt',
                         referenceId: item.id,
-                        notes: notes || 'From repacking queue - repacked and QC passed',
+                        notes: qcComments || notes || 'From repacking queue - repacked and QC passed',
                         createdById: req.user.id,
                     },
                 });
@@ -227,6 +282,7 @@ router.post('/process', authenticateToken, async (req, res) => {
                     where: { id: itemId },
                     data: {
                         status: 'ready',
+                        qcComments: qcComments || null,
                         processedAt: new Date(),
                         processedById: req.user.id,
                     },
@@ -255,7 +311,7 @@ router.post('/process', authenticateToken, async (req, res) => {
                         reason: writeOffReason,
                         sourceType: 'return',
                         sourceId: item.id,
-                        notes,
+                        notes: qcComments || notes,
                         createdById: req.user.id,
                     },
                 });
@@ -266,6 +322,7 @@ router.post('/process', authenticateToken, async (req, res) => {
                     data: {
                         status: 'write_off',
                         writeOffReason,
+                        qcComments: qcComments || null,
                         processedAt: new Date(),
                         processedById: req.user.id,
                     },
@@ -300,12 +357,97 @@ router.post('/process', authenticateToken, async (req, res) => {
     }
 });
 
-// Delete repacking queue item
+// Undo a processed QC item (revert to pending)
+router.post('/queue/:id/undo', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const item = await req.prisma.repackingQueueItem.findUnique({
+            where: { id },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+            },
+        });
+
+        if (!item) {
+            return res.status(404).json({ error: 'Item not found' });
+        }
+
+        if (item.status !== 'ready' && item.status !== 'write_off') {
+            return res.status(400).json({ error: 'Can only undo processed items' });
+        }
+
+        const previousStatus = item.status;
+
+        await req.prisma.$transaction(async (prisma) => {
+            if (previousStatus === 'ready') {
+                // Remove the inventory inward transaction
+                await prisma.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: item.id,
+                        reason: 'return_receipt',
+                    },
+                });
+            } else if (previousStatus === 'write_off') {
+                // Remove write-off log
+                await prisma.writeOffLog.deleteMany({
+                    where: { sourceId: item.id },
+                });
+
+                // Decrement SKU write-off count
+                await prisma.sku.update({
+                    where: { id: item.skuId },
+                    data: { writeOffCount: { decrement: item.qty } },
+                });
+
+                // Decrement Product write-off count
+                if (item.sku?.variation?.product?.id) {
+                    await prisma.product.update({
+                        where: { id: item.sku.variation.product.id },
+                        data: { writeOffCount: { decrement: item.qty } },
+                    });
+                }
+            }
+
+            // Revert item to pending status
+            await prisma.repackingQueueItem.update({
+                where: { id },
+                data: {
+                    status: 'pending',
+                    qcComments: null,
+                    writeOffReason: null,
+                    processedAt: null,
+                    processedById: null,
+                },
+            });
+        });
+
+        res.json({
+            success: true,
+            message: `Undo successful - ${item.sku.skuCode} moved back to pending`,
+            previousStatus,
+        });
+    } catch (error) {
+        console.error('Undo QC process error:', error);
+        res.status(500).json({ error: 'Failed to undo QC process' });
+    }
+});
+
+// Delete repacking queue item (undo receive)
 router.delete('/queue/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const item = await req.prisma.repackingQueueItem.findUnique({ where: { id } });
+        const item = await req.prisma.repackingQueueItem.findUnique({
+            where: { id },
+            include: {
+                returnRequest: true,
+            },
+        });
         if (!item) {
             return res.status(404).json({ error: 'Item not found' });
         }
@@ -314,9 +456,48 @@ router.delete('/queue/:id', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Cannot delete processed items' });
         }
 
-        await req.prisma.repackingQueueItem.delete({ where: { id } });
+        await req.prisma.$transaction(async (tx) => {
+            // If this item came from a return, restore the original ticket line
+            if (item.returnLineId) {
+                // Clear the itemCondition on the return line
+                await tx.returnRequestLine.update({
+                    where: { id: item.returnLineId },
+                    data: { itemCondition: null },
+                });
 
-        res.json({ success: true, message: 'Item deleted from queue' });
+                // If ticket status is "received", revert it to previous status
+                if (item.returnRequest && item.returnRequest.status === 'received') {
+                    // Check shipping to determine appropriate status
+                    const shipping = await tx.returnShipping.findFirst({
+                        where: { requestId: item.returnRequestId, direction: 'reverse' },
+                    });
+
+                    let newStatus = 'requested';
+                    if (shipping) {
+                        if (shipping.pickedUpAt) {
+                            newStatus = 'in_transit';
+                        } else {
+                            newStatus = 'reverse_initiated';
+                        }
+                    }
+
+                    await tx.returnRequest.update({
+                        where: { id: item.returnRequestId },
+                        data: { status: newStatus },
+                    });
+                }
+            }
+
+            // Delete the queue item
+            await tx.repackingQueueItem.delete({ where: { id } });
+        });
+
+        res.json({
+            success: true,
+            message: item.returnLineId
+                ? 'Item removed from queue and return ticket restored'
+                : 'Item deleted from queue',
+        });
     } catch (error) {
         console.error('Delete repacking item error:', error);
         res.status(500).json({ error: 'Failed to delete item' });
