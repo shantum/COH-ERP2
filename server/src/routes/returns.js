@@ -20,6 +20,7 @@ router.get('/', authenticateToken, async (req, res) => {
             where,
             include: {
                 originalOrder: true,
+                exchangeOrder: true,
                 customer: true,
                 lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
                 shipping: true,
@@ -170,6 +171,138 @@ router.get('/pending/by-sku', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
+// ACTION QUEUE DASHBOARD
+// ============================================
+
+// Get action queue summary for dashboard
+router.get('/action-queue', authenticateToken, async (req, res) => {
+    try {
+        // Get all non-completed/cancelled return requests
+        const allRequests = await req.prisma.returnRequest.findMany({
+            where: {
+                status: { notIn: ['resolved', 'cancelled', 'completed'] },
+            },
+            include: {
+                originalOrder: true,
+                customer: true,
+                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+                shipping: true,
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+
+        // Get QC queue (from repacking queue)
+        const qcPending = await req.prisma.repackingQueueItem.findMany({
+            where: { status: 'pending' },
+        });
+
+        // Categorize by status/phase
+        const pendingPickup = allRequests.filter((r) => r.status === 'requested' && !r.shipping?.some((s) => s.awbNumber));
+        const inTransit = allRequests.filter(
+            (r) => r.status === 'in_transit' || (r.status === 'requested' && r.shipping?.some((s) => s.awbNumber && s.direction === 'reverse'))
+        );
+        const received = allRequests.filter((r) => r.status === 'received');
+
+        // Exchanges ready to ship (reverse in transit but replacement not yet shipped)
+        const exchangesReadyToShip = allRequests.filter((r) => {
+            const isExchange = r.resolution?.startsWith('exchange') || r.requestType === 'exchange';
+            const reverseInTransit = r.reverseInTransitAt || r.status === 'in_transit';
+            const notYetShipped = !r.forwardShippedAt && !r.forwardDelivered;
+            return isExchange && reverseInTransit && notYetShipped;
+        });
+
+        // Refunds pending (item received but refund not processed)
+        const refundsPending = allRequests.filter((r) => {
+            const isRefund = r.resolution === 'refund' || r.requestType === 'return';
+            const itemReceived = r.status === 'received' || r.reverseReceived;
+            const noRefundYet = !r.refundAmount && !r.refundProcessedAt;
+            return isRefund && itemReceived && noRefundYet;
+        });
+
+        // Exchange down refunds pending (item QC passed but difference not refunded)
+        const exchangeDownRefundsPending = allRequests.filter((r) => {
+            const isExchangeDown = r.resolution === 'exchange_down';
+            const itemReceived = r.status === 'received' || r.reverseReceived;
+            const noRefundYet = !r.refundAmount && !r.refundProcessedAt;
+            return isExchangeDown && itemReceived && noRefundYet && r.valueDifference && r.valueDifference < 0;
+        });
+
+        // Exchange up payments pending
+        const exchangeUpPaymentsPending = allRequests.filter((r) => {
+            const isExchangeUp = r.resolution === 'exchange_up';
+            const noPaymentYet = !r.paymentAmount && !r.paymentCollectedAt;
+            return isExchangeUp && noPaymentYet && r.valueDifference && r.valueDifference > 0;
+        });
+
+        res.json({
+            summary: {
+                pendingPickup: pendingPickup.length,
+                inTransit: inTransit.length,
+                qcPending: qcPending.length,
+                received: received.length,
+                exchangesReadyToShip: exchangesReadyToShip.length,
+                refundsPending: refundsPending.length,
+                exchangeDownRefundsPending: exchangeDownRefundsPending.length,
+                exchangeUpPaymentsPending: exchangeUpPaymentsPending.length,
+            },
+            actions: {
+                shipReplacements: exchangesReadyToShip.map((r) => ({
+                    id: r.id,
+                    requestNumber: r.requestNumber,
+                    resolution: r.resolution,
+                    valueDifference: r.valueDifference,
+                    customer: r.customer ? { name: `${r.customer.firstName} ${r.customer.lastName}`.trim(), email: r.customer.email } : null,
+                    originalOrder: r.originalOrder ? { orderNumber: r.originalOrder.orderNumber } : null,
+                    reverseAwb: r.shipping?.find((s) => s.direction === 'reverse')?.awbNumber,
+                    createdAt: r.createdAt,
+                })),
+                processRefunds: refundsPending.map((r) => ({
+                    id: r.id,
+                    requestNumber: r.requestNumber,
+                    resolution: r.resolution,
+                    returnValue: r.returnValue,
+                    customer: r.customer ? { name: `${r.customer.firstName} ${r.customer.lastName}`.trim(), email: r.customer.email } : null,
+                    originalOrder: r.originalOrder ? { orderNumber: r.originalOrder.orderNumber, totalAmount: r.originalOrder.totalAmount } : null,
+                    lines: r.lines.map((l) => ({
+                        skuCode: l.sku?.skuCode,
+                        productName: l.sku?.variation?.product?.name,
+                        colorName: l.sku?.variation?.colorName,
+                        size: l.sku?.size,
+                        qty: l.qty,
+                        mrp: l.sku?.mrp,
+                    })),
+                    createdAt: r.createdAt,
+                })),
+                collectPayments: exchangeUpPaymentsPending.map((r) => ({
+                    id: r.id,
+                    requestNumber: r.requestNumber,
+                    valueDifference: r.valueDifference,
+                    customer: r.customer ? { name: `${r.customer.firstName} ${r.customer.lastName}`.trim(), email: r.customer.email } : null,
+                    originalOrder: r.originalOrder ? { orderNumber: r.originalOrder.orderNumber } : null,
+                    createdAt: r.createdAt,
+                })),
+                refundDifferences: exchangeDownRefundsPending.map((r) => ({
+                    id: r.id,
+                    requestNumber: r.requestNumber,
+                    valueDifference: r.valueDifference,
+                    customer: r.customer ? { name: `${r.customer.firstName} ${r.customer.lastName}`.trim(), email: r.customer.email } : null,
+                    originalOrder: r.originalOrder ? { orderNumber: r.originalOrder.orderNumber } : null,
+                    createdAt: r.createdAt,
+                })),
+            },
+            lists: {
+                pendingPickup: pendingPickup.slice(0, 10),
+                inTransit: inTransit.slice(0, 10),
+                received: received.slice(0, 10),
+            },
+        });
+    } catch (error) {
+        console.error('Get action queue error:', error);
+        res.status(500).json({ error: 'Failed to fetch action queue' });
+    }
+});
+
 // Get order details for creating a return
 router.get('/order/:orderId', authenticateToken, async (req, res) => {
     try {
@@ -220,17 +353,52 @@ router.get('/order/:orderId', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        const items = order.orderLines.map((line) => ({
-            orderLineId: line.id,
-            skuId: line.sku.id,
-            skuCode: line.sku.skuCode,
-            barcode: line.sku.barcode,
-            productName: line.sku.variation?.product?.name,
-            colorName: line.sku.variation?.colorName,
-            size: line.sku.size,
-            qty: line.qty,
-            imageUrl: line.sku.variation?.imageUrl || line.sku.variation?.product?.imageUrl,
-        }));
+        // Try to get cached Shopify data for accurate discounted prices
+        let shopifyLineItems = {};
+        if (order.orderNumber) {
+            const cache = await req.prisma.shopifyOrderCache.findFirst({
+                where: { orderNumber: order.orderNumber },
+            });
+            if (cache?.rawData) {
+                try {
+                    const rawData = typeof cache.rawData === 'string' ? JSON.parse(cache.rawData) : cache.rawData;
+                    // Build lookup by SKU code for matching
+                    (rawData.line_items || []).forEach((item) => {
+                        if (item.sku) {
+                            const originalPrice = parseFloat(item.price) || 0;
+                            const discountAllocations = item.discount_allocations || [];
+                            const totalDiscount = discountAllocations.reduce(
+                                (sum, alloc) => sum + (parseFloat(alloc.amount) || 0),
+                                0
+                            );
+                            const effectivePrice = originalPrice - (totalDiscount / item.quantity);
+                            shopifyLineItems[item.sku] = Math.round(effectivePrice * 100) / 100;
+                        }
+                    });
+                } catch (e) {
+                    console.error('Error parsing Shopify cache:', e);
+                }
+            }
+        }
+
+        const items = order.orderLines.map((line) => {
+            // Use cached Shopify discounted price if available, otherwise fall back to stored price
+            const cachedPrice = shopifyLineItems[line.sku.skuCode];
+            const effectivePrice = cachedPrice !== undefined ? cachedPrice : (line.unitPrice || line.sku.mrp || 0);
+
+            return {
+                orderLineId: line.id,
+                skuId: line.sku.id,
+                skuCode: line.sku.skuCode,
+                barcode: line.sku.barcode,
+                productName: line.sku.variation?.product?.name,
+                colorName: line.sku.variation?.colorName,
+                size: line.sku.size,
+                qty: line.qty,
+                unitPrice: effectivePrice,
+                imageUrl: line.sku.variation?.imageUrl || line.sku.variation?.product?.imageUrl,
+            };
+        });
 
         res.json({
             id: order.id,
@@ -260,6 +428,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
             where: { id: req.params.id },
             include: {
                 originalOrder: true,
+                exchangeOrder: true,
                 customer: true,
                 lines: {
                     include: {
@@ -284,13 +453,20 @@ router.post('/', authenticateToken, async (req, res) => {
     try {
         const {
             requestType, // 'return' or 'exchange'
+            resolution, // 'refund', 'exchange_same', 'exchange_up', 'exchange_down'
             originalOrderId,
             reasonCategory,
             reasonDetails,
-            lines, // [{ skuId, qty, exchangeSkuId? }]
+            lines, // [{ skuId, qty, exchangeSkuId?, unitPrice? }]
+            returnValue,
+            replacementValue,
+            valueDifference,
             courier,
             awbNumber,
         } = req.body;
+
+        // Derive resolution from requestType if not provided
+        const effectiveResolution = resolution || (requestType === 'exchange' ? 'exchange_same' : 'refund');
 
         // Validate order
         const order = await req.prisma.order.findUnique({
@@ -342,8 +518,19 @@ router.post('/', authenticateToken, async (req, res) => {
             });
         }
 
-        const count = await req.prisma.returnRequest.count();
-        const requestNumber = `RET-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
+        // Generate unique request number - find max number and increment
+        const year = new Date().getFullYear();
+        const lastRequest = await req.prisma.returnRequest.findFirst({
+            where: { requestNumber: { startsWith: `RET-${year}-` } },
+            orderBy: { requestNumber: 'desc' },
+            select: { requestNumber: true },
+        });
+        let nextNumber = 1;
+        if (lastRequest) {
+            const match = lastRequest.requestNumber.match(/RET-\d{4}-(\d+)/);
+            if (match) nextNumber = parseInt(match[1], 10) + 1;
+        }
+        const requestNumber = `RET-${year}-${String(nextNumber).padStart(4, '0')}`;
 
         // Determine initial status
         const hasShipping = courier && awbNumber;
@@ -355,15 +542,20 @@ router.post('/', authenticateToken, async (req, res) => {
                 data: {
                     requestNumber,
                     requestType,
+                    resolution: effectiveResolution,
                     originalOrderId,
                     customerId: order.customerId,
                     reasonCategory,
                     reasonDetails,
                     status: initialStatus,
+                    returnValue: returnValue || null,
+                    replacementValue: replacementValue || null,
+                    valueDifference: valueDifference || null,
                     lines: {
                         create: lines.map((l) => ({
                             skuId: l.skuId,
                             qty: l.qty || 1,
+                            unitPrice: l.unitPrice || null,
                             exchangeSkuId: l.exchangeSkuId || null,
                         })),
                     },
@@ -809,10 +1001,28 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
                 l.id === lineId ? true : l.itemCondition !== null
             );
 
+            // Build condition summary for notes
+            const conditionLabels = {
+                'good': 'Good Condition - Item is in resellable condition',
+                'used': 'Used / Worn - Item shows signs of use',
+                'damaged': 'Damaged - Item is damaged',
+                'wrong_product': 'Wrong Product - Different item than expected',
+            };
+            const conditionNote = conditionLabels[condition] || condition;
+
             if (allLinesReceived) {
+                // Build update data - mark status received
+                const updateData = { status: 'received' };
+
+                // For exchanges, also mark reverseReceived
+                if (request.requestType === 'exchange') {
+                    updateData.reverseReceived = true;
+                    updateData.reverseReceivedAt = new Date();
+                }
+
                 await tx.returnRequest.update({
                     where: { id: request.id },
-                    data: { status: 'received' },
+                    data: updateData,
                 });
 
                 await tx.returnStatusHistory.create({
@@ -821,15 +1031,32 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
                         fromStatus: request.status,
                         toStatus: 'received',
                         changedById: req.user.id,
-                        notes: 'All items received',
+                        notes: `All items received. Condition: ${conditionNote}`,
                     },
                 });
 
                 // Update shipping status
                 await tx.returnShipping.updateMany({
                     where: { requestId: request.id, direction: 'reverse' },
-                    data: { status: 'delivered', receivedAt: new Date() },
+                    data: { status: 'delivered', receivedAt: new Date(), notes: conditionNote },
                 });
+
+                // Check auto-resolve for exchanges
+                if (request.requestType === 'exchange' && request.forwardDelivered) {
+                    await tx.returnRequest.update({
+                        where: { id: request.id },
+                        data: { status: 'resolved' },
+                    });
+                    await tx.returnStatusHistory.create({
+                        data: {
+                            requestId: request.id,
+                            fromStatus: 'received',
+                            toStatus: 'resolved',
+                            changedById: req.user.id,
+                            notes: 'Exchange auto-resolved: both reverse received and forward delivered',
+                        },
+                    });
+                }
             }
 
             // Update customer stats
@@ -1171,6 +1398,551 @@ router.get('/analytics/by-product', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Return analytics error:', error);
         res.status(500).json({ error: 'Failed to get return analytics' });
+    }
+});
+
+// ============================================
+// EXCHANGE ORDER LINKING
+// ============================================
+
+// Link exchange ticket to replacement order
+router.put('/:id/link-exchange-order', authenticateToken, async (req, res) => {
+    try {
+        const { orderId } = req.body;
+
+        if (!orderId) {
+            return res.status(400).json({ error: 'orderId is required' });
+        }
+
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (request.requestType !== 'exchange') {
+            return res.status(400).json({ error: 'Only exchange requests can be linked to orders' });
+        }
+
+        // Verify order exists
+        const order = await req.prisma.order.findUnique({
+            where: { id: orderId },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Check if order is already linked to another exchange
+        const existingLink = await req.prisma.returnRequest.findFirst({
+            where: {
+                exchangeOrderId: orderId,
+                id: { not: req.params.id },
+            },
+        });
+
+        if (existingLink) {
+            return res.status(400).json({
+                error: `This order is already linked to exchange ${existingLink.requestNumber}`,
+            });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: { exchangeOrderId: orderId },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: request.status,
+                    changedById: req.user.id,
+                    notes: `Linked to exchange order ${order.orderNumber}`,
+                },
+            });
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+                shipping: true,
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Link exchange order error:', error);
+        res.status(500).json({ error: 'Failed to link exchange order' });
+    }
+});
+
+// Unlink exchange order (undo)
+router.put('/:id/unlink-exchange-order', authenticateToken, async (req, res) => {
+    try {
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: { exchangeOrder: true },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (!request.exchangeOrderId) {
+            return res.status(400).json({ error: 'No exchange order linked' });
+        }
+
+        const orderNumber = request.exchangeOrder?.orderNumber;
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: { exchangeOrderId: null },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: request.status,
+                    changedById: req.user.id,
+                    notes: `Unlinked exchange order ${orderNumber}`,
+                },
+            });
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                customer: true,
+                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+                shipping: true,
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Unlink exchange order error:', error);
+        res.status(500).json({ error: 'Failed to unlink exchange order' });
+    }
+});
+
+// ============================================
+// EXCHANGE SHIPMENT TRACKING
+// ============================================
+
+// Helper to check auto-resolution
+async function checkAutoResolve(tx, requestId, userId) {
+    const request = await tx.returnRequest.findUnique({
+        where: { id: requestId },
+    });
+
+    if (request.reverseReceived && request.forwardDelivered && request.status !== 'resolved') {
+        await tx.returnRequest.update({
+            where: { id: requestId },
+            data: { status: 'resolved', resolutionType: 'exchange' },
+        });
+
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId,
+                fromStatus: request.status,
+                toStatus: 'resolved',
+                changedById: userId,
+                notes: 'Auto-resolved: both reverse received and forward delivered',
+            },
+        });
+
+        return true;
+    }
+    return false;
+}
+
+// Mark reverse shipment received
+router.put('/:id/mark-reverse-received', authenticateToken, async (req, res) => {
+    try {
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (request.reverseReceived) {
+            return res.status(400).json({ error: 'Reverse shipment already marked as received' });
+        }
+
+        let autoResolved = false;
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: {
+                    reverseReceived: true,
+                    reverseReceivedAt: new Date(),
+                },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: request.status,
+                    changedById: req.user.id,
+                    notes: 'Marked reverse shipment as received',
+                },
+            });
+
+            autoResolved = await checkAutoResolve(tx, req.params.id, req.user.id);
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                shipping: true,
+            },
+        });
+
+        res.json({ ...updated, autoResolved });
+    } catch (error) {
+        console.error('Mark reverse received error:', error);
+        res.status(500).json({ error: 'Failed to mark reverse received' });
+    }
+});
+
+// Unmark reverse received (undo)
+router.put('/:id/unmark-reverse-received', authenticateToken, async (req, res) => {
+    try {
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (!request.reverseReceived) {
+            return res.status(400).json({ error: 'Reverse shipment not marked as received' });
+        }
+
+        // If already resolved, need to un-resolve
+        const wasResolved = request.status === 'resolved';
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: {
+                    reverseReceived: false,
+                    reverseReceivedAt: null,
+                    status: wasResolved ? 'in_transit' : request.status,
+                },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: wasResolved ? 'in_transit' : request.status,
+                    changedById: req.user.id,
+                    notes: 'Undo: unmarked reverse shipment as received',
+                },
+            });
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                shipping: true,
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Unmark reverse received error:', error);
+        res.status(500).json({ error: 'Failed to unmark reverse received' });
+    }
+});
+
+// Mark forward shipment delivered
+router.put('/:id/mark-forward-delivered', authenticateToken, async (req, res) => {
+    try {
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (request.requestType !== 'exchange') {
+            return res.status(400).json({ error: 'Only exchange requests can have forward delivery' });
+        }
+
+        if (request.forwardDelivered) {
+            return res.status(400).json({ error: 'Forward shipment already marked as delivered' });
+        }
+
+        let autoResolved = false;
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: {
+                    forwardDelivered: true,
+                    forwardDeliveredAt: new Date(),
+                },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: request.status,
+                    changedById: req.user.id,
+                    notes: 'Marked forward shipment as delivered',
+                },
+            });
+
+            autoResolved = await checkAutoResolve(tx, req.params.id, req.user.id);
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                shipping: true,
+            },
+        });
+
+        res.json({ ...updated, autoResolved });
+    } catch (error) {
+        console.error('Mark forward delivered error:', error);
+        res.status(500).json({ error: 'Failed to mark forward delivered' });
+    }
+});
+
+// Unmark forward delivered (undo)
+router.put('/:id/unmark-forward-delivered', authenticateToken, async (req, res) => {
+    try {
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (!request.forwardDelivered) {
+            return res.status(400).json({ error: 'Forward shipment not marked as delivered' });
+        }
+
+        // If already resolved, need to un-resolve
+        const wasResolved = request.status === 'resolved';
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: {
+                    forwardDelivered: false,
+                    forwardDeliveredAt: null,
+                    status: wasResolved ? 'in_transit' : request.status,
+                },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: wasResolved ? 'in_transit' : request.status,
+                    changedById: req.user.id,
+                    notes: 'Undo: unmarked forward shipment as delivered',
+                },
+            });
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                shipping: true,
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Unmark forward delivered error:', error);
+        res.status(500).json({ error: 'Failed to unmark forward delivered' });
+    }
+});
+
+// ============================================
+// EARLY-SHIP LOGIC FOR EXCHANGES
+// ============================================
+
+// Mark reverse shipment as in-transit (enables early shipping of replacement)
+router.put('/:id/mark-reverse-in-transit', authenticateToken, async (req, res) => {
+    try {
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: { shipping: true },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        if (request.reverseInTransitAt) {
+            return res.status(400).json({ error: 'Reverse shipment already marked as in-transit' });
+        }
+
+        // Check if there's a reverse shipping record with AWB
+        const reverseShipping = request.shipping?.find((s) => s.direction === 'reverse' && s.awbNumber);
+        if (!reverseShipping) {
+            return res.status(400).json({ error: 'No reverse pickup AWB found. Add reverse shipping details first.' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: {
+                    reverseInTransitAt: new Date(),
+                    status: 'in_transit',
+                },
+            });
+
+            // Update shipping status
+            await tx.returnShipping.update({
+                where: { id: reverseShipping.id },
+                data: { status: 'in_transit' },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: 'in_transit',
+                    changedById: req.user.id,
+                    notes: 'Reverse pickup confirmed in-transit. Exchange replacement can now be shipped.',
+                },
+            });
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                shipping: true,
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Mark reverse in-transit error:', error);
+        res.status(500).json({ error: 'Failed to mark reverse in-transit' });
+    }
+});
+
+// Ship replacement (for exchanges - can be done when reverse is in-transit)
+router.put('/:id/ship-replacement', authenticateToken, async (req, res) => {
+    try {
+        const { courier, awbNumber, notes } = req.body;
+
+        if (!courier || !awbNumber) {
+            return res.status(400).json({ error: 'Courier and AWB number are required' });
+        }
+
+        const request = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: { shipping: true },
+        });
+
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        // Check if this is an exchange
+        const isExchange = request.resolution?.startsWith('exchange') || request.requestType === 'exchange';
+        if (!isExchange) {
+            return res.status(400).json({ error: 'This is not an exchange request' });
+        }
+
+        // Check if replacement already shipped
+        if (request.forwardShippedAt) {
+            return res.status(400).json({ error: 'Replacement has already been shipped' });
+        }
+
+        // Check if reverse is at least in-transit (allows early shipping)
+        const reverseInTransit = request.reverseInTransitAt || request.status === 'in_transit';
+        if (!reverseInTransit) {
+            return res.status(400).json({ error: 'Reverse pickup must be confirmed in-transit before shipping replacement' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Create forward shipping record
+            await tx.returnShipping.create({
+                data: {
+                    requestId: req.params.id,
+                    direction: 'forward',
+                    courier,
+                    awbNumber,
+                    status: 'shipped',
+                    shippedAt: new Date(),
+                },
+            });
+
+            // Update request with forward shipped timestamp
+            await tx.returnRequest.update({
+                where: { id: req.params.id },
+                data: {
+                    forwardShippedAt: new Date(),
+                },
+            });
+
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: request.status,
+                    changedById: req.user.id,
+                    notes: notes || `Replacement shipped via ${courier} (AWB: ${awbNumber})`,
+                },
+            });
+        });
+
+        const updated = await req.prisma.returnRequest.findUnique({
+            where: { id: req.params.id },
+            include: {
+                originalOrder: true,
+                exchangeOrder: true,
+                customer: true,
+                shipping: true,
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Ship replacement error:', error);
+        res.status(500).json({ error: 'Failed to ship replacement' });
     }
 });
 

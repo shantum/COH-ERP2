@@ -66,8 +66,6 @@ export async function findOrCreateCustomer(prisma, shopifyCustomer, options = {}
                 defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
                 firstOrderDate: orderDate ? new Date(orderDate) : null,
                 lastOrderDate: orderDate ? new Date(orderDate) : null,
-                totalOrders: shopifyCustomer.orders_count || 0,
-                totalSpent: parseFloat(shopifyCustomer.total_spent) || 0,
             }
         });
         created = true;
@@ -106,8 +104,6 @@ export async function upsertCustomerFromWebhook(prisma, shopifyCustomer) {
         phone: shopifyCustomer.phone || null,
         shopifyCustomerId,
         defaultAddress: defaultAddress ? JSON.stringify(defaultAddress) : null,
-        totalOrders: shopifyCustomer.orders_count || 0,
-        totalSpent: parseFloat(shopifyCustomer.total_spent) || 0,
     };
 
     if (customer) {

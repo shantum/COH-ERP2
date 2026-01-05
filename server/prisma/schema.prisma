@@ -111,6 +111,7 @@ model Sku {
   skuCosting            SkuCosting?
   returnRequestLines    ReturnRequestLine[]    @relation("ReturnedSku")
   exchangeRequestLines  ReturnRequestLine[]    @relation("ExchangeSku")
+  replacementItems      ReplacementItem[]      // NEW: When this SKU is wanted as replacement
   feedbackProductLinks  FeedbackProductLink[]
   shopifyInventoryCache ShopifyInventoryCache?
   repackingQueueItems   RepackingQueueItem[]
@@ -325,10 +326,11 @@ model Order {
   shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
   shopifyData     String?   // DEPRECATED: Use ShopifyOrderCache instead. Kept for Railway migration compatibility.
 
-  customer       Customer?           @relation(fields: [customerId], references: [id])
-  shopifyCache   ShopifyOrderCache?  @relation(fields: [shopifyOrderId], references: [id])
-  orderLines     OrderLine[]
-  returnRequests ReturnRequest[]
+  customer         Customer?           @relation(fields: [customerId], references: [id])
+  shopifyCache     ShopifyOrderCache?  @relation(fields: [shopifyOrderId], references: [id])
+  orderLines       OrderLine[]
+  returnRequests   ReturnRequest[]     @relation("OriginalOrder")
+  exchangeRequests ReturnRequest[]     @relation("ExchangeOrder")
 
   @@index([customerId])
   @@index([status])
@@ -373,20 +375,47 @@ model OrderLine {
 model ReturnRequest {
   id              String   @id @default(uuid())
   requestNumber   String   @unique
-  requestType     String   // return, exchange
+  requestType     String   // DEPRECATED: Use resolutionType. Kept for backward compat. Values: return, exchange
   originalOrderId String
   customerId      String?
-  status          String   @default("requested") // requested, reverse_initiated, in_transit, received, inspected, resolved, cancelled
-  reasonCategory  String   // size_issue, color_mismatch, quality_defect, wrong_item, changed_mind, other
+  status          String   @default("pending_pickup") // pending_pickup, in_transit, received, processing, completed, cancelled
+  reasonCategory  String   // size_issue, color_mismatch, quality_defect, wrong_item, changed_mind, damaged_in_transit, other
   reasonDetails   String?
-  resolutionType  String?  // refund, exchange, store_credit, rejected
-  resolutionNotes String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  originalOrder       Order                 @relation(fields: [originalOrderId], references: [id])
+  // NEW: Resolution type (replaces requestType)
+  // refund = full refund, exchange_same = same value item, exchange_up = higher value (+pay), exchange_down = lower value (+refund diff)
+  resolution      String   @default("refund") // refund, exchange_same, exchange_up, exchange_down
+
+  // Value tracking
+  returnValue       Float?    // Value of items being returned
+  replacementValue  Float?    // Value of replacement items (0 for refund)
+  valueDifference   Float?    // Positive = customer pays, Negative = refund difference
+
+  // Resolution outcomes
+  refundAmount        Float?    // Amount to refund (full or difference)
+  refundProcessedAt   DateTime? // When refund was issued
+  paymentAmount       Float?    // Amount customer needs to pay (for exchange_up)
+  paymentCollectedAt  DateTime? // When payment was collected
+  resolutionNotes     String?
+
+  // Exchange order linking
+  exchangeOrderId    String?   // Links to the replacement order
+
+  // Shipment tracking timestamps
+  reverseInTransitAt DateTime? // NEW: When reverse pickup confirmed (allows early-ship)
+  reverseReceived    Boolean   @default(false)  // Customer's return received at warehouse
+  reverseReceivedAt  DateTime?
+  forwardShippedAt   DateTime? // NEW: When replacement shipped
+  forwardDelivered   Boolean   @default(false)  // Replacement delivered to customer
+  forwardDeliveredAt DateTime?
+
+  originalOrder       Order                 @relation("OriginalOrder", fields: [originalOrderId], references: [id])
+  exchangeOrder       Order?                @relation("ExchangeOrder", fields: [exchangeOrderId], references: [id])
   customer            Customer?             @relation(fields: [customerId], references: [id])
   lines               ReturnRequestLine[]
+  replacementItems    ReplacementItem[]     // NEW: Items customer wants as replacement
   shipping            ReturnShipping[]
   statusHistory       ReturnStatusHistory[]
   repackingQueueItems RepackingQueueItem[]
@@ -394,6 +423,8 @@ model ReturnRequest {
   @@index([originalOrderId])
   @@index([customerId])
   @@index([status])
+  @@index([resolution])
+  @@index([exchangeOrderId])
 }
 
 model ReturnRequestLine {
@@ -402,15 +433,31 @@ model ReturnRequestLine {
   originalOrderLineId String?
   skuId               String
   qty                 Int
-  exchangeSkuId       String?
-  exchangeQty         Int?
-  itemCondition       String? // unused, used, damaged, defective
+  unitPrice           Float?  // Price of item being returned (for value calc)
+  exchangeSkuId       String? // DEPRECATED: Use ReplacementItem model instead
+  exchangeQty         Int?    // DEPRECATED: Use ReplacementItem model instead
+  itemCondition       String? // good, used, damaged, wrong_product (set when received)
   inspectionNotes     String?
 
   request           ReturnRequest @relation(fields: [requestId], references: [id])
   originalOrderLine OrderLine?    @relation(fields: [originalOrderLineId], references: [id])
   sku               Sku           @relation("ReturnedSku", fields: [skuId], references: [id])
   exchangeSku       Sku?          @relation("ExchangeSku", fields: [exchangeSkuId], references: [id])
+
+  @@index([requestId])
+  @@index([skuId])
+}
+
+// NEW: Tracks what the customer wants as replacement (for exchanges)
+model ReplacementItem {
+  id            String  @id @default(uuid())
+  requestId     String
+  skuId         String
+  qty           Int
+  unitPrice     Float   // Price of replacement item
+
+  request ReturnRequest @relation(fields: [requestId], references: [id])
+  sku     Sku           @relation(fields: [skuId], references: [id])
 
   @@index([requestId])
   @@index([skuId])
