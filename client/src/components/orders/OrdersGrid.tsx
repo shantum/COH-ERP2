@@ -874,8 +874,9 @@ export function OrdersGrid({
                     if (!row) return null;
                     const order = row.order;
                     const isCancelledLine = row.lineStatus === 'cancelled';
+                    const hasLineId = row.lineId != null;
 
-                    const lineAction = (
+                    const lineAction = hasLineId ? (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -899,7 +900,7 @@ export function OrdersGrid({
                         >
                             {isCancelledLine ? <Undo2 size={12} /> : <X size={12} />}
                         </button>
-                    );
+                    ) : null;
 
                     if (!row.isFirstLine) {
                         return <div className="flex items-center justify-end">{lineAction}</div>;
