@@ -955,7 +955,7 @@ export function OrdersGrid({
                             >
                                 <Archive size={12} />
                             </button>
-                            {!order.shopifyOrderId && (
+                            {row.totalLines === 0 && (
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();

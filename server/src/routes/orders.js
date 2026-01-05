@@ -1381,9 +1381,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        // Only allow deleting manually created orders (not synced from Shopify)
-        if (order.shopifyOrderId) {
-            return res.status(400).json({ error: 'Cannot delete orders synced from Shopify. Use cancel instead.' });
+        // Allow deletion if: no Shopify ID, OR no line items (test orders)
+        if (order.shopifyOrderId && order.orderLines.length > 0) {
+            return res.status(400).json({ error: 'Cannot delete Shopify orders with line items. Use cancel instead.' });
         }
 
         // Delete in transaction
