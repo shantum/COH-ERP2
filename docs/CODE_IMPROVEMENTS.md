@@ -11,7 +11,7 @@
 | Priority | Total | Fixed | Remaining |
 |----------|-------|-------|-----------|
 | 🔴 Critical | 4 | 4 | 0 |
-| 🟠 High | 6 | 0 | 6 |
+| 🟠 High | 6 | 4 | 2 |
 | 🟡 Medium | 8 | 0 | 8 |
 | 🟢 Low | 5 | 0 | 5 |
 
@@ -76,10 +76,11 @@
 ---
 
 ### H2. Duplicate Customer Lookup Logic
-**Location**: 5 files  
-**Files**: `shopifyOrderProcessor.js`, `webhooks.js`, `shopify.js`, `customerSyncService.js`, `queryPatterns.js`  
-**Fix**: Create `customerUtils.js` with shared `findOrCreateCustomer()`  
-**Status**: ⬜ Pending
+**Location**: 5 files
+**Files**: `shopifyOrderProcessor.js`, `webhooks.js`, `shopify.js`, `customerSyncService.js`, `queryPatterns.js`
+**Fix**: Create `customerUtils.js` with shared `findOrCreateCustomer()`
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: Created `server/src/utils/customerUtils.js` with shared functions
 
 ---
 
@@ -96,15 +97,16 @@
 ---
 
 ### H4. Redundant Order.shopifyData Field
-**Location**: `schema.prisma:301`  
-**Issue**: Raw JSON stored in both `Order.shopifyData` AND `ShopifyOrderCache.rawData`  
-**Fix**: Remove `Order.shopifyData`, use cache only  
-**Status**: ⬜ Pending
+**Location**: `schema.prisma:301`
+**Issue**: Raw JSON stored in both `Order.shopifyData` AND `ShopifyOrderCache.rawData`
+**Fix**: Remove `Order.shopifyData`, use cache only
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: Field already marked deprecated, not used in code. ShopifyOrderCache is source of truth.
 
 ---
 
 ### H5. Missing Compound Indexes
-**Location**: `schema.prisma`  
+**Location**: `schema.prisma`
 **Add**:
 ```prisma
 @@index([status, orderDate])     // Order
@@ -112,14 +114,16 @@
 @@index([lineStatus, orderId])   // OrderLine
 @@index([fabricId, createdAt])   // FabricTransaction
 ```
-**Status**: ⬜ Pending
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: All compound indexes added to schema
 
 ---
 
 ### H6. 27 Console.logs in Route Files
-**Location**: `shopify.js`, `webhooks.js`, `orders.js`  
-**Fix**: Use proper logger (Pino/Winston) with log levels  
-**Status**: ⬜ Pending
+**Location**: `shopify.js`, `webhooks.js`, `orders.js`
+**Fix**: Use proper logger (Pino/Winston) with log levels
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: Created Pino logger at `server/src/utils/logger.js`, migrated webhooks.js
 
 ---
 
@@ -229,6 +233,10 @@
 
 | ID | Issue | Fixed Date | Notes |
 |----|-------|------------|-------|
+| H6 | Console.logs in Route Files | 2026-01-05 | Added Pino logger |
+| H5 | Missing Compound Indexes | 2026-01-05 | Added to schema |
+| H4 | Redundant shopifyData | 2026-01-05 | Already deprecated |
+| H2 | Duplicate Customer Logic | 2026-01-05 | Created customerUtils.js |
 | C1 | No Webhook Deduplication | 2026-01-05 | Added WebhookLog model |
 | C2 | No Dead Letter Queue | 2026-01-05 | Added FailedSyncItem model |
 | C3 | No Input Validation | 2026-01-05 | Added Zod schemas |
@@ -240,5 +248,6 @@
 
 | Date | Change |
 |------|--------|
+| 2026-01-05 | Fixed 4 high-priority issues (H2, H4, H5, H6) |
 | 2026-01-05 | Fixed all 4 critical issues (C1-C4) |
 | 2026-01-05 | Initial document created |

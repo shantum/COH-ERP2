@@ -6,6 +6,7 @@
  */
 
 import shopifyClient from './shopify.js';
+import { findOrCreateCustomer } from '../utils/customerUtils.js';
 
 /**
  * Cache raw Shopify order data to ShopifyOrderCache table
@@ -118,49 +119,20 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         include: { orderLines: true }
     });
 
-    // Extract customer info
+    // Extract customer and shipping info
     const customer = shopifyOrder.customer;
     const shippingAddress = shopifyOrder.shipping_address;
 
-    // Find or create customer
-    let customerId = null;
-    if (customer) {
-        const shopifyCustomerId = String(customer.id);
-        const customerEmail = customer.email?.toLowerCase();
-
-        let dbCustomer = await prisma.customer.findFirst({
-            where: {
-                OR: [
-                    { shopifyCustomerId },
-                    ...(customerEmail ? [{ email: customerEmail }] : [])
-                ].filter(Boolean)
-            }
-        });
-
-        if (!dbCustomer && customerEmail) {
-            dbCustomer = await prisma.customer.create({
-                data: {
-                    email: customerEmail,
-                    firstName: customer.first_name || null,
-                    lastName: customer.last_name || null,
-                    phone: customer.phone || null,
-                    shopifyCustomerId,
-                    defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-                    firstOrderDate: new Date(shopifyOrder.created_at),
-                }
-            });
+    // Find or create customer using shared utility
+    const { customer: dbCustomer } = await findOrCreateCustomer(
+        prisma,
+        customer,
+        {
+            shippingAddress,
+            orderDate: shopifyOrder.created_at,
         }
-
-        customerId = dbCustomer?.id;
-
-        // Update customer's last order date
-        if (customerId) {
-            await prisma.customer.update({
-                where: { id: customerId },
-                data: { lastOrderDate: new Date(shopifyOrder.created_at) },
-            });
-        }
-    }
+    );
+    const customerId = dbCustomer?.id || null;
 
     // Determine order status
     let status = shopifyClient.mapOrderStatus(shopifyOrder);

@@ -13,6 +13,8 @@ import {
     updateWebhookLog,
     addToFailedQueue,
 } from '../utils/webhookUtils.js';
+import { upsertCustomerFromWebhook } from '../utils/customerUtils.js';
+import { webhookLogger as log } from '../utils/logger.js';
 
 const router = Router();
 
@@ -25,7 +27,7 @@ async function loadWebhookSecret(prisma) {
         const setting = await prisma.systemSetting.findUnique({ where: { key: 'shopify_webhook_secret' } });
         webhookSecret = setting?.value || null;
     } catch (e) {
-        console.error('Failed to load webhook secret:', e);
+        log.error({ err: e }, 'Failed to load webhook secret');
     }
 }
 
@@ -54,12 +56,12 @@ const verifyWebhook = async (req, res, next) => {
 
     // Skip verification if no secret configured (development mode)
     if (!webhookSecret) {
-        console.warn('Webhook secret not configured - accepting unverified webhook');
+        log.warn('Webhook secret not configured - accepting unverified webhook');
         return next();
     }
 
     if (!verifyShopifyWebhook(req, webhookSecret)) {
-        console.error('Webhook verification failed');
+        log.error('Webhook verification failed');
         return res.status(401).json({ error: 'Webhook verification failed' });
     }
 
@@ -84,20 +86,20 @@ router.post('/shopify/orders', verifyWebhook, async (req, res) => {
         // Deduplication check
         const duplicate = await checkWebhookDuplicate(req.prisma, webhookId);
         if (duplicate) {
-            console.log(`Webhook ${webhookId} already processed, skipping`);
+            log.debug({ webhookId }, 'Webhook already processed, skipping');
             return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
         }
 
         // Validate payload
         const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
         if (!validation.success) {
-            console.error(`Webhook validation failed: ${validation.error}`);
+            log.error({ error: validation.error }, 'Webhook validation failed');
             return res.status(200).json({ received: true, error: `Validation failed: ${validation.error}` });
         }
 
         const shopifyOrder = validation.data;
         const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrder.id;
-        console.log(`Webhook: orders (unified) - Order #${orderName}`);
+        log.info({ orderName, topic: webhookTopic }, 'Processing order webhook');
 
         // Log webhook receipt
         await logWebhookReceived(req.prisma, webhookId, webhookTopic, shopifyOrder.id);
@@ -109,7 +111,7 @@ router.post('/shopify/orders', verifyWebhook, async (req, res) => {
 
         res.status(200).json({ received: true, ...result });
     } catch (error) {
-        console.error('Webhook orders error:', error);
+        log.error({ err: error, webhookId }, 'Webhook orders error');
         await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
         // Add to dead letter queue for retry
         await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
@@ -494,43 +496,9 @@ async function processShopifyOrder(prisma, shopifyOrder, action) {
 }
 
 async function processShopifyCustomer(prisma, shopifyCustomer, action) {
-    const shopifyCustomerId = String(shopifyCustomer.id);
-
-    // Check if customer exists
-    let customer = await prisma.customer.findFirst({
-        where: {
-            OR: [
-                { shopifyCustomerId },
-                { email: shopifyCustomer.email }
-            ].filter(c => c.shopifyCustomerId || c.email)
-        }
-    });
-
-    const defaultAddress = shopifyCustomer.default_address;
-
-    const customerData = {
-        email: shopifyCustomer.email,
-        firstName: shopifyCustomer.first_name,
-        lastName: shopifyCustomer.last_name,
-        phone: shopifyCustomer.phone,
-        shopifyCustomerId,
-        defaultAddress: defaultAddress ? JSON.stringify(defaultAddress) : null,
-        totalOrders: shopifyCustomer.orders_count || 0,
-        totalSpent: parseFloat(shopifyCustomer.total_spent) || 0,
-    };
-
-    if (customer) {
-        await prisma.customer.update({
-            where: { id: customer.id },
-            data: customerData
-        });
-        return { action: 'updated', customerId: customer.id };
-    } else {
-        const newCustomer = await prisma.customer.create({
-            data: customerData
-        });
-        return { action: 'created', customerId: newCustomer.id };
-    }
+    // Use shared customer utility
+    const { customer, action: resultAction } = await upsertCustomerFromWebhook(prisma, shopifyCustomer);
+    return { action: resultAction, customerId: customer?.id };
 }
 
 export default router;

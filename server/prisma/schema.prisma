@@ -215,6 +215,7 @@ model FabricTransaction {
   @@index([fabricId])
   @@index([txnType])
   @@index([createdAt])
+  @@index([fabricId, createdAt])  // Compound: fabric transaction history
 }
 
 model FabricOrder {
@@ -333,6 +334,8 @@ model Order {
   @@index([status])
   @@index([orderDate])
   @@index([isArchived])
+  @@index([status, orderDate])      // Compound: filter by status + sort by date
+  @@index([customerId, orderDate])  // Compound: customer order history
 }
 
 model OrderLine {
@@ -360,6 +363,7 @@ model OrderLine {
   @@index([skuId])
   @@index([lineStatus])
   @@index([productionBatchId])
+  @@index([lineStatus, orderId])  // Compound: filter lines by status within order
 }
 
 // ============================================

@@ -4,6 +4,7 @@ import shopifyClient from '../services/shopify.js';
 import syncWorker from '../services/syncWorker.js';
 import { syncAllProducts } from '../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
+import { findOrCreateCustomer } from '../utils/customerUtils.js';
 
 const router = Router();
 
@@ -630,37 +631,16 @@ router.post('/sync/reprocess-cache', authenticateToken, async (req, res) => {
                     include: { orderLines: true }
                 });
 
-                // Extract customer info
-                const customer = shopifyOrder.customer;
-                const shippingAddress = shopifyOrder.shipping_address;
-
-                // Find or create customer
-                let customerId = null;
-                if (customer) {
-                    const shopifyCustomerId = String(customer.id);
-                    let dbCustomer = await req.prisma.customer.findFirst({
-                        where: {
-                            OR: [
-                                { shopifyCustomerId },
-                                { email: customer.email }
-                            ].filter(Boolean)
-                        }
-                    });
-
-                    if (!dbCustomer && customer.email) {
-                        dbCustomer = await req.prisma.customer.create({
-                            data: {
-                                email: customer.email,
-                                firstName: customer.first_name,
-                                lastName: customer.last_name,
-                                phone: customer.phone,
-                                shopifyCustomerId,
-                                defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-                            }
-                        });
+                // Find or create customer using shared utility
+                const { customer: dbCustomer } = await findOrCreateCustomer(
+                    req.prisma,
+                    shopifyOrder.customer,
+                    {
+                        shippingAddress: shopifyOrder.shipping_address,
+                        orderDate: shopifyOrder.created_at,
                     }
-                    customerId = dbCustomer?.id;
-                }
+                );
+                const customerId = dbCustomer?.id || null;
 
                 // Determine order status
                 let status = 'open';
