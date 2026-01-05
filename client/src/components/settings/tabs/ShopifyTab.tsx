@@ -9,7 +9,8 @@ import { shopifyApi } from '../../../services/api';
 import JsonViewer from '../../JsonViewer';
 import {
     Key, CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
-    AlertCircle, Package, Webhook, Copy, ExternalLink
+    AlertCircle, Package, Webhook, Copy, ExternalLink, Search, Database, Download,
+    Activity, Clock, Zap, Pause
 } from 'lucide-react';
 
 export function ShopifyTab() {
@@ -27,9 +28,13 @@ export function ShopifyTab() {
     const [syncLimit, setSyncLimit] = useState(20);
     const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
 
-    // Order sync mode state
-    const [deepDays, setDeepDays] = useState(365);
-    const [updateMins, setUpdateMins] = useState(60);
+    // Full dump state
+    const [dumpDays, setDumpDays] = useState(30);
+
+    // Order lookup state
+    const [lookupOrderNumber, setLookupOrderNumber] = useState('');
+    const [lookupResult, setLookupResult] = useState<any>(null);
+    const [lookupError, setLookupError] = useState<string | null>(null);
 
     // Fetch current config
     const { data: config, isLoading: configLoading } = useQuery({
@@ -59,6 +64,20 @@ export function ShopifyTab() {
         queryKey: ['syncJobs'],
         queryFn: () => shopifyApi.getSyncJobs(10).then(r => r.data),
         refetchInterval: 3000,
+    });
+
+    // Scheduler status
+    const { data: schedulerStatus, refetch: refetchScheduler } = useQuery({
+        queryKey: ['schedulerStatus'],
+        queryFn: () => shopifyApi.getSchedulerStatus().then(r => r.data),
+        refetchInterval: 10000,
+    });
+
+    // Webhook activity
+    const { data: webhookActivity, refetch: refetchWebhooks } = useQuery({
+        queryKey: ['webhookActivity'],
+        queryFn: () => shopifyApi.getWebhookActivity({ hours: 24, limit: 20 }).then(r => r.data),
+        refetchInterval: 15000,
     });
 
     // Mutations
@@ -102,8 +121,26 @@ export function ShopifyTab() {
         },
     });
 
-    const backfillFromCacheMutation = useMutation({
-        mutationFn: () => shopifyApi.backfillFromCache(),
+    const reprocessCacheMutation = useMutation({
+        mutationFn: () => shopifyApi.reprocessCache(),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
+        },
+    });
+
+    // Full dump mutation
+    const fullDumpMutation = useMutation({
+        mutationFn: (daysBack?: number) => shopifyApi.fullDump(daysBack),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
+            queryClient.invalidateQueries({ queryKey: ['syncJobs'] });
+        },
+    });
+
+    // Process cache mutation
+    const processCacheMutation = useMutation({
+        mutationFn: (limit?: number) => shopifyApi.processCache(limit),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['orders'] });
             queryClient.invalidateQueries({ queryKey: ['openOrders'] });
@@ -111,11 +148,16 @@ export function ShopifyTab() {
         },
     });
 
-    const reprocessCacheMutation = useMutation({
-        mutationFn: () => shopifyApi.reprocessCache(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
-            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
+    // Lookup order mutation
+    const lookupOrderMutation = useMutation({
+        mutationFn: (orderNumber: string) => shopifyApi.lookupOrder(orderNumber),
+        onSuccess: (res) => {
+            setLookupResult(res.data);
+            setLookupError(null);
+        },
+        onError: (error: any) => {
+            setLookupResult(null);
+            setLookupError(error.response?.data?.error || 'Order not found');
         },
     });
 
@@ -140,6 +182,21 @@ export function ShopifyTab() {
     const resumeJobMutation = useMutation({
         mutationFn: (jobId: string) => shopifyApi.resumeSyncJob(jobId),
         onSuccess: () => refetchJobs(),
+    });
+
+    // Scheduler mutations
+    const triggerSyncMutation = useMutation({
+        mutationFn: () => shopifyApi.triggerSchedulerSync(),
+        onSuccess: () => {
+            refetchScheduler();
+            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
+        },
+    });
+
+    const toggleSchedulerMutation = useMutation({
+        mutationFn: (action: 'start' | 'stop') =>
+            action === 'start' ? shopifyApi.startScheduler() : shopifyApi.stopScheduler(),
+        onSuccess: () => refetchScheduler(),
     });
 
     const handleSaveConfig = () => {
@@ -393,187 +450,315 @@ export function ShopifyTab() {
                 </div>
             )}
 
-            {/* Order Sync - Three Mode Cards */}
+            {/* Order Sync - Simple Cache-First Architecture */}
             {config?.hasAccessToken && (
                 <div className="card">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
                         <ShoppingCart size={20} /> Order Sync
                     </h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Cache-first architecture: Orders are stored in cache, then processed to ERP. Webhooks keep cache updated in real-time.
+                    </p>
 
-                    {/* Cache Status */}
+                    {/* Cache Status - Prominent */}
                     {cacheStatus && (
-                        <div className="mb-4 p-3 bg-gray-50 rounded-lg flex flex-wrap items-center gap-3 text-sm">
-                            <span className="font-medium text-gray-700">Cache:</span>
-                            <span className="text-gray-600">{cacheStatus.totalCached || 0} orders</span>
-                            {(cacheStatus.failed || 0) > 0 && (
-                                <span className="text-red-600">{cacheStatus.failed} failed</span>
-                            )}
-                            {(cacheStatus.pending || 0) > 0 && (
-                                <span className="text-yellow-600">{cacheStatus.pending} pending</span>
-                            )}
-                            {(cacheStatus.failed || 0) > 0 && (
-                                <button
-                                    className="btn btn-sm bg-orange-500 text-white hover:bg-orange-600 flex items-center gap-1"
-                                    onClick={() => reprocessCacheMutation.mutate()}
-                                    disabled={reprocessCacheMutation.isPending}
-                                >
-                                    <RefreshCw size={14} className={reprocessCacheMutation.isPending ? 'animate-spin' : ''} />
-                                    Retry Failed
-                                </button>
-                            )}
-                            <button
-                                className="btn btn-secondary btn-sm flex items-center gap-1 ml-auto"
-                                onClick={() => previewOrdersMutation.mutate()}
-                                disabled={previewOrdersMutation.isPending}
-                            >
-                                <Eye size={14} />
-                                {previewOrdersMutation.isPending ? 'Loading...' : 'Preview'}
-                            </button>
+                        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Database size={18} className="text-blue-600" />
+                                <span className="font-semibold text-blue-800">Cache Status</span>
+                            </div>
+                            <div className="grid grid-cols-4 gap-4 text-center">
+                                <div className="bg-white rounded-lg p-3 shadow-sm">
+                                    <p className="text-2xl font-bold text-gray-900">{(cacheStatus.totalCached || 0).toLocaleString()}</p>
+                                    <p className="text-xs text-gray-500">Total Cached</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-3 shadow-sm">
+                                    <p className="text-2xl font-bold text-green-600">{(cacheStatus.processed || 0).toLocaleString()}</p>
+                                    <p className="text-xs text-gray-500">Processed</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-3 shadow-sm">
+                                    <p className="text-2xl font-bold text-yellow-600">{cacheStatus.pending || 0}</p>
+                                    <p className="text-xs text-gray-500">Pending</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-3 shadow-sm">
+                                    <p className="text-2xl font-bold text-red-600">{cacheStatus.failed || 0}</p>
+                                    <p className="text-xs text-gray-500">Failed</p>
+                                </div>
+                            </div>
                         </div>
                     )}
 
-                    {/* Three Mode Cards */}
-                    <div className="grid md:grid-cols-3 gap-4">
-                        {/* DEEP Mode */}
-                        <div className="border-2 border-amber-200 bg-amber-50/30 rounded-lg p-4">
-                            <h3 className="font-semibold text-amber-800 mb-2 flex items-center gap-2">
-                                <Package size={18} /> DEEP SYNC
+                    {/* Two Column Layout */}
+                    <div className="grid md:grid-cols-2 gap-4 mb-4">
+                        {/* Full Dump Card */}
+                        <div className="border-2 border-blue-200 bg-blue-50/30 rounded-lg p-4">
+                            <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                                <Download size={18} /> Full Dump from Shopify
                             </h3>
-                            <p className="text-sm text-amber-700 mb-2">
-                                Full import of all orders. Use for initial setup or data recovery.
-                            </p>
-                            <p className="text-xs text-amber-600 mb-3 flex items-center gap-1">
-                                <AlertCircle size={12} /> Slow (~30min for 60K orders)
+                            <p className="text-sm text-blue-700 mb-3">
+                                Fetch all orders from Shopify and store in cache. Use for initial setup or to catch missing orders.
                             </p>
 
                             <div className="flex items-center gap-2 mb-3">
-                                <label className="text-sm text-gray-700">Days:</label>
+                                <label className="text-sm text-gray-700">Period:</label>
                                 <select
-                                    value={deepDays}
-                                    onChange={(e) => setDeepDays(Number(e.target.value))}
+                                    value={dumpDays}
+                                    onChange={(e) => setDumpDays(Number(e.target.value))}
                                     className="input py-1.5 text-sm flex-1"
                                 >
+                                    <option value={7}>Last 7 days</option>
+                                    <option value={30}>Last 30 days</option>
                                     <option value={90}>Last 90 days</option>
                                     <option value={180}>Last 6 months</option>
                                     <option value={365}>Last year</option>
-                                    <option value={730}>Last 2 years</option>
-                                    <option value={9999}>All time</option>
+                                    <option value={0}>All time</option>
                                 </select>
-                            </div>
-
-                            <button
-                                className="btn bg-amber-600 text-white hover:bg-amber-700 w-full flex items-center justify-center gap-2"
-                                onClick={() => {
-                                    if (confirm('Deep sync imports ALL orders and may take 30+ minutes. Continue?')) {
-                                        startJobMutation.mutate({
-                                            jobType: 'orders',
-                                            syncMode: 'deep',
-                                            days: deepDays === 9999 ? undefined : deepDays
-                                        });
-                                    }
-                                }}
-                                disabled={startJobMutation.isPending}
-                            >
-                                <Play size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Start Deep Sync'}
-                            </button>
-                        </div>
-
-                        {/* QUICK Mode */}
-                        <div className="border-2 border-blue-200 bg-blue-50/30 rounded-lg p-4">
-                            <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
-                                <RefreshCw size={18} /> QUICK SYNC
-                            </h3>
-                            <p className="text-sm text-blue-700 mb-2">
-                                Import missing orders only. Skips existing orders in database.
-                            </p>
-                            <p className="text-xs text-blue-600 mb-3 flex items-center gap-1">
-                                <CheckCircle size={12} /> Recommended for daily use
-                            </p>
-
-                            <div className="h-[38px] mb-3 flex items-center">
-                                <span className="text-xs text-gray-500">Fetches orders newer than latest in DB</span>
                             </div>
 
                             <button
                                 className="btn btn-primary w-full flex items-center justify-center gap-2"
-                                onClick={() => startJobMutation.mutate({
-                                    jobType: 'orders',
-                                    syncMode: 'quick'
-                                })}
-                                disabled={startJobMutation.isPending}
+                                onClick={() => {
+                                    const days = dumpDays === 0 ? undefined : dumpDays;
+                                    fullDumpMutation.mutate(days);
+                                }}
+                                disabled={fullDumpMutation.isPending}
                             >
-                                <Play size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Quick Sync'}
+                                {fullDumpMutation.isPending ? (
+                                    <>
+                                        <RefreshCw size={16} className="animate-spin" />
+                                        Fetching from Shopify...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download size={16} />
+                                        Start Full Dump
+                                    </>
+                                )}
                             </button>
+
+                            {/* Loading indicator */}
+                            {fullDumpMutation.isPending && (
+                                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+                                        <div>
+                                            <p className="text-sm font-medium text-blue-800">Fetching orders from Shopify...</p>
+                                            <p className="text-xs text-blue-600">This may take a few minutes depending on the number of orders</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Success result */}
+                            {fullDumpMutation.data && !fullDumpMutation.isPending && (
+                                <div className="mt-3 p-3 bg-green-100 border border-green-200 rounded-lg">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <CheckCircle size={16} className="text-green-600" />
+                                        <span className="font-medium text-green-800">Full Dump Complete</span>
+                                    </div>
+                                    <div className="text-sm text-green-700 grid grid-cols-3 gap-2">
+                                        <div>Fetched: <span className="font-semibold">{fullDumpMutation.data.data.fetched}</span></div>
+                                        <div>Cached: <span className="font-semibold">{fullDumpMutation.data.data.cached}</span></div>
+                                        <div>Duration: <span className="font-semibold">{fullDumpMutation.data.data.durationSeconds}s</span></div>
+                                    </div>
+                                    {fullDumpMutation.data.data.skipped > 0 && (
+                                        <div className="text-xs text-yellow-600 mt-1">
+                                            Skipped: {fullDumpMutation.data.data.skipped} orders (errors)
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Error result */}
+                            {fullDumpMutation.error && !fullDumpMutation.isPending && (
+                                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <XCircle size={16} className="text-red-600" />
+                                        <span className="text-sm font-medium text-red-800">
+                                            {(fullDumpMutation.error as any)?.response?.data?.error || 'Full dump failed'}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
-                        {/* UPDATE Mode */}
+                        {/* Process Cache Card */}
                         <div className="border-2 border-green-200 bg-green-50/30 rounded-lg p-4">
                             <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2">
-                                <RefreshCw size={18} /> UPDATE SYNC
+                                <RefreshCw size={18} /> Process Cache to ERP
                             </h3>
-                            <p className="text-sm text-green-700 mb-2">
-                                Refresh recently changed orders (fulfillment, payment updates).
-                            </p>
-                            <p className="text-xs text-green-600 mb-3 flex items-center gap-1">
-                                <CheckCircle size={12} /> Run hourly for live updates
+                            <p className="text-sm text-green-700 mb-3">
+                                Convert unprocessed cache entries into ERP Order records. Run after full dump or to retry failed processing.
                             </p>
 
-                            <div className="flex items-center gap-2 mb-3">
-                                <label className="text-sm text-gray-700">Since:</label>
-                                <select
-                                    value={updateMins}
-                                    onChange={(e) => setUpdateMins(Number(e.target.value))}
-                                    className="input py-1.5 text-sm flex-1"
+                            <div className="flex gap-2 mb-3">
+                                <button
+                                    className="btn bg-green-600 text-white hover:bg-green-700 flex-1 flex items-center justify-center gap-2"
+                                    onClick={() => processCacheMutation.mutate(100)}
+                                    disabled={processCacheMutation.isPending || (cacheStatus?.pending || 0) === 0}
                                 >
-                                    <option value={30}>Last 30 mins</option>
-                                    <option value={60}>Last 1 hour</option>
-                                    <option value={120}>Last 2 hours</option>
-                                    <option value={360}>Last 6 hours</option>
-                                    <option value={720}>Last 12 hours</option>
-                                    <option value={1440}>Last 24 hours</option>
-                                </select>
+                                    {processCacheMutation.isPending ? (
+                                        <>
+                                            <RefreshCw size={16} className="animate-spin" />
+                                            Processing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Play size={16} />
+                                            Process Pending ({cacheStatus?.pending || 0})
+                                        </>
+                                    )}
+                                </button>
+                                {(cacheStatus?.failed || 0) > 0 && (
+                                    <button
+                                        className="btn bg-orange-500 text-white hover:bg-orange-600 flex items-center gap-1"
+                                        onClick={() => reprocessCacheMutation.mutate()}
+                                        disabled={reprocessCacheMutation.isPending}
+                                    >
+                                        <RefreshCw size={14} className={reprocessCacheMutation.isPending ? 'animate-spin' : ''} />
+                                        Retry Failed ({cacheStatus?.failed || 0})
+                                    </button>
+                                )}
                             </div>
 
-                            <button
-                                className="btn bg-green-600 text-white hover:bg-green-700 w-full flex items-center justify-center gap-2"
-                                onClick={() => startJobMutation.mutate({
-                                    jobType: 'orders',
-                                    syncMode: 'update',
-                                    staleAfterMins: updateMins
-                                })}
-                                disabled={startJobMutation.isPending}
-                            >
-                                <RefreshCw size={16} />
-                                {startJobMutation.isPending ? 'Starting...' : 'Refresh Changed'}
-                            </button>
+                            {/* Processing indicator */}
+                            {processCacheMutation.isPending && (
+                                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+                                        <div>
+                                            <p className="text-sm font-medium text-blue-800">Processing cache entries...</p>
+                                            <p className="text-xs text-blue-600">Converting orders to ERP format (up to 100 at a time)</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {reprocessCacheMutation.isPending && (
+                                <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-orange-600 border-t-transparent"></div>
+                                        <div>
+                                            <p className="text-sm font-medium text-orange-800">Retrying failed orders...</p>
+                                            <p className="text-xs text-orange-600">Re-processing {cacheStatus?.failed || 0} failed cache entries</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Success result */}
+                            {processCacheMutation.data && !processCacheMutation.isPending && (
+                                <div className="mt-3 p-3 bg-green-100 border border-green-200 rounded-lg">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <CheckCircle size={16} className="text-green-600" />
+                                        <span className="font-medium text-green-800">Processing Complete</span>
+                                    </div>
+                                    <div className="text-sm text-green-700 grid grid-cols-2 gap-2">
+                                        <div>Processed: <span className="font-semibold">{processCacheMutation.data.data.processed}</span></div>
+                                        <div>Failed: <span className="font-semibold">{processCacheMutation.data.data.failed}</span></div>
+                                    </div>
+                                    {processCacheMutation.data.data.errors?.length > 0 && (
+                                        <div className="mt-2 text-xs text-red-600">
+                                            <p className="font-medium">Errors:</p>
+                                            <ul className="list-disc list-inside max-h-20 overflow-y-auto">
+                                                {processCacheMutation.data.data.errors.slice(0, 3).map((err: any, i: number) => (
+                                                    <li key={i}>{err.orderNumber}: {err.error}</li>
+                                                ))}
+                                                {processCacheMutation.data.data.errors.length > 3 && (
+                                                    <li>...and {processCacheMutation.data.data.errors.length - 3} more</li>
+                                                )}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {reprocessCacheMutation.data && !reprocessCacheMutation.isPending && (
+                                <div className="mt-3 p-3 bg-orange-100 border border-orange-200 rounded-lg">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <CheckCircle size={16} className="text-orange-600" />
+                                        <span className="font-medium text-orange-800">Retry Complete</span>
+                                    </div>
+                                    <div className="text-sm text-orange-700">
+                                        Reprocessed: <span className="font-semibold">{reprocessCacheMutation.data?.data?.processed || 0}</span> |
+                                        Succeeded: <span className="font-semibold text-green-600">{reprocessCacheMutation.data?.data?.succeeded || 0}</span> |
+                                        Still Failed: <span className="font-semibold text-red-600">{reprocessCacheMutation.data?.data?.failed || 0}</span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* Feedback messages */}
-                    {backfillFromCacheMutation.data && (
-                        <div className="mt-4 p-3 rounded-lg text-sm bg-purple-50 border border-purple-200">
-                            <p className="font-medium text-purple-800">
-                                {backfillFromCacheMutation.data?.data.message}
-                            </p>
-                            <p className="text-purple-700">
-                                Updated: {backfillFromCacheMutation.data?.data.results?.updated || 0} of {backfillFromCacheMutation.data?.data.results?.total || 0} orders
-                            </p>
-                        </div>
-                    )}
+                    {/* Order Lookup */}
+                    <div className="border rounded-lg p-4 bg-gray-50">
+                        <h3 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
+                            <Search size={18} /> Order Lookup
+                        </h3>
+                        <p className="text-sm text-gray-600 mb-3">
+                            Look up raw Shopify order data from cache by order number.
+                        </p>
 
-                    {reprocessCacheMutation.data && (
-                        <div className="mt-4 p-3 rounded-lg text-sm bg-green-50 border border-green-200">
-                            <p className="font-medium text-green-800">
-                                Reprocessed {reprocessCacheMutation.data?.data?.processed || 0} orders
-                            </p>
-                            <p className="text-green-700">
-                                Succeeded: {reprocessCacheMutation.data?.data?.succeeded || 0},
-                                Failed: {reprocessCacheMutation.data?.data?.failed || 0}
-                            </p>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                className="input flex-1"
+                                placeholder="Enter order number (e.g., 63965)"
+                                value={lookupOrderNumber}
+                                onChange={(e) => setLookupOrderNumber(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && lookupOrderNumber) {
+                                        lookupOrderMutation.mutate(lookupOrderNumber);
+                                    }
+                                }}
+                            />
+                            <button
+                                className="btn btn-secondary flex items-center gap-2"
+                                onClick={() => lookupOrderMutation.mutate(lookupOrderNumber)}
+                                disabled={lookupOrderMutation.isPending || !lookupOrderNumber}
+                            >
+                                <Search size={16} />
+                                {lookupOrderMutation.isPending ? 'Searching...' : 'Lookup'}
+                            </button>
                         </div>
-                    )}
+
+                        {lookupError && (
+                            <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700 flex items-center gap-2">
+                                <XCircle size={16} />
+                                {lookupError}
+                            </div>
+                        )}
+
+                        {lookupResult && (
+                            <div className="mt-3 border rounded-lg overflow-hidden bg-white">
+                                <div className="bg-gray-100 px-3 py-2 text-sm font-medium flex justify-between items-center">
+                                    <span>
+                                        Order {lookupResult.orderNumber} | Status: {lookupResult.financialStatus} |
+                                        {lookupResult.processedAt ? (
+                                            <span className="text-green-600 ml-1">Processed</span>
+                                        ) : (
+                                            <span className="text-yellow-600 ml-1">Pending</span>
+                                        )}
+                                    </span>
+                                    <button onClick={() => setLookupResult(null)} className="text-gray-400 hover:text-gray-600">
+                                        <XCircle size={16} />
+                                    </button>
+                                </div>
+                                <JsonViewer data={lookupResult.rawData} rootName="shopifyOrder" />
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Preview button */}
+                    <div className="mt-4 flex justify-end">
+                        <button
+                            className="btn btn-secondary btn-sm flex items-center gap-1"
+                            onClick={() => previewOrdersMutation.mutate()}
+                            disabled={previewOrdersMutation.isPending}
+                        >
+                            <Eye size={14} />
+                            {previewOrdersMutation.isPending ? 'Loading...' : 'Preview from Shopify API'}
+                        </button>
+                    </div>
 
                     {orderPreview && (
                         <div className="mt-4 border rounded-lg overflow-hidden">
@@ -749,6 +934,268 @@ export function ShopifyTab() {
                                 <ExternalLink size={16} />
                                 Open Shopify Webhook Settings
                             </a>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Webhook Activity & Scheduler Status */}
+            {config?.hasAccessToken && (
+                <div className="card">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <Activity size={20} /> Real-Time Sync Status
+                    </h2>
+
+                    {/* Two Column Layout: Scheduler + Webhook Summary */}
+                    <div className="grid md:grid-cols-2 gap-6 mb-6">
+                        {/* Scheduler Status */}
+                        <div className="border rounded-lg p-4 bg-gradient-to-br from-indigo-50 to-purple-50">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="font-semibold text-indigo-800 flex items-center gap-2">
+                                    <Clock size={18} /> Hourly Sync Scheduler
+                                </h3>
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    schedulerStatus?.schedulerActive
+                                        ? 'bg-green-100 text-green-700'
+                                        : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                    {schedulerStatus?.schedulerActive ? 'Active' : 'Stopped'}
+                                </span>
+                            </div>
+
+                            <div className="space-y-2 mb-4">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Interval:</span>
+                                    <span className="font-medium">Every {schedulerStatus?.intervalMinutes || 60} minutes</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Lookback:</span>
+                                    <span className="font-medium">{schedulerStatus?.lookbackHours || 24} hours</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-600">Last Sync:</span>
+                                    <span className="font-medium">
+                                        {schedulerStatus?.lastSyncAt
+                                            ? new Date(schedulerStatus.lastSyncAt).toLocaleTimeString()
+                                            : 'Never'}
+                                    </span>
+                                </div>
+                                {schedulerStatus?.isRunning && (
+                                    <div className="flex items-center gap-2 text-blue-600 text-sm">
+                                        <RefreshCw size={14} className="animate-spin" />
+                                        <span>Sync in progress...</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Last Sync Result */}
+                            {schedulerStatus?.lastSyncResult && (
+                                <div className="bg-white rounded-lg p-3 mb-4 text-sm">
+                                    <div className="font-medium text-gray-700 mb-2">Last Sync Result</div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div>
+                                            <span className="text-gray-500">Fetched:</span>{' '}
+                                            <span className="font-medium">{schedulerStatus.lastSyncResult.step1_dump?.fetched || 0}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500">Cached:</span>{' '}
+                                            <span className="font-medium text-green-600">{schedulerStatus.lastSyncResult.step1_dump?.cached || 0}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500">Processed:</span>{' '}
+                                            <span className="font-medium">{schedulerStatus.lastSyncResult.step2_process?.processed || 0}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500">Duration:</span>{' '}
+                                            <span className="font-medium">{Math.round((schedulerStatus.lastSyncResult.durationMs || 0) / 1000)}s</span>
+                                        </div>
+                                    </div>
+                                    {schedulerStatus.lastSyncResult.error && (
+                                        <div className="mt-2 text-red-600 text-xs">
+                                            Error: {schedulerStatus.lastSyncResult.error}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="flex gap-2">
+                                <button
+                                    className="btn btn-primary btn-sm flex-1 flex items-center justify-center gap-1"
+                                    onClick={() => triggerSyncMutation.mutate()}
+                                    disabled={triggerSyncMutation.isPending || schedulerStatus?.isRunning}
+                                >
+                                    {triggerSyncMutation.isPending || schedulerStatus?.isRunning ? (
+                                        <RefreshCw size={14} className="animate-spin" />
+                                    ) : (
+                                        <Zap size={14} />
+                                    )}
+                                    Sync Now
+                                </button>
+                                <button
+                                    className={`btn btn-sm flex items-center gap-1 ${
+                                        schedulerStatus?.schedulerActive
+                                            ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    }`}
+                                    onClick={() => toggleSchedulerMutation.mutate(
+                                        schedulerStatus?.schedulerActive ? 'stop' : 'start'
+                                    )}
+                                    disabled={toggleSchedulerMutation.isPending}
+                                >
+                                    {schedulerStatus?.schedulerActive ? (
+                                        <>
+                                            <Pause size={14} />
+                                            Stop
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Play size={14} />
+                                            Start
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Webhook Activity Summary */}
+                        <div className="border rounded-lg p-4 bg-gradient-to-br from-green-50 to-emerald-50">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="font-semibold text-green-800 flex items-center gap-2">
+                                    <Webhook size={18} /> Webhook Activity (24h)
+                                </h3>
+                                <button
+                                    className="text-green-600 hover:text-green-800"
+                                    onClick={() => refetchWebhooks()}
+                                    title="Refresh"
+                                >
+                                    <RefreshCw size={16} />
+                                </button>
+                            </div>
+
+                            {webhookActivity && (
+                                <>
+                                    {/* Summary Stats */}
+                                    <div className="grid grid-cols-3 gap-2 mb-4">
+                                        <div className="bg-white rounded-lg p-2 text-center">
+                                            <p className="text-xl font-bold text-gray-900">
+                                                {(webhookActivity.summary?.processed || 0) + (webhookActivity.summary?.failed || 0)}
+                                            </p>
+                                            <p className="text-xs text-gray-500">Total</p>
+                                        </div>
+                                        <div className="bg-white rounded-lg p-2 text-center">
+                                            <p className="text-xl font-bold text-green-600">{webhookActivity.summary?.processed || 0}</p>
+                                            <p className="text-xs text-gray-500">Processed</p>
+                                        </div>
+                                        <div className="bg-white rounded-lg p-2 text-center">
+                                            <p className="text-xl font-bold text-red-600">{webhookActivity.summary?.failed || 0}</p>
+                                            <p className="text-xs text-gray-500">Failed</p>
+                                        </div>
+                                    </div>
+
+                                    {/* By Topic */}
+                                    {webhookActivity.byTopic && Object.keys(webhookActivity.byTopic).length > 0 && (
+                                        <div className="bg-white rounded-lg p-3 mb-4">
+                                            <div className="font-medium text-gray-700 mb-2 text-sm">By Topic</div>
+                                            <div className="space-y-1">
+                                                {Object.entries(webhookActivity.byTopic).map(([topic, count]) => (
+                                                    <div key={topic} className="flex justify-between text-xs">
+                                                        <code className="text-purple-600">{topic}</code>
+                                                        <span className="font-medium">{count as number}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Status Indicator */}
+                                    <div className={`flex items-center gap-2 text-sm ${
+                                        (webhookActivity.summary?.failed || 0) > 0 ? 'text-yellow-700' : 'text-green-700'
+                                    }`}>
+                                        {(webhookActivity.summary?.failed || 0) > 0 ? (
+                                            <>
+                                                <AlertCircle size={16} />
+                                                <span>{webhookActivity.summary?.failed} webhooks failed - check logs</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <CheckCircle size={16} />
+                                                <span>All webhooks processed successfully</span>
+                                            </>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+
+                            {!webhookActivity && (
+                                <div className="text-center text-gray-500 py-4">
+                                    <Activity size={24} className="mx-auto mb-2 opacity-50" />
+                                    <p className="text-sm">Loading webhook activity...</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Recent Webhook Logs */}
+                    {webhookActivity?.recentLogs && webhookActivity.recentLogs.length > 0 && (
+                        <div>
+                            <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <Activity size={16} /> Recent Webhooks
+                            </h3>
+                            <div className="overflow-x-auto border rounded-lg">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Time</th>
+                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Topic</th>
+                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Resource ID</th>
+                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Status</th>
+                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Duration</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {webhookActivity.recentLogs.slice(0, 10).map((log: any) => (
+                                            <tr key={log.id} className="hover:bg-gray-50">
+                                                <td className="px-3 py-2 text-xs text-gray-500">
+                                                    {new Date(log.receivedAt).toLocaleTimeString()}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    <code className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
+                                                        {log.topic}
+                                                    </code>
+                                                </td>
+                                                <td className="px-3 py-2 text-xs text-gray-600 font-mono">
+                                                    {log.resourceId?.slice(-8) || '-'}
+                                                </td>
+                                                <td className="px-3 py-2">
+                                                    <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                                        log.status === 'processed'
+                                                            ? 'bg-green-100 text-green-700'
+                                                            : log.status === 'failed'
+                                                            ? 'bg-red-100 text-red-700'
+                                                            : 'bg-yellow-100 text-yellow-700'
+                                                    }`}>
+                                                        {log.status}
+                                                    </span>
+                                                    {log.error && (
+                                                        <span className="ml-1 text-red-500" title={log.error}>⚠</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2 text-xs text-gray-500">
+                                                    {log.processingTimeMs ? `${log.processingTimeMs}ms` : '-'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {webhookActivity?.recentLogs?.length === 0 && (
+                        <div className="text-center py-6 bg-gray-50 rounded-lg">
+                            <Webhook size={32} className="mx-auto mb-2 text-gray-300" />
+                            <p className="text-gray-500 text-sm">No webhook activity in the last 24 hours</p>
+                            <p className="text-gray-400 text-xs mt-1">Configure webhooks in Shopify to receive real-time updates</p>
                         </div>
                     )}
                 </div>

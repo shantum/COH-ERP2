@@ -113,11 +113,22 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     const shopifyOrderId = String(shopifyOrder.id);
     const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrderId;
 
-    // Check if order exists
-    const existingOrder = await prisma.order.findFirst({
+    // Check if order exists - first by shopifyOrderId, then by orderNumber
+    let existingOrder = await prisma.order.findFirst({
         where: { shopifyOrderId },
         include: { orderLines: true }
     });
+
+    // If not found by shopifyOrderId, check by orderNumber (handles orders created before sync)
+    if (!existingOrder) {
+        const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
+        if (orderNumber) {
+            existingOrder = await prisma.order.findFirst({
+                where: { orderNumber },
+                include: { orderLines: true }
+            });
+        }
+    }
 
     // Extract customer and shipping info
     const customer = shopifyOrder.customer;
@@ -254,11 +265,21 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         }
 
         if (sku) {
+            // Calculate effective unit price after discounts
+            const originalPrice = parseFloat(item.price) || 0;
+            const discountAllocations = item.discount_allocations || [];
+            const totalDiscount = discountAllocations.reduce(
+                (sum, alloc) => sum + (parseFloat(alloc.amount) || 0),
+                0
+            );
+            // Effective price = original price - (total line discount / quantity)
+            const effectiveUnitPrice = originalPrice - (totalDiscount / item.quantity);
+
             orderLines.push({
                 shopifyLineId: String(item.id),
                 skuId: sku.id,
                 qty: item.quantity,
-                unitPrice: parseFloat(item.price) || 0,
+                unitPrice: Math.round(effectiveUnitPrice * 100) / 100, // Round to 2 decimal places
                 lineStatus: 'pending',
             });
         }

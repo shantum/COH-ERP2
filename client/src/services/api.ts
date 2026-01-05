@@ -175,10 +175,14 @@ export const returnsApi = {
     getById: (id: string) => api.get(`/returns/${id}`),
     create: (data: {
         requestType: 'return' | 'exchange';
+        resolution?: 'refund' | 'exchange_same' | 'exchange_up' | 'exchange_down';
         originalOrderId: string;
         reasonCategory: string;
         reasonDetails?: string;
-        lines: Array<{ skuId: string; qty?: number; exchangeSkuId?: string }>;
+        lines: Array<{ skuId: string; qty?: number; exchangeSkuId?: string; unitPrice?: number }>;
+        returnValue?: number;
+        replacementValue?: number;
+        valueDifference?: number;
         courier?: string;
         awbNumber?: string;
     }) => api.post('/returns', data),
@@ -211,6 +215,27 @@ export const returnsApi = {
     // Remove item from return request
     removeItem: (requestId: string, lineId: string) =>
         api.delete(`/returns/${requestId}/items/${lineId}`),
+    // Exchange order linking
+    linkExchangeOrder: (requestId: string, orderId: string) =>
+        api.put(`/returns/${requestId}/link-exchange-order`, { orderId }),
+    unlinkExchangeOrder: (requestId: string) =>
+        api.put(`/returns/${requestId}/unlink-exchange-order`),
+    // Exchange shipment tracking
+    markReverseReceived: (requestId: string) =>
+        api.put(`/returns/${requestId}/mark-reverse-received`),
+    unmarkReverseReceived: (requestId: string) =>
+        api.put(`/returns/${requestId}/unmark-reverse-received`),
+    markForwardDelivered: (requestId: string) =>
+        api.put(`/returns/${requestId}/mark-forward-delivered`),
+    unmarkForwardDelivered: (requestId: string) =>
+        api.put(`/returns/${requestId}/unmark-forward-delivered`),
+    // Early-ship logic for exchanges
+    markReverseInTransit: (requestId: string) =>
+        api.put(`/returns/${requestId}/mark-reverse-in-transit`),
+    shipReplacement: (requestId: string, data: { courier: string; awbNumber: string; notes?: string }) =>
+        api.put(`/returns/${requestId}/ship-replacement`, data),
+    // Action Queue dashboard
+    getActionQueue: () => api.get('/returns/action-queue'),
 };
 
 // Repacking Queue & Write-offs
@@ -308,14 +333,14 @@ export const shopifyApi = {
     backfillCacheFields: () => api.post('/shopify/sync/backfill-cache-fields'),
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
     getCacheStatus: () => api.get('/shopify/sync/cache-status'),
-    // Background sync jobs (recommended for orders sync)
-    // syncMode options:
-    //   'deep' - Full import, all orders (initial setup, recovery)
-    //   'quick' - Missing orders only (daily catch-up)
-    //   'update' - Recently changed orders only (hourly refresh)
+    // Simple sync operations (recommended)
+    fullDump: (daysBack?: number) => api.post('/shopify/sync/full-dump', { daysBack }),
+    lookupOrder: (orderNumber: string) => api.get(`/shopify/orders/${orderNumber}`),
+    processCache: (limit?: number) => api.post('/shopify/sync/process-cache', { limit }),
+    // Background sync jobs (legacy - use fullDump instead for orders)
     startSyncJob: (params: {
         jobType: string;
-        syncMode?: 'deep' | 'quick' | 'update';
+        syncMode?: 'deep' | 'quick' | 'update' | 'populate';
         days?: number;
         staleAfterMins?: number;
     }) => api.post('/shopify/sync/jobs/start', params),
@@ -327,6 +352,14 @@ export const shopifyApi = {
         api.post(`/shopify/sync/jobs/${jobId}/resume`),
     cancelSyncJob: (jobId: string) =>
         api.post(`/shopify/sync/jobs/${jobId}/cancel`),
+    // Scheduler (hourly sync)
+    getSchedulerStatus: () => api.get('/shopify/sync/scheduler/status'),
+    triggerSchedulerSync: () => api.post('/shopify/sync/scheduler/trigger'),
+    startScheduler: () => api.post('/shopify/sync/scheduler/start'),
+    stopScheduler: () => api.post('/shopify/sync/scheduler/stop'),
+    // Webhook activity
+    getWebhookActivity: (params?: { hours?: number; limit?: number }) =>
+        api.get('/shopify/webhooks/activity', { params }),
 };
 
 // Import/Export

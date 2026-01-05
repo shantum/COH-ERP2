@@ -33,6 +33,7 @@ import shopifyRoutes from './routes/shopify.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 import repackingRoutes from './routes/repacking.js';
+import scheduledSync from './services/scheduledSync.js';
 
 const app = express();
 
@@ -147,10 +148,14 @@ app.listen(PORT, async () => {
 
   // Auto-archive shipped orders older than 90 days on startup
   await autoArchiveOldOrders(prisma);
+
+  // Start hourly Shopify sync scheduler
+  scheduledSync.start();
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
+  scheduledSync.stop();
   await prisma.$disconnect();
   process.exit(0);
 });

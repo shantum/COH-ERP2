@@ -5,7 +5,8 @@ import syncWorker from '../services/syncWorker.js';
 import { syncAllProducts } from '../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
 import { findOrCreateCustomer } from '../utils/customerUtils.js';
-import { processFromCache, markCacheProcessed, markCacheError } from '../services/shopifyOrderProcessor.js';
+import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder } from '../services/shopifyOrderProcessor.js';
+import scheduledSync from '../services/scheduledSync.js';
 
 
 const router = Router();
@@ -691,6 +692,175 @@ router.get('/sync/cache-status', authenticateToken, async (req, res) => {
 });
 
 // ============================================
+// SIMPLE SYNC OPERATIONS
+// ============================================
+
+/**
+ * Full dump: Fetch ALL orders from Shopify and store in cache
+ * Use this once to populate the cache, then rely on webhooks for real-time updates
+ */
+router.post('/sync/full-dump', authenticateToken, async (req, res) => {
+    try {
+        const { daysBack } = req.body;
+
+        // Reload Shopify client config
+        await shopifyClient.loadFromDatabase();
+        if (!shopifyClient.isConfigured()) {
+            return res.status(400).json({ error: 'Shopify is not configured' });
+        }
+
+        // Build options
+        const options = { status: 'any' };
+        if (daysBack) {
+            const d = new Date();
+            d.setDate(d.getDate() - daysBack);
+            options.created_at_min = d.toISOString();
+        }
+
+        console.log('[Full Dump] Starting full order dump from Shopify...');
+        let cached = 0;
+        let skipped = 0;
+        const startTime = Date.now();
+
+        // Fetch all orders with progress callback
+        const allOrders = await shopifyClient.getAllOrders(
+            (fetched, total) => {
+                console.log(`[Full Dump] Fetched ${fetched}/${total} orders...`);
+            },
+            options
+        );
+
+        console.log(`[Full Dump] Fetched ${allOrders.length} orders, caching...`);
+
+        // Cache each order
+        for (const order of allOrders) {
+            try {
+                await cacheShopifyOrder(req.prisma, String(order.id), order, 'full_dump');
+                cached++;
+            } catch (err) {
+                console.error(`[Full Dump] Error caching order ${order.name}:`, err.message);
+                skipped++;
+            }
+        }
+
+        const duration = Math.round((Date.now() - startTime) / 1000);
+        console.log(`[Full Dump] Complete: ${cached} cached, ${skipped} skipped in ${duration}s`);
+
+        res.json({
+            message: 'Full dump complete',
+            fetched: allOrders.length,
+            cached,
+            skipped,
+            durationSeconds: duration
+        });
+    } catch (error) {
+        console.error('Full dump error:', error);
+        res.status(500).json({ error: 'Full dump failed', details: error.message });
+    }
+});
+
+/**
+ * Fast lookup: Get raw Shopify order data from cache by order number
+ */
+router.get('/orders/:orderNumber', authenticateToken, async (req, res) => {
+    try {
+        const { orderNumber } = req.params;
+
+        // Normalize order number (remove # if present)
+        const normalizedNumber = orderNumber.replace(/^#/, '');
+
+        // Try to find by order number
+        const cached = await req.prisma.shopifyOrderCache.findFirst({
+            where: {
+                OR: [
+                    { orderNumber: orderNumber },
+                    { orderNumber: `#${normalizedNumber}` },
+                    { orderNumber: normalizedNumber }
+                ]
+            }
+        });
+
+        if (!cached) {
+            return res.status(404).json({ error: 'Order not found in cache' });
+        }
+
+        // Parse raw data
+        const rawData = typeof cached.rawData === 'string'
+            ? JSON.parse(cached.rawData)
+            : cached.rawData;
+
+        res.json({
+            cacheId: cached.id,
+            orderNumber: cached.orderNumber,
+            financialStatus: cached.financialStatus,
+            fulfillmentStatus: cached.fulfillmentStatus,
+            processedAt: cached.processedAt,
+            processingError: cached.processingError,
+            rawData
+        });
+    } catch (error) {
+        console.error('Order lookup error:', error);
+        res.status(500).json({ error: 'Failed to lookup order' });
+    }
+});
+
+/**
+ * Process cache: Convert unprocessed cache entries to ERP tables
+ */
+router.post('/sync/process-cache', authenticateToken, async (req, res) => {
+    try {
+        const { limit = 100 } = req.body;
+
+        // Find unprocessed cache entries
+        const unprocessed = await req.prisma.shopifyOrderCache.findMany({
+            where: { processedAt: null },
+            orderBy: { lastWebhookAt: 'asc' },
+            take: limit
+        });
+
+        if (unprocessed.length === 0) {
+            return res.json({
+                message: 'No unprocessed orders in cache',
+                processed: 0,
+                failed: 0
+            });
+        }
+
+        console.log(`[Process Cache] Processing ${unprocessed.length} cached orders...`);
+
+        let processed = 0;
+        let failed = 0;
+        const errors = [];
+
+        for (const entry of unprocessed) {
+            try {
+                await processFromCache(req.prisma, entry);
+                await markCacheProcessed(req.prisma, entry.id);
+                processed++;
+            } catch (err) {
+                await markCacheError(req.prisma, entry.id, err.message);
+                failed++;
+                if (errors.length < 10) {
+                    errors.push({ orderNumber: entry.orderNumber, error: err.message });
+                }
+            }
+        }
+
+        console.log(`[Process Cache] Complete: ${processed} processed, ${failed} failed`);
+
+        res.json({
+            message: 'Processing complete',
+            processed,
+            failed,
+            errors: errors.length > 0 ? errors : undefined
+        });
+    } catch (error) {
+        console.error('Process cache error:', error);
+        res.status(500).json({ error: 'Processing failed', details: error.message });
+    }
+});
+
+// ============================================
 // SYNC HISTORY
 // ============================================
 
@@ -840,6 +1010,135 @@ router.post('/sync/jobs/:id/cancel', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Cancel sync job error:', error);
         res.status(400).json({ error: error.message });
+    }
+});
+
+// ============================================
+// SCHEDULED SYNC
+// ============================================
+
+// Get scheduler status
+router.get('/sync/scheduler/status', authenticateToken, async (req, res) => {
+    try {
+        const status = scheduledSync.getStatus();
+        res.json(status);
+    } catch (error) {
+        console.error('Scheduler status error:', error);
+        res.status(500).json({ error: 'Failed to get scheduler status' });
+    }
+});
+
+// Manually trigger a sync
+router.post('/sync/scheduler/trigger', authenticateToken, async (req, res) => {
+    try {
+        const result = await scheduledSync.triggerSync();
+        res.json({ message: 'Sync triggered', result });
+    } catch (error) {
+        console.error('Scheduler trigger error:', error);
+        res.status(500).json({ error: 'Failed to trigger sync' });
+    }
+});
+
+// Start the scheduler
+router.post('/sync/scheduler/start', authenticateToken, async (req, res) => {
+    try {
+        scheduledSync.start();
+        res.json({ message: 'Scheduler started', status: scheduledSync.getStatus() });
+    } catch (error) {
+        console.error('Scheduler start error:', error);
+        res.status(500).json({ error: 'Failed to start scheduler' });
+    }
+});
+
+// Stop the scheduler
+router.post('/sync/scheduler/stop', authenticateToken, async (req, res) => {
+    try {
+        scheduledSync.stop();
+        res.json({ message: 'Scheduler stopped', status: scheduledSync.getStatus() });
+    } catch (error) {
+        console.error('Scheduler stop error:', error);
+        res.status(500).json({ error: 'Failed to stop scheduler' });
+    }
+});
+
+// ============================================
+// WEBHOOK ACTIVITY
+// ============================================
+
+// Get recent webhook activity
+router.get('/webhooks/activity', authenticateToken, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 50;
+        const hours = parseInt(req.query.hours) || 24;
+
+        const since = new Date();
+        since.setHours(since.getHours() - hours);
+
+        // Get recent webhook logs
+        const logs = await req.prisma.webhookLog.findMany({
+            where: {
+                receivedAt: { gte: since }
+            },
+            orderBy: { receivedAt: 'desc' },
+            take: limit
+        });
+
+        // Get summary stats
+        const stats = await req.prisma.webhookLog.groupBy({
+            by: ['status'],
+            where: {
+                receivedAt: { gte: since }
+            },
+            _count: true
+        });
+
+        const statsMap = {};
+        for (const s of stats) {
+            statsMap[s.status] = s._count;
+        }
+
+        // Get webhook counts by topic
+        const byTopic = await req.prisma.webhookLog.groupBy({
+            by: ['topic'],
+            where: {
+                receivedAt: { gte: since }
+            },
+            _count: true
+        });
+
+        const topicMap = {};
+        for (const t of byTopic) {
+            topicMap[t.topic || 'unknown'] = t._count;
+        }
+
+        res.json({
+            timeRange: {
+                hours,
+                since: since.toISOString()
+            },
+            summary: {
+                total: logs.length,
+                processed: statsMap.processed || 0,
+                failed: statsMap.failed || 0,
+                pending: statsMap.pending || 0,
+                received: statsMap.received || 0
+            },
+            byTopic: topicMap,
+            recentLogs: logs.map(l => ({
+                id: l.id,
+                webhookId: l.webhookId,
+                topic: l.topic,
+                resourceId: l.resourceId,
+                status: l.status,
+                error: l.error,
+                processingTimeMs: l.processingTime,
+                receivedAt: l.receivedAt,
+                processedAt: l.processedAt
+            }))
+        });
+    } catch (error) {
+        console.error('Webhook activity error:', error);
+        res.status(500).json({ error: 'Failed to get webhook activity' });
     }
 });
 
