@@ -209,7 +209,7 @@ export default function Orders() {
     );
 
     // Grid component
-    const { gridComponent, customHeaders, resetHeaders } = OrdersGrid({
+    const { gridComponent, columnVisibilityDropdown, customHeaders, resetHeaders } = OrdersGrid({
         rows: filteredOpenRows,
         lockedDates: lockedDates || [],
         onAllocate: handleAllocate,
@@ -320,6 +320,7 @@ export default function Orders() {
                             <option value="180">Last 180 days</option>
                             <option value="365">Last 365 days</option>
                         </select>
+                        {columnVisibilityDropdown}
                         {Object.keys(customHeaders).length > 0 && (
                             <button
                                 onClick={resetHeaders}

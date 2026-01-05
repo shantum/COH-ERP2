@@ -103,6 +103,7 @@ router.get('/open', async (req, res) => {
                         trackingNumber: true,
                         trackingCompany: true,
                         shippedAt: true,
+                        fulfillmentStatus: true,
                     },
                 },
                 customer: true,

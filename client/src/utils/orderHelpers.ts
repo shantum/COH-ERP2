@@ -326,6 +326,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     notes: 'Notes',
     pick: 'P',
     ship: 'S',
+    shopifyStatus: 'Shopify',
     awb: 'AWB',
     courier: 'Courier',
     actions: '...',

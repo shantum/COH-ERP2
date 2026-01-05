@@ -3,7 +3,7 @@
  * AG Grid implementation for orders with all column definitions and row styling
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type {
     ColDef,
@@ -16,7 +16,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Undo2 } from 'lucide-react';
+import { Check, X, Pencil, Ban, Archive, Undo2, Columns, RotateCcw } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
@@ -31,6 +31,95 @@ const compactTheme = themeQuartz.withParams({
     rowHeight: 28,
     headerHeight: 32,
 });
+
+// All column IDs in display order
+const ALL_COLUMN_IDS = [
+    'orderDate', 'orderNumber', 'customerName', 'city', 'orderValue',
+    'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
+    'customerLtv', 'skuCode', 'productName', 'qty', 'skuStock', 'fabricBalance',
+    'allocate', 'production', 'notes', 'pick', 'ship', 'shopifyStatus',
+    'awb', 'courier', 'actions'
+];
+
+// Column visibility dropdown component
+const ColumnVisibilityDropdown = ({
+    visibleColumns,
+    onToggleColumn,
+    onResetAll,
+    getHeaderName,
+}: {
+    visibleColumns: Set<string>;
+    onToggleColumn: (colId: string) => void;
+    onResetAll: () => void;
+    getHeaderName: (colId: string) => string;
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen]);
+
+    return (
+        <div className="relative" ref={dropdownRef}>
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+                title="Show/hide columns"
+            >
+                <Columns size={14} />
+                <span>Columns</span>
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[180px] max-h-[400px] overflow-y-auto">
+                    <div className="p-2 border-b border-gray-100 flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-600">Columns</span>
+                        <button
+                            onClick={() => {
+                                onResetAll();
+                                setIsOpen(false);
+                            }}
+                            className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                            title="Reset visibility and order"
+                        >
+                            <RotateCcw size={10} />
+                            Reset All
+                        </button>
+                    </div>
+                    <div className="px-2 py-1 text-xs text-gray-400 border-b border-gray-100">
+                        Drag column headers to reorder
+                    </div>
+                    <div className="p-1">
+                        {ALL_COLUMN_IDS.map((colId) => (
+                            <label
+                                key={colId}
+                                className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={visibleColumns.has(colId)}
+                                    onChange={() => onToggleColumn(colId)}
+                                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-xs text-gray-700">{getHeaderName(colId)}</span>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 // Editable header component
 const EditableHeader = (props: any) => {
@@ -141,12 +230,44 @@ export function OrdersGrid({
         return saved ? JSON.parse(saved) : {};
     });
 
+    // Visible columns state
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+        const saved = localStorage.getItem('ordersGridVisibleColumns');
+        if (saved) {
+            try {
+                return new Set(JSON.parse(saved));
+            } catch {
+                return new Set(ALL_COLUMN_IDS);
+            }
+        }
+        return new Set(ALL_COLUMN_IDS);
+    });
+
     const setCustomHeader = useCallback((colId: string, headerName: string) => {
         setCustomHeaders((prev) => {
             const updated = { ...prev, [colId]: headerName };
             localStorage.setItem('ordersGridHeaders', JSON.stringify(updated));
             return updated;
         });
+    }, []);
+
+    const toggleColumnVisibility = useCallback((colId: string) => {
+        setVisibleColumns((prev) => {
+            const updated = new Set(prev);
+            if (updated.has(colId)) {
+                updated.delete(colId);
+            } else {
+                updated.add(colId);
+            }
+            localStorage.setItem('ordersGridVisibleColumns', JSON.stringify([...updated]));
+            return updated;
+        });
+    }, []);
+
+    const resetColumnVisibility = useCallback(() => {
+        const allVisible = new Set(ALL_COLUMN_IDS);
+        setVisibleColumns(allVisible);
+        localStorage.removeItem('ordersGridVisibleColumns');
     }, []);
 
     const getHeaderName = useCallback(
@@ -697,11 +818,13 @@ export function OrdersGrid({
             },
             {
                 colId: 'shopifyStatus',
-                headerName: 'Shopify',
+                headerName: getHeaderName('shopifyStatus'),
                 width: 80,
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
-                    const status = params.data.shopifyStatus || params.data.order?.shopifyFulfillmentStatus;
+                    // Use shopifyCache first, fallback to order field for backward compatibility
+                    const status = params.data.order?.shopifyCache?.fulfillmentStatus
+                        || params.data.order?.shopifyFulfillmentStatus;
                     if (!status || status === '-') return null;
 
                     const statusStyles: Record<string, string> = {
@@ -832,7 +955,10 @@ export function OrdersGrid({
                     );
                 },
             },
-        ],
+        ].map(col => ({
+            ...col,
+            hide: !visibleColumns.has(col.colId!),
+        })),
         [
             allocatingLines,
             shippingChecked,
@@ -842,14 +968,62 @@ export function OrdersGrid({
             isCancellingLine,
             isUncancellingLine,
             isArchiving,
+            visibleColumns,
         ]
     );
+
+    // Column order state
+    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+        const saved = localStorage.getItem('ordersGridColumnOrder');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch {
+                return ALL_COLUMN_IDS;
+            }
+        }
+        return ALL_COLUMN_IDS;
+    });
+
+    const handleColumnMoved = useCallback((event: any) => {
+        if (!event.finished || !event.api) return;
+        const newOrder = event.api.getAllDisplayedColumns()
+            .map((col: any) => col.getColId())
+            .filter((id: string) => ALL_COLUMN_IDS.includes(id));
+        setColumnOrder(newOrder);
+        localStorage.setItem('ordersGridColumnOrder', JSON.stringify(newOrder));
+    }, []);
+
+    const resetColumnOrder = useCallback(() => {
+        setColumnOrder(ALL_COLUMN_IDS);
+        localStorage.removeItem('ordersGridColumnOrder');
+    }, []);
+
+    // Sort column defs by saved order
+    const orderedColumnDefs = useMemo(() => {
+        const colDefMap = new Map(columnDefs.map(col => [col.colId, col]));
+        const ordered: ColDef[] = [];
+
+        // Add columns in saved order
+        columnOrder.forEach(colId => {
+            const col = colDefMap.get(colId);
+            if (col) {
+                ordered.push(col);
+                colDefMap.delete(colId);
+            }
+        });
+
+        // Add any remaining columns (new columns not in saved order)
+        colDefMap.forEach(col => ordered.push(col));
+
+        return ordered;
+    }, [columnDefs, columnOrder]);
 
     const defaultColDef = useMemo<ColDef>(
         () => ({
             sortable: true,
             resizable: true,
-            suppressMovable: true,
+            suppressMovable: false, // Allow column dragging
             headerComponent: EditableHeader,
             headerComponentParams: { setCustomHeader },
         }),
@@ -922,9 +1096,9 @@ export function OrdersGrid({
                 `}</style>
                 <div className="border rounded" style={{ height: '600px', width: '100%' }}>
                     <AgGridReact
-                        key={JSON.stringify(customHeaders)}
+                        key={JSON.stringify(customHeaders) + JSON.stringify([...visibleColumns]) + JSON.stringify(columnOrder)}
                         rowData={rows}
-                        columnDefs={columnDefs}
+                        columnDefs={orderedColumnDefs}
                         defaultColDef={defaultColDef}
                         getRowStyle={getRowStyle}
                         getRowClass={getRowClass}
@@ -939,12 +1113,25 @@ export function OrdersGrid({
                         ensureDomOrder={true}
                         suppressRowClickSelection={false}
                         suppressRowHoverHighlight={true}
+                        onColumnMoved={handleColumnMoved}
                     />
                 </div>
             </>
         ),
+        columnVisibilityDropdown: (
+            <ColumnVisibilityDropdown
+                visibleColumns={visibleColumns}
+                onToggleColumn={toggleColumnVisibility}
+                onResetAll={() => {
+                    resetColumnVisibility();
+                    resetColumnOrder();
+                }}
+                getHeaderName={getHeaderName}
+            />
+        ),
         customHeaders,
         resetHeaders,
+        resetColumnOrder,
     };
 }
 
