@@ -294,21 +294,121 @@ router.get('/:id', async (req, res) => {
                     include: {
                         sku: {
                             include: {
-                                variation: { include: { product: true, fabric: true } },
+                                variation: {
+                                    include: {
+                                        product: true,
+                                        fabric: true,
+                                    },
+                                },
                             },
                         },
                         productionBatch: true,
                     },
                 },
                 returnRequests: true,
+                shopifyCache: true,
             },
         });
+
+        // Get Shopify shop domain for admin link
+        let shopifyAdminUrl = null;
+        if (order?.shopifyOrderId) {
+            const shopDomainSetting = await req.prisma.systemSetting.findUnique({
+                where: { key: 'shopify_shop_domain' },
+            });
+            if (shopDomainSetting?.value) {
+                // Format: admin.shopify.com/store/shop-name or shop-name.myshopify.com
+                const domain = shopDomainSetting.value;
+                if (domain.includes('admin.shopify.com')) {
+                    shopifyAdminUrl = `https://${domain}/orders/${order.shopifyOrderId}`;
+                } else {
+                    shopifyAdminUrl = `https://${domain}/admin/orders/${order.shopifyOrderId}`;
+                }
+            }
+        }
 
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        res.json(order);
+        // Parse Shopify raw data for detailed pricing if available
+        let shopifyDetails = null;
+        if (order.shopifyCache?.rawData) {
+            try {
+                const raw = JSON.parse(order.shopifyCache.rawData);
+
+                // Collect all SKU codes to look up images from local database
+                const skuCodes = (raw.line_items || [])
+                    .map(item => item.sku)
+                    .filter(Boolean);
+
+                // Batch lookup SKU images from local database
+                const skuImages = {};
+                if (skuCodes.length > 0) {
+                    const skus = await req.prisma.sKU.findMany({
+                        where: { skuCode: { in: skuCodes } },
+                        select: {
+                            skuCode: true,
+                            variation: {
+                                select: {
+                                    imageUrl: true,
+                                    product: {
+                                        select: { imageUrl: true }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    // Build a map of SKU code -> image URL
+                    for (const sku of skus) {
+                        skuImages[sku.skuCode] = sku.variation?.imageUrl || sku.variation?.product?.imageUrl || null;
+                    }
+                }
+
+                shopifyDetails = {
+                    subtotalPrice: raw.subtotal_price || raw.current_subtotal_price,
+                    totalPrice: raw.total_price || raw.current_total_price,
+                    totalTax: raw.total_tax || raw.current_total_tax,
+                    totalDiscounts: raw.total_discounts || raw.current_total_discounts,
+                    currency: raw.currency || 'INR',
+                    financialStatus: raw.financial_status,
+                    fulfillmentStatus: raw.fulfillment_status,
+                    discountCodes: raw.discount_codes || [],
+                    shippingLines: (raw.shipping_lines || []).map(s => ({
+                        title: s.title,
+                        price: s.price,
+                    })),
+                    taxLines: (raw.tax_lines || []).map(t => ({
+                        title: t.title,
+                        price: t.price,
+                        rate: t.rate,
+                    })),
+                    lineItems: (raw.line_items || []).map(item => ({
+                        id: String(item.id),
+                        title: item.title,
+                        variantTitle: item.variant_title,
+                        sku: item.sku,
+                        quantity: item.quantity,
+                        price: item.price,
+                        totalDiscount: item.total_discount || '0.00',
+                        discountAllocations: (item.discount_allocations || []).map(d => ({
+                            amount: d.amount,
+                        })),
+                        // Use Shopify image first, then local database image
+                        imageUrl: item.image?.src || skuImages[item.sku] || null,
+                    })),
+                    noteAttributes: raw.note_attributes || [],
+                };
+            } catch (e) {
+                console.error('Error parsing Shopify raw data:', e);
+            }
+        }
+
+        res.json({
+            ...order,
+            shopifyDetails,
+            shopifyAdminUrl,
+        });
     } catch (error) {
         console.error('Get order error:', error);
         res.status(500).json({ error: 'Failed to fetch order' });

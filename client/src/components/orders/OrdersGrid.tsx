@@ -94,6 +94,7 @@ interface OrdersGridProps {
     onUpdateBatch: (id: string, data: any) => void;
     onDeleteBatch: (id: string) => void;
     onUpdateNotes: (id: string, notes: string) => void;
+    onViewOrder: (orderId: string) => void;
     onEditOrder: (order: any) => void;
     onCancelOrder: (id: string, reason?: string) => void;
     onArchiveOrder: (id: string) => void;
@@ -120,6 +121,7 @@ export function OrdersGrid({
     onUpdateBatch,
     onDeleteBatch,
     onUpdateNotes,
+    onViewOrder,
     onEditOrder,
     onCancelOrder,
     onArchiveOrder,
@@ -174,9 +176,22 @@ export function OrdersGrid({
                 headerName: getHeaderName('orderNumber'),
                 field: 'orderNumber',
                 width: 110,
-                valueFormatter: (params: ValueFormatterParams) =>
-                    params.data?.isFirstLine ? params.value : '',
-                cellClass: 'text-xs font-mono text-gray-600',
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    return (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onViewOrder(params.data.order?.id);
+                            }}
+                            className="text-blue-600 hover:text-blue-800 hover:underline font-mono text-xs"
+                            title="View order details"
+                        >
+                            {params.value}
+                        </button>
+                    );
+                },
+                cellClass: 'text-xs',
             },
             {
                 colId: 'customerName',

@@ -24,6 +24,7 @@ import {
 import {
     OrdersGrid,
     OrderDetailModal,
+    OrderViewModal,
     CreateOrderModal,
     EditOrderModal,
     ShipOrderModal,
@@ -45,6 +46,7 @@ export default function Orders() {
 
     // Modal state
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
+    const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
     const [showCreateOrder, setShowCreateOrder] = useState(false);
     const [editingOrder, setEditingOrder] = useState<any>(null);
     const [notesOrder, setNotesOrder] = useState<any>(null);
@@ -219,6 +221,7 @@ export default function Orders() {
         onUpdateBatch: (id, data) => mutations.updateBatch.mutate({ id, data }),
         onDeleteBatch: (id) => mutations.deleteBatch.mutate(id),
         onUpdateNotes: (id, notes) => mutations.updateOrderNotes.mutate({ id, notes }),
+        onViewOrder: setViewingOrderId,
         onEditOrder: setEditingOrder,
         onCancelOrder: (id, reason) => mutations.cancelOrder.mutate({ id, reason }),
         onArchiveOrder: (id) => mutations.archiveOrder.mutate(id),
@@ -513,6 +516,13 @@ export default function Orders() {
                     customer={customerDetail}
                     isLoading={customerLoading}
                     onClose={() => setSelectedCustomerId(null)}
+                />
+            )}
+
+            {viewingOrderId && (
+                <OrderViewModal
+                    orderId={viewingOrderId}
+                    onClose={() => setViewingOrderId(null)}
                 />
             )}
         </div>
