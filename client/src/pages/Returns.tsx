@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { returnsApi, customersApi, ordersApi } from '../services/api';
 import { useState, useRef, useEffect } from 'react';
-import { AlertTriangle, Plus, X, Search, Package, Truck, Check, Edit2, Trash2, Crown, Medal, Eye, Calendar, Clock } from 'lucide-react';
+import { AlertTriangle, Plus, X, Search, Package, Truck, Check, Trash2, Crown, Medal, Eye, Calendar } from 'lucide-react';
 
 // Format date as "27 Dec 2025"
 const formatDate = (dateString: string | null | undefined) => {
@@ -172,7 +172,6 @@ export default function Returns() {
         },
     });
 
-    const canEdit = (r: ReturnRequest) => !['received', 'inspected', 'resolved', 'cancelled'].includes(r.status);
     const canDelete = (r: ReturnRequest) => {
         const hasReceivedItems = r.lines?.some((l) => l.itemCondition !== null);
         return !hasReceivedItems && r.status !== 'resolved';
