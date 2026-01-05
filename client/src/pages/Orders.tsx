@@ -38,7 +38,7 @@ export default function Orders() {
 
     // Search and filter state
     const [searchQuery, setSearchQuery] = useState('');
-    const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('');
+    const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
 
     // Shipped orders pagination state
     const [shippedPage, setShippedPage] = useState(1);
@@ -559,10 +559,10 @@ function ShippedOrdersSection({
     orders.forEach((order: any) => {
         const shipDate = order.shippedAt
             ? new Date(order.shippedAt).toLocaleDateString('en-IN', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-              })
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+            })
             : 'Unknown';
         if (!groupedByDate[shipDate]) groupedByDate[shipDate] = [];
         groupedByDate[shipDate].push(order);
@@ -754,13 +754,12 @@ function OrderListSection({
                             {type === 'archived' && (
                                 <>
                                     <span
-                                        className={`text-xs px-2 py-0.5 rounded ${
-                                            order.status === 'cancelled'
+                                        className={`text-xs px-2 py-0.5 rounded ${order.status === 'cancelled'
                                                 ? 'bg-red-100 text-red-700'
                                                 : order.status === 'shipped' || order.status === 'delivered'
-                                                ? 'bg-green-100 text-green-700'
-                                                : 'bg-amber-100 text-amber-700'
-                                        }`}
+                                                    ? 'bg-green-100 text-green-700'
+                                                    : 'bg-amber-100 text-amber-700'
+                                            }`}
                                     >
                                         {order.status === 'open'
                                             ? 'Was Open'
@@ -770,9 +769,9 @@ function OrderListSection({
                                         Archived{' '}
                                         {order.archivedAt
                                             ? new Date(order.archivedAt).toLocaleDateString('en-IN', {
-                                                  day: 'numeric',
-                                                  month: 'short',
-                                              })
+                                                day: 'numeric',
+                                                month: 'short',
+                                            })
                                             : ''}
                                     </span>
                                 </>

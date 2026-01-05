@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { calculateAllInventoryBalances, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
+import { getLockedDates, saveLockedDates } from '../utils/productionUtils.js';
 
 const router = Router();
 
@@ -81,10 +82,7 @@ router.post('/batches', authenticateToken, async (req, res) => {
         const targetDate = batchDate ? new Date(batchDate) : new Date();
         const dateStr = targetDate.toISOString().split('T')[0];
 
-        const lockSetting = await req.prisma.systemSetting.findUnique({
-            where: { key: 'locked_production_dates' }
-        });
-        const lockedDates = lockSetting?.value ? JSON.parse(lockSetting.value) : [];
+        const lockedDates = await getLockedDates(req.prisma);
 
         if (lockedDates.includes(dateStr)) {
             return res.status(400).json({ error: `Production date ${dateStr} is locked. Cannot add new items.` });
@@ -272,10 +270,7 @@ router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
 // Get locked production dates
 router.get('/locked-dates', authenticateToken, async (req, res) => {
     try {
-        const setting = await req.prisma.systemSetting.findUnique({
-            where: { key: 'locked_production_dates' }
-        });
-        const lockedDates = setting?.value ? JSON.parse(setting.value) : [];
+        const lockedDates = await getLockedDates(req.prisma);
         res.json(lockedDates);
     } catch (error) {
         console.error('Get locked dates error:', error);
@@ -291,18 +286,11 @@ router.post('/lock-date', authenticateToken, async (req, res) => {
 
         const dateStr = date.split('T')[0]; // Normalize to YYYY-MM-DD
 
-        const setting = await req.prisma.systemSetting.findUnique({
-            where: { key: 'locked_production_dates' }
-        });
-        const lockedDates = setting?.value ? JSON.parse(setting.value) : [];
+        const lockedDates = await getLockedDates(req.prisma);
 
         if (!lockedDates.includes(dateStr)) {
             lockedDates.push(dateStr);
-            await req.prisma.systemSetting.upsert({
-                where: { key: 'locked_production_dates' },
-                update: { value: JSON.stringify(lockedDates) },
-                create: { key: 'locked_production_dates', value: JSON.stringify(lockedDates) }
-            });
+            await saveLockedDates(req.prisma, lockedDates);
         }
 
         res.json({ success: true, lockedDates });
@@ -320,17 +308,10 @@ router.post('/unlock-date', authenticateToken, async (req, res) => {
 
         const dateStr = date.split('T')[0]; // Normalize to YYYY-MM-DD
 
-        const setting = await req.prisma.systemSetting.findUnique({
-            where: { key: 'locked_production_dates' }
-        });
-        let lockedDates = setting?.value ? JSON.parse(setting.value) : [];
+        let lockedDates = await getLockedDates(req.prisma);
 
         lockedDates = lockedDates.filter(d => d !== dateStr);
-        await req.prisma.systemSetting.upsert({
-            where: { key: 'locked_production_dates' },
-            update: { value: JSON.stringify(lockedDates) },
-            create: { key: 'locked_production_dates', value: JSON.stringify(lockedDates) }
-        });
+        await saveLockedDates(req.prisma, lockedDates);
 
         res.json({ success: true, lockedDates });
     } catch (error) {

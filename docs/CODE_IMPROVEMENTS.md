@@ -11,8 +11,8 @@
 | Priority | Total | Fixed | Remaining |
 |----------|-------|-------|-----------|
 | 🔴 Critical | 4 | 4 | 0 |
-| 🟠 High | 6 | 5 | 1 |
-| 🟡 Medium | 8 | 0 | 8 |
+| 🟠 High | 6 | 6 | 0 |
+| 🟡 Medium | 8 | 2 | 6 |
 | 🟢 Low | 5 | 0 | 5 |
 
 ---
@@ -132,14 +132,16 @@
 ### M1. Duplicate Order Processing Logic
 **Location**: `shopify.js:520-680` duplicates `shopifyOrderProcessor.js`  
 **Fix**: Reuse `shopifyOrderProcessor` in reprocess-cache endpoint  
-**Status**: ⬜ Pending
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: Refactored reprocess-cache endpoint to use shared `processFromCache()` function
 
 ---
 
 ### M2. Locked Dates JSON Parsing (4 places)
 **Location**: `production.js:87,278,297,326`  
 **Fix**: Create `getLockedDates()` utility  
-**Status**: ⬜ Pending
+**Status**: ✅ Fixed (2026-01-05)
+**Solution**: Created `productionUtils.js` with `getLockedDates()` and `saveLockedDates()` utilities
 
 ---
 
@@ -233,6 +235,8 @@
 
 | ID | Issue | Fixed Date | Notes |
 |----|-------|------------|-------|
+| M2 | Locked Dates JSON Parsing | 2026-01-05 | Created productionUtils.js |
+| M1 | Duplicate Order Processing | 2026-01-05 | Used shared processFromCache |
 | H3 | No Pagination on Heavy Endpoints | 2026-01-05 | Added limit/offset pagination |
 | H6 | Console.logs in Route Files | 2026-01-05 | Added Pino logger |
 | H5 | Missing Compound Indexes | 2026-01-05 | Added to schema |
@@ -249,6 +253,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-01-05 | Fixed M1, M2: Extracted locked dates utility and consolidated order processing |
 | 2026-01-05 | Fixed H3: Added pagination to /orders/open and /inventory/balance |
 | 2026-01-05 | Fixed 4 high-priority issues (H2, H4, H5, H6) |
 | 2026-01-05 | Fixed all 4 critical issues (C1-C4) |

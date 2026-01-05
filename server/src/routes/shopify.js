@@ -5,6 +5,8 @@ import syncWorker from '../services/syncWorker.js';
 import { syncAllProducts } from '../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
 import { findOrCreateCustomer } from '../utils/customerUtils.js';
+import { processFromCache, markCacheProcessed, markCacheError } from '../services/shopifyOrderProcessor.js';
+
 
 const router = Router();
 
@@ -619,115 +621,16 @@ router.post('/sync/reprocess-cache', authenticateToken, async (req, res) => {
 
         for (const entry of failedEntries) {
             try {
-                const shopifyOrder = JSON.parse(entry.rawData);
-
-                // Import the processShopifyOrderToERP function logic inline
-                const shopifyOrderId = String(shopifyOrder.id);
-                const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrderId;
-
-                // Check if order exists
-                let existingOrder = await req.prisma.order.findFirst({
-                    where: { shopifyOrderId },
-                    include: { orderLines: true }
-                });
-
-                // Find or create customer using shared utility
-                const { customer: dbCustomer } = await findOrCreateCustomer(
-                    req.prisma,
-                    shopifyOrder.customer,
-                    {
-                        shippingAddress: shopifyOrder.shipping_address,
-                        orderDate: shopifyOrder.created_at,
-                    }
-                );
-                const customerId = dbCustomer?.id || null;
-
-                // Determine order status
-                let status = 'open';
-                if (shopifyOrder.cancelled_at) {
-                    status = 'cancelled';
-                } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
-                    if (existingOrder?.status === 'shipped') {
-                        status = 'shipped';
-                    }
-                }
-
-                // Determine payment method
-                const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-                const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-                const paymentMethod = isPrepaidGateway ? 'Prepaid' :
-                    (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
-
-                // Build order data
-                const orderData = {
-                    shopifyOrderId,
-                    orderNumber: shopifyOrder.name || `SHOP-${shopifyOrderId.slice(-8)}`,
-                    channel: 'shopify',
-                    status,
-                    customerId,
-                    customerName: shippingAddress
-                        ? `${shippingAddress.first_name || ''} ${shippingAddress.last_name || ''}`.trim()
-                        : customer?.first_name ? `${customer.first_name} ${customer.last_name || ''}`.trim() : 'Unknown',
-                    customerEmail: customer?.email || shopifyOrder.email,
-                    customerPhone: shippingAddress?.phone || customer?.phone,
-                    shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-                    totalAmount: parseFloat(shopifyOrder.total_price) || 0,
-                    shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
-                    orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
-                    customerNotes: shopifyOrder.note || null,
-                    paymentMethod,
-                };
-
-                if (existingOrder) {
-                    await req.prisma.order.update({
-                        where: { id: existingOrder.id },
-                        data: orderData
-                    });
-                } else {
-                    // Create new order with lines
-                    const lineItems = shopifyOrder.line_items || [];
-                    const orderLines = [];
-
-                    for (const item of lineItems) {
-                        const shopifyVariantId = item.variant_id ? String(item.variant_id) : null;
-                        let sku = null;
-                        if (shopifyVariantId) {
-                            sku = await req.prisma.sku.findFirst({ where: { shopifyVariantId } });
-                        }
-                        if (!sku && item.sku) {
-                            sku = await req.prisma.sku.findFirst({ where: { skuCode: item.sku } });
-                        }
-                        if (sku) {
-                            orderLines.push({
-                                skuId: sku.id,
-                                qty: item.quantity,
-                                unitPrice: parseFloat(item.price) || 0,
-                                lineStatus: 'pending',
-                            });
-                        }
-                    }
-
-                    await req.prisma.order.create({
-                        data: {
-                            ...orderData,
-                            orderLines: { create: orderLines }
-                        }
-                    });
-                }
+                // Use shared processor instead of duplicated inline logic
+                const result = await processFromCache(req.prisma, entry);
 
                 // Mark as successfully processed
-                await req.prisma.shopifyOrderCache.update({
-                    where: { id: entry.id },
-                    data: { processedAt: new Date(), processingError: null }
-                });
+                await markCacheProcessed(req.prisma, entry.id);
                 succeeded++;
-                console.log(`Reprocessed: ${orderName}`);
+                console.log(`Reprocessed: ${entry.orderNumber} -> ${result.action}`);
             } catch (error) {
                 // Update error in cache
-                await req.prisma.shopifyOrderCache.update({
-                    where: { id: entry.id },
-                    data: { processingError: error.message }
-                });
+                await markCacheError(req.prisma, entry.id, error.message);
                 failed++;
                 errors.push({ orderId: entry.id, orderNumber: entry.orderNumber, error: error.message });
                 console.error(`Reprocess failed for ${entry.orderNumber}: ${error.message}`);
