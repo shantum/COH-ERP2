@@ -34,7 +34,7 @@ const compactTheme = themeQuartz.withParams({
 
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
-    'orderDate', 'orderNumber', 'customerName', 'city', 'orderValue',
+    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'ship', 'shopifyStatus',
@@ -295,6 +295,26 @@ export function OrdersGrid({
                     return `${dt.date} ${dt.time}`;
                 },
                 cellClass: 'text-xs',
+            },
+            {
+                colId: 'orderAge',
+                headerName: getHeaderName('orderAge'),
+                field: 'orderDate',
+                width: 60,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine || !params.data?.orderDate) return null;
+                    const orderDate = new Date(params.data.orderDate);
+                    return Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (params.value === null) return null;
+                    const days = params.value as number;
+                    let colorClass = 'text-gray-500';
+                    if (days > 5) colorClass = 'text-red-600 font-semibold';
+                    else if (days >= 3) colorClass = 'text-amber-600 font-medium';
+                    return <span className={`text-xs ${colorClass}`}>{days}d</span>;
+                },
+                sortable: true,
             },
             {
                 colId: 'orderNumber',
@@ -1095,11 +1115,25 @@ export function OrdersGrid({
         return undefined;
     }, []);
 
-    // Add class for non-first lines to hide row separator
+    // Add class for non-first lines to hide row separator, and urgency classes
     const getRowClass = useCallback((params: any): string => {
         const row = params.data;
         if (!row) return '';
-        return row.isFirstLine ? 'order-first-line' : 'order-continuation-line';
+
+        const classes = [row.isFirstLine ? 'order-first-line' : 'order-continuation-line'];
+
+        // Calculate order age for urgency indicator (only on first line to avoid repetition)
+        if (row.isFirstLine && row.orderDate) {
+            const orderDate = new Date(row.orderDate);
+            const daysOld = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysOld > 5) {
+                classes.push('order-urgent');
+            } else if (daysOld >= 3) {
+                classes.push('order-warning');
+            }
+        }
+
+        return classes.join(' ');
     }, []);
 
     return {
@@ -1117,6 +1151,14 @@ export function OrdersGrid({
                     /* First row in grid doesn't need top border */
                     .ag-row.order-first-line[row-index="0"] {
                         border-top-color: transparent !important;
+                    }
+                    /* Order age urgency indicators - red left border for orders > 5 days */
+                    .ag-row.order-urgent {
+                        border-left: 4px solid #ef4444 !important;
+                    }
+                    /* Amber left border for orders 3-5 days */
+                    .ag-row.order-warning {
+                        border-left: 4px solid #f59e0b !important;
                     }
                 `}</style>
                 <div className="border rounded" style={{ height: '600px', width: '100%' }}>

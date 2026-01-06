@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Plus, X, Search, ChevronDown, Undo2 } from 'lucide-react';
+import { Plus, X, Search, Undo2 } from 'lucide-react';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
@@ -23,6 +23,8 @@ import {
 // Components
 import {
     OrdersGrid,
+    ShippedOrdersGrid,
+    ArchivedOrdersGrid,
     OrderDetailModal,
     OrderViewModal,
     CreateOrderModal,
@@ -30,6 +32,7 @@ import {
     ShipOrderModal,
     NotesModal,
     CustomerDetailModal,
+    SummaryPanel,
 } from '../components/orders';
 
 export default function Orders() {
@@ -43,6 +46,9 @@ export default function Orders() {
     // Shipped orders pagination state
     const [shippedPage, setShippedPage] = useState(1);
     const [shippedDays, setShippedDays] = useState(30);
+
+    // Archived analytics period state
+    const [analyticsDays, setAnalyticsDays] = useState(30);
 
     // Modal state
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -59,9 +65,6 @@ export default function Orders() {
     const [shippingChecked, setShippingChecked] = useState<Set<string>>(new Set());
     const [allocatingLines, setAllocatingLines] = useState<Set<string>>(new Set());
 
-    // Accordion state for shipped orders
-    const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
-
     // Data hooks
     const {
         openOrders,
@@ -70,6 +73,10 @@ export default function Orders() {
         cancelledOrders,
         archivedOrders,
         archivedTotalCount,
+        shippedSummary,
+        archivedAnalytics,
+        loadingShippedSummary,
+        loadingArchivedAnalytics,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -78,7 +85,7 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays });
+    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, analyticsDays });
 
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
@@ -372,16 +379,22 @@ export default function Orders() {
                 </div>
             )}
 
-            {/* Shipped Orders Accordion */}
+            {/* Shipped Orders with Summary Panel and Grid */}
             {!isLoading && tab === 'shipped' && (
                 <>
-                    <ShippedOrdersSection
+                    <SummaryPanel
+                        type="shipped"
+                        data={shippedSummary}
+                        isLoading={loadingShippedSummary}
+                    />
+                    <ShippedOrdersGrid
                         orders={filteredShippedOrders}
-                        expandedOrders={expandedOrders}
-                        setExpandedOrders={setExpandedOrders}
                         onUnship={(id) => mutations.unship.mutate(id)}
+                        onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
+                        onMarkRto={(id) => mutations.markRto.mutate(id)}
                         isUnshipping={mutations.unship.isPending}
-                        searchQuery={searchQuery}
+                        isMarkingDelivered={mutations.markDelivered.isPending}
+                        isMarkingRto={mutations.markRto.isPending}
                     />
                     {/* Pagination Controls */}
                     {shippedPagination.totalPages > 1 && (
@@ -437,14 +450,22 @@ export default function Orders() {
                 />
             )}
 
-            {/* Archived Orders */}
+            {/* Archived Orders with Analytics Panel and Grid */}
             {!isLoading && tab === 'archived' && (
-                <OrderListSection
-                    orders={archivedOrders}
-                    type="archived"
-                    onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
-                    isRestoring={mutations.unarchiveOrder.isPending}
-                />
+                <>
+                    <SummaryPanel
+                        type="archived"
+                        data={archivedAnalytics}
+                        isLoading={loadingArchivedAnalytics}
+                        days={analyticsDays}
+                        onDaysChange={setAnalyticsDays}
+                    />
+                    <ArchivedOrdersGrid
+                        orders={archivedOrders}
+                        onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
+                        isRestoring={mutations.unarchiveOrder.isPending}
+                    />
+                </>
             )}
 
             {/* Modals */}
@@ -533,188 +554,7 @@ export default function Orders() {
     );
 }
 
-// Shipped Orders Section (inline component for shipped tab)
-function ShippedOrdersSection({
-    orders,
-    expandedOrders,
-    setExpandedOrders,
-    onUnship,
-    isUnshipping,
-    searchQuery,
-}: {
-    orders: any[];
-    expandedOrders: Set<string>;
-    setExpandedOrders: (s: Set<string>) => void;
-    onUnship: (id: string) => void;
-    isUnshipping: boolean;
-    searchQuery: string;
-}) {
-    if (!orders?.length) {
-        return (
-            <div className="text-center text-gray-400 py-12">
-                {searchQuery ? 'No orders found' : 'No shipped orders'}
-            </div>
-        );
-    }
-
-    // Group orders by shipping date
-    const groupedByDate: Record<string, any[]> = {};
-    orders.forEach((order: any) => {
-        const shipDate = order.shippedAt
-            ? new Date(order.shippedAt).toLocaleDateString('en-IN', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-            })
-            : 'Unknown';
-        if (!groupedByDate[shipDate]) groupedByDate[shipDate] = [];
-        groupedByDate[shipDate].push(order);
-    });
-
-    return (
-        <div className="space-y-3">
-            {Object.entries(groupedByDate).map(([shipDate, dateOrders]) => {
-                const isDateExpanded = expandedOrders.has(shipDate);
-                const totalItems = dateOrders.reduce(
-                    (sum: number, o: any) => sum + (o.orderLines?.length || 0),
-                    0
-                );
-
-                return (
-                    <div key={shipDate} className="border rounded-lg overflow-hidden">
-                        <div
-                            className="flex items-center justify-between px-4 py-3 bg-gray-100 hover:bg-gray-200 cursor-pointer"
-                            onClick={() => {
-                                const newExpanded = new Set(expandedOrders);
-                                isDateExpanded ? newExpanded.delete(shipDate) : newExpanded.add(shipDate);
-                                setExpandedOrders(newExpanded);
-                            }}
-                        >
-                            <div className="flex items-center gap-4">
-                                <ChevronDown
-                                    size={18}
-                                    className={`text-gray-500 transition-transform ${isDateExpanded ? 'rotate-180' : ''}`}
-                                />
-                                <span className="text-gray-900 font-semibold">{shipDate}</span>
-                                <span className="text-gray-500 text-sm">
-                                    {dateOrders.length} order{dateOrders.length !== 1 ? 's' : ''} •{' '}
-                                    {totalItems} item{totalItems !== 1 ? 's' : ''}
-                                </span>
-                            </div>
-                        </div>
-
-                        {isDateExpanded && (
-                            <div className="divide-y">
-                                {dateOrders.map((order: any) => {
-                                    const dt = formatDateTime(order.orderDate);
-                                    const isOrderExpanded = expandedOrders.has(order.id);
-
-                                    return (
-                                        <div key={order.id} className="bg-white">
-                                            <div
-                                                className="flex items-center justify-between px-4 py-2 bg-gray-50 hover:bg-gray-100 cursor-pointer"
-                                                onClick={() => {
-                                                    const newExpanded = new Set(expandedOrders);
-                                                    isOrderExpanded
-                                                        ? newExpanded.delete(order.id)
-                                                        : newExpanded.add(order.id);
-                                                    setExpandedOrders(newExpanded);
-                                                }}
-                                            >
-                                                <div className="flex items-center gap-4">
-                                                    <ChevronDown
-                                                        size={14}
-                                                        className={`text-gray-400 transition-transform ${isOrderExpanded ? 'rotate-180' : ''}`}
-                                                    />
-                                                    <span className="text-gray-600 font-mono text-xs">
-                                                        {order.orderNumber}
-                                                    </span>
-                                                    <span className="text-gray-900">{order.customerName}</span>
-                                                    <span className="text-gray-500 text-sm">
-                                                        {parseCity(order.shippingAddress)}
-                                                    </span>
-                                                    <span className="text-gray-400 text-xs">
-                                                        Ordered: {dt.date}
-                                                    </span>
-                                                    <span className="text-gray-400 text-xs">
-                                                        • {order.orderLines?.length} item
-                                                        {order.orderLines?.length !== 1 ? 's' : ''}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-center gap-3">
-                                                    {order.courier && (
-                                                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
-                                                            {order.courier}
-                                                        </span>
-                                                    )}
-                                                    {order.awbNumber && (
-                                                        <span className="text-xs font-mono text-gray-500">
-                                                            {order.awbNumber}
-                                                        </span>
-                                                    )}
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            if (
-                                                                confirm(
-                                                                    `Undo shipping for ${order.orderNumber}? This will move it back to open orders.`
-                                                                )
-                                                            ) {
-                                                                onUnship(order.id);
-                                                            }
-                                                        }}
-                                                        disabled={isUnshipping}
-                                                        className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-orange-600"
-                                                        title="Undo shipping"
-                                                    >
-                                                        <Undo2 size={14} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            {isOrderExpanded && (
-                                                <table className="w-full text-sm">
-                                                    <tbody>
-                                                        {order.orderLines?.map((line: any) => (
-                                                            <tr
-                                                                key={line.id}
-                                                                className="border-b border-gray-100 bg-white"
-                                                            >
-                                                                <td className="py-1.5 pl-12 pr-4 text-gray-700">
-                                                                    {line.sku?.variation?.product?.name || '-'}
-                                                                </td>
-                                                                <td className="py-1.5 px-4 text-gray-600">
-                                                                    {line.sku?.variation?.colorName || '-'}
-                                                                </td>
-                                                                <td className="py-1.5 px-4 text-gray-600">
-                                                                    {line.sku?.size || '-'}
-                                                                </td>
-                                                                <td className="py-1.5 px-4 font-mono text-xs text-gray-500">
-                                                                    {line.sku?.skuCode || '-'}
-                                                                </td>
-                                                                <td className="py-1.5 px-4 text-center w-16">
-                                                                    {line.qty}
-                                                                </td>
-                                                                <td className="py-1.5 px-4 text-right text-gray-600 w-24">
-                                                                    ₹{Number(line.unitPrice).toLocaleString()}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
-
-// Order List Section (inline component for cancelled/archived tabs)
+// Order List Section (inline component for cancelled tab)
 function OrderListSection({
     orders,
     type,

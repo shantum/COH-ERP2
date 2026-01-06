@@ -319,6 +319,8 @@ model Order {
   courier         String?
   shippedAt       DateTime?
   deliveredAt     DateTime?
+  rtoInitiatedAt  DateTime?  // When RTO was initiated (failed delivery)
+  rtoReceivedAt   DateTime?  // When RTO package was received back
   totalAmount     Float
   discountCode    String?   // Discount/coupon code used on the order
   createdAt       DateTime  @default(now())

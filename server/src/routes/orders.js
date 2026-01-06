@@ -224,6 +224,8 @@ router.get('/shipped', async (req, res) => {
                 courier: true,
                 shippedAt: true,
                 deliveredAt: true,
+                rtoInitiatedAt: true,
+                rtoReceivedAt: true,
                 totalAmount: true,
                 createdAt: true,
                 shopifyFulfillmentStatus: true,
@@ -269,9 +271,14 @@ router.get('/shipped', async (req, res) => {
                 ? Math.floor((Date.now() - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
                 : 0;
 
+            // Determine tracking status based on RTO and delivery state
             let trackingStatus = 'in_transit';
-            if (order.status === 'delivered') {
-                trackingStatus = 'completed';
+            if (order.rtoReceivedAt) {
+                trackingStatus = 'rto_received';
+            } else if (order.rtoInitiatedAt) {
+                trackingStatus = 'rto_initiated';
+            } else if (order.status === 'delivered' || order.deliveredAt) {
+                trackingStatus = 'delivered';
             } else if (daysInTransit > 7) {
                 trackingStatus = 'delivery_delayed';
             }
@@ -302,6 +309,267 @@ router.get('/shipped', async (req, res) => {
     } catch (error) {
         console.error('Get shipped orders error:', error);
         res.status(500).json({ error: 'Failed to fetch shipped orders' });
+    }
+});
+
+// Get shipped orders summary (status counts)
+router.get('/shipped/summary', async (req, res) => {
+    try {
+        const { days = 30 } = req.query;
+        const sinceDate = new Date();
+        sinceDate.setDate(sinceDate.getDate() - Number(days));
+
+        const orders = await req.prisma.order.findMany({
+            where: {
+                status: { in: ['shipped', 'delivered'] },
+                shippedAt: { gte: sinceDate },
+                isArchived: false,
+            },
+            select: {
+                id: true,
+                status: true,
+                shippedAt: true,
+                deliveredAt: true,
+                rtoInitiatedAt: true,
+                rtoReceivedAt: true,
+            },
+        });
+
+        // Calculate days in transit for each order
+        const now = Date.now();
+        let inTransit = 0;
+        let delivered = 0;
+        let delayed = 0;
+        let rto = 0;
+
+        for (const order of orders) {
+            if (order.rtoInitiatedAt) {
+                rto++;
+            } else if (order.status === 'delivered' || order.deliveredAt) {
+                delivered++;
+            } else {
+                const daysInTransit = order.shippedAt
+                    ? Math.floor((now - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
+                    : 0;
+                if (daysInTransit > 7) {
+                    delayed++;
+                } else {
+                    inTransit++;
+                }
+            }
+        }
+
+        res.json({
+            inTransit,
+            delivered,
+            delayed,
+            rto,
+            needsAttention: delayed + rto,
+            total: orders.length,
+        });
+    } catch (error) {
+        console.error('Get shipped summary error:', error);
+        res.status(500).json({ error: 'Failed to fetch shipped summary' });
+    }
+});
+
+// Get archived orders analytics
+router.get('/archived/analytics', async (req, res) => {
+    try {
+        const { days = 30 } = req.query;
+        const sinceDate = new Date();
+        sinceDate.setDate(sinceDate.getDate() - Number(days));
+
+        // Get archived orders with line items
+        const orders = await req.prisma.order.findMany({
+            where: {
+                isArchived: true,
+                archivedAt: { gte: sinceDate },
+            },
+            select: {
+                id: true,
+                totalAmount: true,
+                channel: true,
+                orderLines: {
+                    select: {
+                        qty: true,
+                        unitPrice: true,
+                        sku: {
+                            select: {
+                                id: true,
+                                skuCode: true,
+                                variation: {
+                                    select: {
+                                        product: {
+                                            select: { name: true },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Calculate summary stats
+        const orderCount = orders.length;
+        const totalRevenue = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+        const avgValue = orderCount > 0 ? totalRevenue / orderCount : 0;
+
+        // Calculate channel split
+        const channelCounts = {};
+        for (const order of orders) {
+            const ch = order.channel || 'shopify';
+            channelCounts[ch] = (channelCounts[ch] || 0) + 1;
+        }
+        const channelSplit = Object.entries(channelCounts).map(([channel, count]) => ({
+            channel,
+            count,
+            percentage: orderCount > 0 ? Math.round((count / orderCount) * 100) : 0,
+        }));
+
+        // Calculate top products by units sold
+        const productStats = {};
+        for (const order of orders) {
+            for (const line of order.orderLines) {
+                const productName = line.sku?.variation?.product?.name || 'Unknown';
+                if (!productStats[productName]) {
+                    productStats[productName] = { units: 0, revenue: 0 };
+                }
+                productStats[productName].units += line.qty;
+                productStats[productName].revenue += line.qty * line.unitPrice;
+            }
+        }
+
+        const topProducts = Object.entries(productStats)
+            .map(([name, stats]) => ({ name, ...stats }))
+            .sort((a, b) => b.units - a.units)
+            .slice(0, 10);
+
+        res.json({
+            orderCount,
+            totalRevenue,
+            avgValue,
+            channelSplit,
+            topProducts,
+        });
+    } catch (error) {
+        console.error('Get archived analytics error:', error);
+        res.status(500).json({ error: 'Failed to fetch archived analytics' });
+    }
+});
+
+// Mark order as delivered
+router.post('/:id/mark-delivered', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status !== 'shipped') {
+            return res.status(400).json({ error: 'Order must be shipped to mark as delivered' });
+        }
+
+        const updated = await req.prisma.order.update({
+            where: { id: req.params.id },
+            data: {
+                status: 'delivered',
+                deliveredAt: new Date(),
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Mark delivered error:', error);
+        res.status(500).json({ error: 'Failed to mark order as delivered' });
+    }
+});
+
+// Initiate RTO for order
+router.post('/:id/mark-rto', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status !== 'shipped') {
+            return res.status(400).json({ error: 'Order must be shipped to initiate RTO' });
+        }
+
+        const updated = await req.prisma.order.update({
+            where: { id: req.params.id },
+            data: {
+                rtoInitiatedAt: new Date(),
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Mark RTO error:', error);
+        res.status(500).json({ error: 'Failed to initiate RTO' });
+    }
+});
+
+// Receive RTO package (creates inventory inward)
+router.post('/:id/receive-rto', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (!order.rtoInitiatedAt) {
+            return res.status(400).json({ error: 'RTO must be initiated first' });
+        }
+
+        if (order.rtoReceivedAt) {
+            return res.status(400).json({ error: 'RTO already received' });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Mark RTO as received
+            await tx.order.update({
+                where: { id: req.params.id },
+                data: { rtoReceivedAt: new Date() },
+            });
+
+            // Create inventory inward transactions for each line
+            for (const line of order.orderLines) {
+                await tx.inventoryTransaction.create({
+                    data: {
+                        skuId: line.skuId,
+                        txnType: TXN_TYPE.INWARD,
+                        qty: line.qty,
+                        reason: TXN_REASON.RTO_RECEIVED,
+                        referenceId: line.id,
+                        createdById: req.user.id,
+                    },
+                });
+            }
+        });
+
+        const updated = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Receive RTO error:', error);
+        res.status(500).json({ error: 'Failed to receive RTO' });
     }
 });
 

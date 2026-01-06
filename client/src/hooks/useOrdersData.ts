@@ -16,9 +16,10 @@ interface UseOrdersDataOptions {
     selectedCustomerId?: string | null;
     shippedPage?: number;
     shippedDays?: number;
+    analyticsDays?: number;
 }
 
-export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30 }: UseOrdersDataOptions) {
+export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, analyticsDays = 30 }: UseOrdersDataOptions) {
     // Order queries with conditional polling based on active tab
     const openOrdersQuery = useQuery({
         queryKey: ['openOrders'],
@@ -42,6 +43,19 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         queryKey: ['archivedOrders'],
         queryFn: () => ordersApi.getArchived().then(r => r.data),
         refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false
+    });
+
+    // Summary and analytics queries
+    const shippedSummaryQuery = useQuery({
+        queryKey: ['shippedSummary', shippedDays],
+        queryFn: () => ordersApi.getShippedSummary({ days: shippedDays }).then(r => r.data),
+        enabled: activeTab === 'shipped',
+    });
+
+    const archivedAnalyticsQuery = useQuery({
+        queryKey: ['archivedAnalytics', analyticsDays],
+        queryFn: () => ordersApi.getArchivedAnalytics({ days: analyticsDays }).then(r => r.data),
+        enabled: activeTab === 'archived',
     });
 
     // Supporting data queries
@@ -102,6 +116,12 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         cancelledOrders: cancelledOrdersQuery.data,
         archivedOrders,
         archivedTotalCount,
+
+        // Summary and analytics data
+        shippedSummary: shippedSummaryQuery.data,
+        archivedAnalytics: archivedAnalyticsQuery.data,
+        loadingShippedSummary: shippedSummaryQuery.isLoading,
+        loadingArchivedAnalytics: archivedAnalyticsQuery.isLoading,
 
         // Supporting data
         allSkus: allSkusQuery.data,

@@ -307,6 +307,7 @@ export function getSizesForVariation(
 // Default column headers for the orders grid
 export const DEFAULT_HEADERS: Record<string, string> = {
     orderDate: 'Date',
+    orderAge: 'Age',
     orderNumber: 'Order',
     customerName: 'Customer',
     city: 'City',

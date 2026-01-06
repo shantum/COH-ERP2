@@ -157,6 +157,13 @@ export const ordersApi = {
     ship: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/ship`, data),
     unship: (id: string) => api.post(`/orders/${id}/unship`),
     deliver: (id: string) => api.post(`/orders/${id}/deliver`),
+    // Summary and analytics endpoints
+    getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),
+    getArchivedAnalytics: (params?: { days?: number }) => api.get('/orders/archived/analytics', { params }),
+    // RTO actions
+    markDelivered: (id: string) => api.post(`/orders/${id}/mark-delivered`),
+    markRto: (id: string) => api.post(`/orders/${id}/mark-rto`),
+    receiveRto: (id: string) => api.post(`/orders/${id}/receive-rto`),
 };
 
 // Customers

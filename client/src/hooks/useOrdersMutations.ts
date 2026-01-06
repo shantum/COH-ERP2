@@ -124,6 +124,34 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to unship order')
     });
 
+    // Delivery tracking mutations
+    const markDelivered = useMutation({
+        mutationFn: (id: string) => ordersApi.markDelivered(id),
+        onSuccess: () => {
+            invalidateAll();
+            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to mark as delivered')
+    });
+
+    const markRto = useMutation({
+        mutationFn: (id: string) => ordersApi.markRto(id),
+        onSuccess: () => {
+            invalidateAll();
+            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to mark as RTO')
+    });
+
+    const receiveRto = useMutation({
+        mutationFn: (id: string) => ordersApi.receiveRto(id),
+        onSuccess: () => {
+            invalidateAll();
+            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to receive RTO')
+    });
+
     // Order status mutations
     const cancelOrder = useMutation({
         mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
@@ -184,6 +212,11 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // Ship
         ship,
         unship,
+
+        // Delivery tracking
+        markDelivered,
+        markRto,
+        receiveRto,
 
         // Allocate/Pick
         allocate,

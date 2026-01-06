@@ -24,6 +24,7 @@ export const TXN_REASON = {
     PRODUCTION: 'production',
     SALE: 'sale',
     RETURN_RECEIPT: 'return_receipt',
+    RTO_RECEIVED: 'rto_received',
     DAMAGE: 'damage',
     ADJUSTMENT: 'adjustment',
     TRANSFER: 'transfer',

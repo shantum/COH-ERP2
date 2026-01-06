@@ -162,6 +162,8 @@ export interface Order {
   courier: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
+  rtoInitiatedAt: string | null;
+  rtoReceivedAt: string | null;
   totalAmount: number;
   discountCode: string | null;
   createdAt: string;
@@ -607,3 +609,33 @@ export interface UpdateOrderLineData {
   unitPrice?: number;
   notes?: string;
 }
+
+// Shipped Orders Summary
+export interface ShippedSummary {
+  inTransit: number;
+  delivered: number;
+  delayed: number;
+  rto: number;
+  needsAttention: number;
+  total: number;
+}
+
+// Archived Orders Analytics
+export interface ArchivedAnalytics {
+  orderCount: number;
+  totalRevenue: number;
+  avgValue: number;
+  channelSplit: Array<{
+    channel: string;
+    count: number;
+    percentage: number;
+  }>;
+  topProducts: Array<{
+    name: string;
+    units: number;
+    revenue: number;
+  }>;
+}
+
+// Tracking status for shipped orders
+export type TrackingStatus = 'in_transit' | 'delivered' | 'delivery_delayed' | 'rto_initiated' | 'rto_received';
