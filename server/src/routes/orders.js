@@ -992,27 +992,36 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
     }
 });
 
-// Get archived orders
+// Get archived orders (paginated)
 router.get('/status/archived', async (req, res) => {
     try {
-        const orders = await req.prisma.order.findMany({
-            where: { isArchived: true },
-            include: {
-                customer: true,
-                orderLines: {
-                    include: {
-                        sku: {
-                            include: {
-                                variation: { include: { product: true, fabric: true } },
+        const { limit = 100, offset = 0 } = req.query;
+        const take = Number(limit);
+        const skip = Number(offset);
+
+        const [orders, totalCount] = await Promise.all([
+            req.prisma.order.findMany({
+                where: { isArchived: true },
+                include: {
+                    customer: true,
+                    orderLines: {
+                        include: {
+                            sku: {
+                                include: {
+                                    variation: { include: { product: true, fabric: true } },
+                                },
                             },
                         },
                     },
                 },
-            },
-            orderBy: { archivedAt: 'desc' },
-        });
+                orderBy: { orderDate: 'desc' },  // newest orders first
+                take,
+                skip,
+            }),
+            req.prisma.order.count({ where: { isArchived: true } }),
+        ]);
 
-        res.json(orders);
+        res.json({ orders, totalCount, limit: take, offset: skip });
     } catch (error) {
         console.error('Get archived orders error:', error);
         res.status(500).json({ error: 'Failed to fetch archived orders' });
@@ -1144,6 +1153,34 @@ router.post('/auto-archive', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Auto-archive endpoint error:', error);
         res.status(500).json({ error: 'Failed to auto-archive orders' });
+    }
+});
+
+// Archive orders before a specific date
+router.post('/archive-before-date', authenticateToken, async (req, res) => {
+    try {
+        const { beforeDate } = req.body;
+        if (!beforeDate) {
+            return res.status(400).json({ error: 'beforeDate is required (ISO format)' });
+        }
+
+        const cutoffDate = new Date(beforeDate);
+
+        const result = await req.prisma.order.updateMany({
+            where: {
+                orderDate: { lt: cutoffDate },
+                isArchived: false
+            },
+            data: {
+                isArchived: true,
+                archivedAt: new Date()
+            }
+        });
+
+        res.json({ message: `Archived ${result.count} orders before ${beforeDate}`, count: result.count });
+    } catch (error) {
+        console.error('Archive before date error:', error);
+        res.status(500).json({ error: 'Failed to archive orders' });
     }
 });
 

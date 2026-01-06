@@ -69,6 +69,7 @@ export default function Orders() {
         shippedPagination,
         cancelledOrders,
         archivedOrders,
+        archivedTotalCount,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -304,7 +305,7 @@ export default function Orders() {
                         className={`pb-2 font-medium ${tab === 'archived' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
                         onClick={() => setTab('archived')}
                     >
-                        Archived <span className="text-gray-400 ml-1">({archivedOrders?.length || 0})</span>
+                        Archived <span className="text-gray-400 ml-1">({archivedTotalCount || archivedOrders?.length || 0})</span>
                     </button>
                 </div>
                 {tab === 'open' && (

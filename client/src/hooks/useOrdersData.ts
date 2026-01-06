@@ -89,13 +89,19 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     const shippedOrders = shippedData?.orders || [];
     const shippedPagination = shippedData?.pagination || { total: 0, page: 1, totalPages: 1 };
 
+    // Extract archived orders and total count from response
+    const archivedData = archivedOrdersQuery.data;
+    const archivedOrders = archivedData?.orders || [];
+    const archivedTotalCount = archivedData?.totalCount || 0;
+
     return {
         // Order data
         openOrders: openOrdersQuery.data,
         shippedOrders,
         shippedPagination,
         cancelledOrders: cancelledOrdersQuery.data,
-        archivedOrders: archivedOrdersQuery.data,
+        archivedOrders,
+        archivedTotalCount,
 
         // Supporting data
         allSkus: allSkusQuery.data,
