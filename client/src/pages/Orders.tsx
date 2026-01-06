@@ -17,7 +17,6 @@ import {
     flattenOrders,
     filterRows,
     parseCity,
-    formatDateTime,
 } from '../utils/orderHelpers';
 
 // Components
