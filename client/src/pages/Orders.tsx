@@ -151,7 +151,7 @@ export default function Orders() {
             // Clear result after 5 seconds
             setTimeout(() => setSyncResult(null), 5000);
         },
-        onError: (error: any) => {
+        onError: () => {
             setSyncResult({
                 success: false,
                 updated: 0,
