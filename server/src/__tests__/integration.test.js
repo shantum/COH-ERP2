@@ -306,9 +306,11 @@ describe('Shopify Order Processing - Order Status Mapping', () => {
         expect(shopifyClient.mapOrderStatus(order)).toBe('cancelled');
     });
 
-    it('should map fulfilled to delivered status', () => {
+    it('should default to open for fulfilled orders (ERP manages ship status)', () => {
+        // Note: Shopify fulfillment_status is informational only
+        // ERP manages shipped/delivered status via Ship Order action
         const order = { fulfillment_status: 'fulfilled' };
-        expect(shopifyClient.mapOrderStatus(order)).toBe('delivered');
+        expect(shopifyClient.mapOrderStatus(order)).toBe('open');
     });
 
     it('should default to open for new orders', () => {

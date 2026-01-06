@@ -9,9 +9,9 @@
 | Metric | Value |
 |--------|-------|
 | Testing Framework | Jest (server-side) |
-| Test Files | `essential.test.js` (71 tests), `integration.test.js` (69 tests), `database-webhook.test.js` (68 tests) |
-| Total Tests | 208 |
-| Coverage | Core utilities, validation, encryption, sync services, business flows, webhooks, Shopify sync, database models |
+| Test Files | `essential.test.js` (71), `integration.test.js` (69), `database-webhook.test.js` (68), `returns-exchange.test.js` (103), `orders-inventory.test.js` (93) |
+| Total Tests | 404 |
+| Coverage | Core utilities, validation, encryption, sync, fulfillment, returns/exchanges, QC, inventory, shipping |
 
 **Run tests:** `cd server && npm test`
 
@@ -487,6 +487,179 @@ describe('Category Name', () => {
 | Queue insertion | 2 | Deduplication key, status enums |
 | Retry scheduling | 2 | Exponential backoff, max retries |
 | Status transitions | 2 | pending → retrying → resolved/abandoned |
+
+---
+
+## Returns and Exchange Tests (103 tests)
+
+### 31. Return Request Status Transitions (12 tests)
+
+**Logic tested:** Status flow and cancellation/deletion rules
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Status transitions | 7 | Valid status flow from requested → resolved |
+| Cancellation rules | 6 | When cancellation is allowed |
+| Deletion rules | 3 | When deletion is allowed based on received items |
+
+---
+
+### 32. Exchange Flow Types (12 tests)
+
+**Logic tested:** Exchange resolutions and value difference calculations
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Resolution types | 5 | refund, exchange_same, exchange_up, exchange_down |
+| Value difference | 4 | Positive/negative/zero difference calculation |
+| Ready to ship detection | 3 | Action queue exchange detection |
+
+---
+
+### 33. Item Receiving and QC Flow (17 tests)
+
+**Logic tested:** Item condition handling and restock decisions
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Condition validation | 5 | good, used, damaged, wrong_product |
+| All items received check | 3 | Multi-line receiving logic |
+| Restock decision | 4 | Which conditions allow restock |
+| Undo receive rules | 4 | When undo is allowed |
+
+---
+
+### 34. Repacking Queue Management (12 tests)
+
+**Logic tested:** QC queue status and processing actions
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Queue statuses | 4 | pending, inspecting, repacking, ready, write_off |
+| Condition types | 4 | unused, used, damaged, defective |
+| Processing actions | 4 | ready vs write_off decisions |
+
+---
+
+### 35. Value Calculations (12 tests)
+
+**Logic tested:** Return/refund/payment amount calculations
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Return value | 3 | Line price aggregation |
+| Refund amount | 4 | Resolution-based refund calculation |
+| Payment amount | 3 | Exchange up payment calculation |
+
+---
+
+### 36. Request Number and Duplicates (8 tests)
+
+**Logic tested:** Request number generation and duplicate detection
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Number generation | 4 | Year-based incrementing format |
+| Duplicate detection | 4 | Active ticket and request duplication |
+
+---
+
+### 37. Action Queue and Auto-Resolve (13 tests)
+
+**Logic tested:** Dashboard queue categorization and exchange auto-resolve
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Pending pickup | 2 | AWB presence detection |
+| Refunds pending | 3 | Resolution + received + no refund |
+| Payments pending | 3 | Exchange up payment tracking |
+| Auto-resolve | 4 | Exchange completion detection |
+| Stats update | 4 | Customer and SKU stats increment |
+
+---
+
+## Orders and Inventory Tests (93 tests)
+
+### 38. Order Line Status Transitions (14 tests)
+
+**Logic tested:** Fulfillment workflow and undo operations
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Status transitions | 8 | pending → allocated → picked → packed → shipped |
+| Undo validation | 6 | unallocate, unpick, unpack rules |
+
+---
+
+### 39. Fulfillment Stage Calculation (9 tests)
+
+**Logic tested:** Order-level fulfillment stage derivation
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Stage calculation | 6 | pending, allocated, in_progress, ready_to_ship |
+| Line status counts | 3 | Counting lines by status |
+
+---
+
+### 40. Shipping and Tracking (11 tests)
+
+**Logic tested:** Shipping readiness and delivery tracking
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Shipping readiness | 4 | All lines allocated validation |
+| Unship rules | 3 | When orders can be unshipped |
+| Tracking status | 4 | in_transit, delayed, completed |
+
+---
+
+### 41. Inventory Balance Calculations (14 tests)
+
+**Logic tested:** Transaction aggregation and stock status
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Balance calculation | 6 | inward - outward - reserved formula |
+| Stock status | 4 | below_target vs ok |
+| Transaction types | 4 | inward, outward, reserved |
+
+---
+
+### 42. Allocation and Reservation (8 tests)
+
+**Logic tested:** Inventory allocation for order lines
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Allocation validation | 4 | Stock sufficiency check |
+| Reservation creation | 4 | Reserved transaction structure |
+
+---
+
+### 43. Production and Stock Alerts (16 tests)
+
+**Logic tested:** Batch matching and shortage calculation
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Batch matching | 5 | Inward to production batch linking |
+| Shortage calculation | 4 | Target vs current balance |
+| Fabric requirements | 4 | Consumption per unit calculation |
+| Alert status | 3 | can_produce vs fabric_needed |
+
+---
+
+### 44. Transaction Edit/Delete and Bulk Operations (12 tests)
+
+**Logic tested:** Transaction management and bulk updates
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Edit rules | 3 | Only inward can be edited |
+| Delete rules | 3 | Admin vs user permissions |
+| Bulk timestamps | 4 | Correct timestamp per status |
+| Date filtering | 3 | Inward history date range |
 
 ---
 
