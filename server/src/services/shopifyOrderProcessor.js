@@ -35,7 +35,12 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
         || shopifyOrder.fulfillments?.[0];
     const trackingNumber = fulfillment?.tracking_number || null;
     const trackingCompany = fulfillment?.tracking_company || null;
+    const trackingUrl = fulfillment?.tracking_url || fulfillment?.tracking_urls?.[0] || null;
     const shippedAt = fulfillment?.created_at ? new Date(fulfillment.created_at) : null;
+    const shipmentStatus = fulfillment?.shipment_status || null; // in_transit, out_for_delivery, delivered, etc.
+    const fulfillmentUpdatedAt = fulfillment?.updated_at ? new Date(fulfillment.updated_at) : null;
+    // Check if delivered - Shopify sets shipment_status to 'delivered'
+    const deliveredAt = shipmentStatus === 'delivered' && fulfillmentUpdatedAt ? fulfillmentUpdatedAt : null;
 
     // Extract shipping address fields
     const addr = shopifyOrder.shipping_address;
@@ -55,7 +60,11 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
         tags: shopifyOrder.tags || null,
         trackingNumber,
         trackingCompany,
+        trackingUrl,
         shippedAt,
+        shipmentStatus,
+        deliveredAt,
+        fulfillmentUpdatedAt,
         shippingCity,
         shippingState,
         shippingCountry,

@@ -30,9 +30,9 @@ npm run lint     # Run ESLint
 ### Testing
 ```bash
 cd server
-npm test           # Run Jest tests
-npm test:watch     # Watch mode
-npm test:coverage  # Coverage report
+npm test              # Run Jest tests
+npm run test:watch    # Watch mode
+npm run test:coverage # Coverage report
 ```
 
 ### First-time Setup
@@ -45,14 +45,15 @@ npx prisma db push && npm run db:seed && npm run dev
 cd client && npm install && npm run dev
 ```
 
-Default login: `admin@coh.com` / `admin123`
+Default login: `admin@coh.com` / `XOFiya@34`
 
 ## Architecture
 
 ### Tech Stack
-- **Backend**: Node.js, Express.js (JavaScript ES modules), Prisma ORM, SQLite
-- **Frontend**: React 19, TypeScript, Vite, TanStack Query, Tailwind CSS, Recharts
+- **Backend**: Node.js, Express.js (JavaScript ES modules), Prisma ORM, PostgreSQL
+- **Frontend**: React 19, TypeScript, Vite, TanStack Query, Tailwind CSS, AG-Grid, Recharts
 - **Auth**: JWT tokens (7-day expiry) with bcryptjs password hashing
+- **Integrations**: Shopify (webhooks + bulk sync), iThink Logistics (shipment tracking)
 
 ### Key Patterns
 - **API Client**: Centralized axios instance in `client/src/services/api.ts` with auth interceptors
@@ -81,13 +82,15 @@ All routes in `server/src/routes/`. Base URL: `/api`
 - **Products**: `/api/products` - Product/Variation/SKU CRUD
 - **Fabrics**: `/api/fabrics` - Fabric types and inventory
 - **Inventory**: `/api/inventory` - Stock balance, transactions, alerts
-- **Orders**: `/api/orders` - Order management, fulfillment workflow
+- **Orders**: `/api/orders` - Order management, fulfillment workflow, archive management
 - **Customers**: `/api/customers` - Customer records
 - **Returns**: `/api/returns` - Return request workflow
 - **Production**: `/api/production` - Production batch scheduling
+- **Tracking**: `/api/tracking` - iThink Logistics shipment tracking (single/batch AWB)
 - **Reports**: `/api/reports` - Analytics and reporting
 - **Shopify**: `/api/shopify` - Shopify sync (products, orders, customers)
 - **Webhooks**: `/api/webhooks` - Shopify webhook receivers
+- **Repacking**: `/api/repacking` - Return item QC and restocking queue
 - **Import/Export**: `/api/export/*`, `/api/import/*` - CSV import/export
 - **Admin**: `/api/admin` - System settings, database management
 
@@ -133,25 +136,30 @@ Webhook secret stored in `SystemSetting` (key: `shopify_webhook_secret`). HMAC-S
 - `POST /api/import/fabrics` - Import fabrics from CSV
 
 ## Orders UI Features
-- **Pagination**: 25 items per page with page controls
+- **Tabs**: Open Orders, Shipped Orders, Archived Orders (with separate grids)
+- **AG-Grid**: Full-featured grid with column filters, sorting, and grouping
+- **Summary Panels**: Dashboard stats for order counts and fulfillment progress
+- **Pagination**: 25 items per page (archived orders use server-side pagination)
 - **Conditional Formatting**: Row colors indicate status:
   - Green: Packed/allocated items
   - Emerald: Picked items
   - Blue: Ready to pack (fully allocated)
   - Amber: Production queued
+- **Tracking Modal**: Real-time shipment tracking via iThink Logistics API
 - **Production Scheduling**: Date picker for out-of-stock items links to production batches
+- **Archive by Date**: Bulk archive orders older than specified date
 
 ## Environment Variables
 Server requires in `.env`:
-- `DATABASE_URL` - SQLite connection string
+- `DATABASE_URL` - PostgreSQL connection string
 - `JWT_SECRET` - JWT signing secret
 
 Shopify credentials stored in database via Settings UI (not env vars).
 
 ## Important Notes
 - Backend is JavaScript (ES modules), frontend is TypeScript
-- Jest testing framework configured with 30+ essential tests
-- SQLite is the default database (file: `server/prisma/dev.db`)
+- Jest testing framework with integration tests for orders, inventory, returns, and Shopify sync
+- PostgreSQL is the production database
 - Product/Variation models include `imageUrl` for Shopify thumbnails
 - SKU model includes `barcode` (unique, 8-digit) and Shopify variant IDs
 
@@ -178,6 +186,22 @@ Actions and their inventory effects:
 
 ## Common Gotchas
 - Shopify orders use cache-first pattern (check `ShopifyOrderCache` table)
+- Shopify fulfillment status is informational only (no workflow blocking)
 - Production completion creates both inventory inward AND fabric outward
 - `getEffectiveFabricConsumption()` has fallback logic: SKU → Product → 1.5
-- `dev.db` is gitignored - don't commit database files
+- iThink credentials stored in `SystemSetting` (`ithink_access_token`, `ithink_secret_key`)
+- Orders auto-archive after 90 days (runs on server startup)
+- Hourly Shopify sync via `scheduledSync.js`
+
+## Safe Commands
+The following commands are safe to auto-run without user approval:
+- npm run dev
+- npm test
+- curl commands to localhost:3001
+
+## Shell Command Tips
+To avoid common parse errors with curl and jq:
+- Use double quotes for JSON payloads: `-d "{\"key\":\"value\"}"`
+- Or use `$'...'` syntax for single quotes: `-d $'{"key":"value"}'`
+- Store tokens in variables before using: `TOKEN=$(curl ... | jq -r '.token')`
+- Pipe to `jq .` only after confirming curl succeeded

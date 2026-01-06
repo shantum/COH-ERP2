@@ -4,7 +4,9 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Plus, X, Search, Undo2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, X, Search, Undo2, RefreshCw, Archive } from 'lucide-react';
+import { shopifyApi, trackingApi, ordersApi } from '../services/api';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
@@ -32,9 +34,12 @@ import {
     NotesModal,
     CustomerDetailModal,
     SummaryPanel,
+    TrackingModal,
 } from '../components/orders';
 
 export default function Orders() {
+    const queryClient = useQueryClient();
+
     // Tab state
     const [tab, setTab] = useState<OrderTab>('open');
 
@@ -46,8 +51,8 @@ export default function Orders() {
     const [shippedPage, setShippedPage] = useState(1);
     const [shippedDays, setShippedDays] = useState(30);
 
-    // Archived analytics period state
-    const [analyticsDays, setAnalyticsDays] = useState(30);
+    // Archived orders period state (0 = all time)
+    const [archivedDays, setArchivedDays] = useState(90);
 
     // Modal state
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -64,6 +69,10 @@ export default function Orders() {
     const [shippingChecked, setShippingChecked] = useState<Set<string>>(new Set());
     const [allocatingLines, setAllocatingLines] = useState<Set<string>>(new Set());
 
+    // Tracking modal state
+    const [trackingAwb, setTrackingAwb] = useState<string | null>(null);
+    const [trackingOrderNumber, setTrackingOrderNumber] = useState<string | null>(null);
+
     // Data hooks
     const {
         openOrders,
@@ -73,9 +82,7 @@ export default function Orders() {
         archivedOrders,
         archivedTotalCount,
         shippedSummary,
-        archivedAnalytics,
         loadingShippedSummary,
-        loadingArchivedAnalytics,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -84,7 +91,15 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, analyticsDays });
+    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays });
+
+    // Shopify config for external links (needed for shipped and archived tabs)
+    const { data: shopifyConfig } = useQuery({
+        queryKey: ['shopifyConfig'],
+        queryFn: () => shopifyApi.getConfig().then(r => r.data),
+        enabled: tab === 'shipped' || tab === 'archived',
+        staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    });
 
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
@@ -106,6 +121,60 @@ export default function Orders() {
         onNotesSuccess: () => {
             setNotesOrder(null);
             setNotesText('');
+        },
+    });
+
+    // iThink sync state for real-time feedback
+    const [syncResult, setSyncResult] = useState<{
+        success: boolean;
+        updated: number;
+        delivered: number;
+        rto: number;
+        errors: number;
+    } | null>(null);
+
+    // Tracking sync mutation - uses the main triggerSync endpoint
+    const trackingSyncMutation = useMutation({
+        mutationFn: () => trackingApi.triggerSync(),
+        onSuccess: (response) => {
+            const result = response.data;
+            setSyncResult({
+                success: true,
+                updated: result.updated || 0,
+                delivered: result.delivered || 0,
+                rto: result.rto || 0,
+                errors: result.errors || 0,
+            });
+            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+            queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
+            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
+            // Clear result after 5 seconds
+            setTimeout(() => setSyncResult(null), 5000);
+        },
+        onError: (error: any) => {
+            setSyncResult({
+                success: false,
+                updated: 0,
+                delivered: 0,
+                rto: 0,
+                errors: 1,
+            });
+            setTimeout(() => setSyncResult(null), 5000);
+        },
+    });
+
+    // Archive delivered prepaid mutation
+    const archivePrepaidMutation = useMutation({
+        mutationFn: () => ordersApi.archiveDeliveredPrepaid(),
+        onSuccess: (response) => {
+            const result = response.data;
+            alert(`Archive complete!\n${result.archived} prepaid orders archived\nAvg delivery time: ${result.avgDaysToDeliver || 'N/A'} days`);
+            queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
+            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
+            queryClient.invalidateQueries({ queryKey: ['archivedOrders'] });
+        },
+        onError: (error: any) => {
+            alert(`Archive failed: ${error.response?.data?.error || error.message}`);
         },
     });
 
@@ -329,6 +398,29 @@ export default function Orders() {
                             <option value="180">Last 180 days</option>
                             <option value="365">Last 365 days</option>
                         </select>
+                        <button
+                            onClick={() => trackingSyncMutation.mutate()}
+                            disabled={trackingSyncMutation.isPending}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 border rounded transition-all ${
+                                syncResult?.success
+                                    ? 'bg-green-50 border-green-300 text-green-700'
+                                    : syncResult && !syncResult.success
+                                    ? 'bg-red-50 border-red-300 text-red-700'
+                                    : 'bg-white hover:bg-blue-50 hover:border-blue-300'
+                            } disabled:opacity-50`}
+                            title="Sync iThink tracking data for fulfilled orders with AWB"
+                        >
+                            <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
+                            {trackingSyncMutation.isPending ? (
+                                'Syncing...'
+                            ) : syncResult?.success ? (
+                                `✓ ${syncResult.updated} updated`
+                            ) : syncResult && !syncResult.success ? (
+                                'Sync failed'
+                            ) : (
+                                'Sync iThink'
+                            )}
+                        </button>
                         {columnVisibilityDropdown}
                         {Object.keys(customHeaders).length > 0 && (
                             <button
@@ -359,6 +451,42 @@ export default function Orders() {
                             <option value={180}>Last 180 days</option>
                             <option value={365}>Last 365 days</option>
                         </select>
+                        <button
+                            onClick={() => trackingSyncMutation.mutate()}
+                            disabled={trackingSyncMutation.isPending}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 border rounded transition-all ${
+                                syncResult?.success
+                                    ? 'bg-green-50 border-green-300 text-green-700'
+                                    : syncResult && !syncResult.success
+                                    ? 'bg-red-50 border-red-300 text-red-700'
+                                    : 'bg-white hover:bg-blue-50 hover:border-blue-300'
+                            } disabled:opacity-50`}
+                            title="Sync iThink tracking data for all orders with AWB"
+                        >
+                            <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
+                            {trackingSyncMutation.isPending ? (
+                                'Syncing...'
+                            ) : syncResult?.success ? (
+                                `✓ ${syncResult.updated} updated${syncResult.delivered > 0 ? `, ${syncResult.delivered} delivered` : ''}`
+                            ) : syncResult && !syncResult.success ? (
+                                'Sync failed'
+                            ) : (
+                                'Sync iThink'
+                            )}
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (confirm('Archive all delivered prepaid orders?')) {
+                                    archivePrepaidMutation.mutate();
+                                }
+                            }}
+                            disabled={archivePrepaidMutation.isPending}
+                            className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50 disabled:opacity-50"
+                            title="Archive all prepaid orders that are marked as delivered"
+                        >
+                            <Archive size={12} />
+                            {archivePrepaidMutation.isPending ? 'Archiving...' : 'Archive Delivered'}
+                        </button>
                     </div>
                 )}
             </div>
@@ -391,9 +519,16 @@ export default function Orders() {
                         onUnship={(id) => mutations.unship.mutate(id)}
                         onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
                         onMarkRto={(id) => mutations.markRto.mutate(id)}
+                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                        onTrack={(awb, orderNumber) => {
+                            setTrackingAwb(awb);
+                            setTrackingOrderNumber(orderNumber);
+                        }}
                         isUnshipping={mutations.unship.isPending}
                         isMarkingDelivered={mutations.markDelivered.isPending}
                         isMarkingRto={mutations.markRto.isPending}
+                        shopDomain={shopifyConfig?.shopDomain}
                     />
                     {/* Pagination Controls */}
                     {shippedPagination.totalPages > 1 && (
@@ -449,22 +584,36 @@ export default function Orders() {
                 />
             )}
 
-            {/* Archived Orders with Analytics Panel and Grid */}
+            {/* Archived Orders Grid */}
             {!isLoading && tab === 'archived' && (
-                <>
-                    <SummaryPanel
-                        type="archived"
-                        data={archivedAnalytics}
-                        isLoading={loadingArchivedAnalytics}
-                        days={analyticsDays}
-                        onDaysChange={setAnalyticsDays}
-                    />
+                <div className="space-y-4">
+                    {/* Period selector */}
+                    <div className="flex items-center gap-4">
+                        <label className="text-sm text-gray-600">Period:</label>
+                        <select
+                            value={archivedDays}
+                            onChange={(e) => setArchivedDays(Number(e.target.value))}
+                            className="border rounded px-3 py-1.5 text-sm"
+                        >
+                            <option value={30}>Last 30 days</option>
+                            <option value={90}>Last 90 days</option>
+                            <option value={180}>Last 6 months</option>
+                            <option value={365}>Last year</option>
+                            <option value={0}>All time</option>
+                        </select>
+                        <span className="text-sm text-gray-500">
+                            {archivedTotalCount.toLocaleString()} orders
+                        </span>
+                    </div>
                     <ArchivedOrdersGrid
                         orders={archivedOrders}
                         onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
+                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         isRestoring={mutations.unarchiveOrder.isPending}
+                        shopDomain={shopifyConfig?.shopDomain}
                     />
-                </>
+                </div>
             )}
 
             {/* Modals */}
@@ -547,6 +696,17 @@ export default function Orders() {
                 <OrderViewModal
                     orderId={viewingOrderId}
                     onClose={() => setViewingOrderId(null)}
+                />
+            )}
+
+            {trackingAwb && (
+                <TrackingModal
+                    awbNumber={trackingAwb}
+                    orderNumber={trackingOrderNumber || undefined}
+                    onClose={() => {
+                        setTrackingAwb(null);
+                        setTrackingOrderNumber(null);
+                    }}
                 />
             )}
         </div>

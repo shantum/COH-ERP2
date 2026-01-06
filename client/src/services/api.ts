@@ -135,7 +135,7 @@ export const ordersApi = {
         return api.get('/orders/shipped', { params: { limit, offset, ...rest } });
     },
     getCancelled: () => api.get('/orders/status/cancelled'),
-    getArchived: () => api.get('/orders/status/archived'),
+    getArchived: (params?: { days?: number }) => api.get('/orders/status/archived', { params }),
     archive: (id: string) => api.post(`/orders/${id}/archive`),
     unarchive: (id: string) => api.post(`/orders/${id}/unarchive`),
     getById: (id: string) => api.get(`/orders/${id}`),
@@ -164,6 +164,8 @@ export const ordersApi = {
     markDelivered: (id: string) => api.post(`/orders/${id}/mark-delivered`),
     markRto: (id: string) => api.post(`/orders/${id}/mark-rto`),
     receiveRto: (id: string) => api.post(`/orders/${id}/receive-rto`),
+    // Bulk archive
+    archiveDeliveredPrepaid: () => api.post('/orders/archive-delivered-prepaid'),
 };
 
 // Customers
@@ -422,6 +424,26 @@ export const adminApi = {
     getTierThresholds: () => api.get('/admin/tier-thresholds'),
     updateTierThresholds: (thresholds: { platinum: number; gold: number; silver: number }) =>
         api.put('/admin/tier-thresholds', thresholds),
+};
+
+// Tracking API (iThink Logistics integration)
+export const trackingApi = {
+    // Config
+    getConfig: () => api.get('/tracking/config'),
+    updateConfig: (data: { accessToken: string; secretKey: string }) =>
+        api.put('/tracking/config', data),
+    testConnection: () => api.post('/tracking/test-connection'),
+
+    // Tracking
+    getAwbTracking: (awbNumber: string) => api.get(`/tracking/awb/${awbNumber}`),
+    getTrackingHistory: (awbNumber: string) => api.get(`/tracking/history/${awbNumber}`),
+    batchTrack: (awbNumbers: string[]) => api.post('/tracking/batch', { awbNumbers }),
+    trackOrders: (orderIds: string[]) => api.post('/tracking/orders', { orderIds }),
+
+    // Sync
+    syncBackfill: (params?: { days?: number; limit?: number }) =>
+        api.post('/tracking/sync/backfill', {}, { params }),
+    triggerSync: () => api.post('/tracking/sync/trigger'),
 };
 
 export default api;

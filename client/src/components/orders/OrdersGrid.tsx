@@ -16,7 +16,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw } from 'lucide-react';
+import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
@@ -32,13 +32,49 @@ const compactTheme = themeQuartz.withParams({
     headerHeight: 32,
 });
 
+// Tracking status badge component (matches ShippedOrdersGrid)
+function TrackingStatusBadge({ status, daysInTransit, ofdCount }: { status: string; daysInTransit?: number; ofdCount?: number }) {
+    const configs: Record<string, { bg: string; text: string; label: string; icon: any }> = {
+        in_transit: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Transit', icon: Package },
+        manifested: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Manifested', icon: Package },
+        out_for_delivery: { bg: 'bg-cyan-100', text: 'text-cyan-700', label: 'Out for Delivery', icon: Truck },
+        delivered: { bg: 'bg-green-100', text: 'text-green-700', label: 'Delivered', icon: CheckCircle },
+        delivery_delayed: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Delayed', icon: AlertCircle },
+        rto_initiated: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO', icon: RotateCw },
+        rto_in_transit: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO Transit', icon: RotateCw },
+        rto_received: { bg: 'bg-red-200', text: 'text-red-800', label: 'RTO Received', icon: RotateCw },
+    };
+
+    const config = configs[status] || configs.in_transit;
+    const Icon = config.icon;
+
+    // Warning indicators
+    const isDelayed = daysInTransit && daysInTransit > 7;
+    const hasMultipleOfd = ofdCount && ofdCount >= 2;
+
+    return (
+        <div className="flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text}`}>
+                <Icon size={10} />
+                {config.label}
+            </span>
+            {isDelayed && !['delivered', 'rto_received'].includes(status) && (
+                <span className="text-amber-500" title={`${daysInTransit} days in transit`}>⚠️</span>
+            )}
+            {hasMultipleOfd && (
+                <span className="text-red-500 text-xs" title={`${ofdCount} delivery attempts`}>({ofdCount})</span>
+            )}
+        </div>
+    );
+}
+
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'ship', 'shopifyStatus',
-    'awb', 'courier', 'actions'
+    'awb', 'courier', 'trackingStatus', 'actions'
 ];
 
 // Column visibility dropdown component
@@ -886,6 +922,27 @@ export function OrdersGrid({
                 valueFormatter: (params: ValueFormatterParams) =>
                     params.data?.isFirstLine ? params.data.order?.courier || '' : '',
                 cellClass: 'text-xs text-blue-600',
+            },
+            {
+                colId: 'trackingStatus',
+                headerName: getHeaderName('trackingStatus'),
+                width: 110,
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const order = params.data.order;
+                    // Only show iThink status if we have actual iThink data
+                    const hasIThinkData = order?.courierStatusCode || order?.lastScanAt || order?.lastTrackingUpdate;
+                    if (!hasIThinkData) {
+                        return <span className="text-gray-400 text-xs">-</span>;
+                    }
+                    return (
+                        <TrackingStatusBadge
+                            status={order?.trackingStatus || 'in_transit'}
+                            daysInTransit={order?.daysInTransit}
+                            ofdCount={order?.deliveryAttempts}
+                        />
+                    );
+                },
             },
             {
                 colId: 'actions',

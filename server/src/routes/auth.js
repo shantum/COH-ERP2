@@ -36,11 +36,11 @@ router.post('/register', requireAdmin, async (req, res) => {
             },
         });
 
-        // Generate token
+        // Generate token (expiry configurable via JWT_EXPIRY env var)
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role },
             process.env.JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: process.env.JWT_EXPIRY || '7d' }
         );
 
         res.status(201).json({ user, token });
@@ -72,11 +72,11 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Account is disabled' });
         }
 
-        // Generate token
+        // Generate token (expiry configurable via JWT_EXPIRY env var)
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role },
             process.env.JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: process.env.JWT_EXPIRY || '7d' }
         );
 
         res.json({

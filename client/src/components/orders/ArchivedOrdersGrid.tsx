@@ -7,7 +7,7 @@ import { useMemo, useCallback } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Undo2 } from 'lucide-react';
+import { Undo2, ExternalLink } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
@@ -25,7 +25,10 @@ const compactTheme = themeQuartz.withParams({
 interface ArchivedOrdersGridProps {
     orders: any[];
     onRestore: (orderId: string) => void;
+    onViewOrder?: (order: any) => void;
+    onSelectCustomer?: (customer: any) => void;
     isRestoring?: boolean;
+    shopDomain?: string;
 }
 
 // Status badge component for final order status
@@ -46,10 +49,23 @@ function FinalStatusBadge({ status }: { status: string }) {
     );
 }
 
+// Helper to format dates
+function formatDate(date: string | null | undefined): string {
+    if (!date) return '-';
+    return new Date(date).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+    });
+}
+
 export function ArchivedOrdersGrid({
     orders,
     onRestore,
+    onViewOrder,
+    onSelectCustomer,
     isRestoring,
+    shopDomain,
 }: ArchivedOrdersGridProps) {
     // Transform orders for grid with grouping field
     const rowData = useMemo(() => {
@@ -67,13 +83,9 @@ export function ArchivedOrdersGrid({
                 ?.slice(0, 2)
                 .map((l: any) => l.sku?.variation?.product?.name || 'Item')
                 .join(', ') + (order.orderLines?.length > 2 ? '...' : ''),
-            orderDateFormatted: order.orderDate
-                ? new Date(order.orderDate).toLocaleDateString('en-IN', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                })
-                : '-',
+            orderDateFormatted: formatDate(order.orderDate),
+            shippedAtFormatted: formatDate(order.shippedAt),
+            deliveredAtFormatted: formatDate(order.deliveredAt),
         }));
     }, [orders]);
 
@@ -88,14 +100,40 @@ export function ArchivedOrdersGrid({
             field: 'orderNumber',
             headerName: 'Order',
             width: 100,
-            cellRenderer: (params: ICellRendererParams) => (
-                <span className="font-mono text-xs text-gray-600">{params.value}</span>
-            ),
+            cellRenderer: (params: ICellRendererParams) => {
+                const order = params.data;
+                if (!order) return null;
+                return (
+                    <button
+                        onClick={() => onViewOrder?.(order)}
+                        className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                        {params.value}
+                    </button>
+                );
+            },
         },
         {
             field: 'customerName',
             headerName: 'Customer',
             width: 150,
+            cellRenderer: (params: ICellRendererParams) => {
+                const order = params.data;
+                if (!order) return null;
+                return (
+                    <button
+                        onClick={() => onSelectCustomer?.({
+                            id: order.customerId,
+                            name: order.customerName,
+                            email: order.customerEmail,
+                            phone: order.customerPhone,
+                        })}
+                        className="text-blue-600 hover:text-blue-800 hover:underline truncate"
+                    >
+                        {params.value}
+                    </button>
+                );
+            },
         },
         {
             field: 'city',
@@ -105,12 +143,42 @@ export function ArchivedOrdersGrid({
         {
             field: 'orderDateFormatted',
             headerName: 'Order Date',
+            width: 100,
+        },
+        {
+            field: 'shippedAtFormatted',
+            headerName: 'Shipped',
+            width: 95,
+        },
+        {
+            field: 'deliveredAtFormatted',
+            headerName: 'Delivered',
+            width: 95,
+        },
+        {
+            field: 'courier',
+            headerName: 'Courier',
+            width: 85,
+            cellRenderer: (params: ICellRendererParams) =>
+                params.value ? (
+                    <span className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                        {params.value}
+                    </span>
+                ) : <span className="text-gray-400">-</span>,
+        },
+        {
+            field: 'awbNumber',
+            headerName: 'AWB',
             width: 110,
+            cellRenderer: (params: ICellRendererParams) =>
+                params.value ? (
+                    <span className="font-mono text-xs text-gray-500">{params.value}</span>
+                ) : <span className="text-gray-400">-</span>,
         },
         {
             field: 'itemCount',
             headerName: 'Items',
-            width: 70,
+            width: 55,
             cellRenderer: (params: ICellRendererParams) => (
                 <span className="text-gray-600" title={params.data?.itemSummary}>
                     {params.value}
@@ -120,14 +188,14 @@ export function ArchivedOrdersGrid({
         {
             field: 'totalAmount',
             headerName: 'Total',
-            width: 90,
+            width: 85,
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value ? `₹${Number(params.value).toLocaleString()}` : '-',
         },
         {
             field: 'status',
-            headerName: 'Final Status',
-            width: 100,
+            headerName: 'Status',
+            width: 90,
             cellRenderer: (params: ICellRendererParams) => (
                 <FinalStatusBadge status={params.value} />
             ),
@@ -135,12 +203,39 @@ export function ArchivedOrdersGrid({
         {
             field: 'channel',
             headerName: 'Channel',
-            width: 90,
+            width: 80,
             cellRenderer: (params: ICellRendererParams) => (
                 <span className="text-xs capitalize text-gray-600">
                     {params.value?.replace('_', ' ') || '-'}
                 </span>
             ),
+        },
+        {
+            colId: 'shopifyLink',
+            headerName: 'Shopify',
+            width: 75,
+            sortable: false,
+            cellRenderer: (params: ICellRendererParams) => {
+                const order = params.data;
+                if (!order?.shopifyOrderId) {
+                    return <span className="text-gray-400 text-xs">-</span>;
+                }
+                if (!shopDomain) {
+                    return <span className="text-gray-400 text-xs" title="Configure Shopify in Settings">N/A</span>;
+                }
+                const shopifyUrl = `https://${shopDomain}/admin/orders/${order.shopifyOrderId}`;
+                return (
+                    <a
+                        href={shopifyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 hover:underline"
+                        title="Open in Shopify Admin"
+                    >
+                        <ExternalLink size={11} /> View
+                    </a>
+                );
+            },
         },
         {
             colId: 'actions',
@@ -166,7 +261,7 @@ export function ArchivedOrdersGrid({
                 );
             },
         },
-    ], [onRestore, isRestoring]);
+    ], [onRestore, onViewOrder, onSelectCustomer, isRestoring, shopDomain]);
 
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,

@@ -33,7 +33,9 @@ import shopifyRoutes from './routes/shopify.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 import repackingRoutes from './routes/repacking.js';
+import trackingRoutes from './routes/tracking.js';
 import scheduledSync from './services/scheduledSync.js';
+import trackingSync from './services/trackingSync.js';
 
 const app = express();
 
@@ -116,6 +118,7 @@ app.use('/api/shopify', shopifyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/repacking', repackingRoutes);
+app.use('/api/tracking', trackingRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -151,11 +154,15 @@ app.listen(PORT, async () => {
 
   // Start hourly Shopify sync scheduler
   scheduledSync.start();
+
+  // Start tracking sync scheduler (every 4 hours)
+  trackingSync.start();
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   scheduledSync.stop();
+  trackingSync.stop();
   await prisma.$disconnect();
   process.exit(0);
 });

@@ -590,6 +590,98 @@ router.post('/sync/backfill-cache-fields', authenticateToken, async (req, res) =
     }
 });
 
+// Backfill tracking fields from existing rawData (for newly added schema fields)
+router.post('/sync/backfill-tracking-fields', authenticateToken, async (req, res) => {
+    try {
+        const batchSize = parseInt(req.query.batchSize) || 5000;
+
+        // Find cache entries that have fulfillment data but missing new tracking fields
+        // We check for entries with trackingNumber but no trackingUrl (indicates old cache format)
+        const cacheEntries = await req.prisma.shopifyOrderCache.findMany({
+            where: {
+                trackingNumber: { not: null },
+                trackingUrl: null,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: batchSize
+        });
+
+        console.log(`Found ${cacheEntries.length} cache entries to backfill tracking fields`);
+
+        if (cacheEntries.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No more entries to backfill tracking fields',
+                results: { updated: 0, errors: [], total: 0, remaining: 0 },
+            });
+        }
+
+        const results = {
+            updated: 0,
+            errors: [],
+            total: cacheEntries.length,
+        };
+
+        // Process in parallel batches
+        const parallelBatchSize = 100;
+        for (let i = 0; i < cacheEntries.length; i += parallelBatchSize) {
+            const batch = cacheEntries.slice(i, i + parallelBatchSize);
+
+            await Promise.all(batch.map(async (entry) => {
+                try {
+                    const shopifyOrder = JSON.parse(entry.rawData);
+
+                    // Extract tracking info from fulfillments
+                    const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
+                        || shopifyOrder.fulfillments?.[0];
+
+                    if (!fulfillment) {
+                        return; // Skip if no fulfillment
+                    }
+
+                    const trackingUrl = fulfillment.tracking_url || fulfillment.tracking_urls?.[0] || null;
+                    const shipmentStatus = fulfillment.shipment_status || null;
+                    const fulfillmentUpdatedAt = fulfillment.updated_at ? new Date(fulfillment.updated_at) : null;
+                    const deliveredAt = shipmentStatus === 'delivered' && fulfillmentUpdatedAt ? fulfillmentUpdatedAt : null;
+
+                    await req.prisma.shopifyOrderCache.update({
+                        where: { id: entry.id },
+                        data: {
+                            trackingUrl,
+                            shipmentStatus,
+                            deliveredAt,
+                            fulfillmentUpdatedAt,
+                        },
+                    });
+                    results.updated++;
+                } catch (entryError) {
+                    console.error(`Error processing cache ${entry.id}: ${entryError.message}`);
+                    results.errors.push(`Cache ${entry.id}: ${entryError.message}`);
+                }
+            }));
+
+            console.log(`Tracking backfill progress: ${Math.min(i + parallelBatchSize, cacheEntries.length)}/${cacheEntries.length}`);
+        }
+
+        // Check remaining
+        const remainingCount = await req.prisma.shopifyOrderCache.count({
+            where: {
+                trackingNumber: { not: null },
+                trackingUrl: null,
+            }
+        });
+
+        res.json({
+            success: true,
+            message: `Backfilled tracking fields for ${results.updated} cache entries`,
+            results: { ...results, remaining: remainingCount },
+        });
+    } catch (error) {
+        console.error('Backfill tracking fields error:', error);
+        res.status(500).json({ error: 'Failed to backfill tracking fields', details: error.message });
+    }
+});
+
 // Reprocess failed cache entries
 router.post('/sync/reprocess-cache', authenticateToken, async (req, res) => {
     try {

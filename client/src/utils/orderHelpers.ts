@@ -330,5 +330,6 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     shopifyStatus: 'Shopify',
     awb: 'AWB',
     courier: 'Courier',
+    trackingStatus: 'iThink',
     actions: '...',
 };

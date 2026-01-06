@@ -106,6 +106,15 @@ router.get('/open', async (req, res) => {
                 createdAt: true,
                 shopifyFulfillmentStatus: true,
                 paymentMethod: true,
+                // iThink tracking fields
+                trackingStatus: true,
+                courierStatusCode: true,
+                lastScanAt: true,
+                lastScanStatus: true,
+                lastScanLocation: true,
+                lastTrackingUpdate: true,
+                deliveryAttempts: true,
+                expectedDeliveryDate: true,
                 // Shopify data from cache (single source of truth)
                 shopifyCache: {
                     select: {
@@ -198,7 +207,8 @@ router.get('/shipped', async (req, res) => {
 
         const whereClause = {
             status: { in: ['shipped', 'delivered'] },
-            shippedAt: { gte: sinceDate }
+            shippedAt: { gte: sinceDate },
+            isArchived: false  // Exclude archived orders
         };
 
         // Get total count for pagination
@@ -230,16 +240,25 @@ router.get('/shipped', async (req, res) => {
                 createdAt: true,
                 shopifyFulfillmentStatus: true,
                 paymentMethod: true,
-                // Shopify data from cache (single source of truth)
+                // iThink Logistics tracking fields
+                trackingStatus: true,
+                expectedDeliveryDate: true,
+                deliveryAttempts: true,
+                lastScanStatus: true,
+                lastScanLocation: true,
+                lastScanAt: true,
+                lastTrackingUpdate: true,
+                courierStatusCode: true,
+                // Shopify data from cache - get rawData to extract any field we need
                 shopifyCache: {
                     select: {
+                        rawData: true,
+                        // Also get extracted fields for quick access (backwards compat)
                         discountCodes: true,
-                        customerNotes: true,
                         paymentMethod: true,
                         tags: true,
-                        trackingNumber: true,
-                        trackingCompany: true,
-                        shippedAt: true,
+                        fulfillmentStatus: true,
+                        financialStatus: true,
                     },
                 },
                 customer: true,
@@ -271,22 +290,58 @@ router.get('/shipped', async (req, res) => {
                 ? Math.floor((Date.now() - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
                 : 0;
 
-            // Determine tracking status based on RTO and delivery state
-            let trackingStatus = 'in_transit';
-            if (order.rtoReceivedAt) {
-                trackingStatus = 'rto_received';
-            } else if (order.rtoInitiatedAt) {
-                trackingStatus = 'rto_initiated';
-            } else if (order.status === 'delivered' || order.deliveredAt) {
-                trackingStatus = 'delivered';
-            } else if (daysInTransit > 7) {
-                trackingStatus = 'delivery_delayed';
+            // Use database tracking status if available, otherwise calculate fallback
+            let trackingStatus = order.trackingStatus;
+            if (!trackingStatus) {
+                // Fallback calculation for orders without tracking data yet
+                if (order.rtoReceivedAt) {
+                    trackingStatus = 'rto_received';
+                } else if (order.rtoInitiatedAt) {
+                    trackingStatus = 'rto_initiated';
+                } else if (order.status === 'delivered' || order.deliveredAt) {
+                    trackingStatus = 'delivered';
+                } else if (daysInTransit > 7) {
+                    trackingStatus = 'delivery_delayed';
+                } else {
+                    trackingStatus = 'in_transit';
+                }
             }
 
             const customerStats = customerStatsMap[order.customerId] || { ltv: 0, orderCount: 0 };
 
+            // Extract tracking fields directly from rawData (no backfill needed)
+            let shopifyCache = order.shopifyCache || {};
+            if (shopifyCache.rawData) {
+                try {
+                    const shopifyOrder = JSON.parse(shopifyCache.rawData);
+                    const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
+                        || shopifyOrder.fulfillments?.[0];
+
+                    // Build enriched cache object with extracted tracking fields
+                    shopifyCache = {
+                        ...shopifyCache,
+                        // Tracking fields extracted on-demand
+                        trackingNumber: fulfillment?.tracking_number || null,
+                        trackingCompany: fulfillment?.tracking_company || null,
+                        trackingUrl: fulfillment?.tracking_url || fulfillment?.tracking_urls?.[0] || null,
+                        shippedAt: fulfillment?.created_at || null,
+                        shipmentStatus: fulfillment?.shipment_status || null,
+                        deliveredAt: fulfillment?.shipment_status === 'delivered' ? fulfillment?.updated_at : null,
+                        fulfillmentUpdatedAt: fulfillment?.updated_at || null,
+                        // Customer notes from order
+                        customerNotes: shopifyOrder.note || null,
+                    };
+                    // Remove rawData from response (too large)
+                    delete shopifyCache.rawData;
+                } catch (e) {
+                    // If JSON parse fails, just use what we have
+                    delete shopifyCache.rawData;
+                }
+            }
+
             return {
                 ...order,
+                shopifyCache,
                 daysInTransit,
                 trackingStatus,
                 customerLtv: customerStats.ltv,
@@ -380,11 +435,11 @@ router.get('/archived/analytics', async (req, res) => {
         const sinceDate = new Date();
         sinceDate.setDate(sinceDate.getDate() - Number(days));
 
-        // Get archived orders with line items
+        // Get archived orders with line items - filter by orderDate (when placed), not archivedAt
         const orders = await req.prisma.order.findMany({
             where: {
                 isArchived: true,
-                archivedAt: { gte: sinceDate },
+                orderDate: { gte: sinceDate },
             },
             select: {
                 id: true,
@@ -1260,16 +1315,24 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
     }
 });
 
-// Get archived orders (paginated)
+// Get archived orders (paginated, optionally filtered by days)
 router.get('/status/archived', async (req, res) => {
     try {
-        const { limit = 100, offset = 0 } = req.query;
+        const { limit = 100, offset = 0, days } = req.query;
         const take = Number(limit);
         const skip = Number(offset);
 
+        // Build where clause - optionally filter by orderDate if days specified
+        const where = { isArchived: true };
+        if (days) {
+            const sinceDate = new Date();
+            sinceDate.setDate(sinceDate.getDate() - Number(days));
+            where.orderDate = { gte: sinceDate };
+        }
+
         const [orders, totalCount] = await Promise.all([
             req.prisma.order.findMany({
-                where: { isArchived: true },
+                where,
                 include: {
                     customer: true,
                     orderLines: {
@@ -1286,7 +1349,7 @@ router.get('/status/archived', async (req, res) => {
                 take,
                 skip,
             }),
-            req.prisma.order.count({ where: { isArchived: true } }),
+            req.prisma.order.count({ where }),
         ]);
 
         res.json({ orders, totalCount, limit: take, offset: skip });
@@ -1427,20 +1490,28 @@ router.post('/auto-archive', authenticateToken, async (req, res) => {
 // Archive orders before a specific date
 router.post('/archive-before-date', authenticateToken, async (req, res) => {
     try {
-        const { beforeDate } = req.body;
+        const { beforeDate, status } = req.body;
         if (!beforeDate) {
             return res.status(400).json({ error: 'beforeDate is required (ISO format)' });
         }
 
         const cutoffDate = new Date(beforeDate);
 
+        const where = {
+            orderDate: { lt: cutoffDate },
+            isArchived: false
+        };
+
+        // Optionally filter by status (e.g., 'shipped')
+        if (status) {
+            where.status = status;
+        }
+
         const result = await req.prisma.order.updateMany({
-            where: {
-                orderDate: { lt: cutoffDate },
-                isArchived: false
-            },
+            where,
             data: {
                 isArchived: true,
+                status: 'archived',
                 archivedAt: new Date()
             }
         });
@@ -1448,6 +1519,77 @@ router.post('/archive-before-date', authenticateToken, async (req, res) => {
         res.json({ message: `Archived ${result.count} orders before ${beforeDate}`, count: result.count });
     } catch (error) {
         console.error('Archive before date error:', error);
+        res.status(500).json({ error: 'Failed to archive orders' });
+    }
+});
+
+/**
+ * Archive delivered prepaid orders
+ * POST /api/orders/archive-delivered-prepaid
+ *
+ * Archives all prepaid orders that have:
+ * - trackingStatus = 'delivered' (from iThink Logistics)
+ * - paymentMethod = 'Prepaid'
+ * - status = 'shipped' or 'delivered' (not yet archived)
+ */
+router.post('/archive-delivered-prepaid', authenticateToken, async (req, res) => {
+    try {
+        // Find all delivered prepaid orders that haven't been archived yet
+        const ordersToArchive = await req.prisma.order.findMany({
+            where: {
+                trackingStatus: 'delivered',
+                paymentMethod: 'Prepaid',
+                status: { in: ['shipped', 'delivered'] },
+            },
+            select: {
+                id: true,
+                orderNumber: true,
+                deliveredAt: true,
+                shippedAt: true,
+            },
+        });
+
+        if (ordersToArchive.length === 0) {
+            return res.json({
+                message: 'No delivered prepaid orders to archive',
+                archived: 0,
+            });
+        }
+
+        // Archive them
+        const result = await req.prisma.order.updateMany({
+            where: {
+                id: { in: ordersToArchive.map(o => o.id) },
+            },
+            data: {
+                status: 'archived',
+            },
+        });
+
+        // Calculate days to deliver for each order
+        const deliveryStats = ordersToArchive
+            .filter(o => o.deliveredAt && o.shippedAt)
+            .map(o => {
+                const daysToDeliver = Math.ceil(
+                    (new Date(o.deliveredAt) - new Date(o.shippedAt)) / (1000 * 60 * 60 * 24)
+                );
+                return { orderNumber: o.orderNumber, daysToDeliver };
+            });
+
+        const avgDaysToDeliver = deliveryStats.length > 0
+            ? (deliveryStats.reduce((sum, s) => sum + s.daysToDeliver, 0) / deliveryStats.length).toFixed(1)
+            : null;
+
+        console.log(`[Auto-Archive] Archived ${result.count} delivered prepaid orders. Avg delivery time: ${avgDaysToDeliver} days`);
+
+        res.json({
+            message: `Archived ${result.count} delivered prepaid orders`,
+            archived: result.count,
+            avgDaysToDeliver,
+            deliveryStats: deliveryStats.slice(0, 10), // Sample
+        });
+    } catch (error) {
+        console.error('Archive delivered prepaid error:', error);
         res.status(500).json({ error: 'Failed to archive orders' });
     }
 });
