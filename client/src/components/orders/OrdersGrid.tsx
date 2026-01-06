@@ -843,7 +843,7 @@ export function OrdersGrid({
 
                     return (
                         <span className={`px-1.5 py-0.5 rounded text-xs ${style}`}>
-                            {displayStatus === 'unfulfilled' ? 'pending' : displayStatus}
+                            {displayStatus}
                         </span>
                     );
                 },

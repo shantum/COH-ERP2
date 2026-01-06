@@ -9,9 +9,9 @@
 | Metric | Value |
 |--------|-------|
 | Testing Framework | Jest (server-side) |
-| Test Files | `essential.test.js` (71 tests), `integration.test.js` (69 tests) |
-| Total Tests | 140 |
-| Coverage | Core utilities, validation, encryption, sync services, business flows |
+| Test Files | `essential.test.js` (71 tests), `integration.test.js` (69 tests), `database-webhook.test.js` (68 tests) |
+| Total Tests | 208 |
+| Coverage | Core utilities, validation, encryption, sync services, business flows, webhooks, Shopify sync, database models |
 
 **Run tests:** `cd server && npm test`
 
@@ -409,6 +409,84 @@ describe('Category Name', () => {
     });
 });
 ```
+
+---
+
+## Database, Webhook, and Sync Tests (68 tests)
+
+### 25. Database Model Validation (12 tests)
+
+**Logic tested:** Data integrity rules and model structure validation
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Order model structure | 4 | Order status, channel, line status enums |
+| ShopifyOrderCache model | 3 | Discount code extraction, tracking info |
+| Customer model | 3 | Email normalization, phone handling |
+| WebhookLog model | 2 | Status enums, deduplication keys |
+
+---
+
+### 26. Webhook Schema Validation (15 tests)
+
+**Logic tested:** Zod schema validation for Shopify webhook payloads
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Order schema | 5 | Valid payloads, type coercion, required fields |
+| Product schema | 3 | Title requirement, variant handling |
+| Customer schema | 3 | Email validation, optional fields |
+| Inventory level schema | 2 | Item ID extraction, available qty |
+| Deduplication logic | 2 | Duplicate detection, topic validation |
+
+---
+
+### 27. Shopify Order Processing (18 tests)
+
+**Logic tested:** Core processing from `shopifyOrderProcessor.js`
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Cache data extraction | 5 | Payment method, shipping address, gateway detection |
+| Order creation | 4 | Order number generation, effective price calculation |
+| Update detection | 5 | Status, fulfillment, AWB, discount code changes |
+| Error handling | 4 | No SKU match, cache-only fallback, status preservation |
+
+---
+
+### 28. Shopify Sync Workflows (8 tests)
+
+**Logic tested:** Sync modes and filtering from `syncWorker.js`
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Mode configuration | 3 | DEEP, QUICK, UPDATE mode settings |
+| Order filtering | 3 | Date filters, skip existing, stale detection |
+| Processing results | 2 | Action counting, progress calculation |
+
+---
+
+### 29. Orders Display Logic (9 tests)
+
+**Logic tested:** Order listing and display from `orders.js`
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Filtering logic | 3 | Status, channel, date range filters |
+| Latest orders | 2 | Sort order, pagination |
+| Order enrichment | 4 | Fulfillment stage, days since order |
+
+---
+
+### 30. Dead Letter Queue (6 tests)
+
+**Logic tested:** FailedSyncItem retry logic
+
+| Test Category | Tests | Description |
+|---------------|-------|-------------|
+| Queue insertion | 2 | Deduplication key, status enums |
+| Retry scheduling | 2 | Exponential backoff, max retries |
+| Status transitions | 2 | pending → retrying → resolved/abandoned |
 
 ---
 
