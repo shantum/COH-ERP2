@@ -367,7 +367,7 @@ router.get('/:id', async (req, res) => {
                 // Batch lookup SKU images from local database
                 const skuImages = {};
                 if (skuCodes.length > 0) {
-                    const skus = await req.prisma.sKU.findMany({
+                    const skus = await req.prisma.sku.findMany({
                         where: { skuCode: { in: skuCodes } },
                         select: {
                             skuCode: true,
@@ -396,6 +396,8 @@ router.get('/:id', async (req, res) => {
                     financialStatus: raw.financial_status,
                     fulfillmentStatus: raw.fulfillment_status,
                     discountCodes: raw.discount_codes || [],
+                    tags: raw.tags || null,
+                    customerNote: raw.note || null,
                     shippingLines: (raw.shipping_lines || []).map(s => ({
                         title: s.title,
                         price: s.price,

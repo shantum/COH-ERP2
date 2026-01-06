@@ -95,6 +95,12 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
         partially_refunded: 'bg-orange-100 text-orange-700',
     };
 
+    const fulfillmentColors: Record<string, string> = {
+        fulfilled: 'bg-green-100 text-green-700',
+        partial: 'bg-yellow-100 text-yellow-700',
+        unfulfilled: 'bg-gray-100 text-gray-600',
+    };
+
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -126,7 +132,12 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
                         </span>
                         {shopify?.financialStatus && (
                             <span className={`px-2 py-1 rounded text-xs font-medium ${paymentColors[shopify.financialStatus] || 'bg-gray-100'}`}>
-                                {shopify.financialStatus.toUpperCase()}
+                                {shopify.financialStatus.replace('_', ' ').toUpperCase()}
+                            </span>
+                        )}
+                        {(shopify?.fulfillmentStatus || order.shopifyFulfillmentStatus) && (
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${fulfillmentColors[shopify?.fulfillmentStatus || order.shopifyFulfillmentStatus] || 'bg-gray-100'}`}>
+                                {(shopify?.fulfillmentStatus || order.shopifyFulfillmentStatus || 'unfulfilled').toUpperCase()}
                             </span>
                         )}
                         <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded">
@@ -178,16 +189,27 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
                         </div>
                     </div>
 
+                    {/* Tags */}
+                    {shopify?.tags && (
+                        <div className="flex flex-wrap gap-1">
+                            {shopify.tags.split(',').map((tag: string, idx: number) => (
+                                <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
+                                    {tag.trim()}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
                     {/* Order Notes */}
-                    {(order.customerNotes || order.internalNotes) && (
+                    {(order.customerNotes || order.internalNotes || shopify?.customerNote) && (
                         <div className="bg-yellow-50 rounded-lg p-3">
                             <h3 className="text-sm font-medium text-yellow-700 mb-2 flex items-center gap-2">
                                 <FileText className="w-4 h-4" /> Notes
                             </h3>
-                            {order.customerNotes && (
+                            {(order.customerNotes || shopify?.customerNote) && (
                                 <div className="text-sm mb-2">
                                     <span className="text-yellow-600 font-medium">Customer: </span>
-                                    <span className="text-gray-700">{order.customerNotes}</span>
+                                    <span className="text-gray-700">{order.customerNotes || shopify?.customerNote}</span>
                                 </div>
                             )}
                             {order.internalNotes && (
