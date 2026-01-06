@@ -499,15 +499,15 @@ class ShopifyClient {
 
     /**
      * Map Shopify order status to ERP status
+     *
+     * NOTE: Shopify fulfillment status is informational only.
+     * ERP manages its own shipped/delivered statuses via the Ship Order action.
+     * Fulfillment data is stored in shopifyFulfillmentStatus for display purposes.
      */
     mapOrderStatus(shopifyOrder) {
-        const financialStatus = shopifyOrder.financial_status;
-        const fulfillmentStatus = shopifyOrder.fulfillment_status;
-
         if (shopifyOrder.cancelled_at) return 'cancelled';
-        if (fulfillmentStatus === 'fulfilled') return 'delivered';
-        if (fulfillmentStatus === 'partial') return 'shipped';
-        if (financialStatus === 'paid' || financialStatus === 'partially_paid') return 'open';
+        // All non-cancelled orders start as 'open' in ERP
+        // shipped/delivered status is managed by ERP ship action, not Shopify fulfillment
         return 'open';
     }
 

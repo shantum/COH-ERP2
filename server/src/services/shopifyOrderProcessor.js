@@ -146,11 +146,16 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     const customerId = dbCustomer?.id || null;
 
     // Determine order status
+    // NOTE: Shopify fulfillment is informational only. ERP manages shipped/delivered statuses.
+    // Preserve ERP-managed statuses (shipped, delivered) - only allow cancelled to override
     let status = shopifyClient.mapOrderStatus(shopifyOrder);
 
-    // Preserve local 'shipped' status if order is fulfilled in Shopify
-    if (shopifyOrder.fulfillment_status === 'fulfilled' && existingOrder?.status === 'shipped') {
-        status = 'shipped';
+    if (existingOrder) {
+        const erpManagedStatuses = ['shipped', 'delivered'];
+        if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
+            // Preserve ERP status unless Shopify cancels the order
+            status = existingOrder.status;
+        }
     }
 
     // Determine payment method (COD vs Prepaid)
