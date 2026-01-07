@@ -987,16 +987,25 @@ router.delete('/undo-inward/:id', authenticateToken, async (req, res) => {
 // ============================================
 
 // Get inventory balance for all SKUs
+// By default excludes custom SKUs from standard inventory view
+// Pass includeCustomSkus=true to include them (e.g., for admin views)
 router.get('/balance', authenticateToken, async (req, res) => {
     try {
         // Default to all SKUs (high limit) since inventory view needs complete picture
         // Use explicit limit param for paginated requests
-        const { belowTarget, search, limit = 10000, offset = 0 } = req.query;
+        const { belowTarget, search, limit = 10000, offset = 0, includeCustomSkus = 'false' } = req.query;
         const take = Number(limit);
         const skip = Number(offset);
+        const shouldIncludeCustomSkus = includeCustomSkus === 'true';
+
+        // Build SKU filter - by default exclude custom SKUs from standard inventory view
+        const skuWhere = {
+            isActive: true,
+            ...(shouldIncludeCustomSkus ? {} : { isCustomSku: false })
+        };
 
         const skus = await req.prisma.sku.findMany({
-            where: { isActive: true },
+            where: skuWhere,
             include: {
                 variation: {
                     include: {
@@ -1009,8 +1018,11 @@ router.get('/balance', authenticateToken, async (req, res) => {
         });
 
         // Calculate all balances in a single query (fixes N+1)
+        // Use excludeCustomSkus option to match SKU filtering
         const skuIds = skus.map(sku => sku.id);
-        const balanceMap = await calculateAllInventoryBalances(req.prisma, skuIds);
+        const balanceMap = await calculateAllInventoryBalances(req.prisma, skuIds, {
+            excludeCustomSkus: !shouldIncludeCustomSkus
+        });
 
         const balances = skus.map((sku) => {
             const balance = balanceMap.get(sku.id) || { totalInward: 0, totalOutward: 0, totalReserved: 0, currentBalance: 0, availableBalance: 0 };
@@ -1039,6 +1051,8 @@ router.get('/balance', authenticateToken, async (req, res) => {
                 status: balance.availableBalance < sku.targetStockQty ? 'below_target' : 'ok',
                 mrp: sku.mrp,
                 shopifyQty: sku.shopifyInventoryCache?.availableQty ?? null,
+                // Custom SKU fields (only present when includeCustomSkus=true)
+                isCustomSku: sku.isCustomSku || false,
             };
         });
 
@@ -1672,10 +1686,16 @@ async function matchProductionBatchInTransaction(tx, skuId, quantity) {
 // STOCK ALERTS
 // ============================================
 
+// Stock alerts exclude custom SKUs since they're made-to-order
+// and don't need stock replenishment alerts
 router.get('/alerts', authenticateToken, async (req, res) => {
     try {
+        // Exclude custom SKUs from alerts - they don't need stock replenishment
         const skus = await req.prisma.sku.findMany({
-            where: { isActive: true },
+            where: {
+                isActive: true,
+                isCustomSku: false
+            },
             include: {
                 variation: {
                     include: {
@@ -1687,8 +1707,11 @@ router.get('/alerts', authenticateToken, async (req, res) => {
         });
 
         // Calculate all balances in single queries (fixes N+1)
+        // excludeCustomSkus=true ensures we don't get balances for custom SKUs
         const skuIds = skus.map(sku => sku.id);
-        const inventoryBalanceMap = await calculateAllInventoryBalances(req.prisma, skuIds);
+        const inventoryBalanceMap = await calculateAllInventoryBalances(req.prisma, skuIds, {
+            excludeCustomSkus: true
+        });
         const fabricBalanceMap = await calculateAllFabricBalances(req.prisma);
 
         const alerts = [];

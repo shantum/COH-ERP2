@@ -50,6 +50,12 @@ export interface Sku {
   shopifyVariantId: string | null;
   variation?: Variation;
   skuCosting?: SkuCosting;
+  // Custom SKU fields
+  isCustomSku?: boolean;
+  parentSkuId?: string;
+  customizationType?: string;
+  customizationValue?: string;
+  customizationNotes?: string;
 }
 
 export interface SkuCosting {
@@ -202,6 +208,11 @@ export interface OrderLine {
   rtoInwardedAt: string | null;
   rtoInwardedById: string | null;
   rtoNotes: string | null;
+  // Customization fields
+  isCustomized?: boolean;
+  isNonReturnable?: boolean;
+  originalSkuId?: string;
+  customizedAt?: string;
   sku?: Sku;
   productionBatch?: ProductionBatch;
 }

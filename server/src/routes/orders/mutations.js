@@ -5,9 +5,9 @@
 
 import { Router } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
-import { releaseReservedInventory, createReservedTransaction, calculateInventoryBalance, recalculateOrderStatus } from '../../utils/queryPatterns.js';
+import { releaseReservedInventory, createReservedTransaction, calculateInventoryBalance, recalculateOrderStatus, createCustomSku, removeCustomization } from '../../utils/queryPatterns.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
-import { validate, CreateOrderSchema, UpdateOrderSchema } from '../../utils/validation.js';
+import { validate, CreateOrderSchema, UpdateOrderSchema, CustomizeLineSchema } from '../../utils/validation.js';
 
 const router = Router();
 
@@ -756,6 +756,133 @@ router.post('/:id/lines', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Add line error:', error);
         res.status(500).json({ error: 'Failed to add line' });
+    }
+});
+
+// ============================================
+// ORDER LINE CUSTOMIZATION
+// ============================================
+
+/**
+ * Customize an order line - create custom SKU
+ * POST /lines/:lineId/customize
+ *
+ * Creates a custom SKU for the order line with customization details.
+ * Line must be in 'pending' status and not already customized.
+ * The custom SKU code is generated as {BASE_SKU}-C{XX}.
+ */
+router.post('/lines/:lineId/customize', authenticateToken, validate(CustomizeLineSchema), async (req, res) => {
+    try {
+        const { lineId } = req.params;
+        const customizationData = req.validatedBody;
+        const userId = req.user.id;
+
+        // Get order line to find the base SKU
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            include: { sku: true, order: { select: { orderNumber: true, status: true } } },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        // Use the current SKU as the base SKU
+        const baseSkuId = line.skuId;
+
+        const result = await createCustomSku(
+            req.prisma,
+            baseSkuId,
+            customizationData,
+            lineId,
+            userId
+        );
+
+        console.log(`[Customize] Order ${result.orderLine.order.orderNumber}: Created custom SKU ${result.customSku.skuCode} for line ${lineId}`);
+
+        res.json({
+            id: result.orderLine.id,
+            customSkuCode: result.customSku.skuCode,
+            customSkuId: result.customSku.id,
+            isCustomized: true,
+            isNonReturnable: true,
+            originalSkuCode: result.originalSkuCode,
+            qty: result.orderLine.qty,
+            customizationType: result.customSku.customizationType,
+            customizationValue: result.customSku.customizationValue,
+            customizationNotes: result.customSku.customizationNotes,
+        });
+    } catch (error) {
+        // Handle specific error codes from createCustomSku
+        if (error.message === 'ORDER_LINE_NOT_FOUND') {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+        if (error.message === 'LINE_NOT_PENDING') {
+            return res.status(400).json({
+                error: 'Cannot customize an allocated/picked/packed line. Unallocate first.',
+                code: 'LINE_NOT_PENDING',
+            });
+        }
+        if (error.message === 'ALREADY_CUSTOMIZED') {
+            return res.status(400).json({
+                error: 'Order line is already customized',
+                code: 'ALREADY_CUSTOMIZED',
+            });
+        }
+
+        console.error('Customize line error:', error);
+        res.status(500).json({ error: 'Failed to customize order line' });
+    }
+});
+
+/**
+ * Remove customization from an order line
+ * DELETE /lines/:lineId/customize
+ *
+ * Reverts the order line to the original SKU and deletes the custom SKU.
+ * Only allowed if no inventory transactions or production batches exist.
+ */
+router.delete('/lines/:lineId/customize', authenticateToken, async (req, res) => {
+    try {
+        const { lineId } = req.params;
+
+        const result = await removeCustomization(req.prisma, lineId);
+
+        console.log(`[Uncustomize] Order ${result.orderLine.order.orderNumber}: Removed custom SKU ${result.deletedCustomSkuCode} from line ${lineId}`);
+
+        res.json({
+            id: result.orderLine.id,
+            skuCode: result.orderLine.sku.skuCode,
+            skuId: result.orderLine.sku.id,
+            isCustomized: false,
+            deletedCustomSkuCode: result.deletedCustomSkuCode,
+        });
+    } catch (error) {
+        // Handle specific error codes from removeCustomization
+        if (error.message === 'ORDER_LINE_NOT_FOUND') {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+        if (error.message === 'NOT_CUSTOMIZED') {
+            return res.status(400).json({
+                error: 'Order line is not customized',
+                code: 'NOT_CUSTOMIZED',
+            });
+        }
+        if (error.message === 'CANNOT_UNDO_HAS_INVENTORY') {
+            return res.status(400).json({
+                error: 'Cannot undo customization - inventory transactions exist for custom SKU',
+                code: 'CANNOT_UNDO_HAS_INVENTORY',
+            });
+        }
+        if (error.message === 'CANNOT_UNDO_HAS_PRODUCTION') {
+            return res.status(400).json({
+                error: 'Cannot undo customization - production batch exists for custom SKU',
+                code: 'CANNOT_UNDO_HAS_PRODUCTION',
+            });
+        }
+
+        console.error('Uncustomize line error:', error);
+        res.status(500).json({ error: 'Failed to remove customization' });
     }
 });
 

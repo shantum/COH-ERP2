@@ -91,6 +91,13 @@ export interface FlattenedOrderRow {
     totalLines: number;
     fulfillmentStage: string;
     order: any;
+    // Customization fields
+    isCustomized: boolean;
+    isNonReturnable: boolean;
+    customSkuCode: string | null;
+    customizationType: string | null;
+    customizationValue: string | null;
+    originalSkuCode: string | null;
 }
 
 /**
@@ -153,7 +160,14 @@ export function flattenOrders(
                 isFirstLine: true,
                 totalLines: 0,
                 fulfillmentStage: order.fulfillmentStage,
-                order: order
+                order: order,
+                // Customization fields
+                isCustomized: false,
+                isNonReturnable: false,
+                customSkuCode: null,
+                customizationType: null,
+                customizationValue: null,
+                originalSkuCode: null,
             });
             return;
         }
@@ -163,6 +177,16 @@ export function flattenOrders(
             const skuStock = getSkuBalance(inventoryBalance, line.skuId);
             const fabricBal = fabricId ? getFabricBalance(fabricStock, fabricId) : 0;
             const productionBatch = line.productionBatch;
+
+            // Extract customization data
+            const isCustomized = line.isCustomized || false;
+            const isNonReturnable = line.isNonReturnable || false;
+            const sku = line.sku;
+            const customSkuCode = isCustomized && sku?.isCustomSku ? sku.skuCode : null;
+            const customizationType = sku?.customizationType || null;
+            const customizationValue = sku?.customizationValue || null;
+            // originalSkuCode would need to be populated by the backend
+            const originalSkuCode = line.originalSkuId ? (line.originalSku?.skuCode || null) : null;
 
             rows.push({
                 orderId: order.id,
@@ -189,7 +213,14 @@ export function flattenOrders(
                 isFirstLine: idx === 0,
                 totalLines: orderLines.length,
                 fulfillmentStage: order.fulfillmentStage,
-                order: order
+                order: order,
+                // Customization fields
+                isCustomized,
+                isNonReturnable,
+                customSkuCode,
+                customizationType,
+                customizationValue,
+                originalSkuCode,
             });
         });
     });
@@ -319,6 +350,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     customerLtv: 'LTV',
     skuCode: 'SKU',
     productName: 'Item',
+    customize: 'Custom',
     qty: 'Q',
     skuStock: 'St',
     fabricBalance: 'Fab',

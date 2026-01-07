@@ -539,8 +539,44 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'At least one item is required' });
         }
 
-        // Check for duplicate items - items from this order already in an active ticket
+        // CUSTOMIZATION CHECK: Block returns for non-returnable (customized) items
         const skuIds = lines.map((l) => l.skuId);
+
+        // Get order lines with their return eligibility status
+        const orderLinesWithSkus = await req.prisma.orderLine.findMany({
+            where: {
+                orderId: originalOrderId,
+                skuId: { in: skuIds }
+            },
+            include: {
+                sku: { select: { skuCode: true, isCustomSku: true } }
+            }
+        });
+
+        // Check for non-returnable items
+        const nonReturnableItems = [];
+        for (const lineData of lines) {
+            const orderLine = orderLinesWithSkus.find(ol => ol.skuId === lineData.skuId);
+
+            if (orderLine?.isNonReturnable) {
+                nonReturnableItems.push({
+                    skuCode: orderLine.sku.skuCode,
+                    skuId: lineData.skuId,
+                    reason: 'customized'
+                });
+            }
+        }
+
+        if (nonReturnableItems.length > 0) {
+            return res.status(400).json({
+                error: 'Customized items cannot be returned',
+                nonReturnableItems,
+                isCustomized: true,
+                hint: 'These items were customized for this order and are non-returnable'
+            });
+        }
+
+        // Check for duplicate items - items from this order already in an active ticket
         const existingTickets = await req.prisma.returnRequest.findMany({
             where: {
                 originalOrderId,

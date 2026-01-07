@@ -26,10 +26,11 @@ router.post('/tailors', authenticateToken, async (req, res) => {
     }
 });
 
-// Get production batches
+// Get all production batches
+// Custom batches include customization details and linked order info
 router.get('/batches', authenticateToken, async (req, res) => {
     try {
-        const { status, tailorId, startDate, endDate } = req.query;
+        const { status, tailorId, startDate, endDate, customOnly } = req.query;
         const where = {};
         if (status) where.status = status;
         if (tailorId) where.tailorId = tailorId;
@@ -38,18 +39,57 @@ router.get('/batches', authenticateToken, async (req, res) => {
             if (startDate) where.batchDate.gte = new Date(startDate);
             if (endDate) where.batchDate.lte = new Date(endDate);
         }
+        // Optional filter to show only custom SKU batches
+        if (customOnly === 'true') {
+            where.sku = { isCustomSku: true };
+        }
 
         const batches = await req.prisma.productionBatch.findMany({
             where,
             include: {
                 tailor: true,
                 sku: { include: { variation: { include: { product: true, fabric: true } } } },
+                // Include linked order line details for custom batches
+                orderLines: {
+                    include: {
+                        order: {
+                            select: {
+                                id: true,
+                                orderNumber: true,
+                                customerName: true
+                            }
+                        }
+                    }
+                }
             },
             orderBy: { batchDate: 'desc' },
         });
 
-        res.json(batches);
+        // Enrich batches with customization display info
+        const enrichedBatches = batches.map(batch => {
+            const isCustom = batch.sku?.isCustomSku || false;
+
+            return {
+                ...batch,
+                // Add explicit custom SKU indicator
+                isCustomSku: isCustom,
+                // Add customization details if this is a custom batch
+                ...(isCustom && batch.sku && {
+                    customization: {
+                        type: batch.sku.customizationType || null,
+                        value: batch.sku.customizationValue || null,
+                        notes: batch.sku.customizationNotes || null,
+                        sourceOrderLineId: batch.sourceOrderLineId,
+                        // Include linked order info
+                        linkedOrder: batch.orderLines?.[0]?.order || null
+                    }
+                })
+            };
+        });
+
+        res.json(enrichedBatches);
     } catch (error) {
+        console.error('Fetch batches error:', error);
         res.status(500).json({ error: 'Failed to fetch batches' });
     }
 });
@@ -337,6 +377,7 @@ const getEffectiveFabricConsumption = (sku, product) => {
 };
 
 // Complete batch (creates inventory inward + fabric outward)
+// Custom SKUs auto-allocate to their linked order line
 router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
     try {
         const { qtyCompleted } = req.body;
@@ -381,6 +422,10 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
             });
         }
 
+        // Check if this is a custom SKU batch that should auto-allocate
+        const isCustomSkuBatch = batch.sku.isCustomSku && batch.sourceOrderLineId;
+
+        let autoAllocated = false;
         await req.prisma.$transaction(async (tx) => {
             // Update batch
             await tx.productionBatch.update({
@@ -389,14 +434,17 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
             });
 
             // Create inventory inward with batch code for tracking
+            const inwardReason = isCustomSkuBatch ? 'production_custom' : TXN_REASON.PRODUCTION;
             await tx.inventoryTransaction.create({
                 data: {
                     skuId: batch.skuId,
                     txnType: TXN_TYPE.INWARD,
                     qty: qtyCompleted,
-                    reason: TXN_REASON.PRODUCTION,
+                    reason: inwardReason,
                     referenceId: batch.id,
-                    notes: `Production ${batch.batchCode || batch.id}`,
+                    notes: isCustomSkuBatch
+                        ? `Custom production: ${batch.sku.skuCode}`
+                        : `Production ${batch.batchCode || batch.id}`,
                     createdById: req.user.id
                 },
             });
@@ -413,13 +461,55 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
                     createdById: req.user.id
                 },
             });
+
+            // CUSTOM SKU AUTO-ALLOCATION:
+            // When a custom SKU batch completes, auto-allocate to the linked order line
+            // Standard order-linked batches do NOT auto-allocate (staff allocates manually)
+            if (isCustomSkuBatch) {
+                // Create reserved transaction for the completed quantity
+                await tx.inventoryTransaction.create({
+                    data: {
+                        skuId: batch.skuId,
+                        txnType: TXN_TYPE.RESERVED,
+                        qty: qtyCompleted,
+                        reason: TXN_REASON.ORDER_ALLOCATION,
+                        referenceId: batch.sourceOrderLineId,
+                        notes: `Auto-allocated from custom production: ${batch.sku.skuCode}`,
+                        createdById: req.user.id
+                    },
+                });
+
+                // Update order line status to 'allocated'
+                await tx.orderLine.update({
+                    where: { id: batch.sourceOrderLineId },
+                    data: {
+                        lineStatus: 'allocated',
+                        allocatedAt: new Date()
+                    }
+                });
+
+                autoAllocated = true;
+            }
         });
 
         const updated = await req.prisma.productionBatch.findUnique({
             where: { id: req.params.id },
             include: { tailor: true, sku: true }
         });
-        res.json(updated);
+
+        // Include auto-allocation info in response
+        res.json({
+            ...updated,
+            autoAllocated,
+            isCustomSku: batch.sku.isCustomSku,
+            ...(isCustomSkuBatch && {
+                allocationInfo: {
+                    orderLineId: batch.sourceOrderLineId,
+                    qtyAllocated: qtyCompleted,
+                    message: 'Custom SKU auto-allocated to order line'
+                }
+            })
+        });
     } catch (error) {
         console.error('Complete batch error:', error);
         res.status(500).json({ error: 'Failed to complete batch' });
@@ -427,6 +517,7 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
 });
 
 // Uncomplete batch (reverses inventory inward + fabric outward)
+// For custom SKUs, also reverses auto-allocation
 router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
     try {
         const batch = await req.prisma.productionBatch.findUnique({
@@ -437,6 +528,25 @@ router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
         if (!batch) return res.status(404).json({ error: 'Batch not found' });
         if (batch.status !== 'completed') return res.status(400).json({ error: 'Batch is not completed' });
 
+        // Check if this is a custom SKU batch that was auto-allocated
+        const isCustomSkuBatch = batch.sku.isCustomSku && batch.sourceOrderLineId;
+
+        // If custom SKU, check if order line has progressed beyond allocation
+        if (isCustomSkuBatch) {
+            const orderLine = await req.prisma.orderLine.findUnique({
+                where: { id: batch.sourceOrderLineId }
+            });
+
+            if (orderLine && ['picked', 'packed', 'shipped'].includes(orderLine.lineStatus)) {
+                return res.status(400).json({
+                    error: 'Cannot uncomplete - order line has progressed beyond allocation',
+                    lineStatus: orderLine.lineStatus,
+                    hint: 'Unship or unpick the order line first'
+                });
+            }
+        }
+
+        let allocationReversed = false;
         await req.prisma.$transaction(async (tx) => {
             // Update batch status back to planned
             await tx.productionBatch.update({
@@ -444,22 +554,58 @@ router.post('/batches/:id/uncomplete', authenticateToken, async (req, res) => {
                 data: { qtyCompleted: 0, status: 'planned', completedAt: null }
             });
 
-            // Delete inventory inward transaction
+            // Delete inventory inward transaction (includes both 'production' and 'production_custom' reasons)
             await tx.inventoryTransaction.deleteMany({
-                where: { referenceId: batch.id, reason: TXN_REASON.PRODUCTION, txnType: TXN_TYPE.INWARD }
+                where: {
+                    referenceId: batch.id,
+                    reason: { in: [TXN_REASON.PRODUCTION, 'production_custom'] },
+                    txnType: TXN_TYPE.INWARD
+                }
             });
 
             // Delete fabric outward transaction
             await tx.fabricTransaction.deleteMany({
                 where: { referenceId: batch.id, reason: TXN_REASON.PRODUCTION, txnType: 'outward' }
             });
+
+            // CUSTOM SKU: Reverse auto-allocation
+            if (isCustomSkuBatch) {
+                // Delete reserved transaction for this order line
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: batch.sourceOrderLineId,
+                        txnType: TXN_TYPE.RESERVED,
+                        reason: TXN_REASON.ORDER_ALLOCATION,
+                        skuId: batch.skuId
+                    }
+                });
+
+                // Reset order line status back to pending
+                await tx.orderLine.update({
+                    where: { id: batch.sourceOrderLineId },
+                    data: {
+                        lineStatus: 'pending',
+                        allocatedAt: null
+                    }
+                });
+
+                allocationReversed = true;
+            }
         });
 
         const updated = await req.prisma.productionBatch.findUnique({
             where: { id: req.params.id },
             include: { tailor: true, sku: { include: { variation: { include: { product: true } } } } }
         });
-        res.json(updated);
+
+        res.json({
+            ...updated,
+            allocationReversed,
+            isCustomSku: batch.sku.isCustomSku,
+            ...(allocationReversed && {
+                message: 'Custom SKU allocation reversed - order line reset to pending'
+            })
+        });
     } catch (error) {
         console.error('Uncomplete batch error:', error);
         res.status(500).json({ error: 'Failed to uncomplete batch' });

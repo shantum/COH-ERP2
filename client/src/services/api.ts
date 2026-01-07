@@ -164,6 +164,10 @@ export const ordersApi = {
     uncancelLine: (lineId: string) => api.post(`/orders/lines/${lineId}/uncancel`),
     allocateLine: (lineId: string) => api.post(`/orders/lines/${lineId}/allocate`),
     unallocateLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unallocate`),
+    // Customization
+    customizeLine: (lineId: string, data: { type: string; value: string; notes?: string }) =>
+        api.post(`/orders/lines/${lineId}/customize`, data),
+    removeCustomization: (lineId: string) => api.delete(`/orders/lines/${lineId}/customize`),
     pickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pick`),
     unpickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpick`),
     packLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pack`),

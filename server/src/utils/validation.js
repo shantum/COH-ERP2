@@ -189,6 +189,24 @@ export const UpdateOrderSchema = z.object({
     totalAmount: z.number().positive('Total amount must be positive').optional(),
 });
 
+/**
+ * Customize order line validation schema
+ * Used for creating custom SKUs for order lines
+ */
+export const CustomizeLineSchema = z.object({
+    type: z.enum(['length', 'size', 'measurements', 'other'], {
+        errorMap: () => ({ message: 'Type must be one of: length, size, measurements, other' }),
+    }),
+    value: z.string()
+        .min(1, 'Customization value is required')
+        .max(100, 'Customization value cannot exceed 100 characters')
+        .trim(),
+    notes: z.string()
+        .max(500, 'Notes cannot exceed 500 characters')
+        .trim()
+        .optional(),
+});
+
 // ============================================
 // VALIDATION MIDDLEWARE
 // ============================================

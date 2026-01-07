@@ -16,7 +16,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw } from 'lucide-react';
+import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
@@ -72,7 +72,7 @@ function TrackingStatusBadge({ status, daysInTransit, ofdCount }: { status: stri
 const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
-    'customerLtv', 'skuCode', 'productName', 'qty', 'skuStock', 'fabricBalance',
+    'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'ship', 'shopifyStatus',
     'awb', 'courier', 'trackingStatus', 'actions'
 ];
@@ -227,6 +227,14 @@ interface OrdersGridProps {
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
     onSelectCustomer: (customerId: string) => void;
+    onCustomize?: (lineId: string, lineData: {
+        lineId: string;
+        skuCode: string;
+        productName: string;
+        colorName: string;
+        size: string;
+        qty: number;
+    }) => void;
     allocatingLines: Set<string>;
     shippingChecked: Set<string>;
     isCancellingOrder: boolean;
@@ -256,6 +264,7 @@ export function OrdersGrid({
     onCancelLine,
     onUncancelLine,
     onSelectCustomer,
+    onCustomize,
     allocatingLines,
     shippingChecked,
     isCancellingOrder,
@@ -566,6 +575,69 @@ export function OrdersGrid({
                 cellClass: 'text-xs',
             },
             {
+                colId: 'customize',
+                headerName: getHeaderName('customize'),
+                width: 80,
+                cellRenderer: (params: ICellRendererParams) => {
+                    const row = params.data;
+                    if (!row || !row.lineId) return null;
+
+                    // Only show customize button for pending lines
+                    if (row.lineStatus !== 'pending') {
+                        // If already customized, show the custom badge even after allocation
+                        if (row.isCustomized && row.customSkuCode) {
+                            return (
+                                <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700"
+                                    title={`${row.customizationType}: ${row.customizationValue}`}
+                                >
+                                    <Wrench size={10} />
+                                    {row.customSkuCode.split('-').pop()}
+                                </span>
+                            );
+                        }
+                        return null;
+                    }
+
+                    // If customized, show badge with option to view details
+                    if (row.isCustomized && row.customSkuCode) {
+                        return (
+                            <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 cursor-help"
+                                title={`${row.customizationType}: ${row.customizationValue}`}
+                            >
+                                <Wrench size={10} />
+                                {row.customSkuCode.split('-').pop()}
+                            </span>
+                        );
+                    }
+
+                    // Show customize button
+                    return (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (onCustomize) {
+                                    onCustomize(row.lineId, {
+                                        lineId: row.lineId,
+                                        skuCode: row.skuCode,
+                                        productName: row.productName,
+                                        colorName: row.colorName,
+                                        size: row.size,
+                                        qty: row.qty,
+                                    });
+                                }
+                            }}
+                            className="p-1 rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50"
+                            title="Add customization"
+                        >
+                            <Settings size={14} />
+                        </button>
+                    );
+                },
+                cellClass: 'text-center',
+            },
+            {
                 colId: 'qty',
                 headerName: getHeaderName('qty'),
                 field: 'qty',
@@ -578,7 +650,16 @@ export function OrdersGrid({
                 field: 'skuStock',
                 width: 45,
                 cellRenderer: (params: ICellRendererParams) => {
-                    const hasStock = params.value >= params.data?.qty;
+                    const row = params.data;
+                    // For customized lines, stock is not applicable (requires production)
+                    if (row?.isCustomized) {
+                        return (
+                            <span className="text-gray-400" title="Custom item - requires production">
+                                N/A
+                            </span>
+                        );
+                    }
+                    const hasStock = params.value >= row?.qty;
                     return (
                         <span className={hasStock ? 'text-green-600' : 'text-red-500'}>
                             {params.value}
@@ -598,17 +679,31 @@ export function OrdersGrid({
             {
                 colId: 'allocate',
                 headerName: getHeaderName('allocate'),
-                width: 40,
+                width: 50,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
                     if (!row || row.lineStatus === 'cancelled') return null;
+
+                    // For customized lines in pending state, show "Custom" indicator
+                    // (allocation happens automatically after production)
+                    if (row.isCustomized && row.lineStatus === 'pending') {
+                        return (
+                            <span
+                                className="text-xs text-orange-500 font-medium"
+                                title="Custom item - auto-allocates after production"
+                            >
+                                C
+                            </span>
+                        );
+                    }
+
                     const hasStock = row.skuStock >= row.qty;
                     const isAllocated =
                         row.lineStatus === 'allocated' ||
                         row.lineStatus === 'picked' ||
                         row.lineStatus === 'packed';
                     const isPending = row.lineStatus === 'pending';
-                    const canAllocate = isPending && hasStock;
+                    const canAllocate = isPending && hasStock && !row.isCustomized;
                     const isToggling = allocatingLines.has(row.lineId);
 
                     if (isAllocated) {
@@ -671,7 +766,9 @@ export function OrdersGrid({
                         row.lineStatus === 'picked' ||
                         row.lineStatus === 'packed';
 
-                    if (row.lineStatus === 'pending' && (row.productionBatchId || !hasStock)) {
+                    // For customized lines, always show production (must produce custom items)
+                    // The condition is: pending + (has batch OR no stock OR is customized)
+                    if (row.lineStatus === 'pending' && (row.productionBatchId || !hasStock || row.isCustomized)) {
                         if (row.productionBatchId) {
                             return (
                                 <div className="flex items-center gap-0.5">
@@ -1071,6 +1168,7 @@ export function OrdersGrid({
             isArchiving,
             isDeletingOrder,
             visibleColumns,
+            onCustomize,
         ]
     );
 
@@ -1143,6 +1241,14 @@ export function OrdersGrid({
 
         if (row.lineStatus === 'cancelled') {
             return { backgroundColor: '#f3f4f6', color: '#9ca3af', textDecoration: 'line-through' };
+        }
+
+        // Customized lines get special orange styling with left border
+        if (row.isCustomized) {
+            return {
+                backgroundColor: '#fff7ed',  // Orange-50
+                borderLeft: '3px solid #f97316',  // Orange-500
+            };
         }
 
         const activeLines =

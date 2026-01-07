@@ -453,11 +453,23 @@ export async function calculateInventoryBalance(prisma, skuId, options = {}) {
  * @param {string[]} skuIds - Optional array of SKU IDs to filter
  * @param {Object} options - Options for balance calculation
  * @param {boolean} options.allowNegative - If false (default), floors balance at 0
+ * @param {boolean} options.excludeCustomSkus - If true, excludes custom SKUs (isCustomSku=true) from results
  * @returns {Map} Map of skuId -> balance info
  */
 export async function calculateAllInventoryBalances(prisma, skuIds = null, options = {}) {
-    const { allowNegative = false } = options;
-    const where = skuIds ? { skuId: { in: skuIds } } : {};
+    const { allowNegative = false, excludeCustomSkus = false } = options;
+
+    // Build where clause for inventory transactions
+    let where = {};
+
+    if (skuIds) {
+        where.skuId = { in: skuIds };
+    }
+
+    // If excluding custom SKUs, we need to filter via the sku relation
+    if (excludeCustomSkus) {
+        where.sku = { isCustomSku: false };
+    }
 
     const result = await prisma.inventoryTransaction.groupBy({
         by: ['skuId', 'txnType'],
@@ -847,4 +859,192 @@ export async function validateSku(prisma, { skuId, skuCode, barcode }) {
     }
 
     return { valid: true, sku };
+}
+
+// ============================================
+// CUSTOMIZATION HELPERS
+// ============================================
+
+/**
+ * Create a custom SKU for an order line
+ * Generates a unique custom SKU code in format {BASE_SKU}-C{XX}
+ *
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} baseSkuId - The base SKU ID to customize from
+ * @param {Object} customizationData - Customization details
+ * @param {string} customizationData.type - Type of customization: 'length', 'size', 'measurements', 'other'
+ * @param {string} customizationData.value - The customization value (e.g., "-2 inches")
+ * @param {string} [customizationData.notes] - Optional notes about the customization
+ * @param {string} orderLineId - The order line ID this custom SKU is for
+ * @param {string} userId - The user ID who created the customization
+ * @returns {Object} The created custom SKU with updated order line
+ */
+export async function createCustomSku(prisma, baseSkuId, customizationData, orderLineId, userId) {
+    return prisma.$transaction(async (tx) => {
+        // 1. Validate order line exists and is in pending status
+        const orderLine = await tx.orderLine.findUnique({
+            where: { id: orderLineId },
+            include: {
+                order: { select: { status: true, orderNumber: true } },
+                sku: true,
+            },
+        });
+
+        if (!orderLine) {
+            throw new Error('ORDER_LINE_NOT_FOUND');
+        }
+
+        if (orderLine.lineStatus !== 'pending') {
+            throw new Error('LINE_NOT_PENDING');
+        }
+
+        if (orderLine.isCustomized) {
+            throw new Error('ALREADY_CUSTOMIZED');
+        }
+
+        // 2. Get base SKU and atomically increment counter
+        const baseSku = await tx.sku.update({
+            where: { id: baseSkuId },
+            data: { customizationCount: { increment: 1 } },
+            include: { variation: true },
+        });
+
+        // 3. Generate custom SKU code
+        const count = baseSku.customizationCount;
+        const customCode = `${baseSku.skuCode}-C${String(count).padStart(2, '0')}`;
+
+        // 4. Create new Sku record for custom piece
+        const customSku = await tx.sku.create({
+            data: {
+                skuCode: customCode,
+                variationId: baseSku.variationId,
+                size: baseSku.size,
+                mrp: baseSku.mrp,
+                isActive: true,
+                isCustomSku: true,
+                parentSkuId: baseSkuId,
+                customizationType: customizationData.type,
+                customizationValue: customizationData.value,
+                customizationNotes: customizationData.notes || null,
+                linkedOrderLineId: orderLineId,
+                fabricConsumption: baseSku.fabricConsumption,
+            },
+        });
+
+        // 5. Update order line to point to custom SKU
+        const updatedLine = await tx.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                skuId: customSku.id,
+                originalSkuId: baseSkuId,
+                isCustomized: true,
+                isNonReturnable: true,
+                customizedAt: new Date(),
+                customizedById: userId,
+            },
+            include: {
+                sku: {
+                    include: {
+                        parentSku: true,
+                        variation: { include: { product: true } },
+                    },
+                },
+                order: { select: { orderNumber: true } },
+            },
+        });
+
+        return {
+            customSku,
+            orderLine: updatedLine,
+            originalSkuCode: baseSku.skuCode,
+        };
+    });
+}
+
+/**
+ * Remove customization from an order line
+ * Reverts the line to original SKU and deletes the custom SKU
+ * Only allowed if no inventory transactions or production batches exist
+ *
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} orderLineId - The order line ID to uncustomize
+ * @returns {Object} Result with success status and updated order line
+ */
+export async function removeCustomization(prisma, orderLineId) {
+    return prisma.$transaction(async (tx) => {
+        // 1. Get order line with custom SKU
+        const orderLine = await tx.orderLine.findUnique({
+            where: { id: orderLineId },
+            include: {
+                sku: true,
+                order: { select: { orderNumber: true } },
+            },
+        });
+
+        if (!orderLine) {
+            throw new Error('ORDER_LINE_NOT_FOUND');
+        }
+
+        if (!orderLine.isCustomized || !orderLine.originalSkuId) {
+            throw new Error('NOT_CUSTOMIZED');
+        }
+
+        const customSkuId = orderLine.skuId;
+
+        // 2. Check if custom SKU has inventory transactions
+        const txnCount = await tx.inventoryTransaction.count({
+            where: { skuId: customSkuId },
+        });
+
+        if (txnCount > 0) {
+            throw new Error('CANNOT_UNDO_HAS_INVENTORY');
+        }
+
+        // 3. Check if production batch exists for this custom SKU
+        const batchCount = await tx.productionBatch.count({
+            where: { skuId: customSkuId },
+        });
+
+        if (batchCount > 0) {
+            throw new Error('CANNOT_UNDO_HAS_PRODUCTION');
+        }
+
+        // 4. Get original SKU for response
+        const originalSku = await tx.sku.findUnique({
+            where: { id: orderLine.originalSkuId },
+            include: {
+                variation: { include: { product: true } },
+            },
+        });
+
+        // 5. Revert order line to original SKU
+        const updatedLine = await tx.orderLine.update({
+            where: { id: orderLineId },
+            data: {
+                skuId: orderLine.originalSkuId,
+                originalSkuId: null,
+                isCustomized: false,
+                isNonReturnable: false,
+                customizedAt: null,
+                customizedById: null,
+            },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+                order: { select: { orderNumber: true } },
+            },
+        });
+
+        // 6. Delete the custom SKU record
+        await tx.sku.delete({ where: { id: customSkuId } });
+
+        return {
+            success: true,
+            orderLine: updatedLine,
+            deletedCustomSkuCode: orderLine.sku.skuCode,
+        };
+    });
 }
