@@ -164,6 +164,7 @@ export const ordersApi = {
     // Summary and analytics endpoints
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),
     getArchivedAnalytics: (params?: { days?: number }) => api.get('/orders/archived/analytics', { params }),
+    getRtoSummary: () => api.get('/orders/rto/summary'),
     // RTO actions
     markDelivered: (id: string) => api.post(`/orders/${id}/mark-delivered`),
     markRto: (id: string) => api.post(`/orders/${id}/mark-rto`),

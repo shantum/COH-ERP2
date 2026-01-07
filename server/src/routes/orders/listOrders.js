@@ -173,6 +173,93 @@ router.get('/shipped', async (req, res) => {
     }
 });
 
+// Get RTO orders summary
+router.get('/rto/summary', async (req, res) => {
+    try {
+        const orders = await req.prisma.order.findMany({
+            where: {
+                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                isArchived: false,
+            },
+            select: {
+                id: true,
+                trackingStatus: true,
+                paymentMethod: true,
+                totalAmount: true,
+                rtoInitiatedAt: true,
+                rtoReceivedAt: true,
+            },
+        });
+
+        const now = Date.now();
+        let pendingReceipt = 0;
+        let received = 0;
+        let prepaid = 0;
+        let cod = 0;
+        let totalValue = 0;
+        let prepaidValue = 0;
+        let codValue = 0;
+        let within7Days = 0;
+        let within14Days = 0;
+        let over14Days = 0;
+        let totalTransitDays = 0;
+        let transitOrderCount = 0;
+
+        for (const order of orders) {
+            const amount = order.totalAmount || 0;
+            totalValue += amount;
+
+            // Status classification
+            if (order.trackingStatus === 'rto_delivered' || order.rtoReceivedAt) {
+                received++;
+            } else {
+                pendingReceipt++;
+
+                // Transit duration calculation (only for pending orders)
+                if (order.rtoInitiatedAt) {
+                    const daysInRto = Math.floor(
+                        (now - new Date(order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24)
+                    );
+                    totalTransitDays += daysInRto;
+                    transitOrderCount++;
+
+                    if (daysInRto <= 7) within7Days++;
+                    else if (daysInRto <= 14) within14Days++;
+                    else over14Days++;
+                }
+            }
+
+            // Payment method classification
+            const isPrepaid = order.paymentMethod?.toLowerCase() !== 'cod';
+            if (isPrepaid) {
+                prepaid++;
+                prepaidValue += amount;
+            } else {
+                cod++;
+                codValue += amount;
+            }
+        }
+
+        res.json({
+            pendingReceipt,
+            received,
+            total: orders.length,
+            transitBreakdown: { within7Days, within14Days, over14Days },
+            avgDaysInTransit: transitOrderCount > 0
+                ? Math.round((totalTransitDays / transitOrderCount) * 10) / 10
+                : 0,
+            paymentBreakdown: { prepaid, cod },
+            totalValue,
+            prepaidValue,
+            codValue,
+            needsAttention: over14Days,
+        });
+    } catch (error) {
+        console.error('Get RTO summary error:', error);
+        res.status(500).json({ error: 'Failed to fetch RTO summary' });
+    }
+});
+
 // Get RTO orders (Return to Origin)
 router.get('/rto', async (req, res) => {
     try {

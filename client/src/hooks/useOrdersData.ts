@@ -68,6 +68,12 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         enabled: activeTab === 'shipped',
     });
 
+    const rtoSummaryQuery = useQuery({
+        queryKey: ['rtoSummary'],
+        queryFn: () => ordersApi.getRtoSummary().then(r => r.data),
+        enabled: activeTab === 'rto',
+    });
+
     // Supporting data queries
     const allSkusQuery = useQuery({
         queryKey: ['allSkus'],
@@ -148,6 +154,8 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         // Summary data
         shippedSummary: shippedSummaryQuery.data,
         loadingShippedSummary: shippedSummaryQuery.isLoading,
+        rtoSummary: rtoSummaryQuery.data,
+        loadingRtoSummary: rtoSummaryQuery.isLoading,
 
         // Supporting data
         allSkus: allSkusQuery.data,

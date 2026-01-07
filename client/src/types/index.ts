@@ -639,3 +639,24 @@ export interface ArchivedAnalytics {
 
 // Tracking status for shipped orders
 export type TrackingStatus = 'in_transit' | 'delivered' | 'delivery_delayed' | 'rto_initiated' | 'rto_received';
+
+// RTO Summary Analytics
+export interface RtoSummary {
+  pendingReceipt: number;
+  received: number;
+  total: number;
+  transitBreakdown: {
+    within7Days: number;
+    within14Days: number;
+    over14Days: number;
+  };
+  avgDaysInTransit: number;
+  paymentBreakdown: {
+    prepaid: number;
+    cod: number;
+  };
+  totalValue: number;
+  prepaidValue: number;
+  codValue: number;
+  needsAttention: number;
+}

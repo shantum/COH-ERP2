@@ -1,10 +1,10 @@
 /**
  * SummaryPanel component
- * Displays summary statistics for shipped and archived orders
+ * Displays summary statistics for shipped, RTO, and archived orders
  */
 
 import { AlertCircle } from 'lucide-react';
-import type { ShippedSummary, ArchivedAnalytics } from '../../types';
+import type { ShippedSummary, ArchivedAnalytics, RtoSummary } from '../../types';
 
 interface ShippedSummaryPanelProps {
   type: 'shipped';
@@ -21,11 +21,20 @@ interface ArchivedAnalyticsPanelProps {
   onDaysChange?: (days: number) => void;
 }
 
-type SummaryPanelProps = ShippedSummaryPanelProps | ArchivedAnalyticsPanelProps;
+interface RtoSummaryPanelProps {
+  type: 'rto';
+  data: RtoSummary | null;
+  isLoading?: boolean;
+}
+
+type SummaryPanelProps = ShippedSummaryPanelProps | ArchivedAnalyticsPanelProps | RtoSummaryPanelProps;
 
 export function SummaryPanel(props: SummaryPanelProps) {
   if (props.type === 'shipped') {
     return <ShippedSummaryPanel {...props} />;
+  }
+  if (props.type === 'rto') {
+    return <RtoSummaryPanel {...props} />;
   }
   return <ArchivedAnalyticsPanel {...props} />;
 }
@@ -165,6 +174,103 @@ function ArchivedAnalyticsPanel({ data, isLoading, days, onDaysChange }: Archive
               <span className="capitalize">{ch.channel.replace('_', ' ')}</span> {ch.percentage}%
             </span>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RtoSummaryPanel({ data, isLoading }: RtoSummaryPanelProps) {
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-lg border p-4 mb-4">
+        <div className="flex items-center gap-4 animate-pulse">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex-1 h-16 bg-gray-100 rounded" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const formatCurrency = (value: number) => {
+    if (value >= 100000) {
+      return `${(value / 100000).toFixed(1)}L`;
+    } else if (value >= 1000) {
+      return `${(value / 1000).toFixed(1)}k`;
+    }
+    return value.toFixed(0);
+  };
+
+  const stats = [
+    {
+      label: 'Pending Receipt',
+      value: data.pendingReceipt,
+      subtitle: data.avgDaysInTransit > 0 ? `Avg ${data.avgDaysInTransit} days in transit` : 'No transit data',
+      color: 'bg-amber-100 text-amber-700',
+    },
+    {
+      label: 'Received',
+      value: data.received,
+      subtitle: 'At warehouse',
+      color: 'bg-green-100 text-green-700',
+    },
+    {
+      label: 'COD Orders',
+      value: data.paymentBreakdown.cod,
+      subtitle: `Value: ₹${formatCurrency(data.codValue)}`,
+      color: 'bg-blue-100 text-blue-700',
+    },
+    {
+      label: 'Total Value',
+      value: `₹${formatCurrency(data.totalValue)}`,
+      subtitle: `${data.total} orders`,
+      color: 'bg-gray-100 text-gray-700',
+      isValue: true,
+    },
+  ];
+
+  return (
+    <div className="bg-white rounded-lg border p-4 mb-4">
+      <div className="flex items-center gap-4">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className={`flex-1 p-3 rounded-lg ${stat.color}`}
+          >
+            <div className="text-sm font-medium">{stat.label}</div>
+            <div className={`font-bold mt-1 ${stat.isValue ? 'text-xl' : 'text-2xl'}`}>
+              {stat.value}
+            </div>
+            <div className="text-xs opacity-75 mt-0.5">{stat.subtitle}</div>
+          </div>
+        ))}
+      </div>
+
+      {data.needsAttention > 0 && (
+        <div className="mt-3 w-full flex items-center justify-center gap-2 py-2 px-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          <AlertCircle size={16} />
+          <span className="text-sm font-medium">
+            {data.needsAttention} order{data.needsAttention !== 1 ? 's' : ''} in transit for over 14 days - may need follow-up
+          </span>
+        </div>
+      )}
+
+      {/* Transit time breakdown */}
+      {data.pendingReceipt > 0 && (
+        <div className="mt-3 flex items-center gap-4 text-sm text-gray-600">
+          <span className="font-medium">Transit time:</span>
+          <span className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
+            {data.transitBreakdown.within7Days} within 7 days
+          </span>
+          <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">
+            {data.transitBreakdown.within14Days} within 8-14 days
+          </span>
+          <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
+            {data.transitBreakdown.over14Days} over 14 days
+          </span>
         </div>
       )}
     </div>

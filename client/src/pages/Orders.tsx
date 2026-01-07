@@ -91,6 +91,8 @@ export default function Orders() {
         archivedTotalCount,
         shippedSummary,
         loadingShippedSummary,
+        rtoSummary,
+        loadingRtoSummary,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -612,16 +614,23 @@ export default function Orders() {
 
             {/* RTO Orders */}
             {!isLoading && tab === 'rto' && (
-                <RtoOrdersGrid
-                    orders={rtoOrders}
-                    onViewOrder={(order) => setViewingOrderId(order.id)}
-                    onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                    onTrack={(awb, orderNumber) => {
-                        setTrackingAwb(awb);
-                        setTrackingOrderNumber(orderNumber);
-                    }}
-                    shopDomain={shopifyConfig?.shopDomain}
-                />
+                <>
+                    <SummaryPanel
+                        type="rto"
+                        data={rtoSummary}
+                        isLoading={loadingRtoSummary}
+                    />
+                    <RtoOrdersGrid
+                        orders={rtoOrders}
+                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                        onTrack={(awb, orderNumber) => {
+                            setTrackingAwb(awb);
+                            setTrackingOrderNumber(orderNumber);
+                        }}
+                        shopDomain={shopifyConfig?.shopDomain}
+                    />
+                </>
             )}
 
             {/* COD Pending Orders */}
