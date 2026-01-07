@@ -5,10 +5,8 @@
 
 import { Router } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
-import {
-    releaseReservedInventory,
-    findOrCreateCustomer,
-} from '../../utils/queryPatterns.js';
+import { releaseReservedInventory } from '../../utils/queryPatterns.js';
+import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { validate, CreateOrderSchema, UpdateOrderSchema } from '../../utils/validation.js';
 
 const router = Router();
@@ -34,7 +32,7 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
 
         let customerId = null;
         if (customerEmail || customerPhone) {
-            const customer = await findOrCreateCustomer(req.prisma, {
+            const customer = await findOrCreateCustomerByContact(req.prisma, {
                 email: customerEmail,
                 phone: customerPhone,
                 firstName: customerName?.split(' ')[0],

@@ -84,13 +84,3 @@ export async function getCustomerStatsMap(prisma, customerIds) {
 
     return statsMap;
 }
-
-// Backwards compatible alias
-export async function getCustomerLtvMap(prisma, customerIds) {
-    const statsMap = await getCustomerStatsMap(prisma, customerIds);
-    const ltvMap = {};
-    for (const [id, stats] of Object.entries(statsMap)) {
-        ltvMap[id] = stats.ltv;
-    }
-    return ltvMap;
-}

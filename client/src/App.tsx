@@ -67,7 +67,6 @@ function App() {
                 <Route path="orders" element={<ErrorBoundary><Orders /></ErrorBoundary>} />
                 <Route path="customers" element={<ErrorBoundary><Customers /></ErrorBoundary>} />
                 <Route path="returns" element={<ErrorBoundary><Returns /></ErrorBoundary>} />
-                <Route path="return-inward" element={<Navigate to="/returns" replace />} />
                 <Route path="production" element={<ErrorBoundary><Production /></ErrorBoundary>} />
                 <Route path="production-inward" element={<ErrorBoundary><ProductionInward /></ErrorBoundary>} />
                 <Route path="picklist" element={<ErrorBoundary><Picklist /></ErrorBoundary>} />

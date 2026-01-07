@@ -121,32 +121,49 @@ export async function upsertCustomerFromWebhook(prisma, shopifyCustomer) {
 }
 
 /**
- * Find customer by various identifiers
+ * Find or create a customer from manual order data (email/phone)
+ * Used for offline/manual order creation where we don't have Shopify customer data
  * @param {PrismaClient} prisma - Prisma client instance
- * @param {Object} identifiers - Customer identifiers
- * @param {string} identifiers.shopifyCustomerId - Shopify customer ID
- * @param {string} identifiers.email - Customer email
- * @param {string} identifiers.phone - Customer phone
- * @returns {Promise<Object|null>}
+ * @param {Object} customerData - Customer data
+ * @param {string} customerData.email - Customer email
+ * @param {string} customerData.phone - Customer phone
+ * @param {string} customerData.firstName - Customer first name
+ * @param {string} customerData.lastName - Customer last name
+ * @param {string} customerData.defaultAddress - Default address (JSON string or plain text)
+ * @returns {Promise<Object>} Customer record
  */
-export async function findCustomer(prisma, { shopifyCustomerId, email, phone }) {
-    const conditions = [];
+export async function findOrCreateCustomerByContact(prisma, { email, phone, firstName, lastName, defaultAddress }) {
+    let customer = null;
 
-    if (shopifyCustomerId) {
-        conditions.push({ shopifyCustomerId: String(shopifyCustomerId) });
-    }
+    // Try to find by email first
     if (email) {
-        conditions.push({ email: email.toLowerCase().trim() });
-    }
-    if (phone) {
-        conditions.push({ phone });
+        customer = await prisma.customer.findUnique({ where: { email: email.toLowerCase().trim() } });
     }
 
-    if (conditions.length === 0) {
-        return null;
+    // If no email or not found, try by phone
+    if (!customer && phone) {
+        customer = await prisma.customer.findFirst({ where: { phone } });
     }
 
-    return prisma.customer.findFirst({
-        where: { OR: conditions }
-    });
+    // Create new customer if not found
+    if (!customer) {
+        const customerEmail = email?.toLowerCase().trim() || `${phone.replace(/\D/g, '')}@phone.local`;
+        customer = await prisma.customer.create({
+            data: {
+                email: customerEmail,
+                firstName,
+                lastName,
+                phone,
+                defaultAddress,
+            },
+        });
+    } else if (phone && !customer.phone) {
+        // Update phone if customer exists but doesn't have phone
+        customer = await prisma.customer.update({
+            where: { id: customer.id },
+            data: { phone },
+        });
+    }
+
+    return customer;
 }
