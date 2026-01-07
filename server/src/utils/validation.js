@@ -198,13 +198,14 @@ export const CustomizeLineSchema = z.object({
         errorMap: () => ({ message: 'Type must be one of: length, size, measurements, other' }),
     }),
     value: z.string()
-        .min(1, 'Customization value is required')
-        .max(100, 'Customization value cannot exceed 100 characters')
-        .trim(),
-    notes: z.string()
-        .max(500, 'Notes cannot exceed 500 characters')
         .trim()
-        .optional(),
+        .min(1, 'Customization value is required')
+        .max(100, 'Customization value cannot exceed 100 characters'),
+    notes: z.string()
+        .trim()
+        .max(500, 'Notes cannot exceed 500 characters')
+        .optional()
+        .or(z.literal('')),
 });
 
 // ============================================
@@ -229,6 +230,13 @@ export function validate(schema) {
         const result = schema.safeParse(req.body);
 
         if (!result.success) {
+            // Log validation failures for debugging
+            console.error('[Validation Error]', {
+                path: req.path,
+                body: req.body,
+                errors: result.error.issues,
+            });
+
             return res.status(400).json({
                 error: 'Validation failed',
                 details: result.error.issues.map(issue => ({

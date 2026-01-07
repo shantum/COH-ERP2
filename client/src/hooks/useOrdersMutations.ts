@@ -218,7 +218,16 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         mutationFn: ({ lineId, data }: { lineId: string; data: { type: string; value: string; notes?: string } }) =>
             ordersApi.customizeLine(lineId, data),
         onSuccess: () => invalidateAll(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to customize line')
+        onError: (err: any) => {
+            const errorData = err.response?.data;
+            if (errorData?.details && Array.isArray(errorData.details)) {
+                // Show validation details
+                const messages = errorData.details.map((d: any) => `${d.path}: ${d.message}`).join('\n');
+                alert(`Validation failed:\n${messages}`);
+            } else {
+                alert(errorData?.error || 'Failed to customize line');
+            }
+        }
     });
 
     const removeCustomization = useMutation({
