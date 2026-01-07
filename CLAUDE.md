@@ -1,260 +1,134 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Primary instructions for Claude Code. For detailed reference, see `ARCHITECTURE.md`.
 
-## Project Overview
+## Quick Start
 
-COH-ERP is a full-stack ERP system for Creatures of Habit's manufacturing operations. It manages products, inventory, orders, customers, returns, production tracking, and Shopify integration.
-
-## Development Commands
-
-### Server (Express.js + Prisma)
 ```bash
-cd server
-npm run dev           # Start server with nodemon (port 3001)
-npm run db:generate   # Generate Prisma client after schema changes
-npm run db:push       # Push schema changes to database
-npm run db:migrate    # Create migration files
-npm run db:seed       # Seed sample data
-npm run db:studio     # Open Prisma Studio GUI
+# Server (port 3001)
+cd server && npm run dev
+
+# Client (port 5173)
+cd client && npm run dev
+
+# Database
+npm run db:generate   # After schema changes
+npm run db:push       # Push to database
+npm run db:studio     # Prisma GUI
+
+# Tests
+cd server && npm test
 ```
 
-### Client (React + Vite)
-```bash
-cd client
-npm run dev      # Start Vite dev server (port 5173)
-npm run build    # TypeScript compile + Vite production build
-npm run lint     # Run ESLint
+**Login**: `admin@coh.com` / `XOFiya@34`
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Backend | Express.js (JS ES modules), Prisma ORM, PostgreSQL |
+| Frontend | React 19, TypeScript, TanStack Query, Tailwind, AG-Grid |
+| Auth | JWT (7-day), bcryptjs |
+| Integrations | Shopify (webhooks + sync), iThink Logistics |
+
+## Critical Files
+
+**Before making changes, read the relevant domain README:**
+
+| Domain | README Location |
+|--------|-----------------|
+| Orders | `server/src/routes/ORDERS_DOMAIN.md` |
+| Returns | `server/src/routes/RETURNS_DOMAIN.md` |
+| Shopify | `server/src/routes/SHOPIFY_DOMAIN.md` |
+| Inventory | `server/src/routes/INVENTORY_DOMAIN.md` |
+| Production | `server/src/routes/PRODUCTION_DOMAIN.md` |
+| Tracking | `server/src/routes/TRACKING_DOMAIN.md` |
+| Frontend | `client/src/FRONTEND_DOMAINS.md` |
+
+**Key source files:**
+- `server/src/routes/orders/` - Modular order routes (index, listOrders, fulfillment, mutations)
+- `server/src/utils/queryPatterns.js` - Shared Prisma patterns, ORDER_LIST_SELECT
+- `server/src/utils/validation.js` - Zod schemas (ShipOrderSchema, CreateOrderSchema)
+- `client/src/types/index.ts` - TypeScript type definitions
+- `client/src/services/api.ts` - Centralized API client
+
+## Core Concepts
+
+### Order Fulfillment
+```
+pending → allocated → picked → packed → shipped
+```
+- **Allocate**: Creates `reserved` inventory transaction
+- **Ship**: Deletes `reserved`, creates `outward`
+
+### Inventory Ledger
+```
+Balance = SUM(inward) - SUM(outward)
+Available = Balance - SUM(reserved)
 ```
 
-### Testing
-```bash
-cd server
-npm test              # Run Jest tests
-npm run test:watch    # Watch mode
-npm run test:coverage # Coverage report
-```
+### Orders Page (5 Tabs)
+| Tab | Endpoint | Notes |
+|-----|----------|-------|
+| Open | `/orders/open` | Active fulfillment |
+| Shipped | `/orders/shipped` | Excludes RTO and unpaid COD |
+| RTO | `/orders/rto` | Return to Origin |
+| COD Pending | `/orders/cod-pending` | Delivered, awaiting payment |
+| Archived | `/orders/archived` | Historical |
 
-### First-time Setup
-```bash
-# Server
-cd server && npm install && cp .env.example .env
-npx prisma db push && npm run db:seed && npm run dev
+## API Routes
 
-# Client (new terminal)
-cd client && npm install && npm run dev
-```
+Base URL: `/api`
 
-Default login: `admin@coh.com` / `XOFiya@34`
-
-## Architecture
-
-### Tech Stack
-- **Backend**: Node.js, Express.js (JavaScript ES modules), Prisma ORM, PostgreSQL
-- **Frontend**: React 19, TypeScript, Vite, TanStack Query, Tailwind CSS, AG-Grid, Recharts
-- **Auth**: JWT tokens (7-day expiry) with bcryptjs password hashing
-- **Integrations**: Shopify (webhooks + bulk sync), iThink Logistics (shipment tracking)
-
-### Key Patterns
-- **API Client**: Centralized axios instance in `client/src/services/api.ts` with auth interceptors
-- **Auth Context**: `client/src/hooks/useAuth.tsx` provides login/logout/user state
-- **Protected Routes**: Wrapper component checks auth state before rendering
-- **Server State**: TanStack Query for caching and data fetching
-- **State Machines**: Order fulfillment (pending→allocated→picked→packed→shipped) and returns (6-step workflow)
-
-### Database Schema (Prisma)
-Located at `server/prisma/schema.prisma`. Key models:
-- **Product Hierarchy**: Product → Variation → SKU (with imageUrl, barcode fields)
-- **Inventory**: `InventoryTransaction` ledger (inward/outward/reserved)
-- **Orders**: Order → OrderLine with fulfillment status tracking, Shopify sync, and COD remittance fields
-- **Returns**: ReturnRequest with multi-step workflow states
-- **Production**: ProductionBatch for date-wise manufacturing scheduling
-
-### Key Business Logic Files
-Critical files to understand before making changes:
-- `server/src/routes/orders/` - Modular order routes split into:
-  - `index.js` - Router orchestration (mounts sub-routers)
-  - `listOrders.js` - GET endpoints (open, shipped, RTO, COD pending, archived)
-  - `fulfillment.js` - Line status updates, ship/unship, RTO actions
-  - `mutations.js` - CRUD, cancel, archive operations
-- `server/src/utils/queryPatterns.js` - Shared Prisma patterns, ORDER_LIST_SELECT constants, enrichOrdersWithCustomerStats()
-- `server/src/utils/validation.js` - Zod schemas for order validation (ShipOrderSchema, CreateOrderSchema, etc.)
-- `server/src/services/shopifyOrderProcessor.js` - Order sync logic (cache-first pattern)
-- `server/src/services/trackingSync.js` - Background tracking sync with RTO detection
-- `server/src/routes/remittance.js` - COD payment processing and Shopify sync
-- `client/src/types/index.ts` - All TypeScript types for entities
-
-### Domain READMEs (for deeper context)
-Each major domain has a README with key files, functions, data flows, and gotchas:
-- `server/src/routes/ORDERS_DOMAIN.md` - Order fulfillment workflow + COD remittance
-- `server/src/routes/RETURNS_DOMAIN.md` - Returns and repacking
-- `server/src/routes/SHOPIFY_DOMAIN.md` - Sync, webhooks, cache pattern, payment sync
-- `server/src/routes/INVENTORY_DOMAIN.md` - Ledger transactions
-- `server/src/routes/PRODUCTION_DOMAIN.md` - Batch scheduling
-- `server/src/routes/TRACKING_DOMAIN.md` - iThink Logistics
-- `client/src/FRONTEND_DOMAINS.md` - Page organization, patterns
-
-### API Routes
-All routes in `server/src/routes/`. Base URL: `/api`
-- **Auth**: `/api/auth` - Login, register, user management
-- **Products**: `/api/products` - Product/Variation/SKU CRUD
-- **Fabrics**: `/api/fabrics` - Fabric types and inventory
-- **Inventory**: `/api/inventory` - Stock balance, transactions, alerts
-- **Orders**: `/api/orders` - Order management, fulfillment, RTO (`/rto`), COD pending (`/cod-pending`)
-- **Remittance**: `/api/remittance` - COD payment tracking and Shopify sync
-- **Customers**: `/api/customers` - Customer records
-- **Returns**: `/api/returns` - Return request workflow
-- **Production**: `/api/production` - Production batch scheduling
-- **Tracking**: `/api/tracking` - iThink Logistics shipment tracking (single/batch AWB)
-- **Reports**: `/api/reports` - Analytics and reporting
-- **Shopify**: `/api/shopify` - Shopify sync (products, orders, customers)
-- **Webhooks**: `/api/webhooks` - Shopify webhook receivers
-- **Repacking**: `/api/repacking` - Return item QC and restocking queue
-- **Import/Export**: `/api/export/*`, `/api/import/*` - CSV import/export
-- **Admin**: `/api/admin` - System settings, database management
+| Route | Purpose |
+|-------|---------|
+| `/auth` | Login, register, users |
+| `/products` | Product/Variation/SKU CRUD |
+| `/inventory` | Stock balance, transactions |
+| `/orders` | Order management, fulfillment |
+| `/remittance` | COD payment tracking |
+| `/returns` | Return request workflow |
+| `/repacking` | QC and restocking queue |
+| `/production` | Batch scheduling |
+| `/tracking` | iThink shipment tracking |
+| `/shopify` | Sync endpoints |
+| `/webhooks` | Shopify webhooks |
 
 ## Shopify Integration
 
-### Configuration
-Shopify credentials stored in `SystemSetting` table (keys: `shopify_shop_domain`, `shopify_access_token`). Configure via Settings page in UI.
-
-### Sync Features
-- **Products**: Sync products, variations, SKUs with images and inventory quantities
-- **Orders**: Import orders with line items, customer data, fulfillment status
-- **Customers**: Sync customer records with addresses
-- **COD Payments**: Sync COD payment status using Transaction API
-
-### Webhooks
-Webhook endpoints for real-time Shopify updates:
-
-**Recommended - Unified Order Endpoint:**
-- `POST /api/webhooks/shopify/orders` - Handles create, update, cancel, fulfill (use with `orders/updated` topic)
-
-**Legacy Endpoints (still supported):**
-- `POST /api/webhooks/shopify/orders/create`
-- `POST /api/webhooks/shopify/orders/updated`
-- `POST /api/webhooks/shopify/orders/cancelled`
-- `POST /api/webhooks/shopify/orders/fulfilled`
-
-**Other Endpoints:**
-- `POST /api/webhooks/shopify/customers/create`
-- `POST /api/webhooks/shopify/customers/update`
-
-Webhook secret stored in `SystemSetting` (key: `shopify_webhook_secret`). HMAC-SHA256 verification enabled when secret is configured.
-
-### Key Files
-- `server/src/services/shopify.js` - Shopify API client (including `markOrderAsPaid`)
-- `server/src/routes/shopify.js` - Sync endpoints
-- `server/src/routes/webhooks.js` - Webhook receivers
-
-## COD Remittance System
-
-### Endpoints
-- `POST /api/remittance/upload` - Upload CSV with COD payment data
-- `GET /api/remittance/pending` - COD orders delivered but not paid
-- `GET /api/remittance/summary` - Stats for pending/paid COD orders
-- `GET /api/remittance/failed` - Orders that failed Shopify sync
-- `POST /api/remittance/retry-sync` - Retry failed Shopify syncs
-- `POST /api/remittance/approve-manual` - Approve orders flagged for manual review
-
-### CSV Expected Columns
-- `Order No.` (required)
-- `Price` / `COD Amount`
-- `Remittance Date`
-- `Remittance UTR`
-
-Amount mismatches >5% are flagged for `manual_review`.
-
-## CSV Import/Export
-
-### Endpoints
-- `GET /api/export/products` - Export products/SKUs as CSV
-- `GET /api/export/fabrics` - Export fabrics as CSV
-- `POST /api/import/products` - Import products from CSV
-- `POST /api/import/fabrics` - Import fabrics from CSV
-
-## Orders UI Features
-- **5 Tabs**: Open, Shipped, RTO, COD Pending, Archived (each with dedicated grid)
-- **AG-Grid**: Full-featured grid with column filters, sorting
-- **Summary Panels**: Dashboard stats for order counts and fulfillment progress
-- **Pagination**: 25 items per page (archived orders use server-side pagination)
-- **RTO Tab**: Return to Origin orders with `daysInRto` calculation
-- **COD Pending Tab**: Delivered COD orders awaiting payment with total pending amount
-- **Archived Sort**: Sort by `orderDate` or `archivedAt`
-- **Archived Analytics**: Revenue and order stats via `/orders/archived/analytics`
-- **Conditional Formatting**: Row colors indicate status:
-  - Green: Packed/allocated items
-  - Emerald: Picked items
-  - Blue: Ready to pack (fully allocated)
-  - Amber: Production queued / COD pending / RTO
-- **Tracking Modal**: Real-time shipment tracking via iThink Logistics API
-- **Production Scheduling**: Date picker for out-of-stock items links to production batches
-- **Archive by Date**: Bulk archive orders older than specified date
-- **Archive Delivered**: Archives prepaid orders + COD orders that are delivered AND paid
-
-## Environment Variables
-Server requires in `.env`:
-- `DATABASE_URL` - PostgreSQL connection string
-- `JWT_SECRET` - JWT signing secret
-
-Shopify and iThink credentials stored in database via Settings UI (not env vars).
-
-## Important Notes
-- Backend is JavaScript (ES modules), frontend is TypeScript
-- Jest testing framework with integration tests for orders, inventory, returns, and Shopify sync
-- PostgreSQL is the production database
-- Product/Variation models include `imageUrl` for Shopify thumbnails
-- SKU model includes `barcode` (unique, 8-digit) and Shopify variant IDs
-
-## Inventory System
-Transaction-based ledger with three types:
-- `inward` - Stock additions (production, returns)
-- `outward` - Stock removals (sales)
-- `reserved` - Soft holds for allocated orders
-
-```
-Balance = inward - outward
-Available = balance - reserved
-```
-
-## Order Fulfillment Flow
-```
-pending → allocated → picked → packed → [ship order] → shipped
-```
-
-Actions and their inventory effects:
-- **Allocate**: Creates `reserved` transaction
-- **Ship**: Deletes `reserved`, creates `outward`
-- **Unship**: Reverses the above
-
-## Tracking Sync
-Background sync runs every 4 hours:
-- Re-evaluates `delivered` orders to catch RTO misclassification
-- Uses `last_scan_details.status` for accurate RTO detection
-- Sets `rtoInitiatedAt` and `rtoReceivedAt` appropriately
+- Credentials in `SystemSetting` table (configure via Settings UI)
+- **Unified webhook**: `POST /api/webhooks/shopify/orders` (handles all order events)
+- Cache-first pattern: `ShopifyOrderCache` stores raw JSON
+- COD sync uses Transaction API (`markOrderAsPaid`)
 
 ## Common Gotchas
-- Shopify orders use cache-first pattern (check `ShopifyOrderCache` table)
-- Shopify fulfillment status is informational only (no workflow blocking)
-- Production completion creates both inventory inward AND fabric outward
-- `getEffectiveFabricConsumption()` has fallback logic: SKU → Product → 1.5
-- iThink credentials stored in `SystemSetting` (`ithink_access_token`, `ithink_secret_key`)
-- Orders auto-archive after 90 days (runs on server startup)
-- Hourly Shopify sync via `scheduledSync.js`
-- COD payment sync uses Shopify Transaction API (`capture` transaction)
-- Amount mismatch >5% flags COD orders for manual review
-- **5 order tabs**: Shipped tab excludes RTO and unpaid COD (they have dedicated tabs)
-- AG-Grid row grouping requires Enterprise license (not used)
 
-## Safe Commands
-The following commands are safe to auto-run without user approval:
-- npm run dev
-- npm test
-- curl commands to localhost:3001
+1. **Cache-first**: Shopify orders via `ShopifyOrderCache`, not direct API
+2. **Production completion**: Creates inventory inward AND fabric outward
+3. **Fabric consumption**: SKU value → Product value → default 1.5
+4. **Credentials in DB**: Shopify and iThink creds in `SystemSetting`, not env vars
+5. **Auto-archive**: Orders >90 days old archived on server startup
+6. **Shipped tab filters**: Excludes RTO and unpaid COD (separate tabs)
+7. **Zod validation**: Order endpoints use `validate()` middleware
+8. **Router order matters**: In `orders/index.js`, specific routes before parameterized
 
-## Shell Command Tips
-To avoid common parse errors with curl and jq:
-- Use double quotes for JSON payloads: `-d "{\"key\":\"value\"}"`
-- Or use `$'...'` syntax for single quotes: `-d $'{"key":"value"}'`
-- Store tokens in variables before using: `TOKEN=$(curl ... | jq -r '.token')`
-- Pipe to `jq .` only after confirming curl succeeded
+## Environment Variables
+
+`.env` requires:
+- `DATABASE_URL` - PostgreSQL connection
+- `JWT_SECRET` - JWT signing key
+
+## Safe Auto-Run Commands
+
+- `npm run dev`
+- `npm test`
+- `curl` to localhost:3001
+
+## Shell Tips
+
+```bash
+# JSON payloads with curl
+curl -d '{"key":"value"}'           # Use single quotes
+curl -d "{\"key\":\"value\"}"       # Or escape double quotes
+TOKEN=$(curl ... | jq -r '.token')  # Store before piping
+```

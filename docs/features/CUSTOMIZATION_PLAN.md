@@ -1,5 +1,7 @@
 # Feature: Order Line Customizations
 
+> **Status: PLANNED** — Not yet implemented
+
 *Custom SKU modifications with unique tracking and non-returnable flag*
 
 ---

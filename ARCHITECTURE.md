@@ -1,23 +1,9 @@
 # COH-ERP Architecture
 
 > **Living Reference** — Last updated: January 7, 2026
+> For quick start and commands, see `CLAUDE.md`
 
-A lightweight ERP for Creatures of Habit's manufacturing operations, inventory, orders, and Shopify integration.
-
-This file is an up to date project summary containing the most important details to keep in mind while working on the project. Check the changelog section to track updates and changes. It is a living reference file for the whole project.
-
----
-
-## Quick Reference
-
-| Component | Technology |
-|-----------|------------|
-| Backend | Express.js, Prisma ORM, PostgreSQL |
-| Frontend | React 19, TypeScript, TanStack Query, Tailwind CSS |
-| Auth | JWT (7-day expiry), bcryptjs |
-| Integration | Shopify (webhooks + bulk sync), iThink Logistics (tracking) |
-
-**Default credentials:** `admin@coh.com` / `XOFiya@34`
+Detailed architecture reference for COH-ERP, a manufacturing ERP with Shopify integration.
 
 ---
 
@@ -291,68 +277,35 @@ npm test               # Jest tests
 
 ## Changelog
 
-### January 7, 2026 (Evening)
-- **Orders routes refactored into modular structure**: Split 2000-line `orders.js` into 4 files:
-  - `orders/index.js` - Router orchestration
-  - `orders/listOrders.js` - GET endpoints (open, shipped, RTO, COD pending, archived)
-  - `orders/fulfillment.js` - Line status updates, ship/unship, RTO actions
-  - `orders/mutations.js` - CRUD, cancel, archive operations
-- **Validation centralized**: Added Zod schemas to `utils/validation.js` (ShipOrderSchema, CreateOrderSchema, etc.)
-- **Query patterns enhanced**: Added ORDER_LIST_SELECT constants and helper functions to `utils/queryPatterns.js`
-- `autoArchiveOldOrders` now exported from `mutations.js` instead of main orders route
+### January 7, 2026
+**Orders Modular Refactor** (Evening):
+- Split 2000-line `orders.js` into `orders/index.js`, `listOrders.js`, `fulfillment.js`, `mutations.js`
+- Centralized Zod validation in `utils/validation.js`
+- Added ORDER_LIST_SELECT constants to `utils/queryPatterns.js`
 
-### January 7, 2026 (Afternoon)
-- New **RTO tab** with dedicated endpoint `/orders/rto` and `RtoOrdersGrid.tsx`
-- New **COD Pending tab** with endpoint `/orders/cod-pending` and `CodPendingGrid.tsx`
-- Orders page now has **5 tabs**: Open, Shipped, RTO, COD Pending, Archived
-- Shipped orders now **exclude RTO and unpaid COD** (they have dedicated tabs)
-- `useOrdersData` hook updated to fetch RTO and COD pending data
-- Removed non-functional row grouping from ShippedOrdersGrid (needs AG-Grid Enterprise)
+**Orders Page 5-Tab System** (Afternoon):
+- Added RTO tab (`/orders/rto`, `RtoOrdersGrid.tsx`)
+- Added COD Pending tab (`/orders/cod-pending`, `CodPendingGrid.tsx`)
+- Shipped tab now excludes RTO and unpaid COD
 
-### January 7, 2026 (Morning)
-- Added COD Remittance system (`/api/remittance/*`)
-- New `remittance.js` route for CSV upload and payment tracking
-- Shopify `markOrderAsPaid()` method for COD payment sync
-- New Order schema fields: `codRemittedAt`, `codRemittanceUtr`, `codRemittedAmount`, `codShopifySyncStatus`, etc.
-- Frontend: RemittanceTab in Settings for CSV upload
-- Improved tracking sync: re-evaluates delivered/RTO orders
-- Enhanced RTO status detection using last scan status
-- Fixed RTO status mapping: properly distinguish `rto_in_transit` vs `rto_delivered`
-- Consolidated `rto_initiated` into `rto_in_transit` for simpler status display
-- Archived orders analytics endpoint (`/orders/archived/analytics`) with revenue/order stats
-- Archived orders now support sort by `orderDate` or `archivedAt`
-- Archive Delivered button now handles both prepaid and paid COD orders
-- Added domain documentation files for code organization
+**COD Remittance System** (Morning):
+- New `/api/remittance/*` endpoints for COD payment tracking
+- Shopify `markOrderAsPaid()` for Transaction API sync
+- New Order fields: `codRemittedAt`, `codRemittanceUtr`, `codShopifySyncStatus`
+- Improved RTO detection in tracking sync
 
-### January 6, 2026 (Late Evening)
-- Enhanced order management with pagination for archived orders
-- Added archive-by-date endpoint (`POST /api/orders/archive-by-date`)
-- Expanded ShippedOrdersGrid with summary panels and AG-Grid improvements
-- Fixed unused import error in Orders.tsx
-- Shopify fulfillment status now informational only (no blocking)
-
-### January 6, 2026 (Evening)
-- Added iThink Logistics tracking integration (`/api/tracking/*`)
-- New order components: TrackingModal, ShippedOrdersGrid, ArchivedOrdersGrid, SummaryPanel
-- Updated default credentials
-- Removed obsolete docs (APP_OVERVIEW.md, TECHNICAL_OVERVIEW.md, etc.)
-
-### January 6, 2026 (Morning)
-- Rewrote ARCHITECTURE.md as concise living reference based on actual code analysis
-- Added changelog section
+### January 6, 2026
+- iThink Logistics tracking integration (`/api/tracking/*`)
+- New components: TrackingModal, ShippedOrdersGrid, ArchivedOrdersGrid
+- Archive-by-date and pagination for archived orders
+- Shopify fulfillment status now informational only
 
 ### January 5, 2026
-- Added test suites: `orders-inventory.test.js`, `integration.test.js`
-- Improved Shopify sync reliability with cache mechanisms
-- Enhanced return processing with repacking queue and write-off logs
+- Test suites: `orders-inventory.test.js`, `integration.test.js`
+- Shopify cache-first sync pattern
+- Repacking queue and write-off logs
 
-### January 3, 2026
-- Frontend reorganization planning (feature-based structure proposal)
-
-### December 31, 2025
-- Undo functionality for fulfillment (unpick, unpack)
-- Real-time production plan updates in order view
-
-### December 2025
+### Earlier (December 2025)
 - Initial production deployment
-- Shopify integration with webhooks and bulk sync
+- Shopify webhooks and bulk sync
+- Undo fulfillment actions (unpick, unpack)

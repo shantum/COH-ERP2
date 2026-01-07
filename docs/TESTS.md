@@ -2,22 +2,28 @@
 
 *Last updated: January 2026*
 
----
-
-## Overview
+## Quick Summary
 
 | Metric | Value |
 |--------|-------|
-| Testing Framework | Jest (server-side) |
-| Test Files | `essential.test.js` (71), `integration.test.js` (69), `database-webhook.test.js` (68), `returns-exchange.test.js` (103), `orders-inventory.test.js` (93) |
+| Framework | Jest |
 | Total Tests | 404 |
-| Coverage | Core utilities, validation, encryption, sync, fulfillment, returns/exchanges, QC, inventory, shipping |
+| Run Command | `cd server && npm test` |
 
-**Run tests:** `cd server && npm test`
+**Test Files:**
+- `essential.test.js` (71) - Core utilities
+- `integration.test.js` (69) - Order/fulfillment logic
+- `database-webhook.test.js` (68) - DB and webhook validation
+- `returns-exchange.test.js` (103) - Return workflows
+- `orders-inventory.test.js` (93) - Inventory transactions
+
+**Covered Areas:** Fabric consumption, inventory balance, order status transitions, shipping validation, return processing, Shopify sync, encryption, password validation, customer tiers.
+
+**Not Yet Tested:** Route handlers (HTTP layer), frontend components, full end-to-end flows.
 
 ---
 
-## Test Categories
+## Detailed Test Categories
 
 ### 1. Fabric Consumption Calculation (6 tests)
 
