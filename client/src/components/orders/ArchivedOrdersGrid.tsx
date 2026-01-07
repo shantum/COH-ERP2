@@ -42,16 +42,6 @@ function formatDate(date: string | null | undefined): string {
     });
 }
 
-// Helper to format full dates with year
-function formatFullDate(date: string | null | undefined): string {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-    });
-}
-
 // Status badge component for final order status
 function FinalStatusBadge({ status }: { status: string }) {
     const configs: Record<string, { bg: string; text: string; label: string; icon?: any }> = {

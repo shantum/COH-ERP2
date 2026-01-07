@@ -442,7 +442,7 @@ export function RemittanceTab() {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y">
-                                                {(failedData.data.orders as FailedOrder[]).map((order) => (
+                                                {(failedData!.data.orders as FailedOrder[]).map((order) => (
                                                     <tr key={order.id} className="hover:bg-gray-50">
                                                         <td className="px-3 py-2 font-medium">{order.orderNumber}</td>
                                                         <td className="px-3 py-2">{order.customerName}</td>
