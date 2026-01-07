@@ -215,12 +215,12 @@ router.post('/outward', authenticateToken, async (req, res) => {
     try {
         const { skuId, qty, reason, referenceId, notes, warehouseLocation } = req.body;
 
-        // Check balance
+        // Check available balance (currentBalance minus reserved)
         const balance = await calculateInventoryBalance(req.prisma, skuId);
-        if (balance.currentBalance < qty) {
+        if (balance.availableBalance < qty) {
             return res.status(400).json({
                 error: 'Insufficient stock',
-                available: balance.currentBalance,
+                available: balance.availableBalance,
                 requested: qty
             });
         }

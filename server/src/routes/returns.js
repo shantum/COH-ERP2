@@ -996,10 +996,12 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
                 },
             });
 
-            // Check if all lines are now received
-            const allLinesReceived = request.lines.every((l) =>
-                l.id === lineId ? true : l.itemCondition !== null
-            );
+            // Re-fetch lines inside transaction to avoid race condition
+            // (concurrent receives could both see stale data otherwise)
+            const updatedLines = await tx.returnRequestLine.findMany({
+                where: { requestId: request.id }
+            });
+            const allLinesReceived = updatedLines.every((l) => l.itemCondition !== null);
 
             // Build condition summary for notes
             const conditionLabels = {

@@ -47,6 +47,7 @@ class ShopifyClient {
                     'X-Shopify-Access-Token': this.accessToken,
                     'Content-Type': 'application/json',
                 },
+                timeout: 30000, // 30 second timeout to prevent hung requests
             });
         }
     }

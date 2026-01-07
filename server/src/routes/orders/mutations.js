@@ -150,17 +150,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
                 }
 
                 if (line.lineStatus === 'allocated' || line.lineStatus === 'picked' || line.lineStatus === 'packed') {
-                    await tx.inventoryTransaction.create({
-                        data: {
-                            skuId: line.skuId,
-                            txnType: 'reserved',
-                            qty: -line.qty,
-                            reason: 'order_deleted',
-                            referenceId: order.id,
-                            notes: `Released from deleted order ${order.orderNumber}`,
-                            createdById: req.user.id,
-                        }
-                    });
+                    // Properly release reserved inventory by deleting the reservation transaction
+                    await releaseReservedInventory(tx, line.id);
                 }
             }
 

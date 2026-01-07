@@ -69,7 +69,8 @@ export default function Inventory() {
 
     const quickInward = useMutation({
         mutationFn: (data: { skuCode: string; qty: number; reason: string; notes: string }) => inventoryApi.quickInward(data),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] }); setShowInward(false); setInwardForm({ skuCode: '', qty: 1, reason: 'production', notes: '' }); }
+        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] }); setShowInward(false); setInwardForm({ skuCode: '', qty: 1, reason: 'production', notes: '' }); },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to add inward entry')
     });
 
     const deleteTransaction = useMutation({
@@ -77,7 +78,8 @@ export default function Inventory() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['skuTransactions'] });
             queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
-        }
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
     });
 
     // Get unique genders, product types and colors for filters

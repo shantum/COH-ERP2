@@ -34,6 +34,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
+    // Listen for unauthorized events from API interceptor
+    // This handles 401 responses without forcing a full page reload
+    useEffect(() => {
+        const handleUnauthorized = () => {
+            setUser(null);
+        };
+        window.addEventListener('auth:unauthorized', handleUnauthorized);
+        return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    }, []);
+
     const login = async (email: string, password: string) => {
         const res = await authApi.login(email, password);
         localStorage.setItem('token', res.data.token);

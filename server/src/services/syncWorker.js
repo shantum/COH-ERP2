@@ -67,19 +67,7 @@ class SyncWorker {
      * @param {number} options.staleAfterMins - For update mode: re-sync orders updated in last X mins
      */
     async startJob(jobType, options = {}) {
-        // Check for existing running job of same type
-        const existingJob = await prisma.syncJob.findFirst({
-            where: {
-                jobType,
-                status: { in: ['pending', 'running'] }
-            }
-        });
-
-        if (existingJob) {
-            throw new Error(`A ${jobType} sync job is already running (ID: ${existingJob.id})`);
-        }
-
-        // Reload Shopify config
+        // Reload Shopify config first (outside transaction)
         await shopifyClient.loadFromDatabase();
 
         if (!shopifyClient.isConfigured()) {
@@ -102,16 +90,32 @@ class SyncWorker {
             dateFilter = `Last ${options.days} days`;
         }
 
-        // Create job record
-        const job = await prisma.syncJob.create({
-            data: {
-                jobType,
-                status: 'pending',
-                daysBack: options.days || null,
-                dateFilter,
-                syncMode: options.syncMode || null,
-                staleAfterMins: options.staleAfterMins || null,
+        // Use transaction to atomically check for existing job and create new one
+        // This prevents race condition where two requests could both see no running job
+        const job = await prisma.$transaction(async (tx) => {
+            // Check for existing running job of same type (within transaction)
+            const existingJob = await tx.syncJob.findFirst({
+                where: {
+                    jobType,
+                    status: { in: ['pending', 'running'] }
+                }
+            });
+
+            if (existingJob) {
+                throw new Error(`A ${jobType} sync job is already running (ID: ${existingJob.id})`);
             }
+
+            // Create job record (atomically with the check above)
+            return await tx.syncJob.create({
+                data: {
+                    jobType,
+                    status: 'pending',
+                    daysBack: options.days || null,
+                    dateFilter,
+                    syncMode: options.syncMode || null,
+                    staleAfterMins: options.staleAfterMins || null,
+                }
+            });
         });
 
         // Start processing in background

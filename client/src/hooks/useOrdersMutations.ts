@@ -42,23 +42,27 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Allocate/unallocate line mutations
     const allocate = useMutation({
         mutationFn: (lineId: string) => ordersApi.allocateLine(lineId),
-        onSettled: () => invalidateAll()
+        onSettled: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to allocate line')
     });
 
     const unallocate = useMutation({
         mutationFn: (lineId: string) => ordersApi.unallocateLine(lineId),
-        onSettled: () => invalidateAll()
+        onSettled: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to unallocate line')
     });
 
     // Pick/unpick line mutations
     const pickLine = useMutation({
         mutationFn: (lineId: string) => ordersApi.pickLine(lineId),
-        onSettled: () => invalidateAll()
+        onSettled: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to pick line')
     });
 
     const unpickLine = useMutation({
         mutationFn: (lineId: string) => ordersApi.unpickLine(lineId),
-        onSettled: () => invalidateAll()
+        onSettled: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to unpick line')
     });
 
     // Production batch mutations
@@ -76,7 +80,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     const deleteBatch = useMutation({
         mutationFn: (id: string) => productionApi.deleteBatch(id),
-        onSuccess: () => invalidateAll()
+        onSuccess: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete batch')
     });
 
     // Order CRUD mutations

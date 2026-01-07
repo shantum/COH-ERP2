@@ -67,9 +67,16 @@ export function decrypt(encryptedValue) {
 
         return decrypted.toString('utf8');
     } catch (error) {
-        // If decryption fails, the value might be stored in plaintext (legacy)
-        // Return as-is for backward compatibility
-        console.warn('Decryption failed, value may be stored in plaintext');
+        // Check if this looks like encrypted data that failed to decrypt
+        // vs plaintext legacy data that was never encrypted
+        if (isEncrypted(encryptedValue)) {
+            // This appears to be encrypted data that failed to decrypt
+            // Could be corrupted or wrong key - don't return potentially corrupted data
+            console.error('Decryption failed for encrypted value - data may be corrupted');
+            throw new Error('Failed to decrypt stored value - data may be corrupted');
+        }
+        // Not encrypted format - return as plaintext (legacy compatibility)
+        console.warn('Value stored in plaintext format (legacy)');
         return encryptedValue;
     }
 }
