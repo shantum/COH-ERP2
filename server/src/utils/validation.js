@@ -199,8 +199,7 @@ export const CustomizeLineSchema = z.object({
     }),
     value: z.string()
         .trim()
-        .min(1, 'Customization value is required')
-        .max(100, 'Customization value cannot exceed 100 characters'),
+        .min(1, 'Customization value is required'),
     notes: z.string()
         .trim()
         .max(500, 'Notes cannot exceed 500 characters')
