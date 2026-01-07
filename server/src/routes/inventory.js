@@ -1,8 +1,425 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { calculateInventoryBalance, calculateAllInventoryBalances, calculateAllFabricBalances, getEffectiveFabricConsumption } from '../utils/queryPatterns.js';
+import { calculateInventoryBalance, calculateAllInventoryBalances, calculateAllFabricBalances, getEffectiveFabricConsumption, TXN_REASON } from '../utils/queryPatterns.js';
 
 const router = Router();
+
+// ============================================
+// CENTRALIZED INWARD HUB ENDPOINTS
+// ============================================
+
+/**
+ * GET /pending-sources
+ * Returns counts and items from all pending inward sources
+ */
+router.get('/pending-sources', authenticateToken, async (req, res) => {
+    try {
+        // Get pending production batches (status: in_progress)
+        const productionPending = await req.prisma.productionBatch.findMany({
+            where: { status: 'in_progress' },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } }
+                    }
+                }
+            }
+        });
+
+        // Get return request lines that are in_transit or received but not yet inspected
+        const returnsPending = await req.prisma.returnRequestLine.findMany({
+            where: {
+                request: { status: { in: ['in_transit', 'received'] } },
+                itemCondition: null  // Not yet inspected
+            },
+            include: {
+                sku: { include: { variation: { include: { product: true } } } },
+                request: true
+            }
+        });
+
+        // Get RTO orders pending receipt
+        const rtoPending = await req.prisma.order.findMany({
+            where: {
+                trackingStatus: 'rto_in_transit',
+                rtoReceivedAt: null,
+                isArchived: false
+            },
+            include: {
+                orderLines: {
+                    include: {
+                        sku: { include: { variation: { include: { product: true } } } }
+                    }
+                }
+            }
+        });
+
+        // Get repacking queue items (pending or inspecting)
+        const repackingPending = await req.prisma.repackingQueueItem.findMany({
+            where: { status: { in: ['pending', 'inspecting'] } },
+            include: {
+                sku: { include: { variation: { include: { product: true } } } },
+                returnRequest: true
+            }
+        });
+
+        // Build response with counts and items
+        res.json({
+            counts: {
+                production: productionPending.length,
+                returns: returnsPending.length,
+                rto: rtoPending.reduce((sum, o) => sum + o.orderLines.length, 0),
+                repacking: repackingPending.length
+            },
+            items: {
+                production: productionPending.map(b => ({
+                    source: 'production',
+                    batchId: b.id,
+                    batchCode: b.batchCode,
+                    skuId: b.skuId,
+                    skuCode: b.sku.skuCode,
+                    productName: b.sku.variation.product.name,
+                    colorName: b.sku.variation.colorName,
+                    size: b.sku.size,
+                    qtyPlanned: b.qtyPlanned,
+                    qtyCompleted: b.qtyCompleted || 0,
+                    qtyPending: b.qtyPlanned - (b.qtyCompleted || 0)
+                })),
+                returns: returnsPending.map(l => ({
+                    source: 'return',
+                    lineId: l.id,
+                    requestId: l.requestId,
+                    requestNumber: l.request.requestNumber,
+                    skuId: l.skuId,
+                    skuCode: l.sku.skuCode,
+                    productName: l.sku.variation.product.name,
+                    colorName: l.sku.variation.colorName,
+                    size: l.sku.size,
+                    qty: l.qty,
+                    reasonCategory: l.request.reasonCategory
+                })),
+                rto: rtoPending.flatMap(o => o.orderLines.map(l => ({
+                    source: 'rto',
+                    orderId: o.id,
+                    orderNumber: o.orderNumber,
+                    lineId: l.id,
+                    skuId: l.skuId,
+                    skuCode: l.sku.skuCode,
+                    productName: l.sku.variation.product.name,
+                    colorName: l.sku.variation.colorName,
+                    size: l.sku.size,
+                    qty: l.qty
+                }))),
+                repacking: repackingPending.map(r => ({
+                    source: 'repacking',
+                    queueItemId: r.id,
+                    skuId: r.skuId,
+                    skuCode: r.sku.skuCode,
+                    productName: r.sku.variation.product.name,
+                    colorName: r.sku.variation.colorName,
+                    size: r.sku.size,
+                    qty: r.qty,
+                    condition: r.condition,
+                    returnRequestNumber: r.returnRequest?.requestNumber
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Get pending sources error:', error);
+        res.status(500).json({ error: 'Failed to fetch pending sources' });
+    }
+});
+
+/**
+ * GET /scan-lookup?code=XXX
+ * Looks up SKU by code and finds matching pending sources
+ */
+router.get('/scan-lookup', authenticateToken, async (req, res) => {
+    try {
+        const { code } = req.query;
+        if (!code) return res.status(400).json({ error: 'Code is required' });
+
+        // Find SKU by skuCode (which also serves as barcode per schema)
+        const sku = await req.prisma.sku.findFirst({
+            where: { skuCode: code },
+            include: {
+                variation: {
+                    include: {
+                        product: true,
+                        fabric: true
+                    }
+                }
+            }
+        });
+
+        if (!sku) {
+            return res.status(404).json({ error: 'SKU not found' });
+        }
+
+        // Get current balance
+        const balance = await calculateInventoryBalance(req.prisma, sku.id);
+
+        // Check all pending sources for this SKU (priority order)
+        const matches = [];
+
+        // 1. Repacking (highest priority - already in warehouse)
+        const repackingItem = await req.prisma.repackingQueueItem.findFirst({
+            where: { skuId: sku.id, status: { in: ['pending', 'inspecting'] } },
+            include: { returnRequest: true }
+        });
+        if (repackingItem) {
+            matches.push({
+                source: 'repacking',
+                priority: 1,
+                data: {
+                    queueItemId: repackingItem.id,
+                    condition: repackingItem.condition,
+                    qty: repackingItem.qty,
+                    returnRequestNumber: repackingItem.returnRequest?.requestNumber,
+                    notes: repackingItem.inspectionNotes
+                }
+            });
+        }
+
+        // 2. Returns (in transit or received, not yet inspected)
+        const returnLine = await req.prisma.returnRequestLine.findFirst({
+            where: {
+                skuId: sku.id,
+                itemCondition: null,
+                request: { status: { in: ['in_transit', 'received'] } }
+            },
+            include: { request: true }
+        });
+        if (returnLine) {
+            matches.push({
+                source: 'return',
+                priority: 2,
+                data: {
+                    lineId: returnLine.id,
+                    requestId: returnLine.requestId,
+                    requestNumber: returnLine.request.requestNumber,
+                    qty: returnLine.qty,
+                    reasonCategory: returnLine.request.reasonCategory,
+                    customerName: returnLine.request.customer?.firstName || null
+                }
+            });
+        }
+
+        // 3. RTO orders
+        const rtoLine = await req.prisma.orderLine.findFirst({
+            where: {
+                skuId: sku.id,
+                order: {
+                    trackingStatus: 'rto_in_transit',
+                    rtoReceivedAt: null,
+                    isArchived: false
+                }
+            },
+            include: { order: true }
+        });
+        if (rtoLine) {
+            matches.push({
+                source: 'rto',
+                priority: 3,
+                data: {
+                    orderId: rtoLine.orderId,
+                    orderNumber: rtoLine.order.orderNumber,
+                    lineId: rtoLine.id,
+                    qty: rtoLine.qty,
+                    customerName: rtoLine.order.customerName
+                }
+            });
+        }
+
+        // 4. Production batches
+        const productionBatch = await req.prisma.productionBatch.findFirst({
+            where: {
+                skuId: sku.id,
+                status: 'in_progress'
+            }
+        });
+        if (productionBatch) {
+            matches.push({
+                source: 'production',
+                priority: 4,
+                data: {
+                    batchId: productionBatch.id,
+                    batchCode: productionBatch.batchCode,
+                    qtyPlanned: productionBatch.qtyPlanned,
+                    qtyCompleted: productionBatch.qtyCompleted || 0,
+                    qtyPending: productionBatch.qtyPlanned - (productionBatch.qtyCompleted || 0)
+                }
+            });
+        }
+
+        res.json({
+            sku: {
+                id: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation.product.name,
+                colorName: sku.variation.colorName,
+                size: sku.size,
+                mrp: sku.mrp,
+                imageUrl: sku.variation.imageUrl || sku.variation.product.imageUrl
+            },
+            currentBalance: balance.currentBalance,
+            availableBalance: balance.availableBalance,
+            matches: matches.sort((a, b) => a.priority - b.priority),
+            recommendedSource: matches.length > 0 ? matches[0].source : 'adjustment'
+        });
+    } catch (error) {
+        console.error('Scan lookup error:', error);
+        res.status(500).json({ error: 'Failed to lookup SKU' });
+    }
+});
+
+/**
+ * GET /recent-inwards
+ * Returns recent inward transactions for the activity feed
+ */
+router.get('/recent-inwards', authenticateToken, async (req, res) => {
+    try {
+        const { limit = 50 } = req.query;
+
+        const transactions = await req.prisma.inventoryTransaction.findMany({
+            where: {
+                txnType: 'inward',
+                createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Last 24 hours
+            },
+            orderBy: { createdAt: 'desc' },
+            take: Number(limit),
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } }
+                    }
+                },
+                createdBy: { select: { id: true, name: true } }
+            }
+        });
+
+        res.json(transactions.map(t => ({
+            id: t.id,
+            skuId: t.skuId,
+            skuCode: t.sku.skuCode,
+            productName: t.sku.variation.product.name,
+            colorName: t.sku.variation.colorName,
+            size: t.sku.size,
+            qty: t.qty,
+            reason: t.reason,
+            notes: t.notes,
+            createdAt: t.createdAt,
+            createdBy: t.createdBy?.name || 'System',
+            // Map reason to source for display
+            source: mapReasonToSource(t.reason)
+        })));
+    } catch (error) {
+        console.error('Get recent inwards error:', error);
+        res.status(500).json({ error: 'Failed to fetch recent inwards' });
+    }
+});
+
+/**
+ * Helper: Map transaction reason to source type for display
+ */
+function mapReasonToSource(reason) {
+    const mapping = {
+        'production': 'production',
+        'return_receipt': 'return',
+        'rto_received': 'rto',
+        'repack_complete': 'repacking',
+        'adjustment': 'adjustment'
+    };
+    return mapping[reason] || 'adjustment';
+}
+
+/**
+ * DELETE /undo-inward/:id
+ * Undo an inward transaction (with 24-hour window validation)
+ * Available to all authenticated users for recent transactions
+ */
+router.delete('/undo-inward/:id', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const transaction = await req.prisma.inventoryTransaction.findUnique({
+            where: { id },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } }
+                    }
+                }
+            }
+        });
+
+        if (!transaction) {
+            return res.status(404).json({ error: 'Transaction not found' });
+        }
+
+        if (transaction.txnType !== 'inward') {
+            return res.status(400).json({ error: 'Can only undo inward transactions' });
+        }
+
+        // Check if within undo window (24 hours)
+        const hoursSinceCreated = (Date.now() - new Date(transaction.createdAt).getTime()) / (1000 * 60 * 60);
+        if (hoursSinceCreated > 24) {
+            return res.status(400).json({
+                error: 'Transaction is too old to undo',
+                hoursAgo: Math.round(hoursSinceCreated),
+                maxHours: 24
+            });
+        }
+
+        // If this is a return_receipt transaction with a referenceId, revert the repacking queue item
+        let revertedQueueItem = null;
+        if (transaction.reason === 'return_receipt' && transaction.referenceId) {
+            const queueItem = await req.prisma.repackingQueueItem.findUnique({
+                where: { id: transaction.referenceId }
+            });
+
+            if (queueItem && queueItem.status === 'ready') {
+                await req.prisma.repackingQueueItem.update({
+                    where: { id: transaction.referenceId },
+                    data: {
+                        status: 'pending',
+                        qcComments: null,
+                        processedAt: null,
+                        processedById: null
+                    }
+                });
+                revertedQueueItem = queueItem;
+            }
+        }
+
+        // Delete the transaction
+        await req.prisma.inventoryTransaction.delete({
+            where: { id }
+        });
+
+        // Get updated balance
+        const balance = await calculateInventoryBalance(req.prisma, transaction.skuId);
+
+        res.json({
+            success: true,
+            message: revertedQueueItem
+                ? 'Transaction undone and item returned to QC queue'
+                : 'Transaction undone',
+            undone: {
+                id: transaction.id,
+                skuCode: transaction.sku?.skuCode,
+                productName: transaction.sku?.variation?.product?.name,
+                qty: transaction.qty,
+                reason: transaction.reason
+            },
+            newBalance: balance.currentBalance,
+            revertedToQueue: !!revertedQueueItem
+        });
+    } catch (error) {
+        console.error('Undo inward transaction error:', error);
+        res.status(500).json({ error: 'Failed to undo transaction' });
+    }
+});
 
 // ============================================
 // INVENTORY DASHBOARD

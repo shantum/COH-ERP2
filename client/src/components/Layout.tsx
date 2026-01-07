@@ -17,7 +17,7 @@ const navItems = [
     { to: '/customers', icon: Users, label: 'Customers' },
     { to: '/returns', icon: RotateCcw, label: 'Returns' },
     { to: '/production', icon: Factory, label: 'Production' },
-    { to: '/production-inward', icon: PackagePlus, label: 'Inward' },
+    { to: '/inward-hub', icon: PackagePlus, label: 'Inward Hub' },
     { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
     { to: '/settings', icon: Settings, label: 'Settings' },
 ];

@@ -125,6 +125,11 @@ export const inventoryApi = {
     deleteInward: (id: string) => api.delete(`/inventory/inward/${id}`),
     // Delete any transaction (admin only)
     deleteTransaction: (id: string) => api.delete(`/inventory/transactions/${id}`),
+    // Inward Hub
+    getPendingSources: () => api.get('/inventory/pending-sources'),
+    scanLookup: (code: string) => api.get(`/inventory/scan-lookup?code=${encodeURIComponent(code)}`),
+    getRecentInwards: (limit?: number) => api.get(`/inventory/recent-inwards?limit=${limit || 50}`),
+    undoTransaction: (id: string) => api.delete(`/inventory/transactions/${id}`),
 };
 
 // Orders

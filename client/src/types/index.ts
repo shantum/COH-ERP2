@@ -660,3 +660,111 @@ export interface RtoSummary {
   codValue: number;
   needsAttention: number;
 }
+
+// ============================================
+// INWARD HUB
+// ============================================
+
+export interface PendingSources {
+  counts: {
+    production: number;
+    returns: number;
+    rto: number;
+    repacking: number;
+  };
+  items: {
+    production: PendingProductionItem[];
+    returns: PendingReturnItem[];
+    rto: PendingRtoItem[];
+    repacking: PendingRepackingItem[];
+  };
+}
+
+export interface PendingProductionItem {
+  batchId: string;
+  batchCode: string;
+  skuId: string;
+  skuCode: string;
+  productName: string;
+  colorName: string;
+  size: string;
+  qtyPlanned: number;
+  qtyCompleted: number;
+  qtyPending: number;
+  batchDate: string;
+}
+
+export interface PendingReturnItem {
+  requestId: string;
+  requestNumber: string;
+  lineId: string;
+  skuId: string;
+  skuCode: string;
+  productName: string;
+  colorName: string;
+  size: string;
+  qty: number;
+  customerName: string;
+  reasonCategory: string;
+}
+
+export interface PendingRtoItem {
+  orderId: string;
+  orderNumber: string;
+  skuId: string;
+  skuCode: string;
+  productName: string;
+  colorName: string;
+  size: string;
+  qty: number;
+  customerName: string;
+  rtoInitiatedAt: string;
+}
+
+export interface PendingRepackingItem {
+  queueId: string;
+  skuId: string;
+  skuCode: string;
+  productName: string;
+  colorName: string;
+  size: string;
+  qty: number;
+  condition: string;
+  returnRequestNumber: string | null;
+}
+
+export interface ScanLookupResult {
+  sku: {
+    id: string;
+    skuCode: string;
+    barcode: string | null;
+    productName: string;
+    colorName: string;
+    size: string;
+    mrp: number;
+    imageUrl: string | null;
+  };
+  currentBalance: number;
+  availableBalance: number;
+  matches: ScanMatch[];
+  recommendedSource: 'production' | 'return' | 'rto' | 'repacking' | 'adjustment';
+}
+
+export interface ScanMatch {
+  source: string;
+  priority: number;
+  data: PendingProductionItem | PendingReturnItem | PendingRtoItem | PendingRepackingItem;
+}
+
+export interface RecentInward {
+  id: string;
+  skuCode: string;
+  productName: string;
+  colorName: string;
+  size: string;
+  qty: number;
+  reason: string;
+  source: string;
+  notes: string | null;
+  createdAt: string;
+}
