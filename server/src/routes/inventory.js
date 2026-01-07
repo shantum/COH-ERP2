@@ -38,17 +38,25 @@ router.get('/pending-sources', authenticateToken, async (req, res) => {
             }
         });
 
-        // Get RTO orders pending receipt
-        const rtoPending = await req.prisma.order.findMany({
+        // Get RTO lines pending receipt (line-level, not order-level)
+        // Includes both rto_in_transit AND rto_delivered where lines are not yet processed
+        const rtoPending = await req.prisma.orderLine.findMany({
             where: {
-                trackingStatus: 'rto_in_transit',
-                rtoReceivedAt: null,
-                isArchived: false
+                order: {
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    isArchived: false
+                },
+                rtoCondition: null  // Not yet processed
             },
             include: {
-                orderLines: {
-                    include: {
-                        sku: { include: { variation: { include: { product: true } } } }
+                sku: { include: { variation: { include: { product: true } } } },
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerName: true,
+                        trackingStatus: true,
+                        rtoInitiatedAt: true
                     }
                 }
             }
@@ -63,12 +71,27 @@ router.get('/pending-sources', authenticateToken, async (req, res) => {
             }
         });
 
+        // Calculate RTO urgency based on days since rtoInitiatedAt
+        const now = Date.now();
+        let rtoUrgent = 0;
+        let rtoWarning = 0;
+
+        for (const line of rtoPending) {
+            if (line.order.rtoInitiatedAt) {
+                const daysInRto = Math.floor((now - new Date(line.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24));
+                if (daysInRto > 14) rtoUrgent++;
+                else if (daysInRto > 7) rtoWarning++;
+            }
+        }
+
         // Build response with counts and items
         res.json({
             counts: {
                 production: productionPending.length,
                 returns: returnsPending.length,
-                rto: rtoPending.reduce((sum, o) => sum + o.orderLines.length, 0),
+                rto: rtoPending.length,
+                rtoUrgent,    // Items >14 days - for red badge
+                rtoWarning,   // Items 7-14 days - for orange badge
                 repacking: repackingPending.length
             },
             items: {
@@ -98,18 +121,22 @@ router.get('/pending-sources', authenticateToken, async (req, res) => {
                     qty: l.qty,
                     reasonCategory: l.request.reasonCategory
                 })),
-                rto: rtoPending.flatMap(o => o.orderLines.map(l => ({
+                rto: rtoPending.map(l => ({
                     source: 'rto',
-                    orderId: o.id,
-                    orderNumber: o.orderNumber,
+                    orderId: l.order.id,
+                    orderNumber: l.order.orderNumber,
+                    customerName: l.order.customerName,
                     lineId: l.id,
                     skuId: l.skuId,
                     skuCode: l.sku.skuCode,
                     productName: l.sku.variation.product.name,
                     colorName: l.sku.variation.colorName,
                     size: l.sku.size,
-                    qty: l.qty
-                }))),
+                    qty: l.qty,
+                    trackingStatus: l.order.trackingStatus,
+                    atWarehouse: l.order.trackingStatus === 'rto_delivered',
+                    rtoInitiatedAt: l.order.rtoInitiatedAt
+                })),
                 repacking: repackingPending.map(r => ({
                     source: 'repacking',
                     queueItemId: r.id,
@@ -205,28 +232,58 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
             });
         }
 
-        // 3. RTO orders
+        // 3. RTO orders (includes both rto_in_transit and rto_delivered)
         const rtoLine = await req.prisma.orderLine.findFirst({
             where: {
                 skuId: sku.id,
+                rtoCondition: null,  // Not yet processed
                 order: {
-                    trackingStatus: 'rto_in_transit',
-                    rtoReceivedAt: null,
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
                     isArchived: false
                 }
             },
-            include: { order: true }
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerName: true,
+                        trackingStatus: true,
+                        rtoInitiatedAt: true
+                    }
+                }
+            }
         });
+
         if (rtoLine) {
+            // Get all lines for this order to show progress
+            const allOrderLines = await req.prisma.orderLine.findMany({
+                where: { orderId: rtoLine.orderId },
+                include: {
+                    sku: { select: { skuCode: true } }
+                }
+            });
+
             matches.push({
                 source: 'rto',
                 priority: 3,
                 data: {
+                    lineId: rtoLine.id,
                     orderId: rtoLine.orderId,
                     orderNumber: rtoLine.order.orderNumber,
-                    lineId: rtoLine.id,
+                    customerName: rtoLine.order.customerName,
+                    trackingStatus: rtoLine.order.trackingStatus,
+                    atWarehouse: rtoLine.order.trackingStatus === 'rto_delivered',
+                    rtoInitiatedAt: rtoLine.order.rtoInitiatedAt,
                     qty: rtoLine.qty,
-                    customerName: rtoLine.order.customerName
+                    // Include other lines for progress display
+                    orderLines: allOrderLines.map(l => ({
+                        lineId: l.id,
+                        skuCode: l.sku.skuCode,
+                        qty: l.qty,
+                        rtoCondition: l.rtoCondition,
+                        isCurrentLine: l.id === rtoLine.id
+                    }))
                 }
             });
         }
@@ -270,6 +327,452 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Scan lookup error:', error);
         res.status(500).json({ error: 'Failed to lookup SKU' });
+    }
+});
+
+/**
+ * GET /pending-queue/:source
+ * Returns detailed pending items for a specific source with search and pagination support
+ */
+router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
+    try {
+        const { source } = req.params;
+        const { search, limit = 50, offset = 0 } = req.query;
+        const take = Number(limit);
+        const skip = Number(offset);
+
+        if (source === 'rto') {
+            // Get RTO lines pending receipt
+            const rtoPending = await req.prisma.orderLine.findMany({
+                where: {
+                    order: {
+                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                        isArchived: false
+                    },
+                    rtoCondition: null  // Not yet processed
+                },
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    order: {
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerName: true,
+                            trackingStatus: true,
+                            rtoInitiatedAt: true
+                        }
+                    }
+                },
+                orderBy: [
+                    { order: { rtoInitiatedAt: 'asc' } }  // Oldest first (most urgent)
+                ]
+            });
+
+            let items = rtoPending.map(l => {
+                const daysInRto = l.order.rtoInitiatedAt
+                    ? Math.floor((Date.now() - new Date(l.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24))
+                    : 0;
+
+                return {
+                    // Normalized fields for QueuePanel
+                    id: l.id,  // Use lineId as the unique ID
+                    skuId: l.skuId,
+                    skuCode: l.sku.skuCode,
+                    productName: l.sku.variation.product.name,
+                    colorName: l.sku.variation.colorName,
+                    size: l.sku.size,
+                    qty: l.qty,
+                    imageUrl: l.sku.variation.product.imageUrl,
+                    contextLabel: 'Order',
+                    contextValue: l.order.orderNumber,
+                    // RTO-specific fields
+                    source: 'rto',
+                    lineId: l.id,
+                    orderId: l.order.id,
+                    orderNumber: l.order.orderNumber,
+                    customerName: l.order.customerName,
+                    trackingStatus: l.order.trackingStatus,
+                    atWarehouse: l.order.trackingStatus === 'rto_delivered',
+                    rtoInitiatedAt: l.order.rtoInitiatedAt,
+                    daysInRto,
+                    urgency: daysInRto > 14 ? 'urgent' : daysInRto > 7 ? 'warning' : 'normal'
+                };
+            });
+
+            // Apply search filter
+            if (search) {
+                const searchLower = search.toLowerCase();
+                items = items.filter(item =>
+                    item.skuCode.toLowerCase().includes(searchLower) ||
+                    item.orderNumber.toLowerCase().includes(searchLower) ||
+                    item.customerName.toLowerCase().includes(searchLower) ||
+                    item.productName.toLowerCase().includes(searchLower)
+                );
+            }
+
+            // Apply pagination
+            const totalCount = items.length;
+            const paginatedItems = items.slice(skip, skip + take);
+
+            res.json({
+                source: 'rto',
+                items: paginatedItems,
+                total: totalCount,
+                pagination: {
+                    total: totalCount,
+                    limit: take,
+                    offset: skip,
+                    hasMore: skip + paginatedItems.length < totalCount
+                }
+            });
+        } else if (source === 'production') {
+            // Production batches
+            const productionPending = await req.prisma.productionBatch.findMany({
+                where: { status: 'in_progress' },
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } }
+                },
+                orderBy: { batchDate: 'asc' }
+            });
+
+            let items = productionPending.map(b => ({
+                // Normalized fields for QueuePanel
+                id: b.id,
+                skuId: b.skuId,
+                skuCode: b.sku.skuCode,
+                productName: b.sku.variation.product.name,
+                colorName: b.sku.variation.colorName,
+                size: b.sku.size,
+                qty: b.qtyPlanned - (b.qtyCompleted || 0),  // Pending qty
+                imageUrl: b.sku.variation.product.imageUrl,
+                contextLabel: 'Batch',
+                contextValue: b.batchCode || `Batch ${b.id.slice(0, 8)}`,
+                // Production-specific fields
+                source: 'production',
+                batchId: b.id,
+                batchCode: b.batchCode,
+                qtyPlanned: b.qtyPlanned,
+                qtyCompleted: b.qtyCompleted || 0,
+                qtyPending: b.qtyPlanned - (b.qtyCompleted || 0),
+                batchDate: b.batchDate
+            }));
+
+            if (search) {
+                const searchLower = search.toLowerCase();
+                items = items.filter(item =>
+                    item.skuCode.toLowerCase().includes(searchLower) ||
+                    (item.batchCode && item.batchCode.toLowerCase().includes(searchLower)) ||
+                    item.productName.toLowerCase().includes(searchLower)
+                );
+            }
+
+            // Apply pagination
+            const totalCount = items.length;
+            const paginatedItems = items.slice(skip, skip + take);
+
+            res.json({
+                source: 'production',
+                items: paginatedItems,
+                total: totalCount,
+                pagination: {
+                    total: totalCount,
+                    limit: take,
+                    offset: skip,
+                    hasMore: skip + paginatedItems.length < totalCount
+                }
+            });
+        } else if (source === 'returns') {
+            // Return request lines
+            const returnsPending = await req.prisma.returnRequestLine.findMany({
+                where: {
+                    request: { status: { in: ['in_transit', 'received'] } },
+                    itemCondition: null
+                },
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    request: { include: { customer: true } }
+                }
+            });
+
+            let items = returnsPending.map(l => ({
+                // Normalized fields for QueuePanel
+                id: l.id,
+                skuId: l.skuId,
+                skuCode: l.sku.skuCode,
+                productName: l.sku.variation.product.name,
+                colorName: l.sku.variation.colorName,
+                size: l.sku.size,
+                qty: l.qty,
+                imageUrl: l.sku.variation.product.imageUrl,
+                contextLabel: 'Ticket',
+                contextValue: l.request.requestNumber,
+                // Return-specific fields
+                source: 'return',
+                lineId: l.id,
+                requestId: l.requestId,
+                requestNumber: l.request.requestNumber,
+                reasonCategory: l.request.reasonCategory,
+                customerName: l.request.customer?.firstName || 'Unknown'
+            }));
+
+            if (search) {
+                const searchLower = search.toLowerCase();
+                items = items.filter(item =>
+                    item.skuCode.toLowerCase().includes(searchLower) ||
+                    item.requestNumber.toLowerCase().includes(searchLower) ||
+                    item.productName.toLowerCase().includes(searchLower)
+                );
+            }
+
+            // Apply pagination
+            const totalCount = items.length;
+            const paginatedItems = items.slice(skip, skip + take);
+
+            res.json({
+                source: 'returns',
+                items: paginatedItems,
+                total: totalCount,
+                pagination: {
+                    total: totalCount,
+                    limit: take,
+                    offset: skip,
+                    hasMore: skip + paginatedItems.length < totalCount
+                }
+            });
+        } else if (source === 'repacking') {
+            // Repacking queue items
+            const repackingPending = await req.prisma.repackingQueueItem.findMany({
+                where: { status: { in: ['pending', 'inspecting'] } },
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    returnRequest: true
+                }
+            });
+
+            let items = repackingPending.map(r => ({
+                // Normalized fields for QueuePanel
+                id: r.id,
+                skuId: r.skuId,
+                skuCode: r.sku.skuCode,
+                productName: r.sku.variation.product.name,
+                colorName: r.sku.variation.colorName,
+                size: r.sku.size,
+                qty: r.qty,
+                imageUrl: r.sku.variation.product.imageUrl,
+                contextLabel: 'Return',
+                contextValue: r.returnRequest?.requestNumber || 'N/A',
+                // Repacking-specific fields
+                source: 'repacking',
+                queueItemId: r.id,
+                condition: r.condition,
+                returnRequestNumber: r.returnRequest?.requestNumber
+            }));
+
+            if (search) {
+                const searchLower = search.toLowerCase();
+                items = items.filter(item =>
+                    item.skuCode.toLowerCase().includes(searchLower) ||
+                    item.productName.toLowerCase().includes(searchLower) ||
+                    (item.returnRequestNumber && item.returnRequestNumber.toLowerCase().includes(searchLower))
+                );
+            }
+
+            // Apply pagination
+            const totalCount = items.length;
+            const paginatedItems = items.slice(skip, skip + take);
+
+            res.json({
+                source: 'repacking',
+                items: paginatedItems,
+                total: totalCount,
+                pagination: {
+                    total: totalCount,
+                    limit: take,
+                    offset: skip,
+                    hasMore: skip + paginatedItems.length < totalCount
+                }
+            });
+        } else {
+            res.status(400).json({ error: 'Invalid source. Must be one of: rto, production, returns, repacking' });
+        }
+    } catch (error) {
+        console.error('Get pending queue error:', error);
+        res.status(500).json({ error: 'Failed to fetch pending queue' });
+    }
+});
+
+/**
+ * POST /rto-inward-line
+ * Process a single RTO order line (mark condition and optionally create inventory inward)
+ */
+router.post('/rto-inward-line', authenticateToken, async (req, res) => {
+    try {
+        const { lineId, condition, notes } = req.body;
+
+        if (!lineId) {
+            return res.status(400).json({ error: 'lineId is required' });
+        }
+
+        if (!condition || !['good', 'damaged', 'wrong_product', 'unopened'].includes(condition)) {
+            return res.status(400).json({
+                error: 'Valid condition is required',
+                validConditions: ['good', 'damaged', 'wrong_product', 'unopened']
+            });
+        }
+
+        // Get the order line with order info
+        const orderLine = await req.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        trackingStatus: true,
+                        isArchived: true
+                    }
+                },
+                sku: {
+                    include: {
+                        variation: { include: { product: true } }
+                    }
+                }
+            }
+        });
+
+        if (!orderLine) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        // Check if already processed
+        if (orderLine.rtoCondition) {
+            return res.status(400).json({
+                error: 'Line already processed',
+                existingCondition: orderLine.rtoCondition,
+                processedAt: orderLine.rtoInwardedAt
+            });
+        }
+
+        // Check if order is in RTO status
+        if (!['rto_in_transit', 'rto_delivered'].includes(orderLine.order.trackingStatus)) {
+            return res.status(400).json({
+                error: 'Order is not in RTO status',
+                currentStatus: orderLine.order.trackingStatus
+            });
+        }
+
+        // Start transaction to update line and create inventory if good
+        const result = await req.prisma.$transaction(async (tx) => {
+            // Update the order line with RTO condition
+            const updatedLine = await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    rtoCondition: condition,
+                    rtoInwardedAt: new Date(),
+                    rtoInwardedById: req.user.id,
+                    rtoNotes: notes || null
+                }
+            });
+
+            // Only create inventory inward for 'good' or 'unopened' condition
+            let inventoryTxn = null;
+            let writeOffRecord = null;
+
+            if (condition === 'good' || condition === 'unopened') {
+                inventoryTxn = await tx.inventoryTransaction.create({
+                    data: {
+                        skuId: orderLine.skuId,
+                        txnType: 'inward',
+                        qty: orderLine.qty,
+                        reason: 'rto_received',
+                        referenceId: lineId,
+                        notes: `RTO from order ${orderLine.order.orderNumber}${notes ? ` - ${notes}` : ''}`,
+                        createdById: req.user.id
+                    }
+                });
+            } else {
+                // For damaged/wrong_product - create write-off record
+                writeOffRecord = await tx.writeOffLog.create({
+                    data: {
+                        skuId: orderLine.skuId,
+                        qty: orderLine.qty,
+                        reason: condition === 'damaged' ? 'defective' : 'wrong_product',
+                        sourceType: 'rto',
+                        sourceId: lineId,
+                        notes: `RTO write-off (${condition}) - Order ${orderLine.order.orderNumber}${notes ? ': ' + notes : ''}`,
+                        createdById: req.user.id
+                    }
+                });
+
+                // Increment SKU write-off count
+                await tx.sku.update({
+                    where: { id: orderLine.skuId },
+                    data: { writeOffCount: { increment: orderLine.qty } }
+                });
+            }
+
+            // Check if all lines are processed
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId: orderLine.orderId }
+            });
+            const pendingLines = allLines.filter(l => l.rtoCondition === null);
+            const allLinesProcessed = pendingLines.length === 0;
+
+            // If all lines processed, update order's rtoReceivedAt
+            if (allLinesProcessed) {
+                await tx.order.update({
+                    where: { id: orderLine.orderId },
+                    data: { rtoReceivedAt: new Date() }
+                });
+            }
+
+            return {
+                updatedLine,
+                inventoryTxn,
+                writeOffRecord,
+                allLinesProcessed,
+                totalLines: allLines.length,
+                processedLines: allLines.filter(l => l.rtoCondition !== null).length
+            };
+        });
+
+        // Get updated balance
+        const balance = await calculateInventoryBalance(req.prisma, orderLine.skuId);
+
+        res.json({
+            success: true,
+            message: result.inventoryTxn
+                ? `RTO line processed - ${orderLine.qty} units added to inventory`
+                : result.writeOffRecord
+                    ? `RTO line written off as ${condition}`
+                    : `RTO line processed as ${condition} - no inventory added`,
+            line: {
+                lineId: orderLine.id,
+                orderId: orderLine.orderId,
+                orderNumber: orderLine.order.orderNumber,
+                skuCode: orderLine.sku.skuCode,
+                productName: orderLine.sku.variation.product.name,
+                colorName: orderLine.sku.variation.colorName,
+                size: orderLine.sku.size,
+                qty: orderLine.qty,
+                condition,
+                notes: notes || null
+            },
+            inventoryAdded: result.inventoryTxn !== null,
+            writtenOff: result.writeOffRecord !== null,
+            newBalance: balance.currentBalance,
+            orderProgress: {
+                orderId: orderLine.orderId,
+                orderNumber: orderLine.order.orderNumber,
+                total: result.totalLines,
+                processed: result.processedLines,
+                remaining: result.totalLines - result.processedLines,
+                allComplete: result.allLinesProcessed
+            }
+        });
+    } catch (error) {
+        console.error('RTO inward line error:', error);
+        res.status(500).json({ error: 'Failed to process RTO line' });
     }
 });
 

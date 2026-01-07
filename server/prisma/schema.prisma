@@ -27,6 +27,7 @@ model User {
   returnStatusHistory    ReturnStatusHistory[]
   processedRepackItems   RepackingQueueItem[]   @relation("RepackingProcessor")
   createdWriteOffs       WriteOffLog[]          @relation("WriteOffCreator")
+  rtoInwardedLines       OrderLine[]            @relation("RtoInwardedBy")
 }
 
 // ============================================
@@ -379,16 +380,24 @@ model OrderLine {
   productionBatchId String?
   notes             String?
 
+  // RTO Reconciliation fields (only populated for RTO orders)
+  rtoCondition      String?   // null, unopened, good, damaged, wrong_product
+  rtoInwardedAt     DateTime?
+  rtoInwardedById   String?
+  rtoNotes          String?
+
   order              Order               @relation(fields: [orderId], references: [id])
   sku                Sku                 @relation(fields: [skuId], references: [id])
   productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
   returnRequestLines ReturnRequestLine[]
+  rtoInwardedBy      User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
 
   @@index([orderId])
   @@index([skuId])
   @@index([lineStatus])
   @@index([productionBatchId])
   @@index([lineStatus, orderId])  // Compound: filter lines by status within order
+  @@index([rtoInwardedById])
 }
 
 // ============================================

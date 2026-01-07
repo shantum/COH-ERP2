@@ -47,3 +47,7 @@ prisma/migrations/
 # Testing screenshots
 .playwright-mcp/
 
+# Coverage
+coverage/
+server/coverage/
+

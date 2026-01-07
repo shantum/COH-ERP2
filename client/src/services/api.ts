@@ -130,6 +130,11 @@ export const inventoryApi = {
     scanLookup: (code: string) => api.get(`/inventory/scan-lookup?code=${encodeURIComponent(code)}`),
     getRecentInwards: (limit?: number) => api.get(`/inventory/recent-inwards?limit=${limit || 50}`),
     undoTransaction: (id: string) => api.delete(`/inventory/transactions/${id}`),
+    // Queue panel
+    getPendingQueue: (source: string, params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get(`/inventory/pending-queue/${source}`, { params }),
+    rtoInwardLine: (data: { lineId: string; condition: string; notes?: string }) =>
+        api.post('/inventory/rto-inward-line', data),
 };
 
 // Orders

@@ -197,6 +197,11 @@ export interface OrderLine {
   inventoryTxnId: string | null;
   productionBatchId: string | null;
   notes: string | null;
+  // RTO Inward fields
+  rtoCondition: string | null;
+  rtoInwardedAt: string | null;
+  rtoInwardedById: string | null;
+  rtoNotes: string | null;
   sku?: Sku;
   productionBatch?: ProductionBatch;
 }
@@ -670,6 +675,8 @@ export interface PendingSources {
     production: number;
     returns: number;
     rto: number;
+    rtoUrgent: number;   // Items >14 days - for red badge
+    rtoWarning: number;  // Items 7-14 days - for orange badge
     repacking: number;
   };
   items: {
@@ -709,6 +716,7 @@ export interface PendingReturnItem {
 }
 
 export interface PendingRtoItem {
+  lineId: string;
   orderId: string;
   orderNumber: string;
   skuId: string;
@@ -718,7 +726,11 @@ export interface PendingRtoItem {
   size: string;
   qty: number;
   customerName: string;
-  rtoInitiatedAt: string;
+  trackingStatus: string;
+  atWarehouse: boolean;
+  rtoInitiatedAt: string | null;
+  daysInRto?: number;
+  urgency?: 'urgent' | 'warning' | 'normal';
 }
 
 export interface PendingRepackingItem {
@@ -753,7 +765,26 @@ export interface ScanLookupResult {
 export interface ScanMatch {
   source: string;
   priority: number;
-  data: PendingProductionItem | PendingReturnItem | PendingRtoItem | PendingRepackingItem;
+  data: PendingProductionItem | PendingReturnItem | RtoScanMatchData | PendingRepackingItem;
+}
+
+// Enhanced RTO scan match data with order lines for progress display
+export interface RtoScanMatchData {
+  lineId: string;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  trackingStatus: string;
+  atWarehouse: boolean;
+  rtoInitiatedAt: string | null;
+  qty: number;
+  orderLines: Array<{
+    lineId: string;
+    skuCode: string;
+    qty: number;
+    rtoCondition: string | null;
+    isCurrentLine: boolean;
+  }>;
 }
 
 export interface RecentInward {
@@ -767,4 +798,75 @@ export interface RecentInward {
   source: string;
   notes: string | null;
   createdAt: string;
+}
+
+// ============================================
+// RTO CONDITIONS
+// ============================================
+
+export type RtoCondition = 'unopened' | 'good' | 'damaged' | 'wrong_product';
+
+// ============================================
+// QUEUE PANEL
+// ============================================
+
+// Queue Panel Item (generic for all sources)
+export interface QueuePanelItem {
+  id: string;
+  skuId: string;
+  skuCode: string;
+  productName: string;
+  colorName: string;
+  size: string;
+  qty: number;
+  imageUrl?: string;
+  // Source-specific context
+  contextLabel: string;  // "Batch", "Ticket", "Order"
+  contextValue: string;  // "PB-2025-001", "RET-2025-042", "#63735"
+  // RTO-specific
+  atWarehouse?: boolean;
+  daysInRto?: number;
+  customerName?: string;
+  // For click-to-process
+  lineId?: string;
+  orderId?: string;
+  batchId?: string;
+}
+
+// RTO Inward Request/Response
+export interface RtoInwardLineRequest {
+  lineId: string;
+  condition: RtoCondition;
+  notes?: string;
+}
+
+export interface RtoInwardLineResponse {
+  success: boolean;
+  message: string;
+  line: {
+    lineId: string;
+    orderId: string;
+    orderNumber: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    condition: RtoCondition;
+    notes: string | null;
+  };
+  inventoryAdded: boolean;
+  newBalance: number;
+  progress: {
+    totalLines: number;
+    processedLines: number;
+    allComplete: boolean;
+  };
+}
+
+// Pending Queue Response
+export interface PendingQueueResponse {
+  source: string;
+  items: QueuePanelItem[];
+  total: number;
 }
