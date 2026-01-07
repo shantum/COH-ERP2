@@ -35,6 +35,7 @@ import {
     ShipOrderModal,
     NotesModal,
     CustomerDetailModal,
+    CustomizationModal,
     SummaryPanel,
     TrackingModal,
 } from '../components/orders';
@@ -75,6 +76,16 @@ export default function Orders() {
     // Tracking modal state
     const [trackingAwb, setTrackingAwb] = useState<string | null>(null);
     const [trackingOrderNumber, setTrackingOrderNumber] = useState<string | null>(null);
+
+    // Customization modal state
+    const [customizingLine, setCustomizingLine] = useState<{
+        lineId: string;
+        skuCode: string;
+        productName: string;
+        colorName: string;
+        size: string;
+        qty: number;
+    } | null>(null);
 
     // Data hooks
     const {
@@ -300,6 +311,35 @@ export default function Orders() {
         [mutations.unpickLine]
     );
 
+    const handleCustomize = useCallback(
+        (_lineId: string, lineData: {
+            lineId: string;
+            skuCode: string;
+            productName: string;
+            colorName: string;
+            size: string;
+            qty: number;
+        }) => {
+            setCustomizingLine(lineData);
+        },
+        []
+    );
+
+    const handleConfirmCustomization = useCallback(
+        (data: { type: string; value: string; notes?: string }) => {
+            if (!customizingLine) return;
+            mutations.customizeLine.mutate(
+                { lineId: customizingLine.lineId, data },
+                {
+                    onSuccess: () => {
+                        setCustomizingLine(null);
+                    },
+                }
+            );
+        },
+        [customizingLine, mutations.customizeLine]
+    );
+
     // Grid component
     const { gridComponent, columnVisibilityDropdown, customHeaders, resetHeaders } = OrdersGrid({
         rows: filteredOpenRows,
@@ -321,6 +361,7 @@ export default function Orders() {
         onCancelLine: (lineId) => mutations.cancelLine.mutate(lineId),
         onUncancelLine: (lineId) => mutations.uncancelLine.mutate(lineId),
         onSelectCustomer: setSelectedCustomerId,
+        onCustomize: handleCustomize,
         allocatingLines,
         shippingChecked,
         isCancellingOrder: mutations.cancelOrder.isPending,
@@ -791,6 +832,16 @@ export default function Orders() {
                         setTrackingAwb(null);
                         setTrackingOrderNumber(null);
                     }}
+                />
+            )}
+
+            {customizingLine && (
+                <CustomizationModal
+                    isOpen={true}
+                    onClose={() => setCustomizingLine(null)}
+                    onConfirm={handleConfirmCustomization}
+                    lineData={customizingLine}
+                    isSubmitting={mutations.customizeLine.isPending}
                 />
             )}
         </div>

@@ -15,5 +15,6 @@ export { EditOrderModal } from './EditOrderModal';
 export { ShipOrderModal } from './ShipOrderModal';
 export { NotesModal } from './NotesModal';
 export { CustomerDetailModal } from './CustomerDetailModal';
+export { CustomizationModal } from './CustomizationModal';
 export { SummaryPanel } from './SummaryPanel';
 export { TrackingModal } from './TrackingModal';

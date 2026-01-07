@@ -213,6 +213,20 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to add line')
     });
 
+    // Customization mutations
+    const customizeLine = useMutation({
+        mutationFn: ({ lineId, data }: { lineId: string; data: { type: string; value: string; notes?: string } }) =>
+            ordersApi.customizeLine(lineId, data),
+        onSuccess: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to customize line')
+    });
+
+    const removeCustomization = useMutation({
+        mutationFn: (lineId: string) => ordersApi.removeCustomization(lineId),
+        onSuccess: () => invalidateAll(),
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to remove customization')
+    });
+
     return {
         // Ship
         ship,
@@ -251,6 +265,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         uncancelLine,
         updateLine,
         addLine,
+
+        // Customization
+        customizeLine,
+        removeCustomization,
 
         // Helper
         invalidateAll,
