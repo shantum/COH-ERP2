@@ -293,8 +293,14 @@ npm test               # Jest tests
 - Frontend: RemittanceTab in Settings for CSV upload
 - Improved tracking sync: re-evaluates delivered/RTO orders
 - Enhanced RTO status detection using last scan status
+- Fixed RTO status mapping: properly distinguish `rto_in_transit` vs `rto_delivered`
+- Consolidated `rto_initiated` into `rto_in_transit` for simpler status display
+- Shipped orders grid now groups by payment method (COD/Prepaid)
+- Manual archive option added to shipped orders
+- Archived orders analytics endpoint (`/orders/archived/analytics`) with revenue/order stats
 - Archived orders now support sort by `orderDate` or `archivedAt`
 - Archive Delivered button now handles both prepaid and paid COD orders
+- Added domain documentation files for code organization
 
 ### January 6, 2026 (Late Evening)
 - Enhanced order management with pagination for archived orders

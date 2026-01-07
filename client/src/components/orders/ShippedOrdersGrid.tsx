@@ -155,20 +155,8 @@ export function ShippedOrdersGrid({
                 deliveryDays = Math.round((deliveredDate.getTime() - shippedDate.getTime()) / (1000 * 60 * 60 * 24));
             }
 
-            // Determine payment group for row grouping
-            const paymentMethod = cache.paymentMethod || order.paymentMethod || '';
-            const paymentGroup = paymentMethod.toLowerCase().includes('cod') ? 'COD' : 'Prepaid';
-
             return {
                 ...order,
-                paymentGroup,
-                shipDateGroup: order.shippedAt
-                    ? new Date(order.shippedAt).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric',
-                    })
-                    : 'Unknown',
                 city: parseCity(order.shippingAddress),
                 itemCount: order.orderLines?.length || 0,
                 itemSummary: order.orderLines
@@ -192,14 +180,6 @@ export function ShippedOrdersGrid({
     }, [orders]);
 
     const columnDefs = useMemo<ColDef[]>(() => [
-        // Row grouping column (hidden) - Group by Payment Method
-        {
-            field: 'paymentGroup',
-            headerName: 'Payment',
-            rowGroup: true,
-            hide: true,
-        },
-
         // ═══════════════════════════════════════════════════════════════════
         // ERP DATA - Internal order and customer information
         // ═══════════════════════════════════════════════════════════════════
@@ -754,14 +734,6 @@ export function ShippedOrdersGrid({
         resizable: true,
     }), []);
 
-    const autoGroupColumnDef = useMemo<ColDef>(() => ({
-        headerName: 'Payment Method',
-        minWidth: 140,
-        cellRendererParams: {
-            suppressCount: false,
-        },
-    }), []);
-
     const getRowStyle = useCallback((params: any) => {
         const status = params.data?.trackingStatus;
         if (status === 'delivered') return { backgroundColor: '#f0fdf4' };
@@ -784,12 +756,9 @@ export function ShippedOrdersGrid({
                 rowData={rowData}
                 columnDefs={columnDefs}
                 defaultColDef={defaultColDef}
-                autoGroupColumnDef={autoGroupColumnDef}
-                groupDisplayType="groupRows"
                 theme={compactTheme}
                 getRowStyle={getRowStyle}
                 animateRows={true}
-                groupDefaultExpanded={1}
             />
         </div>
     );

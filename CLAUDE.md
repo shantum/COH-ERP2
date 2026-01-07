@@ -173,6 +173,9 @@ Amount mismatches >5% are flagged for `manual_review`.
 - **Summary Panels**: Dashboard stats for order counts and fulfillment progress
 - **Pagination**: 25 items per page (archived orders use server-side pagination)
 - **Archived Sort**: Sort by `orderDate` or `archivedAt`
+- **Payment Grouping**: Shipped orders grouped by payment method (COD/Prepaid)
+- **Manual Archive**: Archive individual shipped orders
+- **Archived Analytics**: Revenue and order stats via `/orders/archived/analytics`
 - **Conditional Formatting**: Row colors indicate status:
   - Green: Packed/allocated items
   - Emerald: Picked items

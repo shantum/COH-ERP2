@@ -17,11 +17,14 @@ Order management and fulfillment workflow.
 |--------|------|---------|
 | GET | `/open` | Open orders with fulfillment status |
 | GET | `/shipped` | Shipped orders (last 30 days default) |
+| GET | `/shipped/summary` | Shipped orders summary stats |
 | GET | `/archived` | Paginated archived orders (sort by `orderDate` or `archivedAt`) |
+| GET | `/archived/analytics` | Archived orders revenue and stats |
 | PUT | `/lines/:id/allocate` | Allocate inventory (creates `reserved` txn) |
 | PUT | `/lines/:id/pick` | Mark line as picked |
 | PUT | `/lines/:id/pack` | Mark line as packed |
 | POST | `/:id/ship` | Ship order (releases reserved, creates outward txn) |
+| POST | `/:id/archive` | Archive a single order |
 | POST | `/archive-by-date` | Bulk archive orders before date |
 | POST | `/archive-delivered-prepaid` | Archive delivered prepaid & paid COD orders |
 
@@ -119,11 +122,14 @@ Orders are enriched with:
 5. **Ship requires lines allocated**: Can skip pick/pack, but must be at least allocated
 6. **Archive Delivered**: Now archives both prepaid AND paid COD orders
 7. **COD Shopify sync**: Uses `shopifyClient.markOrderAsPaid()` to create capture transaction
+8. **Payment grouping**: Shipped orders grid groups by payment method (COD/Prepaid)
+9. **Manual archive**: Individual shipped orders can be archived via UI
 
 ## Related Frontend
 
 - `pages/Orders.tsx` (38KB) — Main orders page with 3 tabs
 - `components/orders/OrdersGrid.tsx` (56KB) — AG-Grid for open orders
-- `components/orders/ShippedOrdersGrid.tsx` (38KB) — Shipped orders grid
-- `components/orders/ArchivedOrdersGrid.tsx` (26KB) — Archived orders with sort options
-- `components/settings/tabs/RemittanceTab.tsx` (27KB) — COD remittance upload UI
+- `components/orders/ShippedOrdersGrid.tsx` (38KB) — Shipped orders with payment grouping
+- `components/orders/ArchivedOrdersGrid.tsx` (26KB) — Archived orders with analytics
+- `components/settings/tabs/RemittanceTab.tsx` (28KB) — COD remittance upload UI
+

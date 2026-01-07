@@ -82,16 +82,17 @@ iThink statuses are mapped to internal tracking statuses:
 | `DL` | Delivered | `delivered` |
 | `IT`, `OT` | In Transit | `in_transit` |
 | `PP` | Pending Pickup | `manifested` |
-| `RTO` initiated | Return to Origin | `rto_initiated` |
-| `RTO` in transit | RTO In Transit | `rto_in_transit` |
+| `RTO` initiated/in transit | RTO In Transit | `rto_in_transit` |
 | `RTO` delivered | RTO Delivered | `rto_delivered` |
 | `UD` | Undelivered Attempt | `undelivered` |
+
+**Note**: `rto_initiated` is consolidated into `rto_in_transit` for simpler status display.
 
 ## Background Sync (trackingSync.js)
 
 Runs every 4 hours and syncs orders with these tracking statuses:
 - `in_transit`, `out_for_delivery`, `delivery_delayed`
-- `rto_initiated`, `rto_in_transit`, `rto_delivered` (re-evaluates)
+- `rto_in_transit`, `rto_delivered` (re-evaluates)
 - `manifested`, `picked_up`, `reached_destination`
 - `undelivered`, `not_picked`
 - `delivered` (re-evaluates to catch RTO misclassification)
