@@ -111,6 +111,8 @@ Base URL: `/api`
 6. **Shipped tab filters**: Excludes RTO and unpaid COD (separate tabs)
 7. **Zod validation**: Order endpoints use `validate()` middleware
 8. **Router order matters**: In `orders/index.js`, specific routes before parameterized
+9. **RTO per-line processing**: Use `/inventory/rto-inward-line` for per-line condition marking
+10. **RTO condition logic**: Only `good`/`unopened` create inventory; `damaged`/`wrong_product` write-off
 
 ## Environment Variables
 

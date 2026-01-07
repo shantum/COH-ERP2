@@ -1,10 +1,17 @@
 /**
  * Shared customer utilities
  * Consolidates duplicate customer lookup/create logic across the codebase
+ *
+ * IMPORTANT: Uses upsert pattern to prevent race conditions when
+ * concurrent orders from the same customer arrive simultaneously.
  */
 
 /**
  * Find or create a customer from Shopify customer data
+ *
+ * Uses upsert on shopifyCustomerId to prevent race conditions where
+ * two concurrent orders from the same customer could create duplicate records.
+ *
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {Object} shopifyCustomer - Shopify customer object
  * @param {Object} options - Additional options
@@ -21,57 +28,144 @@ export async function findOrCreateCustomer(prisma, shopifyCustomer, options = {}
     const customerEmail = shopifyCustomer.email?.toLowerCase()?.trim() || null;
     const { shippingAddress, orderDate } = options;
 
-    // Build search conditions
-    const searchConditions = [{ shopifyCustomerId }];
-    if (customerEmail) {
-        searchConditions.push({ email: customerEmail });
-    }
+    // If we have a Shopify customer ID, use upsert to prevent race conditions
+    // This is the primary key for deduplication
+    if (shopifyCustomerId) {
+        try {
+            // First, try to find by shopifyCustomerId (fastest path)
+            let customer = await prisma.customer.findUnique({
+                where: { shopifyCustomerId }
+            });
 
-    // Try to find existing customer
-    let customer = await prisma.customer.findFirst({
-        where: { OR: searchConditions }
-    });
+            if (customer) {
+                // Update existing customer with latest data
+                const updateData = {};
 
-    let created = false;
+                // Update last order date if provided
+                if (orderDate) {
+                    updateData.lastOrderDate = new Date(orderDate);
+                }
 
-    if (customer) {
-        // Update existing customer with latest data
-        const updateData = {
-            shopifyCustomerId, // Ensure Shopify ID is linked
-        };
+                // Update address if provided and customer doesn't have one
+                if (shippingAddress && !customer.defaultAddress) {
+                    updateData.defaultAddress = JSON.stringify(shippingAddress);
+                }
 
-        // Update last order date if provided
-        if (orderDate) {
-            updateData.lastOrderDate = new Date(orderDate);
-        }
+                // Only update if there's something to update
+                if (Object.keys(updateData).length > 0) {
+                    customer = await prisma.customer.update({
+                        where: { id: customer.id },
+                        data: updateData,
+                    });
+                }
 
-        // Update address if provided and customer doesn't have one
-        if (shippingAddress && !customer.defaultAddress) {
-            updateData.defaultAddress = JSON.stringify(shippingAddress);
-        }
-
-        await prisma.customer.update({
-            where: { id: customer.id },
-            data: updateData,
-        });
-    } else if (customerEmail) {
-        // Create new customer
-        customer = await prisma.customer.create({
-            data: {
-                email: customerEmail,
-                firstName: shopifyCustomer.first_name || null,
-                lastName: shopifyCustomer.last_name || null,
-                phone: shopifyCustomer.phone || null,
-                shopifyCustomerId,
-                defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-                firstOrderDate: orderDate ? new Date(orderDate) : null,
-                lastOrderDate: orderDate ? new Date(orderDate) : null,
+                return { customer, created: false };
             }
-        });
-        created = true;
+
+            // Customer not found by Shopify ID - check by email to avoid duplicates
+            if (customerEmail) {
+                const existingByEmail = await prisma.customer.findUnique({
+                    where: { email: customerEmail }
+                });
+
+                if (existingByEmail) {
+                    // Link existing customer to Shopify ID
+                    customer = await prisma.customer.update({
+                        where: { id: existingByEmail.id },
+                        data: {
+                            shopifyCustomerId,
+                            lastOrderDate: orderDate ? new Date(orderDate) : existingByEmail.lastOrderDate,
+                            defaultAddress: shippingAddress && !existingByEmail.defaultAddress
+                                ? JSON.stringify(shippingAddress)
+                                : existingByEmail.defaultAddress,
+                        }
+                    });
+                    return { customer, created: false };
+                }
+            }
+
+            // No existing customer found - create new one
+            // Use try-catch to handle race condition where another process creates same customer
+            if (customerEmail) {
+                try {
+                    customer = await prisma.customer.create({
+                        data: {
+                            email: customerEmail,
+                            firstName: shopifyCustomer.first_name || null,
+                            lastName: shopifyCustomer.last_name || null,
+                            phone: shopifyCustomer.phone || null,
+                            shopifyCustomerId,
+                            defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+                            firstOrderDate: orderDate ? new Date(orderDate) : null,
+                            lastOrderDate: orderDate ? new Date(orderDate) : null,
+                        }
+                    });
+                    return { customer, created: true };
+                } catch (createError) {
+                    // Unique constraint violation - another process created the customer
+                    if (createError.code === 'P2002') {
+                        // Try to find the customer that was just created
+                        customer = await prisma.customer.findFirst({
+                            where: {
+                                OR: [
+                                    { shopifyCustomerId },
+                                    { email: customerEmail }
+                                ]
+                            }
+                        });
+                        return { customer, created: false };
+                    }
+                    throw createError;
+                }
+            }
+
+            return { customer: null, created: false };
+        } catch (error) {
+            console.error('findOrCreateCustomer error:', error);
+            throw error;
+        }
     }
 
-    return { customer, created };
+    // Fallback: No Shopify customer ID, try by email only
+    if (customerEmail) {
+        let customer = await prisma.customer.findUnique({
+            where: { email: customerEmail }
+        });
+
+        if (customer) {
+            if (orderDate) {
+                customer = await prisma.customer.update({
+                    where: { id: customer.id },
+                    data: { lastOrderDate: new Date(orderDate) },
+                });
+            }
+            return { customer, created: false };
+        }
+
+        // Create new customer
+        try {
+            customer = await prisma.customer.create({
+                data: {
+                    email: customerEmail,
+                    firstName: shopifyCustomer.first_name || null,
+                    lastName: shopifyCustomer.last_name || null,
+                    phone: shopifyCustomer.phone || null,
+                    defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+                    firstOrderDate: orderDate ? new Date(orderDate) : null,
+                    lastOrderDate: orderDate ? new Date(orderDate) : null,
+                }
+            });
+            return { customer, created: true };
+        } catch (createError) {
+            if (createError.code === 'P2002') {
+                customer = await prisma.customer.findUnique({ where: { email: customerEmail } });
+                return { customer, created: false };
+            }
+            throw createError;
+        }
+    }
+
+    return { customer: null, created: false };
 }
 
 /**

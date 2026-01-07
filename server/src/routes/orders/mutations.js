@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
-import { releaseReservedInventory } from '../../utils/queryPatterns.js';
+import { releaseReservedInventory, createReservedTransaction, calculateInventoryBalance, recalculateOrderStatus } from '../../utils/queryPatterns.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { validate, CreateOrderSchema, UpdateOrderSchema } from '../../utils/validation.js';
 
@@ -30,46 +30,53 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
             lines,
         } = req.validatedBody;
 
-        let customerId = null;
-        if (customerEmail || customerPhone) {
-            const customer = await findOrCreateCustomerByContact(req.prisma, {
-                email: customerEmail,
-                phone: customerPhone,
-                firstName: customerName?.split(' ')[0],
-                lastName: customerName?.split(' ').slice(1).join(' '),
-                defaultAddress: shippingAddress,
-            });
-            customerId = customer.id;
-        }
+        // Issue #5: Wrap entire order + lines creation in single Prisma transaction
+        const order = await req.prisma.$transaction(async (tx) => {
+            // Find or create customer within transaction
+            let customerId = null;
+            if (customerEmail || customerPhone) {
+                const customer = await findOrCreateCustomerByContact(tx, {
+                    email: customerEmail,
+                    phone: customerPhone,
+                    firstName: customerName?.split(' ')[0],
+                    lastName: customerName?.split(' ').slice(1).join(' '),
+                    defaultAddress: shippingAddress,
+                });
+                customerId = customer.id;
+            }
 
-        const order = await req.prisma.order.create({
-            data: {
-                orderNumber,
-                channel,
-                customerId,
-                customerName,
-                customerEmail,
-                customerPhone,
-                shippingAddress,
-                customerNotes,
-                internalNotes,
-                totalAmount,
-                orderLines: {
-                    create: lines.map((line) => ({
-                        skuId: line.skuId,
-                        qty: line.qty,
-                        unitPrice: line.unitPrice,
-                        lineStatus: 'pending',
-                    })),
-                },
-            },
-            include: {
-                orderLines: {
-                    include: {
-                        sku: { include: { variation: { include: { product: true } } } },
+            // Create order with lines in same transaction
+            const createdOrder = await tx.order.create({
+                data: {
+                    orderNumber,
+                    channel,
+                    customerId,
+                    customerName,
+                    customerEmail,
+                    customerPhone,
+                    shippingAddress,
+                    customerNotes,
+                    internalNotes,
+                    totalAmount,
+                    orderLines: {
+                        create: lines.map((line) => ({
+                            skuId: line.skuId,
+                            qty: line.qty,
+                            unitPrice: line.unitPrice,
+                            lineStatus: 'pending',
+                        })),
                     },
                 },
-            },
+                include: {
+                    orderLines: {
+                        include: {
+                            sku: { include: { variation: { include: { product: true } } } },
+                        },
+                    },
+                },
+            });
+
+            return createdOrder;
         });
 
         res.status(201).json(order);
@@ -193,6 +200,21 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
         }
 
         await req.prisma.$transaction(async (tx) => {
+            // Issue #7: Re-check status inside transaction to prevent race condition
+            const currentOrder = await tx.order.findUnique({
+                where: { id: req.params.id },
+                select: { status: true },
+            });
+
+            // Prevent canceling if status changed during request
+            if (currentOrder.status === 'shipped' || currentOrder.status === 'delivered') {
+                throw new Error('CANNOT_CANCEL_SHIPPED');
+            }
+
+            if (currentOrder.status === 'cancelled') {
+                throw new Error('ALREADY_CANCELLED');
+            }
+
             for (const line of order.orderLines) {
                 if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
                     await releaseReservedInventory(tx, line.id);
@@ -201,7 +223,7 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
 
             await tx.orderLine.updateMany({
                 where: { orderId: req.params.id },
-                data: { lineStatus: 'pending' },
+                data: { lineStatus: 'cancelled' },
             });
 
             await tx.order.update({
@@ -222,6 +244,12 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
 
         res.json(updated);
     } catch (error) {
+        if (error.message === 'CANNOT_CANCEL_SHIPPED') {
+            return res.status(409).json({ error: 'Order was shipped by another request and cannot be cancelled' });
+        }
+        if (error.message === 'ALREADY_CANCELLED') {
+            return res.status(409).json({ error: 'Order was already cancelled by another request' });
+        }
         console.error('Cancel order error:', error);
         res.status(500).json({ error: 'Failed to cancel order' });
     }
@@ -232,7 +260,7 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
     try {
         const order = await req.prisma.order.findUnique({
             where: { id: req.params.id },
-            include: { orderLines: true },
+            include: { orderLines: { include: { sku: true } } },
         });
 
         if (!order) {
@@ -243,9 +271,20 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Order is not cancelled' });
         }
 
-        await req.prisma.order.update({
-            where: { id: req.params.id },
-            data: { status: 'open' },
+        // Issue #8: Uncancel needs to restore line statuses to pending
+        // Note: We don't auto-allocate on uncancel - that requires manual allocation
+        await req.prisma.$transaction(async (tx) => {
+            // Restore order to open status
+            await tx.order.update({
+                where: { id: req.params.id },
+                data: { status: 'open' },
+            });
+
+            // Restore all lines to pending status
+            await tx.orderLine.updateMany({
+                where: { orderId: req.params.id },
+                data: { lineStatus: 'pending' },
+            });
         });
 
         const updated = await req.prisma.order.findUnique({
@@ -269,7 +308,7 @@ router.post('/:id/archive', authenticateToken, async (req, res) => {
     try {
         const order = await req.prisma.order.findUnique({
             where: { id: req.params.id },
-            select: { id: true, orderNumber: true, isArchived: true },
+            select: { id: true, orderNumber: true, isArchived: true, status: true },
         });
 
         if (!order) {
@@ -278,6 +317,17 @@ router.post('/:id/archive', authenticateToken, async (req, res) => {
 
         if (order.isArchived) {
             return res.status(400).json({ error: 'Order is already archived' });
+        }
+
+        // Issue #6: Add status validation before archiving
+        // Only terminal states can be archived
+        const terminalStatuses = ['shipped', 'delivered', 'cancelled'];
+        if (!terminalStatuses.includes(order.status)) {
+            return res.status(400).json({
+                error: 'Order must be in a terminal state to archive',
+                currentStatus: order.status,
+                allowedStatuses: terminalStatuses,
+            });
         }
 
         const updated = await req.prisma.order.update({

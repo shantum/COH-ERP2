@@ -92,13 +92,49 @@ RepackingQueueItem
 - **Customers**: Tier for prioritization
 - **SKUs**: For barcode/code lookup
 
+## Status Transition Rules (State Machine)
+
+Valid status transitions are enforced by `isValidStatusTransition()`:
+
+| From Status | Allowed To Status |
+|-------------|------------------|
+| `requested` | `reverse_initiated`, `in_transit`, `cancelled` |
+| `reverse_initiated` | `in_transit`, `received`, `cancelled` |
+| `in_transit` | `received`, `cancelled` |
+| `received` | `processing`, `resolved`, `cancelled`, `reverse_initiated` (undo) |
+| `processing` | `resolved`, `cancelled` |
+| `resolved` | (terminal - no transitions) |
+| `cancelled` | (terminal - no transitions) |
+
+## Race Condition Protection
+
+The following operations use optimistic locking to prevent concurrent modification:
+
+1. **Receive Item** (`POST /:id/receive-item`):
+   - Re-checks `itemCondition` inside transaction
+   - Checks for existing repacking queue item
+
+2. **Process Repacking** (`POST /repacking/process`):
+   - Re-checks item status inside transaction
+   - Checks for existing inventory transactions
+
+## Validation Rules
+
+1. **Duplicate tickets**: Cannot create ticket with same SKU from same order if active ticket exists
+2. **Reason category lock**: Cannot change `reasonCategory` after any item is received
+3. **Refund validation**: `refundAmount` cannot exceed sum of line values
+4. **Close validation**: Cannot resolve ticket until all lines have `itemCondition` set
+5. **Delete protection**: Cannot delete if any repacking items are processed (`ready` or `write_off`)
+
 ## Common Gotchas
 
 1. **Return vs Exchange logic**: Resolution type determines workflow
 2. **Value difference**: `valueDifference` field tracks exchange up/down amounts
 3. **Barcode scanning**: Uses `skuCode` field (not separate barcode) in pending lookups
 4. **Status vs Resolution**: `status` is workflow state, `resolution` is outcome type
-5. **Repacking is separate**: Item in repacking queue ≠ return completed
+5. **Repacking is separate**: Item in repacking queue != return completed
+6. **Undo-receive cleanup**: Deletes inventory transactions and write-off logs when undoing
+7. **Input sanitization**: SKU lookup sanitizes input to prevent special character issues
 
 ## Related Frontend
 

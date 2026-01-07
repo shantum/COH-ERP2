@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { calculateAllInventoryBalances, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
+import { calculateAllInventoryBalances, calculateFabricBalance, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
 import { getLockedDates, saveLockedDates } from '../utils/productionUtils.js';
 
 const router = Router();
@@ -54,7 +54,14 @@ router.get('/batches', authenticateToken, async (req, res) => {
     }
 });
 
-// Helper to generate batch code (YYYYMMDD-XXX)
+/**
+ * Generate batch code atomically using database sequence pattern
+ * Format: YYYYMMDD-XXX (e.g., 20260107-001)
+ *
+ * Uses a retry loop with unique constraint to handle race conditions.
+ * If concurrent requests try to create batches for the same date,
+ * only one will succeed with each code, others will retry with next number.
+ */
 const generateBatchCode = async (prisma, targetDate) => {
     const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
     const startOfDay = new Date(targetDate);
@@ -62,15 +69,64 @@ const generateBatchCode = async (prisma, targetDate) => {
     const endOfDay = new Date(targetDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // Count existing batches for this date
-    const existingCount = await prisma.productionBatch.count({
+    // Get the highest existing batch code for this date
+    const latestBatch = await prisma.productionBatch.findFirst({
         where: {
-            batchDate: { gte: startOfDay, lte: endOfDay }
-        }
+            batchDate: { gte: startOfDay, lte: endOfDay },
+            batchCode: { startsWith: dateStr }
+        },
+        orderBy: { batchCode: 'desc' },
+        select: { batchCode: true }
     });
 
-    const serial = String(existingCount + 1).padStart(3, '0');
+    let nextSerial = 1;
+    if (latestBatch && latestBatch.batchCode) {
+        // Extract serial number from batch code (e.g., "20260107-003" -> 3)
+        const match = latestBatch.batchCode.match(/-(\d+)$/);
+        if (match) {
+            nextSerial = parseInt(match[1], 10) + 1;
+        }
+    }
+
+    const serial = String(nextSerial).padStart(3, '0');
     return `${dateStr}-${serial}`;
+};
+
+/**
+ * Create batch with atomic batch code generation
+ * Handles race conditions by catching unique constraint violations and retrying
+ */
+const createBatchWithAtomicCode = async (prisma, batchData, targetDate, maxRetries = 5) => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const batchCode = await generateBatchCode(prisma, targetDate);
+
+            const batch = await prisma.productionBatch.create({
+                data: {
+                    ...batchData,
+                    batchCode,
+                },
+                include: {
+                    tailor: true,
+                    sku: { include: { variation: { include: { product: true } } } }
+                },
+            });
+
+            return batch;
+        } catch (error) {
+            // P2002 is Prisma's unique constraint violation error code
+            if (error.code === 'P2002' && error.meta?.target?.includes('batchCode')) {
+                // Race condition occurred, retry with new code
+                if (attempt === maxRetries - 1) {
+                    throw new Error('Failed to generate unique batch code after multiple attempts');
+                }
+                // Small delay before retry to reduce contention
+                await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+                continue;
+            }
+            throw error;
+        }
+    }
 };
 
 // Create batch
@@ -88,22 +144,28 @@ router.post('/batches', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: `Production date ${dateStr} is locked. Cannot add new items.` });
         }
 
-        // Generate batch code
-        const batchCode = await generateBatchCode(req.prisma, targetDate);
+        // Validate scheduled date is not in the past (allow today)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const targetDateNormalized = new Date(targetDate);
+        targetDateNormalized.setHours(0, 0, 0, 0);
 
-        const batch = await req.prisma.productionBatch.create({
-            data: {
-                batchCode,
-                batchDate: targetDate,
-                tailorId: tailorId || null,
-                skuId,
-                qtyPlanned,
-                priority: priority || 'normal',
-                sourceOrderLineId: sourceOrderLineId || null,
-                notes: notes || null
-            },
-            include: { tailor: true, sku: { include: { variation: { include: { product: true } } } } },
-        });
+        if (targetDateNormalized < today) {
+            return res.status(400).json({ error: 'Cannot schedule batch for a past date' });
+        }
+
+        // Create batch with atomic batch code generation (handles race conditions)
+        const batchData = {
+            batchDate: targetDate,
+            tailorId: tailorId || null,
+            skuId,
+            qtyPlanned,
+            priority: priority || 'normal',
+            sourceOrderLineId: sourceOrderLineId || null,
+            notes: notes || null
+        };
+
+        const batch = await createBatchWithAtomicCode(req.prisma, batchData, targetDate);
 
         // If linked to order line, update it
         if (sourceOrderLineId) {
@@ -127,16 +189,64 @@ router.post('/batches/:id/start', authenticateToken, async (req, res) => {
     }
 });
 
+/**
+ * Determine appropriate batch status based on quantities
+ * @param {number} qtyPlanned - Planned quantity
+ * @param {number} qtyCompleted - Completed quantity
+ * @param {string} currentStatus - Current status
+ * @returns {string|null} New status or null if no change needed
+ */
+const determineBatchStatus = (qtyPlanned, qtyCompleted, currentStatus) => {
+    // If fully completed, should be 'completed'
+    if (qtyCompleted >= qtyPlanned && qtyCompleted > 0) {
+        return currentStatus !== 'completed' ? 'completed' : null;
+    }
+
+    // If partially completed, should be 'in_progress'
+    if (qtyCompleted > 0 && qtyCompleted < qtyPlanned) {
+        return currentStatus !== 'in_progress' ? 'in_progress' : null;
+    }
+
+    // If nothing completed and currently 'completed', reset to 'planned'
+    if (qtyCompleted === 0 && currentStatus === 'completed') {
+        return 'planned';
+    }
+
+    return null; // No status change needed
+};
+
 // Update batch (change date, qty, notes)
 router.put('/batches/:id', authenticateToken, async (req, res) => {
     try {
         const { batchDate, qtyPlanned, tailorId, priority, notes } = req.body;
+
+        // Fetch current batch state first
+        const currentBatch = await req.prisma.productionBatch.findUnique({
+            where: { id: req.params.id },
+            select: { qtyPlanned: true, qtyCompleted: true, status: true }
+        });
+
+        if (!currentBatch) {
+            return res.status(404).json({ error: 'Batch not found' });
+        }
+
         const updateData = {};
         if (batchDate) updateData.batchDate = new Date(batchDate);
         if (qtyPlanned) updateData.qtyPlanned = qtyPlanned;
         if (tailorId) updateData.tailorId = tailorId;
         if (priority) updateData.priority = priority;
         if (notes !== undefined) updateData.notes = notes;
+
+        // AUTO-UPDATE STATUS: If qtyPlanned changes, check if status needs update
+        const newQtyPlanned = qtyPlanned ?? currentBatch.qtyPlanned;
+        const newStatus = determineBatchStatus(newQtyPlanned, currentBatch.qtyCompleted, currentBatch.status);
+        if (newStatus) {
+            updateData.status = newStatus;
+            // If status changes to completed, set completedAt
+            if (newStatus === 'completed' && !currentBatch.completedAt) {
+                updateData.completedAt = new Date();
+            }
+        }
 
         const batch = await req.prisma.productionBatch.update({
             where: { id: req.params.id },
@@ -156,6 +266,37 @@ router.delete('/batches/:id', authenticateToken, async (req, res) => {
         const batch = await req.prisma.productionBatch.findUnique({ where: { id: req.params.id } });
         if (!batch) return res.status(404).json({ error: 'Batch not found' });
 
+        // SAFETY CHECK: Prevent deletion if batch has inventory transactions
+        // This protects data integrity - completed batches have created inventory
+        const inventoryTxnCount = await req.prisma.inventoryTransaction.count({
+            where: {
+                referenceId: batch.id,
+                reason: TXN_REASON.PRODUCTION
+            }
+        });
+
+        if (inventoryTxnCount > 0) {
+            return res.status(400).json({
+                error: 'Cannot delete batch with inventory transactions. Use uncomplete first.',
+                hasInventoryTransactions: true
+            });
+        }
+
+        // Also check for fabric transactions
+        const fabricTxnCount = await req.prisma.fabricTransaction.count({
+            where: {
+                referenceId: batch.id,
+                reason: 'production'
+            }
+        });
+
+        if (fabricTxnCount > 0) {
+            return res.status(400).json({
+                error: 'Cannot delete batch with fabric transactions. Use uncomplete first.',
+                hasFabricTransactions: true
+            });
+        }
+
         // Unlink from order line if connected
         if (batch.sourceOrderLineId) {
             await req.prisma.orderLine.update({ where: { id: batch.sourceOrderLineId }, data: { productionBatchId: null } });
@@ -169,29 +310,41 @@ router.delete('/batches/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Helper to get effective fabric consumption (SKU-specific or Product-level fallback)
-const getEffectiveFabricConsumption = (sku, product) => {
-    const skuConsumption = Number(sku.fabricConsumption);
-    const DEFAULT_SKU_CONSUMPTION = 1.5; // Schema default
+/**
+ * Get effective fabric consumption for a SKU
+ * Standardized priority: SKU.fabricConsumption ?? Product.defaultFabricConsumption ?? 1.5
+ *
+ * Note: SKU schema default is 1.5, so we check if it differs from default
+ * to determine if it was explicitly set.
+ */
+const DEFAULT_FABRIC_CONSUMPTION = 1.5;
 
-    // If SKU has a non-default consumption value, use it
-    if (skuConsumption !== DEFAULT_SKU_CONSUMPTION) {
+const getEffectiveFabricConsumption = (sku, product) => {
+    // Priority 1: SKU-specific consumption (if explicitly set, not default)
+    const skuConsumption = Number(sku.fabricConsumption);
+    if (skuConsumption && skuConsumption !== DEFAULT_FABRIC_CONSUMPTION && skuConsumption > 0) {
         return skuConsumption;
     }
 
-    // Otherwise, use Product-level default if set
-    if (product.defaultFabricConsumption) {
-        return Number(product.defaultFabricConsumption);
+    // Priority 2: Product-level default
+    const productDefault = product?.defaultFabricConsumption;
+    if (productDefault && Number(productDefault) > 0) {
+        return Number(productDefault);
     }
 
-    // Final fallback to SKU value
-    return skuConsumption;
+    // Priority 3: System default
+    return DEFAULT_FABRIC_CONSUMPTION;
 };
 
 // Complete batch (creates inventory inward + fabric outward)
 router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
     try {
         const { qtyCompleted } = req.body;
+
+        if (!qtyCompleted || qtyCompleted <= 0) {
+            return res.status(400).json({ error: 'qtyCompleted must be a positive number' });
+        }
+
         const batch = await req.prisma.productionBatch.findUnique({
             where: { id: req.params.id },
             include: { sku: { include: { variation: { include: { product: true } } } } }
@@ -199,30 +352,76 @@ router.post('/batches/:id/complete', authenticateToken, async (req, res) => {
 
         if (!batch) return res.status(404).json({ error: 'Batch not found' });
 
+        // IDEMPOTENCY CHECK: Prevent double completion
+        if (batch.completedAt) {
+            return res.status(400).json({
+                error: 'Batch already completed',
+                completedAt: batch.completedAt,
+                qtyCompleted: batch.qtyCompleted
+            });
+        }
+
+        // Calculate required fabric consumption
+        const consumptionPerUnit = getEffectiveFabricConsumption(
+            batch.sku,
+            batch.sku.variation.product
+        );
+        const fabricConsumption = consumptionPerUnit * qtyCompleted;
+
+        // FABRIC BALANCE CHECK: Validate sufficient fabric before completion
+        const fabricId = batch.sku.variation.fabricId;
+        const fabricBalance = await calculateFabricBalance(req.prisma, fabricId);
+
+        if (fabricBalance.currentBalance < fabricConsumption) {
+            return res.status(400).json({
+                error: 'Insufficient fabric balance',
+                required: fabricConsumption,
+                available: fabricBalance.currentBalance,
+                fabricId: fabricId
+            });
+        }
+
         await req.prisma.$transaction(async (tx) => {
             // Update batch
-            await tx.productionBatch.update({ where: { id: req.params.id }, data: { qtyCompleted, status: 'completed', completedAt: new Date() } });
+            await tx.productionBatch.update({
+                where: { id: req.params.id },
+                data: { qtyCompleted, status: 'completed', completedAt: new Date() }
+            });
 
             // Create inventory inward with batch code for tracking
             await tx.inventoryTransaction.create({
-                data: { skuId: batch.skuId, txnType: TXN_TYPE.INWARD, qty: qtyCompleted, reason: TXN_REASON.PRODUCTION, referenceId: batch.id, notes: `Production ${batch.batchCode || batch.id}`, createdById: req.user.id },
+                data: {
+                    skuId: batch.skuId,
+                    txnType: TXN_TYPE.INWARD,
+                    qty: qtyCompleted,
+                    reason: TXN_REASON.PRODUCTION,
+                    referenceId: batch.id,
+                    notes: `Production ${batch.batchCode || batch.id}`,
+                    createdById: req.user.id
+                },
             });
 
-            // Get effective fabric consumption (SKU or Product-level fallback)
-            const consumptionPerUnit = getEffectiveFabricConsumption(
-                batch.sku,
-                batch.sku.variation.product
-            );
-            const fabricConsumption = consumptionPerUnit * qtyCompleted;
-
+            // Create fabric outward transaction
             await tx.fabricTransaction.create({
-                data: { fabricId: batch.sku.variation.fabricId, txnType: 'outward', qty: fabricConsumption, unit: 'meter', reason: 'production', referenceId: batch.id, createdById: req.user.id },
+                data: {
+                    fabricId: fabricId,
+                    txnType: 'outward',
+                    qty: fabricConsumption,
+                    unit: 'meter',
+                    reason: 'production',
+                    referenceId: batch.id,
+                    createdById: req.user.id
+                },
             });
         });
 
-        const updated = await req.prisma.productionBatch.findUnique({ where: { id: req.params.id }, include: { tailor: true, sku: true } });
+        const updated = await req.prisma.productionBatch.findUnique({
+            where: { id: req.params.id },
+            include: { tailor: true, sku: true }
+        });
         res.json(updated);
     } catch (error) {
+        console.error('Complete batch error:', error);
         res.status(500).json({ error: 'Failed to complete batch' });
     }
 });

@@ -8,6 +8,11 @@ import { encrypt, decrypt } from '../utils/encryption.js';
  * Configuration is loaded from:
  * 1. Database (SystemSetting table) - takes priority
  * 2. Environment variables as fallback
+ *
+ * Features:
+ * - Automatic rate limit handling with exponential backoff
+ * - Request retry on transient failures
+ * - Detailed error logging
  */
 class ShopifyClient {
     constructor() {
@@ -15,6 +20,14 @@ class ShopifyClient {
         this.accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
         this.apiVersion = '2024-10'; // Use a stable API version
         this.client = null;
+
+        // Rate limiting state
+        this.rateLimitState = {
+            remaining: 40,       // Shopify default bucket size
+            lastUpdated: null,
+            retryAfter: null,
+        };
+
         this.initializeClient();
     }
 
@@ -117,6 +130,111 @@ class ShopifyClient {
     }
 
     // ============================================
+    // RATE LIMITING & RETRY LOGIC
+    // ============================================
+
+    /**
+     * Update rate limit state from response headers
+     */
+    updateRateLimitState(response) {
+        const callLimit = response.headers['x-shopify-shop-api-call-limit'];
+        if (callLimit) {
+            const [used, total] = callLimit.split('/').map(Number);
+            this.rateLimitState.remaining = total - used;
+            this.rateLimitState.lastUpdated = Date.now();
+        }
+
+        const retryAfter = response.headers['retry-after'];
+        if (retryAfter) {
+            this.rateLimitState.retryAfter = Date.now() + (parseFloat(retryAfter) * 1000);
+        }
+    }
+
+    /**
+     * Wait if we need to respect rate limits
+     */
+    async waitForRateLimit() {
+        // If we have a retry-after time in the future, wait
+        if (this.rateLimitState.retryAfter && Date.now() < this.rateLimitState.retryAfter) {
+            const waitTime = this.rateLimitState.retryAfter - Date.now();
+            console.log(`[Shopify] Rate limited, waiting ${Math.ceil(waitTime / 1000)}s...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime + 100));
+            this.rateLimitState.retryAfter = null;
+        }
+
+        // If we're low on remaining calls, add a small delay
+        if (this.rateLimitState.remaining < 5) {
+            const delay = Math.max(500, (5 - this.rateLimitState.remaining) * 200);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    /**
+     * Execute a request with automatic retry and rate limit handling
+     *
+     * @param {Function} requestFn - Function that returns an axios promise
+     * @param {Object} options - Retry options
+     * @param {number} options.maxRetries - Maximum retry attempts (default: 3)
+     * @param {number} options.baseDelay - Base delay in ms for exponential backoff (default: 1000)
+     */
+    async executeWithRetry(requestFn, options = {}) {
+        const { maxRetries = 3, baseDelay = 1000 } = options;
+        let lastError;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                // Wait for rate limit if needed
+                await this.waitForRateLimit();
+
+                const response = await requestFn();
+
+                // Update rate limit state from response
+                this.updateRateLimitState(response);
+
+                return response;
+            } catch (error) {
+                lastError = error;
+                const status = error.response?.status;
+
+                // Update rate limit state even on error responses
+                if (error.response) {
+                    this.updateRateLimitState(error.response);
+                }
+
+                // 429 = Rate limited - always retry with backoff
+                if (status === 429) {
+                    const retryAfter = error.response?.headers['retry-after'];
+                    const waitTime = retryAfter ? parseFloat(retryAfter) * 1000 : baseDelay * Math.pow(2, attempt);
+                    console.warn(`[Shopify] Rate limited (429), retrying in ${Math.ceil(waitTime / 1000)}s (attempt ${attempt + 1}/${maxRetries + 1})`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    continue;
+                }
+
+                // 5xx errors - retry with exponential backoff
+                if (status >= 500 && attempt < maxRetries) {
+                    const waitTime = baseDelay * Math.pow(2, attempt);
+                    console.warn(`[Shopify] Server error (${status}), retrying in ${Math.ceil(waitTime / 1000)}s (attempt ${attempt + 1}/${maxRetries + 1})`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    continue;
+                }
+
+                // Network errors - retry with backoff
+                if (!error.response && attempt < maxRetries) {
+                    const waitTime = baseDelay * Math.pow(2, attempt);
+                    console.warn(`[Shopify] Network error, retrying in ${Math.ceil(waitTime / 1000)}s (attempt ${attempt + 1}/${maxRetries + 1}): ${error.message}`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    continue;
+                }
+
+                // Other errors - don't retry
+                throw error;
+            }
+        }
+
+        throw lastError;
+    }
+
+    // ============================================
     // ORDERS
     // ============================================
 
@@ -155,7 +273,9 @@ class ShopifyClient {
         if (options.updated_at_min) params.updated_at_min = options.updated_at_min;
         if (options.updated_at_max) params.updated_at_max = options.updated_at_max;
 
-        const response = await this.client.get('/orders.json', { params });
+        const response = await this.executeWithRetry(
+            () => this.client.get('/orders.json', { params })
+        );
         return response.data.orders;
     }
 
@@ -167,7 +287,9 @@ class ShopifyClient {
             throw new Error('Shopify is not configured');
         }
 
-        const response = await this.client.get(`/orders/${orderId}.json`);
+        const response = await this.executeWithRetry(
+            () => this.client.get(`/orders/${orderId}.json`)
+        );
         return response.data.order;
     }
 
@@ -182,7 +304,9 @@ class ShopifyClient {
         const params = { status: options.status || 'any' };
         if (options.created_at_min) params.created_at_min = options.created_at_min;
 
-        const response = await this.client.get('/orders/count.json', { params });
+        const response = await this.executeWithRetry(
+            () => this.client.get('/orders/count.json', { params })
+        );
         return response.data.count;
     }
 
@@ -211,7 +335,9 @@ class ShopifyClient {
         if (options.created_at_min) params.created_at_min = options.created_at_min;
         if (options.updated_at_min) params.updated_at_min = options.updated_at_min;
 
-        const response = await this.client.get('/customers.json', { params });
+        const response = await this.executeWithRetry(
+            () => this.client.get('/customers.json', { params })
+        );
         return response.data.customers;
     }
 
@@ -223,7 +349,9 @@ class ShopifyClient {
             throw new Error('Shopify is not configured');
         }
 
-        const response = await this.client.get(`/customers/${customerId}.json`);
+        const response = await this.executeWithRetry(
+            () => this.client.get(`/customers/${customerId}.json`)
+        );
         return response.data.customer;
     }
 
@@ -235,7 +363,9 @@ class ShopifyClient {
             throw new Error('Shopify is not configured');
         }
 
-        const response = await this.client.get('/customers/count.json');
+        const response = await this.executeWithRetry(
+            () => this.client.get('/customers/count.json')
+        );
         return response.data.count;
     }
 
@@ -262,7 +392,9 @@ class ShopifyClient {
             if (sinceId) params.since_id = sinceId;
             if (options.created_at_min) params.created_at_min = options.created_at_min;
 
-            const response = await this.client.get('/orders.json', { params });
+            const response = await this.executeWithRetry(
+                () => this.client.get('/orders.json', { params })
+            );
             const orders = response.data.orders;
 
             if (orders.length === 0) break;
@@ -274,8 +406,8 @@ class ShopifyClient {
                 onProgress(allOrders.length, totalCount);
             }
 
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 250));
+            // Small delay to avoid rate limiting (in addition to automatic handling)
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             if (orders.length < limit) break;
         }
@@ -301,7 +433,9 @@ class ShopifyClient {
             const params = { limit };
             if (sinceId) params.since_id = sinceId;
 
-            const response = await this.client.get('/customers.json', { params });
+            const response = await this.executeWithRetry(
+                () => this.client.get('/customers.json', { params })
+            );
             const customers = response.data.customers;
 
             if (customers.length === 0) break;
@@ -313,8 +447,8 @@ class ShopifyClient {
                 onProgress(allCustomers.length, totalCount);
             }
 
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 250));
+            // Small delay to avoid rate limiting (in addition to automatic handling)
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             if (customers.length < limit) break;
         }
@@ -340,7 +474,9 @@ class ShopifyClient {
 
         if (options.since_id) params.since_id = options.since_id;
 
-        const response = await this.client.get('/products.json', { params });
+        const response = await this.executeWithRetry(
+            () => this.client.get('/products.json', { params })
+        );
         return response.data.products;
     }
 
@@ -365,7 +501,9 @@ class ShopifyClient {
                 params.page_info = pageInfo;
             }
 
-            const response = await this.client.get('/products.json', { params });
+            const response = await this.executeWithRetry(
+                () => this.client.get('/products.json', { params })
+            );
             const products = response.data.products;
 
             if (products.length === 0) {
@@ -395,6 +533,9 @@ class ShopifyClient {
                     }
                 }
             }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         return allProducts;
@@ -408,7 +549,9 @@ class ShopifyClient {
             throw new Error('Shopify is not configured');
         }
 
-        const response = await this.client.get('/products/count.json');
+        const response = await this.executeWithRetry(
+            () => this.client.get('/products/count.json')
+        );
         return response.data.count;
     }
 
@@ -422,7 +565,9 @@ class ShopifyClient {
         }
 
         try {
-            const response = await this.client.get(`/products/${productId}/metafields.json`);
+            const response = await this.executeWithRetry(
+                () => this.client.get(`/products/${productId}/metafields.json`)
+            );
             return response.data.metafields || [];
         } catch (error) {
             console.error(`Failed to fetch metafields for product ${productId}:`, error.message);
@@ -502,49 +647,74 @@ class ShopifyClient {
      * Mark a Shopify order as paid by creating a transaction
      * Used for COD orders when remittance is received
      *
+     * IMPORTANT: Proper error logging for debugging COD sync issues
+     *
      * @param {string} shopifyOrderId - Shopify order ID (numeric string)
      * @param {number} amount - Amount to mark as paid
      * @param {string} utr - Bank UTR reference
      * @param {Date} paidAt - When payment was received
-     * @returns {Object} - { success, transaction, error }
+     * @returns {Object} - { success, transaction, error, errorCode, shouldRetry }
      */
     async markOrderAsPaid(shopifyOrderId, amount, utr, paidAt = new Date()) {
         if (!this.isConfigured()) {
-            throw new Error('Shopify is not configured');
+            console.error('[COD Sync] Shopify not configured');
+            return { success: false, error: 'Shopify is not configured', shouldRetry: false };
         }
 
         if (!shopifyOrderId) {
-            return { success: false, error: 'No Shopify order ID provided' };
+            console.error('[COD Sync] No Shopify order ID provided');
+            return { success: false, error: 'No Shopify order ID provided', shouldRetry: false };
         }
+
+        const transactionData = {
+            transaction: {
+                kind: 'capture',          // capture = payment received
+                status: 'success',
+                amount: String(amount),
+                gateway: 'Cash on Delivery',
+                source: 'external',
+                authorization: utr || `COD-${Date.now()}`,
+                processed_at: paidAt.toISOString(),
+            }
+        };
 
         try {
             // Create a transaction to mark the order as paid
-            const response = await this.client.post(`/orders/${shopifyOrderId}/transactions.json`, {
-                transaction: {
-                    kind: 'capture',          // capture = payment received
-                    status: 'success',
-                    amount: String(amount),
-                    gateway: 'Cash on Delivery',
-                    source: 'external',
-                    authorization: utr || `COD-${Date.now()}`,
-                    processed_at: paidAt.toISOString(),
-                }
-            });
+            const response = await this.executeWithRetry(
+                () => this.client.post(`/orders/${shopifyOrderId}/transactions.json`, transactionData),
+                { maxRetries: 2 } // Limit retries for payment operations
+            );
+
+            console.log(`[COD Sync] Successfully marked order ${shopifyOrderId} as paid: $${amount}`);
 
             return {
                 success: true,
                 transaction: response.data.transaction,
             };
         } catch (error) {
-            const errorMessage = error.response?.data?.errors ||
-                                error.response?.data?.error ||
-                                error.message;
+            const status = error.response?.status;
+            const errorData = error.response?.data;
+            const errorMessage = errorData?.errors || errorData?.error || error.message;
 
-            console.error(`Failed to mark order ${shopifyOrderId} as paid:`, errorMessage);
+            // Determine if this error is retryable
+            const shouldRetry = status === 429 || status >= 500 || !error.response;
+
+            // Structured error logging for debugging
+            console.error(`[COD Sync] Failed to mark order ${shopifyOrderId} as paid:`, {
+                shopifyOrderId,
+                amount,
+                utr,
+                httpStatus: status,
+                errorMessage: typeof errorMessage === 'object' ? JSON.stringify(errorMessage) : errorMessage,
+                shouldRetry,
+                requestData: transactionData,
+            });
 
             return {
                 success: false,
                 error: typeof errorMessage === 'object' ? JSON.stringify(errorMessage) : errorMessage,
+                errorCode: status,
+                shouldRetry,
             };
         }
     }
@@ -559,7 +729,9 @@ class ShopifyClient {
         }
 
         try {
-            const response = await this.client.get(`/orders/${shopifyOrderId}/transactions.json`);
+            const response = await this.executeWithRetry(
+                () => this.client.get(`/orders/${shopifyOrderId}/transactions.json`)
+            );
             return response.data.transactions || [];
         } catch (error) {
             console.error(`Failed to get transactions for order ${shopifyOrderId}:`, error.message);

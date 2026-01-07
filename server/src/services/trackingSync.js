@@ -76,10 +76,17 @@ async function getInTransitOrders() {
 }
 
 /**
+ * Terminal tracking statuses - no further updates expected
+ */
+const TERMINAL_STATUSES = ['delivered', 'rto_delivered', 'cancelled'];
+
+/**
  * Update order tracking status based on iThink response
+ * Also updates order.status when tracking reaches terminal state
+ *
  * @param {string} orderId - Order ID
  * @param {object} trackingData - Tracking data from iThink
- * @param {object} orderInfo - Additional order info (paymentMethod, shopifyFulfillmentStatus)
+ * @param {object} orderInfo - Additional order info (paymentMethod, status)
  */
 async function updateOrderTracking(orderId, trackingData, orderInfo = {}) {
     const updateData = {
@@ -111,11 +118,19 @@ async function updateOrderTracking(orderId, trackingData, orderInfo = {}) {
         }
     }
 
-    // If delivered, update delivery date
+    // UPDATE ORDER STATUS FOR TERMINAL STATES
+    // This ensures order.status reflects what the tracking shows
+
+    // If delivered, update delivery date AND order status
     if (trackingData.internalStatus === 'delivered') {
         updateData.deliveredAt = trackingData.lastScan?.datetime
             ? new Date(trackingData.lastScan.datetime)
             : new Date();
+
+        // Update order status to 'delivered' if it's currently 'shipped'
+        if (orderInfo.status === 'shipped') {
+            updateData.status = 'delivered';
+        }
 
         // Auto-archive prepaid orders that are delivered
         // Prepaid orders don't need COD collection verification
@@ -136,15 +151,30 @@ async function updateOrderTracking(orderId, trackingData, orderInfo = {}) {
             updateData.rtoInitiatedAt = new Date();
         }
 
-        // If RTO delivered, set rtoReceivedAt
+        // If RTO delivered, set rtoReceivedAt AND update order status
         if (trackingData.internalStatus === 'rto_delivered') {
             updateData.rtoReceivedAt = trackingData.lastScan?.datetime
                 ? new Date(trackingData.lastScan.datetime)
                 : new Date();
+
+            // Update order status to 'returned' for RTO delivered
+            // This ensures the order appears in the RTO tab
+            if (orderInfo.status === 'shipped' || orderInfo.status === 'delivered') {
+                updateData.status = 'returned';
+                console.log(`[Tracking Sync] Updated order status to 'returned' (RTO delivered)`);
+            }
         }
 
         // Don't override the trackingStatus - it's already set correctly from mapToInternalStatus
         // The internalStatus already has the correct value (rto_initiated, rto_in_transit, rto_delivered)
+    }
+
+    // Handle cancelled orders
+    if (trackingData.internalStatus === 'cancelled') {
+        if (orderInfo.status === 'shipped') {
+            updateData.status = 'cancelled';
+            console.log(`[Tracking Sync] Updated order status to 'cancelled' (tracking cancelled)`);
+        }
     }
 
     // Update courier name if available
@@ -232,8 +262,26 @@ async function runTrackingSync() {
                     const order = awbToOrder.get(awb);
                     if (!order) continue;
 
-                    // Skip if tracking data indicates failure
-                    if (!rawData || rawData.message !== 'success') continue;
+                    // PRESERVE TRACKING DATA ON API ERROR
+                    // If tracking API returns error, keep last known good data
+                    // Only mark lastTrackingUpdate to indicate sync was attempted
+                    if (!rawData || rawData.message !== 'success') {
+                        // Update only lastTrackingUpdate timestamp to show we tried
+                        // This preserves existing tracking data
+                        try {
+                            await prisma.order.update({
+                                where: { id: order.id },
+                                data: {
+                                    lastTrackingUpdate: new Date(),
+                                    // Optionally store error info for debugging
+                                    // trackingError: rawData?.message || 'Tracking data unavailable'
+                                }
+                            });
+                        } catch (e) {
+                            // Ignore update errors for failed tracking
+                        }
+                        continue;
+                    }
 
                     try {
                         // Transform raw iThink API response to our format
@@ -268,9 +316,10 @@ async function runTrackingSync() {
                         const newStatus = trackingData.internalStatus;
 
                         // Always update tracking data to keep it fresh
-                        // Pass order info for auto-archive logic
+                        // Pass order info for auto-archive and status update logic
                         const updateResult = await updateOrderTracking(order.id, trackingData, {
                             paymentMethod: order.paymentMethod,
+                            status: order.status,  // Pass current order status for terminal state updates
                         });
                         result.updated++;
 

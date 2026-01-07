@@ -7,6 +7,7 @@ import { syncCustomers, syncAllCustomers } from '../services/customerSyncService
 import { findOrCreateCustomer } from '../utils/customerUtils.js';
 import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder } from '../services/shopifyOrderProcessor.js';
 import scheduledSync from '../services/scheduledSync.js';
+import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 
 
 const router = Router();
@@ -1231,6 +1232,55 @@ router.get('/webhooks/activity', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Webhook activity error:', error);
         res.status(500).json({ error: 'Failed to get webhook activity' });
+    }
+});
+
+// ============================================
+// CACHE MAINTENANCE
+// ============================================
+
+/**
+ * Get cache statistics
+ */
+router.get('/cache/stats', authenticateToken, async (req, res) => {
+    try {
+        const stats = await getCacheStats();
+        res.json(stats);
+    } catch (error) {
+        console.error('Cache stats error:', error);
+        res.status(500).json({ error: 'Failed to get cache statistics' });
+    }
+});
+
+/**
+ * Run cache cleanup
+ * Removes old processed cache entries, webhook logs, etc.
+ */
+router.post('/cache/cleanup', authenticateToken, async (req, res) => {
+    try {
+        const {
+            orderCacheRetentionDays,
+            productCacheRetentionDays,
+            webhookLogRetentionDays,
+            failedSyncRetentionDays,
+            syncJobRetentionDays,
+        } = req.body;
+
+        const results = await runAllCleanup({
+            orderCacheRetentionDays,
+            productCacheRetentionDays,
+            webhookLogRetentionDays,
+            failedSyncRetentionDays,
+            syncJobRetentionDays,
+        });
+
+        res.json({
+            message: 'Cache cleanup completed',
+            ...results,
+        });
+    } catch (error) {
+        console.error('Cache cleanup error:', error);
+        res.status(500).json({ error: 'Failed to run cache cleanup' });
     }
 });
 

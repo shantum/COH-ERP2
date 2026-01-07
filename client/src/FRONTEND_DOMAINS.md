@@ -9,6 +9,7 @@ Overview of frontend page organization and component structure.
 | `Orders.tsx` | 40KB | Orders | Order management tabs (5 tabs) |
 | `Returns.tsx` | 114KB | Returns | Full return workflow |
 | `ReturnInward.tsx` | 74KB | Returns | Receiving and QC |
+| `InwardHub.tsx` | — | Inventory | Unified inward operations hub |
 | `Inventory.tsx` | 42KB | Inventory | Stock levels |
 | `Ledgers.tsx` | 23KB | Inventory | Transaction history |
 | `Production.tsx` | 50KB | Production | Batch planning |
@@ -211,8 +212,43 @@ interface InventoryTransaction { ... }
 | Database | `DatabaseTab.tsx` | Clear tables, DB management |
 | Data Inspector | `InspectorTab.tsx` | View raw database records |
 
+## Inward Hub Page
+
+Unified hub for all inventory inward operations (commit 11b903b).
+
+**Components:**
+- **SourceCards**: Clickable cards showing pending counts (Production, Returns, RTO, Repacking)
+- **QueuePanel**: 400px right slide panel for viewing pending items from a source
+- **RtoInwardForm**: Per-line RTO condition selection (unopened, good, damaged, wrong_product)
+- **ScanInput**: Barcode scanner with auto-lookup
+
+**Features:**
+- Source-specific pending queues with search and pagination
+- RTO urgency indicators (>14 days urgent, 7-14 days warning)
+- Per-line RTO processing with condition marking
+- Only good/unopened items create inventory inward
+- Damaged/wrong_product items create write-off records
+
+**API Integration:**
+```typescript
+inventoryApi.getPendingSources()           // Get all source counts
+inventoryApi.getPendingQueue(source)       // Get detailed queue
+inventoryApi.scanLookup(code)              // SKU lookup with matches
+inventoryApi.rtoInwardLine({ lineId, condition, notes })  // Process RTO line
+```
+
+**Database Schema (OrderLine):**
+- `rtoCondition`: String? (null, unopened, good, damaged, wrong_product)
+- `rtoInwardedAt`: DateTime?
+- `rtoInwardedById`: String?
+- `rtoNotes`: String?
+
 ## Recent Changes (January 7, 2026)
 
+- **InwardHub** added for unified inward operations (Production, Returns, RTO, Repacking)
+- **QueuePanel** component for viewing pending items per source
+- **RtoInwardForm** for per-line RTO condition marking
+- **RTO per-line processing**: Lines processed individually with condition tracking
 - **RtoOrdersGrid** added for dedicated RTO order management
 - **CodPendingGrid** added for COD orders awaiting payment
 - **Orders page now has 5 tabs**: Open, Shipped, RTO, COD Pending, Archived

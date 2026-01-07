@@ -3,10 +3,16 @@
  *
  * This module consolidates order processing logic that was previously
  * duplicated in webhooks.js, shopify.js, and syncWorker.js
+ *
+ * Key features:
+ * - Cache-first approach: always caches raw Shopify data before processing
+ * - Idempotent processing: can safely re-process cached orders
+ * - Race condition protection: uses in-memory lock for single-instance
  */
 
 import shopifyClient from './shopify.js';
 import { findOrCreateCustomer } from '../utils/customerUtils.js';
+import { withOrderLock } from '../utils/orderLock.js';
 
 /**
  * Cache raw Shopify order data to ShopifyOrderCache table
@@ -232,8 +238,17 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         ? discountCodes.map(d => d.code).join(', ')
         : null;
 
+    // Extract tags (Shopify order tags)
+    const orderTags = shopifyOrder.tags || null;
+
+    // Extract internal notes from Shopify note_attributes (staff-only notes)
+    // Shopify note_attributes is an array of {name, value} objects
+    const noteAttributes = shopifyOrder.note_attributes || [];
+    const internalNote = noteAttributes.find(n => n.name === 'internal_note' || n.name === 'staff_note')?.value;
+
     // Build order data
     // NOTE: Raw Shopify data is stored in ShopifyOrderCache, not duplicated in Order
+    // Comprehensive field mapping for order updates
     const orderData = {
         shopifyOrderId,
         orderNumber: shopifyOrder.name || String(shopifyOrder.order_number) || `SHOP-${shopifyOrderId.slice(-8)}`,
@@ -249,6 +264,8 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
         orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
         customerNotes: shopifyOrder.note || null,
+        // Preserve existing internal notes, append Shopify note_attributes if present
+        internalNotes: existingOrder?.internalNotes || internalNote || null,
         paymentMethod,
         awbNumber,
         courier,
@@ -264,14 +281,27 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     }
 
     if (existingOrder) {
-        // Check if update is needed
-        const needsUpdate = existingOrder.status !== status ||
+        // Comprehensive update detection - check all syncable fields
+        const needsUpdate =
+            // Core status changes
+            existingOrder.status !== status ||
             existingOrder.shopifyFulfillmentStatus !== orderData.shopifyFulfillmentStatus ||
+            // Fulfillment/shipping info
             existingOrder.awbNumber !== awbNumber ||
             existingOrder.courier !== courier ||
+            // Payment
             existingOrder.paymentMethod !== paymentMethod ||
+            // Customer-facing notes
             existingOrder.customerNotes !== orderData.customerNotes ||
-            existingOrder.discountCode !== discountCode;
+            // Discounts
+            existingOrder.discountCode !== discountCode ||
+            // Contact info (can change if customer updates)
+            existingOrder.customerEmail !== orderData.customerEmail ||
+            existingOrder.customerPhone !== orderData.customerPhone ||
+            // Amounts (can change with refunds/modifications)
+            existingOrder.totalAmount !== orderData.totalAmount ||
+            // Shipping address changes
+            existingOrder.shippingAddress !== orderData.shippingAddress;
 
         if (needsUpdate) {
             await prisma.order.update({
@@ -373,6 +403,9 @@ export async function processFromCache(prisma, cacheEntry, options = {}) {
  * Cache and process a Shopify order (convenience function)
  * Used by webhooks and sync workers
  *
+ * Uses order lock to prevent race conditions when the same order is processed
+ * simultaneously by webhook and sync job.
+ *
  * @param {PrismaClient} prisma
  * @param {object} shopifyOrder
  * @param {string} webhookTopic
@@ -380,22 +413,37 @@ export async function processFromCache(prisma, cacheEntry, options = {}) {
  */
 export async function cacheAndProcessOrder(prisma, shopifyOrder, webhookTopic = 'api_sync', options = {}) {
     const shopifyOrderId = String(shopifyOrder.id);
+    const source = webhookTopic.startsWith('orders/') ? 'webhook' : 'sync';
 
-    // Step 1: Cache first (always succeeds)
-    await cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, webhookTopic);
+    // Use order lock to prevent race conditions between webhook and sync
+    const lockResult = await withOrderLock(shopifyOrderId, source, async () => {
+        // Step 1: Cache first (always succeeds)
+        await cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, webhookTopic);
 
-    // Step 2: Process to ERP
-    try {
-        const result = await processShopifyOrderToERP(prisma, shopifyOrder, options);
+        // Step 2: Process to ERP
+        try {
+            const result = await processShopifyOrderToERP(prisma, shopifyOrder, options);
 
-        // Step 3a: Mark as processed
-        await markCacheProcessed(prisma, shopifyOrderId);
+            // Step 3a: Mark as processed
+            await markCacheProcessed(prisma, shopifyOrderId);
 
-        return result;
-    } catch (error) {
-        // Step 3b: Mark error but don't throw
-        await markCacheError(prisma, shopifyOrderId, error.message);
+            return result;
+        } catch (error) {
+            // Step 3b: Mark error but don't throw
+            await markCacheError(prisma, shopifyOrderId, error.message);
 
-        return { action: 'cache_only', error: error.message, cached: true };
+            return { action: 'cache_only', error: error.message, cached: true };
+        }
+    });
+
+    // If we couldn't acquire the lock, return skipped
+    if (lockResult.skipped) {
+        return {
+            action: 'skipped',
+            reason: 'concurrent_processing',
+            source,
+        };
     }
+
+    return lockResult.result;
 }

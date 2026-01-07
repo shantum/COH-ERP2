@@ -1,5 +1,10 @@
 /**
  * Webhook utilities for validation, deduplication, and error handling
+ *
+ * Key features:
+ * - Idempotency via X-Shopify-Webhook-Id header
+ * - Dead letter queue for failed items with exponential backoff
+ * - Webhook retry detection and log updating (vs creating duplicates)
  */
 import { z } from 'zod';
 
@@ -116,35 +121,82 @@ export const shopifyInventoryLevelSchema = z.object({
 }).passthrough();
 
 // ============================================
-// WEBHOOK DEDUPLICATION
+// WEBHOOK DEDUPLICATION & IDEMPOTENCY
 // ============================================
 
 /**
- * Check if webhook has already been processed (deduplication)
- * Returns existing log if found, null if new webhook
+ * Check if webhook has already been processed (idempotency check)
+ *
+ * Returns:
+ * - { duplicate: true, status: 'processed' } if already processed successfully
+ * - { duplicate: true, status: 'processing' } if currently being processed
+ * - { duplicate: false, isRetry: true, existing } if this is a retry of a failed webhook
+ * - { duplicate: false, isRetry: false } if this is a new webhook
+ *
+ * CRITICAL: This prevents duplicate processing when Shopify retries webhooks
  */
 export async function checkWebhookDuplicate(prisma, webhookId) {
-    if (!webhookId) return null;
+    if (!webhookId) return { duplicate: false, isRetry: false };
 
     try {
         const existing = await prisma.webhookLog.findUnique({
             where: { webhookId }
         });
-        return existing;
+
+        if (!existing) {
+            return { duplicate: false, isRetry: false };
+        }
+
+        // If already processed successfully, skip entirely
+        if (existing.status === 'processed') {
+            return { duplicate: true, status: 'processed', existing };
+        }
+
+        // If currently processing (webhook in-flight), skip to prevent race
+        // Processing timeout: if still 'processing' after 5 mins, allow retry
+        const processingTimeout = 5 * 60 * 1000; // 5 minutes
+        const isStale = existing.receivedAt &&
+            (Date.now() - new Date(existing.receivedAt).getTime()) > processingTimeout;
+
+        if (existing.status === 'processing' && !isStale) {
+            return { duplicate: true, status: 'processing', existing };
+        }
+
+        // If failed or stale processing, this is a retry - update existing log instead of creating new
+        return { duplicate: false, isRetry: true, existing };
     } catch (e) {
         // Table might not exist yet, continue processing
         console.warn('WebhookLog lookup failed:', e.message);
-        return null;
+        return { duplicate: false, isRetry: false };
     }
 }
 
 /**
  * Log webhook receipt for deduplication
+ * If isRetry=true, updates existing log instead of creating duplicate
+ *
+ * @param {PrismaClient} prisma
+ * @param {string} webhookId - X-Shopify-Webhook-Id header
+ * @param {string} topic - Webhook topic (e.g., 'orders/updated')
+ * @param {string} resourceId - Shopify resource ID
+ * @param {boolean} isRetry - Whether this is a retry of a failed webhook
  */
-export async function logWebhookReceived(prisma, webhookId, topic, resourceId) {
+export async function logWebhookReceived(prisma, webhookId, topic, resourceId, isRetry = false) {
     if (!webhookId) return null;
 
     try {
+        if (isRetry) {
+            // Update existing log entry instead of creating duplicate
+            return await prisma.webhookLog.update({
+                where: { webhookId },
+                data: {
+                    status: 'processing',
+                    error: null, // Clear previous error
+                    receivedAt: new Date(), // Update received time for retry
+                }
+            });
+        }
+
         return await prisma.webhookLog.create({
             data: {
                 webhookId,
@@ -154,11 +206,12 @@ export async function logWebhookReceived(prisma, webhookId, topic, resourceId) {
             }
         });
     } catch (e) {
-        // Unique constraint = duplicate
+        // Unique constraint = duplicate (race condition)
         if (e.code === 'P2002') {
+            // Another process beat us, skip this one
             return null;
         }
-        console.warn('WebhookLog create failed:', e.message);
+        console.warn('WebhookLog create/update failed:', e.message);
         return null;
     }
 }

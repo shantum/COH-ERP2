@@ -30,6 +30,20 @@ export const TXN_REASON = {
     DAMAGE: 'damage',
     ADJUSTMENT: 'adjustment',
     TRANSFER: 'transfer',
+    WRITE_OFF: 'write_off',
+};
+
+/**
+ * Reference types for inventory transactions
+ * Used to link transactions to their source entities
+ */
+export const TXN_REFERENCE_TYPE = {
+    ORDER_LINE: 'order_line',
+    PRODUCTION_BATCH: 'production_batch',
+    RETURN_REQUEST_LINE: 'return_request_line',
+    REPACKING_QUEUE_ITEM: 'repacking_queue_item',
+    WRITE_OFF_LOG: 'write_off_log',
+    MANUAL_ADJUSTMENT: 'manual_adjustment',
 };
 
 /**
@@ -223,6 +237,49 @@ export function calculateLineStatusCounts(orderLines) {
 }
 
 /**
+ * Recalculate order status based on line statuses
+ * Issue #10: Ensures order status is consistent with line statuses
+ *
+ * @param {PrismaClient} prisma - Prisma client (or transaction)
+ * @param {string} orderId - Order ID to recalculate
+ * @returns {Object} Updated order
+ */
+export async function recalculateOrderStatus(prisma, orderId) {
+    const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { orderLines: true },
+    });
+
+    if (!order) return null;
+
+    // Don't modify terminal statuses
+    if (['shipped', 'delivered', 'archived'].includes(order.status)) {
+        return order;
+    }
+
+    const lineStatuses = order.orderLines.map((l) => l.lineStatus);
+    const nonCancelledLines = lineStatuses.filter((s) => s !== 'cancelled');
+
+    // If all lines are cancelled, order should be cancelled
+    if (nonCancelledLines.length === 0 && lineStatuses.length > 0) {
+        return prisma.order.update({
+            where: { id: orderId },
+            data: { status: 'cancelled' },
+        });
+    }
+
+    // If order was cancelled but has non-cancelled lines, restore to open
+    if (order.status === 'cancelled' && nonCancelledLines.length > 0) {
+        return prisma.order.update({
+            where: { id: orderId },
+            data: { status: 'open' },
+        });
+    }
+
+    return order;
+}
+
+/**
  * Enrich orders with customer LTV, tier, and order count
  * Consolidates the duplicate customer enrichment pattern from list endpoints
  *
@@ -344,9 +401,13 @@ export function determineTrackingStatus(order, daysInTransit) {
  * Uses aggregation to avoid N+1 queries
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string} skuId - SKU ID
+ * @param {Object} options - Options for balance calculation
+ * @param {boolean} options.allowNegative - If false (default), floors balance at 0
  * @returns {Object} Balance information
  */
-export async function calculateInventoryBalance(prisma, skuId) {
+export async function calculateInventoryBalance(prisma, skuId, options = {}) {
+    const { allowNegative = false } = options;
+
     const result = await prisma.inventoryTransaction.groupBy({
         by: ['txnType'],
         where: { skuId },
@@ -363,10 +424,26 @@ export async function calculateInventoryBalance(prisma, skuId) {
         else if (r.txnType === 'reserved') totalReserved = r._sum.qty || 0;
     });
 
-    const currentBalance = totalInward - totalOutward;
-    const availableBalance = currentBalance - totalReserved;
+    let currentBalance = totalInward - totalOutward;
+    let availableBalance = currentBalance - totalReserved;
 
-    return { totalInward, totalOutward, totalReserved, currentBalance, availableBalance };
+    // Flag for data integrity issues (when outward > inward)
+    const hasDataIntegrityIssue = currentBalance < 0 || availableBalance < 0;
+
+    // Floor at 0 unless explicitly allowing negative (for diagnostic purposes)
+    if (!allowNegative) {
+        currentBalance = Math.max(0, currentBalance);
+        availableBalance = Math.max(0, availableBalance);
+    }
+
+    return {
+        totalInward,
+        totalOutward,
+        totalReserved,
+        currentBalance,
+        availableBalance,
+        hasDataIntegrityIssue
+    };
 }
 
 /**
@@ -374,9 +451,12 @@ export async function calculateInventoryBalance(prisma, skuId) {
  * Uses a single aggregation query instead of N+1
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string[]} skuIds - Optional array of SKU IDs to filter
+ * @param {Object} options - Options for balance calculation
+ * @param {boolean} options.allowNegative - If false (default), floors balance at 0
  * @returns {Map} Map of skuId -> balance info
  */
-export async function calculateAllInventoryBalances(prisma, skuIds = null) {
+export async function calculateAllInventoryBalances(prisma, skuIds = null, options = {}) {
+    const { allowNegative = false } = options;
     const where = skuIds ? { skuId: { in: skuIds } } : {};
 
     const result = await prisma.inventoryTransaction.groupBy({
@@ -405,8 +485,20 @@ export async function calculateAllInventoryBalances(prisma, skuIds = null) {
 
     // Calculate derived fields
     for (const [skuId, balance] of balanceMap) {
-        balance.currentBalance = balance.totalInward - balance.totalOutward;
-        balance.availableBalance = balance.currentBalance - balance.totalReserved;
+        let currentBalance = balance.totalInward - balance.totalOutward;
+        let availableBalance = currentBalance - balance.totalReserved;
+
+        // Flag for data integrity issues
+        balance.hasDataIntegrityIssue = currentBalance < 0 || availableBalance < 0;
+
+        // Floor at 0 unless explicitly allowing negative
+        if (!allowNegative) {
+            currentBalance = Math.max(0, currentBalance);
+            availableBalance = Math.max(0, availableBalance);
+        }
+
+        balance.currentBalance = currentBalance;
+        balance.availableBalance = availableBalance;
         balance.skuId = skuId;
     }
 
@@ -588,4 +680,171 @@ export async function deleteSaleTransactions(prisma, orderLineId) {
         },
     });
     return result.count;
+}
+
+// ============================================
+// IDEMPOTENCY & VALIDATION HELPERS
+// ============================================
+
+/**
+ * Check if an RTO inward transaction already exists for an order line
+ * Used to prevent duplicate transactions on network retries
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} orderLineId - Order line ID
+ * @returns {Object|null} Existing transaction or null
+ */
+export async function findExistingRtoInward(prisma, orderLineId) {
+    return prisma.inventoryTransaction.findFirst({
+        where: {
+            referenceId: orderLineId,
+            txnType: TXN_TYPE.INWARD,
+            reason: TXN_REASON.RTO_RECEIVED,
+        },
+    });
+}
+
+/**
+ * Check if an inventory transaction can be safely deleted
+ * Validates that no dependent operations exist
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} transactionId - Transaction ID to validate
+ * @returns {Object} { canDelete: boolean, reason?: string, dependencies?: Object[] }
+ */
+export async function validateTransactionDeletion(prisma, transactionId) {
+    const transaction = await prisma.inventoryTransaction.findUnique({
+        where: { id: transactionId },
+        include: {
+            sku: {
+                include: {
+                    variation: { include: { product: true } },
+                },
+            },
+        },
+    });
+
+    if (!transaction) {
+        return { canDelete: false, reason: 'Transaction not found' };
+    }
+
+    const dependencies = [];
+
+    // For inward transactions, check if deleting would cause negative balance
+    if (transaction.txnType === TXN_TYPE.INWARD) {
+        const balance = await calculateInventoryBalance(prisma, transaction.skuId, { allowNegative: true });
+        const balanceAfterDeletion = balance.currentBalance - transaction.qty;
+
+        if (balanceAfterDeletion < 0) {
+            dependencies.push({
+                type: 'negative_balance',
+                message: `Deleting would cause negative balance (${balanceAfterDeletion})`,
+                currentBalance: balance.currentBalance,
+                transactionQty: transaction.qty,
+            });
+        }
+
+        // Check if there are reserved quantities that would be affected
+        if (balance.totalReserved > 0 && balanceAfterDeletion < balance.totalReserved) {
+            dependencies.push({
+                type: 'reserved_inventory',
+                message: `Deleting would leave insufficient stock for ${balance.totalReserved} reserved units`,
+                reserved: balance.totalReserved,
+            });
+        }
+    }
+
+    // For reserved transactions, check if order line is in a state that requires reservation
+    if (transaction.txnType === TXN_TYPE.RESERVED && transaction.referenceId) {
+        const orderLine = await prisma.orderLine.findFirst({
+            where: { id: transaction.referenceId },
+            include: { order: { select: { status: true, orderNumber: true } } },
+        });
+
+        if (orderLine && orderLine.lineStatus === 'allocated') {
+            dependencies.push({
+                type: 'active_allocation',
+                message: `Order line ${orderLine.order?.orderNumber} is still allocated`,
+                orderNumber: orderLine.order?.orderNumber,
+                lineStatus: orderLine.lineStatus,
+            });
+        }
+    }
+
+    // For return_receipt transactions, check if repacking item would become orphaned
+    if (transaction.reason === TXN_REASON.RETURN_RECEIPT && transaction.referenceId) {
+        const repackItem = await prisma.repackingQueueItem.findUnique({
+            where: { id: transaction.referenceId },
+        });
+
+        if (repackItem && repackItem.status === 'ready') {
+            dependencies.push({
+                type: 'repacking_queue_item',
+                message: 'Associated repacking queue item is in ready status',
+                repackItemId: repackItem.id,
+            });
+        }
+    }
+
+    return {
+        canDelete: dependencies.length === 0,
+        reason: dependencies.length > 0 ? 'Transaction has dependencies that must be resolved first' : null,
+        dependencies: dependencies.length > 0 ? dependencies : undefined,
+        transaction: {
+            id: transaction.id,
+            skuCode: transaction.sku?.skuCode,
+            txnType: transaction.txnType,
+            qty: transaction.qty,
+            reason: transaction.reason,
+        },
+    };
+}
+
+/**
+ * Check if a SKU exists and is active
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {Object} params - Search parameters
+ * @param {string} params.skuId - SKU ID
+ * @param {string} params.skuCode - SKU code
+ * @param {string} params.barcode - Barcode (same as skuCode in this schema)
+ * @returns {Object} { valid: boolean, sku?: Object, error?: string }
+ */
+export async function validateSku(prisma, { skuId, skuCode, barcode }) {
+    let sku = null;
+
+    if (skuId) {
+        sku = await prisma.sku.findUnique({
+            where: { id: skuId },
+            include: {
+                variation: { include: { product: true } },
+            },
+        });
+    } else if (barcode) {
+        // Barcode is same as skuCode in this schema
+        sku = await prisma.sku.findFirst({
+            where: { skuCode: barcode },
+            include: {
+                variation: { include: { product: true } },
+            },
+        });
+    } else if (skuCode) {
+        sku = await prisma.sku.findUnique({
+            where: { skuCode },
+            include: {
+                variation: { include: { product: true } },
+            },
+        });
+    }
+
+    if (!sku) {
+        return { valid: false, error: 'SKU not found' };
+    }
+
+    if (!sku.isActive) {
+        return { valid: false, error: 'SKU is inactive', sku };
+    }
+
+    if (!sku.variation?.product?.isActive) {
+        return { valid: false, error: 'Product is inactive', sku };
+    }
+
+    return { valid: true, sku };
 }

@@ -34,6 +34,14 @@ router.post('/lines/:lineId/allocate', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Order line not found' });
         }
 
+        // Issue #3: Add status precondition check
+        if (line.lineStatus !== 'pending') {
+            return res.status(400).json({
+                error: 'Line must be in pending status to allocate',
+                currentStatus: line.lineStatus,
+            });
+        }
+
         const balance = await calculateInventoryBalance(req.prisma, line.skuId);
         if (balance.availableBalance < line.qty) {
             return res.status(400).json({
@@ -44,6 +52,16 @@ router.post('/lines/:lineId/allocate', authenticateToken, async (req, res) => {
         }
 
         await req.prisma.$transaction(async (tx) => {
+            // Re-check status inside transaction to prevent race conditions
+            const currentLine = await tx.orderLine.findUnique({
+                where: { id: req.params.lineId },
+                select: { lineStatus: true },
+            });
+
+            if (currentLine.lineStatus !== 'pending') {
+                throw new Error('ALREADY_ALLOCATED');
+            }
+
             await createReservedTransaction(tx, {
                 skuId: line.skuId,
                 qty: line.qty,
@@ -63,6 +81,9 @@ router.post('/lines/:lineId/allocate', authenticateToken, async (req, res) => {
 
         res.json(updated);
     } catch (error) {
+        if (error.message === 'ALREADY_ALLOCATED') {
+            return res.status(409).json({ error: 'Line was already allocated by another request' });
+        }
         console.error('Allocate line error:', error);
         res.status(500).json({ error: 'Failed to allocate line' });
     }
@@ -106,6 +127,22 @@ router.post('/lines/:lineId/unallocate', authenticateToken, async (req, res) => 
 // Pick order line
 router.post('/lines/:lineId/pick', authenticateToken, async (req, res) => {
     try {
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        // Issue #3: Add status precondition check
+        if (line.lineStatus !== 'allocated') {
+            return res.status(400).json({
+                error: 'Line must be in allocated status to pick',
+                currentStatus: line.lineStatus,
+            });
+        }
+
         const updated = await req.prisma.orderLine.update({
             where: { id: req.params.lineId },
             data: { lineStatus: 'picked', pickedAt: new Date() },
@@ -147,6 +184,22 @@ router.post('/lines/:lineId/unpick', authenticateToken, async (req, res) => {
 // Pack order line
 router.post('/lines/:lineId/pack', authenticateToken, async (req, res) => {
     try {
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        // Issue #3: Add status precondition check
+        if (line.lineStatus !== 'picked') {
+            return res.status(400).json({
+                error: 'Line must be in picked status to pack',
+                currentStatus: line.lineStatus,
+            });
+        }
+
         const updated = await req.prisma.orderLine.update({
             where: { id: req.params.lineId },
             data: { lineStatus: 'packed', packedAt: new Date() },
@@ -189,6 +242,10 @@ router.post('/lines/:lineId/unpack', authenticateToken, async (req, res) => {
 router.post('/lines/bulk-update', authenticateToken, async (req, res) => {
     try {
         const { lineIds, status } = req.body;
+
+        // Issue #4: Deduplicate lineIds to prevent double-counting
+        const uniqueLineIds = [...new Set(lineIds)];
+
         const timestamp = new Date();
 
         const updateData = { lineStatus: status };
@@ -197,12 +254,12 @@ router.post('/lines/bulk-update', authenticateToken, async (req, res) => {
         if (status === 'packed') updateData.packedAt = timestamp;
         if (status === 'shipped') updateData.shippedAt = timestamp;
 
-        await req.prisma.orderLine.updateMany({
-            where: { id: { in: lineIds } },
+        const result = await req.prisma.orderLine.updateMany({
+            where: { id: { in: uniqueLineIds } },
             data: updateData,
         });
 
-        res.json({ updated: lineIds.length });
+        res.json({ updated: result.count, requested: lineIds.length, deduplicated: uniqueLineIds.length });
     } catch (error) {
         console.error('Bulk update error:', error);
         res.status(500).json({ error: 'Failed to bulk update' });
@@ -226,16 +283,71 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
             return res.status(404).json({ error: 'Order not found' });
         }
 
-        const validStatuses = ['allocated', 'picked', 'packed'];
-        const notReady = order.orderLines.filter((l) => !validStatuses.includes(l.lineStatus));
-        if (notReady.length > 0) {
+        // Issue #1: Idempotency check - if already shipped, return success
+        if (order.status === 'shipped') {
+            return res.json({
+                ...order,
+                message: 'Order is already shipped',
+            });
+        }
+
+        // Issue #11: Check for duplicate AWB number (if AWB provided)
+        if (awbNumber) {
+            const existingAwb = await req.prisma.order.findFirst({
+                where: {
+                    awbNumber,
+                    id: { not: req.params.id },
+                },
+                select: { id: true, orderNumber: true },
+            });
+
+            if (existingAwb) {
+                return res.status(400).json({
+                    error: 'AWB number already assigned to another order',
+                    existingOrderNumber: existingAwb.orderNumber,
+                });
+            }
+        }
+
+        // Issue #9: Validate all lines are packed before shipping
+        const notPacked = order.orderLines.filter((l) => l.lineStatus !== 'packed');
+        if (notPacked.length > 0) {
             return res.status(400).json({
-                error: 'Not all lines are allocated',
-                notReadyCount: notReady.length,
+                error: 'All lines must be packed before shipping',
+                notPackedCount: notPacked.length,
+                notPackedLines: notPacked.map(l => ({
+                    id: l.id,
+                    status: l.lineStatus,
+                })),
             });
         }
 
         await req.prisma.$transaction(async (tx) => {
+            // Issue #1: Re-check order status inside transaction to prevent race condition
+            const currentOrder = await tx.order.findUnique({
+                where: { id: req.params.id },
+                select: { status: true },
+            });
+
+            if (currentOrder.status === 'shipped') {
+                throw new Error('ALREADY_SHIPPED');
+            }
+
+            // Issue #11: Re-check AWB inside transaction
+            if (awbNumber) {
+                const existingAwb = await tx.order.findFirst({
+                    where: {
+                        awbNumber,
+                        id: { not: req.params.id },
+                    },
+                    select: { id: true },
+                });
+
+                if (existingAwb) {
+                    throw new Error('AWB_DUPLICATE');
+                }
+            }
+
             await tx.order.update({
                 where: { id: req.params.id },
                 data: {
@@ -270,6 +382,17 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
 
         res.json(updated);
     } catch (error) {
+        if (error.message === 'ALREADY_SHIPPED') {
+            // Return success for idempotency
+            const order = await req.prisma.order.findUnique({
+                where: { id: req.params.id },
+                include: { orderLines: true },
+            });
+            return res.json({ ...order, message: 'Order was already shipped' });
+        }
+        if (error.message === 'AWB_DUPLICATE') {
+            return res.status(409).json({ error: 'AWB number was assigned to another order' });
+        }
         console.error('Ship order error:', error);
         res.status(500).json({ error: 'Failed to ship order' });
     }
@@ -292,6 +415,33 @@ router.post('/:id/unship', authenticateToken, async (req, res) => {
         }
 
         await req.prisma.$transaction(async (tx) => {
+            // Issue #2: Re-check status inside transaction to prevent race condition
+            const currentOrder = await tx.order.findUnique({
+                where: { id: req.params.id },
+                select: { status: true },
+            });
+
+            if (currentOrder.status !== 'shipped') {
+                throw new Error('NOT_SHIPPED');
+            }
+
+            // Issue #2: Atomic inventory correction
+            // First, delete all sale transactions for this order's lines
+            for (const line of order.orderLines) {
+                await deleteSaleTransactions(tx, line.id);
+            }
+
+            // Then create reserved transactions atomically
+            for (const line of order.orderLines) {
+                await createReservedTransaction(tx, {
+                    skuId: line.skuId,
+                    qty: line.qty,
+                    orderLineId: line.id,
+                    userId: req.user.id,
+                });
+            }
+
+            // Update order status
             await tx.order.update({
                 where: { id: req.params.id },
                 data: {
@@ -302,21 +452,11 @@ router.post('/:id/unship', authenticateToken, async (req, res) => {
                 },
             });
 
+            // Revert line statuses to packed (ready to re-ship)
             await tx.orderLine.updateMany({
                 where: { orderId: req.params.id },
-                data: { lineStatus: 'allocated', shippedAt: null },
+                data: { lineStatus: 'packed', shippedAt: null },
             });
-
-            for (const line of order.orderLines) {
-                await deleteSaleTransactions(tx, line.id);
-
-                await createReservedTransaction(tx, {
-                    skuId: line.skuId,
-                    qty: line.qty,
-                    orderLineId: line.id,
-                    userId: req.user.id,
-                });
-            }
         });
 
         const updated = await req.prisma.order.findUnique({
@@ -326,6 +466,9 @@ router.post('/:id/unship', authenticateToken, async (req, res) => {
 
         res.json(updated);
     } catch (error) {
+        if (error.message === 'NOT_SHIPPED') {
+            return res.status(400).json({ error: 'Order is no longer in shipped status' });
+        }
         console.error('Unship order error:', error);
         res.status(500).json({ error: 'Failed to unship order' });
     }

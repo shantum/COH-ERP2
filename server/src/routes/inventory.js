@@ -1,6 +1,17 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { calculateInventoryBalance, calculateAllInventoryBalances, calculateAllFabricBalances, getEffectiveFabricConsumption, TXN_REASON } from '../utils/queryPatterns.js';
+import {
+    calculateInventoryBalance,
+    calculateAllInventoryBalances,
+    calculateAllFabricBalances,
+    getEffectiveFabricConsumption,
+    TXN_REASON,
+    TXN_TYPE,
+    TXN_REFERENCE_TYPE,
+    findExistingRtoInward,
+    validateTransactionDeletion,
+    validateSku
+} from '../utils/queryPatterns.js';
 
 const router = Router();
 
@@ -11,65 +22,69 @@ const router = Router();
 /**
  * GET /pending-sources
  * Returns counts and items from all pending inward sources
+ * Fixed: Uses Promise.all for parallel queries to improve performance
  */
 router.get('/pending-sources', authenticateToken, async (req, res) => {
     try {
-        // Get pending production batches (status: in_progress)
-        const productionPending = await req.prisma.productionBatch.findMany({
-            where: { status: 'in_progress' },
-            include: {
-                sku: {
-                    include: {
-                        variation: { include: { product: true } }
+        // Execute all queries in parallel for better performance
+        const [productionPending, returnsPending, rtoPending, repackingPending] = await Promise.all([
+            // Get pending production batches (status: in_progress)
+            req.prisma.productionBatch.findMany({
+                where: { status: 'in_progress' },
+                include: {
+                    sku: {
+                        include: {
+                            variation: { include: { product: true } }
+                        }
                     }
                 }
-            }
-        });
+            }),
 
-        // Get return request lines that are in_transit or received but not yet inspected
-        const returnsPending = await req.prisma.returnRequestLine.findMany({
-            where: {
-                request: { status: { in: ['in_transit', 'received'] } },
-                itemCondition: null  // Not yet inspected
-            },
-            include: {
-                sku: { include: { variation: { include: { product: true } } } },
-                request: true
-            }
-        });
-
-        // Get RTO lines pending receipt (line-level, not order-level)
-        // Includes both rto_in_transit AND rto_delivered where lines are not yet processed
-        const rtoPending = await req.prisma.orderLine.findMany({
-            where: {
-                order: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    isArchived: false
+            // Get return request lines that are in_transit or received but not yet inspected
+            req.prisma.returnRequestLine.findMany({
+                where: {
+                    request: { status: { in: ['in_transit', 'received'] } },
+                    itemCondition: null  // Not yet inspected
                 },
-                rtoCondition: null  // Not yet processed
-            },
-            include: {
-                sku: { include: { variation: { include: { product: true } } } },
-                order: {
-                    select: {
-                        id: true,
-                        orderNumber: true,
-                        customerName: true,
-                        trackingStatus: true,
-                        rtoInitiatedAt: true
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    request: true
+                }
+            }),
+
+            // Get RTO lines pending receipt (line-level, not order-level)
+            // Includes both rto_in_transit AND rto_delivered where lines are not yet processed
+            req.prisma.orderLine.findMany({
+                where: {
+                    order: {
+                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                        isArchived: false
+                    },
+                    rtoCondition: null  // Not yet processed
+                },
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    order: {
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerName: true,
+                            trackingStatus: true,
+                            rtoInitiatedAt: true
+                        }
                     }
                 }
-            }
-        });
+            }),
 
-        // Get repacking queue items (pending or inspecting)
-        const repackingPending = await req.prisma.repackingQueueItem.findMany({
-            where: { status: { in: ['pending', 'inspecting'] } },
-            include: {
-                sku: { include: { variation: { include: { product: true } } } },
-                returnRequest: true
-            }
-        });
+            // Get repacking queue items (pending or inspecting)
+            req.prisma.repackingQueueItem.findMany({
+                where: { status: { in: ['pending', 'inspecting'] } },
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    returnRequest: true
+                }
+            })
+        ]);
 
         // Calculate RTO urgency based on days since rtoInitiatedAt
         const now = Date.now();
@@ -604,6 +619,7 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
 /**
  * POST /rto-inward-line
  * Process a single RTO order line (mark condition and optionally create inventory inward)
+ * Includes idempotency check to prevent duplicate transactions on network retries
  */
 router.post('/rto-inward-line', authenticateToken, async (req, res) => {
     try {
@@ -644,12 +660,36 @@ router.post('/rto-inward-line', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Order line not found' });
         }
 
-        // Check if already processed
+        // Check if already processed (primary idempotency check via order line status)
         if (orderLine.rtoCondition) {
             return res.status(400).json({
                 error: 'Line already processed',
                 existingCondition: orderLine.rtoCondition,
                 processedAt: orderLine.rtoInwardedAt
+            });
+        }
+
+        // Secondary idempotency check: Look for existing inventory transaction
+        // This catches race conditions where the order line update succeeded but response was lost
+        const existingTxn = await findExistingRtoInward(req.prisma, lineId);
+        if (existingTxn) {
+            // Transaction already exists - return success without creating duplicate
+            const balance = await calculateInventoryBalance(req.prisma, orderLine.skuId);
+            return res.json({
+                success: true,
+                message: 'RTO line already processed (idempotent response)',
+                idempotent: true,
+                existingTransactionId: existingTxn.id,
+                line: {
+                    lineId: orderLine.id,
+                    orderId: orderLine.orderId,
+                    orderNumber: orderLine.order.orderNumber,
+                    skuCode: orderLine.sku.skuCode,
+                    qty: orderLine.qty,
+                    condition: orderLine.rtoCondition || condition
+                },
+                inventoryAdded: true,
+                newBalance: balance.currentBalance
             });
         }
 
@@ -662,7 +702,18 @@ router.post('/rto-inward-line', authenticateToken, async (req, res) => {
         }
 
         // Start transaction to update line and create inventory if good
+        // Use serializable isolation to prevent race conditions
         const result = await req.prisma.$transaction(async (tx) => {
+            // Re-check inside transaction to prevent race conditions
+            const currentLine = await tx.orderLine.findUnique({
+                where: { id: lineId },
+                select: { rtoCondition: true }
+            });
+
+            if (currentLine?.rtoCondition) {
+                throw new Error('ALREADY_PROCESSED');
+            }
+
             // Update the order line with RTO condition
             const updatedLine = await tx.orderLine.update({
                 where: { id: lineId },
@@ -691,7 +742,7 @@ router.post('/rto-inward-line', authenticateToken, async (req, res) => {
                     }
                 });
             } else {
-                // For damaged/wrong_product - create write-off record
+                // For damaged/wrong_product - create write-off record with proper linking
                 writeOffRecord = await tx.writeOffLog.create({
                     data: {
                         skuId: orderLine.skuId,
@@ -771,6 +822,13 @@ router.post('/rto-inward-line', authenticateToken, async (req, res) => {
             }
         });
     } catch (error) {
+        // Handle the race condition case gracefully
+        if (error.message === 'ALREADY_PROCESSED') {
+            return res.status(400).json({
+                error: 'Line already processed (concurrent request)',
+                hint: 'This line was processed by another request. Refresh to see current status.'
+            });
+        }
         console.error('RTO inward line error:', error);
         res.status(500).json({ error: 'Failed to process RTO line' });
     }
@@ -1102,9 +1160,33 @@ router.get('/transactions', authenticateToken, async (req, res) => {
 });
 
 // Create inward transaction
+// Fixed: Added audit trail for manual adjustments
 router.post('/inward', authenticateToken, async (req, res) => {
     try {
-        const { skuId, qty, reason, referenceId, notes, warehouseLocation } = req.body;
+        const { skuId, qty, reason, referenceId, notes, warehouseLocation, adjustmentReason } = req.body;
+
+        // Validate required fields
+        if (!skuId || !qty || !reason) {
+            return res.status(400).json({
+                error: 'Missing required fields',
+                required: ['skuId', 'qty', 'reason']
+            });
+        }
+
+        // For adjustments, require a reason/justification
+        if (reason === 'adjustment' && !adjustmentReason && !notes) {
+            return res.status(400).json({
+                error: 'Adjustment transactions require a reason',
+                hint: 'Provide adjustmentReason or notes explaining the adjustment'
+            });
+        }
+
+        // Build enhanced notes for audit trail
+        let auditNotes = notes || '';
+        if (reason === 'adjustment') {
+            const timestamp = new Date().toISOString();
+            auditNotes = `[MANUAL ADJUSTMENT by ${req.user.name || req.user.email} at ${timestamp}] ${adjustmentReason || ''} ${notes ? '| ' + notes : ''}`.trim();
+        }
 
         const transaction = await req.prisma.inventoryTransaction.create({
             data: {
@@ -1113,7 +1195,7 @@ router.post('/inward', authenticateToken, async (req, res) => {
                 qty,
                 reason,
                 referenceId,
-                notes,
+                notes: auditNotes || null,
                 warehouseLocation,
                 createdById: req.user.id,
             },
@@ -1123,7 +1205,14 @@ router.post('/inward', authenticateToken, async (req, res) => {
             },
         });
 
-        res.status(201).json(transaction);
+        // Get updated balance
+        const balance = await calculateInventoryBalance(req.prisma, skuId);
+
+        res.status(201).json({
+            ...transaction,
+            newBalance: balance.currentBalance,
+            availableBalance: balance.availableBalance
+        });
     } catch (error) {
         console.error('Create inward transaction error:', error);
         res.status(500).json({ error: 'Failed to create inward transaction' });
@@ -1131,9 +1220,26 @@ router.post('/inward', authenticateToken, async (req, res) => {
 });
 
 // Create outward transaction
+// Fixed: Added audit trail for manual adjustments
 router.post('/outward', authenticateToken, async (req, res) => {
     try {
-        const { skuId, qty, reason, referenceId, notes, warehouseLocation } = req.body;
+        const { skuId, qty, reason, referenceId, notes, warehouseLocation, adjustmentReason } = req.body;
+
+        // Validate required fields
+        if (!skuId || !qty || !reason) {
+            return res.status(400).json({
+                error: 'Missing required fields',
+                required: ['skuId', 'qty', 'reason']
+            });
+        }
+
+        // For adjustments/damage, require a reason/justification
+        if ((reason === 'adjustment' || reason === 'damage') && !adjustmentReason && !notes) {
+            return res.status(400).json({
+                error: 'Adjustment/damage transactions require a reason',
+                hint: 'Provide adjustmentReason or notes explaining the adjustment'
+            });
+        }
 
         // Check available balance (currentBalance minus reserved)
         const balance = await calculateInventoryBalance(req.prisma, skuId);
@@ -1141,8 +1247,17 @@ router.post('/outward', authenticateToken, async (req, res) => {
             return res.status(400).json({
                 error: 'Insufficient stock',
                 available: balance.availableBalance,
-                requested: qty
+                requested: qty,
+                currentBalance: balance.currentBalance,
+                reserved: balance.totalReserved
             });
+        }
+
+        // Build enhanced notes for audit trail
+        let auditNotes = notes || '';
+        if (reason === 'adjustment' || reason === 'damage') {
+            const timestamp = new Date().toISOString();
+            auditNotes = `[MANUAL ${reason.toUpperCase()} by ${req.user.name || req.user.email} at ${timestamp}] ${adjustmentReason || ''} ${notes ? '| ' + notes : ''}`.trim();
         }
 
         const transaction = await req.prisma.inventoryTransaction.create({
@@ -1152,7 +1267,7 @@ router.post('/outward', authenticateToken, async (req, res) => {
                 qty,
                 reason,
                 referenceId,
-                notes,
+                notes: auditNotes || null,
                 warehouseLocation,
                 createdById: req.user.id,
             },
@@ -1162,7 +1277,14 @@ router.post('/outward', authenticateToken, async (req, res) => {
             },
         });
 
-        res.status(201).json(transaction);
+        // Get updated balance
+        const newBalance = await calculateInventoryBalance(req.prisma, skuId);
+
+        res.status(201).json({
+            ...transaction,
+            newBalance: newBalance.currentBalance,
+            availableBalance: newBalance.availableBalance
+        });
     } catch (error) {
         console.error('Create outward transaction error:', error);
         res.status(500).json({ error: 'Failed to create outward transaction' });
@@ -1170,58 +1292,72 @@ router.post('/outward', authenticateToken, async (req, res) => {
 });
 
 // Quick inward (simplified form) - with production batch matching
+// Fixed: Added SKU validation and race condition protection
 router.post('/quick-inward', authenticateToken, async (req, res) => {
     try {
         const { skuCode, barcode, qty, reason = 'production', notes } = req.body;
 
-        // Find SKU by code or barcode
-        let sku;
-        if (barcode) {
-            sku = await req.prisma.sku.findFirst({ where: { barcode } });
-        }
-        if (!sku && skuCode) {
-            sku = await req.prisma.sku.findUnique({ where: { skuCode } });
-        }
-        if (!sku) {
-            return res.status(404).json({ error: 'SKU not found' });
+        // Validate quantity
+        if (!qty || qty <= 0 || !Number.isInteger(qty)) {
+            return res.status(400).json({
+                error: 'Invalid quantity',
+                message: 'Quantity must be a positive integer'
+            });
         }
 
-        // Create inward transaction
-        const transaction = await req.prisma.inventoryTransaction.create({
-            data: {
-                skuId: sku.id,
-                txnType: 'inward',
-                qty,
-                reason,
-                notes,
-                createdById: req.user.id,
-            },
-            include: {
-                sku: {
-                    include: {
-                        variation: { include: { product: true } },
+        // Validate SKU exists and is active
+        const skuValidation = await validateSku(req.prisma, { skuCode, barcode });
+        if (!skuValidation.valid) {
+            return res.status(400).json({
+                error: skuValidation.error,
+                skuCode: skuCode || barcode,
+                isInactive: skuValidation.sku && !skuValidation.sku.isActive
+            });
+        }
+
+        const sku = skuValidation.sku;
+
+        // Use transaction for atomic operation to prevent race conditions
+        const result = await req.prisma.$transaction(async (tx) => {
+            // Create inward transaction
+            const transaction = await tx.inventoryTransaction.create({
+                data: {
+                    skuId: sku.id,
+                    txnType: 'inward',
+                    qty,
+                    reason,
+                    notes: notes || null,
+                    createdById: req.user.id,
+                },
+                include: {
+                    sku: {
+                        include: {
+                            variation: { include: { product: true } },
+                        },
                     },
                 },
-            },
-        });
+            });
 
-        // Try to match to pending production batch
-        let matchedBatch = null;
-        if (reason === 'production') {
-            matchedBatch = await matchProductionBatch(req.prisma, sku.id, qty);
-        }
+            // Try to match to pending production batch (within same transaction)
+            let matchedBatch = null;
+            if (reason === 'production') {
+                matchedBatch = await matchProductionBatchInTransaction(tx, sku.id, qty);
+            }
+
+            return { transaction, matchedBatch };
+        });
 
         const balance = await calculateInventoryBalance(req.prisma, sku.id);
 
         res.status(201).json({
-            transaction,
+            transaction: result.transaction,
             newBalance: balance.currentBalance,
-            matchedBatch: matchedBatch ? {
-                id: matchedBatch.id,
-                batchCode: matchedBatch.batchCode,
-                qtyCompleted: matchedBatch.qtyCompleted,
-                qtyPlanned: matchedBatch.qtyPlanned,
-                status: matchedBatch.status,
+            matchedBatch: result.matchedBatch ? {
+                id: result.matchedBatch.id,
+                batchCode: result.matchedBatch.batchCode,
+                qtyCompleted: result.matchedBatch.qtyCompleted,
+                qtyPlanned: result.matchedBatch.qtyPlanned,
+                status: result.matchedBatch.status,
             } : null,
         });
     } catch (error) {
@@ -1335,40 +1471,11 @@ router.put('/inward/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete inward transaction
+// Fixed: Added validation to check for dependent operations before deletion
 router.delete('/inward/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
-
-        const existing = await req.prisma.inventoryTransaction.findUnique({
-            where: { id },
-        });
-
-        if (!existing) {
-            return res.status(404).json({ error: 'Transaction not found' });
-        }
-
-        if (existing.txnType !== 'inward') {
-            return res.status(400).json({ error: 'Can only delete inward transactions' });
-        }
-
-        await req.prisma.inventoryTransaction.delete({ where: { id } });
-
-        res.json({ success: true, message: 'Transaction deleted' });
-    } catch (error) {
-        console.error('Delete inward error:', error);
-        res.status(500).json({ error: 'Failed to delete inward transaction' });
-    }
-});
-
-// Delete any inventory transaction (admin only)
-router.delete('/transactions/:id', authenticateToken, async (req, res) => {
-    try {
-        // Check if user is admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Only admin can delete transactions' });
-        }
-
-        const { id } = req.params;
+        const { force = false } = req.query; // Allow force delete for admins
 
         const existing = await req.prisma.inventoryTransaction.findUnique({
             where: { id },
@@ -1385,30 +1492,123 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Transaction not found' });
         }
 
-        let revertedQueueItem = null;
+        if (existing.txnType !== 'inward') {
+            return res.status(400).json({ error: 'Can only delete inward transactions' });
+        }
 
-        // If this is a return_receipt transaction with a referenceId, revert the repacking queue item
-        if (existing.reason === 'return_receipt' && existing.referenceId) {
-            const queueItem = await req.prisma.repackingQueueItem.findUnique({
-                where: { id: existing.referenceId },
-            });
-
-            if (queueItem && queueItem.status === 'ready') {
-                // Revert the queue item back to pending
-                await req.prisma.repackingQueueItem.update({
-                    where: { id: existing.referenceId },
-                    data: {
-                        status: 'pending',
-                        qcComments: null,
-                        processedAt: null,
-                        processedById: null,
-                    },
+        // Validate deletion is safe (check for dependencies)
+        const validation = await validateTransactionDeletion(req.prisma, id);
+        if (!validation.canDelete) {
+            // Only admins can force delete with dependencies
+            if (force === 'true' && req.user.role === 'admin') {
+                console.warn(`Admin ${req.user.id} force-deleting transaction ${id} with dependencies:`, validation.dependencies);
+            } else {
+                return res.status(400).json({
+                    error: 'Cannot delete transaction',
+                    reason: validation.reason,
+                    dependencies: validation.dependencies,
+                    hint: 'Resolve dependencies first or use force=true (admin only)'
                 });
-                revertedQueueItem = queueItem;
             }
         }
 
         await req.prisma.inventoryTransaction.delete({ where: { id } });
+
+        // Get updated balance
+        const balance = await calculateInventoryBalance(req.prisma, existing.skuId);
+
+        res.json({
+            success: true,
+            message: 'Transaction deleted',
+            deleted: {
+                id: existing.id,
+                skuCode: existing.sku?.skuCode,
+                qty: existing.qty,
+                reason: existing.reason
+            },
+            newBalance: balance.currentBalance
+        });
+    } catch (error) {
+        console.error('Delete inward error:', error);
+        res.status(500).json({ error: 'Failed to delete inward transaction' });
+    }
+});
+
+// Delete any inventory transaction (admin only)
+// Fixed: Added dependency validation with force option and audit logging
+router.delete('/transactions/:id', authenticateToken, async (req, res) => {
+    try {
+        // Check if user is admin
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can delete transactions' });
+        }
+
+        const { id } = req.params;
+        const { force = false } = req.query;
+
+        const existing = await req.prisma.inventoryTransaction.findUnique({
+            where: { id },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+            },
+        });
+
+        if (!existing) {
+            return res.status(404).json({ error: 'Transaction not found' });
+        }
+
+        // Validate deletion is safe (check for dependencies)
+        const validation = await validateTransactionDeletion(req.prisma, id);
+        if (!validation.canDelete && force !== 'true') {
+            return res.status(400).json({
+                error: 'Cannot delete transaction',
+                reason: validation.reason,
+                dependencies: validation.dependencies,
+                hint: 'Use force=true to override (admin only)'
+            });
+        }
+
+        if (!validation.canDelete && force === 'true') {
+            console.warn(`Admin ${req.user.id} (${req.user.email}) force-deleting transaction ${id} with dependencies:`, {
+                transaction: validation.transaction,
+                dependencies: validation.dependencies
+            });
+        }
+
+        let revertedQueueItem = null;
+
+        // Use transaction for atomic operation
+        await req.prisma.$transaction(async (tx) => {
+            // If this is a return_receipt transaction with a referenceId, revert the repacking queue item
+            if (existing.reason === 'return_receipt' && existing.referenceId) {
+                const queueItem = await tx.repackingQueueItem.findUnique({
+                    where: { id: existing.referenceId },
+                });
+
+                if (queueItem && queueItem.status === 'ready') {
+                    // Revert the queue item back to pending
+                    await tx.repackingQueueItem.update({
+                        where: { id: existing.referenceId },
+                        data: {
+                            status: 'pending',
+                            qcComments: null,
+                            processedAt: null,
+                            processedById: null,
+                        },
+                    });
+                    revertedQueueItem = queueItem;
+                }
+            }
+
+            await tx.inventoryTransaction.delete({ where: { id } });
+        });
+
+        // Get updated balance
+        const balance = await calculateInventoryBalance(req.prisma, existing.skuId);
 
         res.json({
             success: true,
@@ -1423,6 +1623,8 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
                 productName: existing.sku?.variation?.product?.name,
             },
             revertedToQueue: revertedQueueItem ? true : false,
+            newBalance: balance.currentBalance,
+            forcedDeletion: !validation.canDelete && force === 'true',
         });
     } catch (error) {
         console.error('Delete inventory transaction error:', error);
@@ -1430,10 +1632,16 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// Helper: Match production batch for inward
+// Helper: Match production batch for inward (outside transaction - deprecated)
 async function matchProductionBatch(prisma, skuId, quantity) {
+    return matchProductionBatchInTransaction(prisma, skuId, quantity);
+}
+
+// Helper: Match production batch for inward (transaction-safe version)
+// Uses the passed transaction client to ensure atomicity
+async function matchProductionBatchInTransaction(tx, skuId, quantity) {
     // Find oldest pending/in_progress batch for this SKU that isn't fully completed
-    const batch = await prisma.productionBatch.findFirst({
+    const batch = await tx.productionBatch.findFirst({
         where: {
             skuId,
             status: { in: ['planned', 'in_progress'] },
@@ -1445,7 +1653,7 @@ async function matchProductionBatch(prisma, skuId, quantity) {
         const newCompleted = Math.min(batch.qtyCompleted + quantity, batch.qtyPlanned);
         const isComplete = newCompleted >= batch.qtyPlanned;
 
-        const updated = await prisma.productionBatch.update({
+        const updated = await tx.productionBatch.update({
             where: { id: batch.id },
             data: {
                 qtyCompleted: newCompleted,

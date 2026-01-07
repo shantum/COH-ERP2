@@ -264,6 +264,31 @@ router.post('/process', authenticateToken, async (req, res) => {
         if (action === 'ready') {
             // Add to inventory
             await req.prisma.$transaction(async (prisma) => {
+                // CRITICAL FIX: Optimistic locking - re-check status inside transaction
+                const freshItem = await prisma.repackingQueueItem.findUnique({
+                    where: { id: itemId },
+                });
+
+                if (!freshItem) {
+                    throw new Error('CONFLICT:Item not found');
+                }
+
+                if (freshItem.status === 'ready' || freshItem.status === 'write_off') {
+                    throw new Error('CONFLICT:Item already processed by another user');
+                }
+
+                // Check if inventory transaction already exists (duplicate prevention)
+                const existingTxn = await prisma.inventoryTransaction.findFirst({
+                    where: {
+                        referenceId: item.id,
+                        reason: 'return_receipt',
+                    },
+                });
+
+                if (existingTxn) {
+                    throw new Error('CONFLICT:Inventory transaction already exists');
+                }
+
                 // Create inventory inward transaction
                 await prisma.inventoryTransaction.create({
                     data: {
@@ -303,6 +328,28 @@ router.post('/process', authenticateToken, async (req, res) => {
             }
 
             await req.prisma.$transaction(async (prisma) => {
+                // CRITICAL FIX: Optimistic locking - re-check status inside transaction
+                const freshItem = await prisma.repackingQueueItem.findUnique({
+                    where: { id: itemId },
+                });
+
+                if (!freshItem) {
+                    throw new Error('CONFLICT:Item not found');
+                }
+
+                if (freshItem.status === 'ready' || freshItem.status === 'write_off') {
+                    throw new Error('CONFLICT:Item already processed by another user');
+                }
+
+                // Check if write-off log already exists (duplicate prevention)
+                const existingWriteOff = await prisma.writeOffLog.findFirst({
+                    where: { sourceId: item.id },
+                });
+
+                if (existingWriteOff) {
+                    throw new Error('CONFLICT:Write-off already exists for this item');
+                }
+
                 // Create write-off log
                 await prisma.writeOffLog.create({
                     data: {
@@ -353,6 +400,10 @@ router.post('/process', authenticateToken, async (req, res) => {
         }
     } catch (error) {
         console.error('Process repacking item error:', error);
+        // Handle conflict errors (race conditions)
+        if (error.message && error.message.startsWith('CONFLICT:')) {
+            return res.status(409).json({ error: error.message.replace('CONFLICT:', '') });
+        }
         res.status(500).json({ error: 'Failed to process repacking item' });
     }
 });

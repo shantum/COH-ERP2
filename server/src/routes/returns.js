@@ -5,6 +5,59 @@ import { getTierThresholds, calculateTier, getCustomerStatsMap } from '../utils/
 const router = Router();
 
 // ============================================
+// STATUS TRANSITION VALIDATION (State Machine)
+// ============================================
+
+/**
+ * Valid status transitions for return requests
+ * Key = current status, Value = array of allowed next statuses
+ */
+const VALID_STATUS_TRANSITIONS = {
+    'requested': ['reverse_initiated', 'in_transit', 'cancelled'],
+    'reverse_initiated': ['in_transit', 'received', 'cancelled'],
+    'in_transit': ['received', 'cancelled'],
+    'received': ['processing', 'resolved', 'cancelled', 'reverse_initiated'], // reverse_initiated for undo
+    'processing': ['resolved', 'cancelled'],
+    'resolved': [], // Terminal state - no transitions allowed
+    'cancelled': [], // Terminal state - no transitions allowed
+    'completed': [], // Terminal state - no transitions allowed
+};
+
+/**
+ * Validates if a status transition is allowed
+ * @param {string} fromStatus - Current status
+ * @param {string} toStatus - Target status
+ * @returns {boolean} - Whether transition is valid
+ */
+function isValidStatusTransition(fromStatus, toStatus) {
+    // Allow same status (no-op)
+    if (fromStatus === toStatus) return true;
+
+    // Special case for 'new' (initial state during creation)
+    if (fromStatus === 'new') return true;
+
+    const allowedTransitions = VALID_STATUS_TRANSITIONS[fromStatus];
+    if (!allowedTransitions) return false;
+
+    return allowedTransitions.includes(toStatus);
+}
+
+/**
+ * Sanitizes search input to prevent SQL injection and special character issues
+ * @param {string} input - User input to sanitize
+ * @returns {string} - Sanitized input
+ */
+function sanitizeSearchInput(input) {
+    if (!input || typeof input !== 'string') return '';
+    // Remove SQL special characters and escape sequences
+    return input
+        .replace(/['"\\;%_]/g, '') // Remove quotes, backslash, semicolon, wildcards
+        .replace(/--/g, '') // Remove SQL comments
+        .trim()
+        .slice(0, 100); // Limit length
+}
+
+// ============================================
 // RETURN REQUESTS (TICKETS)
 // ============================================
 
@@ -103,9 +156,15 @@ router.get('/pending/by-sku', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'SKU code or barcode is required' });
         }
 
+        // HIGH PRIORITY FIX: Sanitize search input
+        const sanitizedCode = sanitizeSearchInput(code);
+        if (!sanitizedCode) {
+            return res.status(400).json({ error: 'Invalid SKU code format' });
+        }
+
         // First find the SKU (skuCode serves as barcode for scanning)
         const sku = await req.prisma.sku.findFirst({
-            where: { skuCode: code },
+            where: { skuCode: sanitizedCode },
             include: {
                 variation: { include: { product: true } },
             },
@@ -608,18 +667,35 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
         const request = await req.prisma.returnRequest.findUnique({
             where: { id: req.params.id },
-            include: { shipping: true },
+            include: {
+                shipping: true,
+                lines: true,
+            },
         });
 
         if (!request) {
             return res.status(404).json({ error: 'Return request not found' });
         }
 
+        // HIGH PRIORITY FIX: Check if any items have been received
+        const hasReceivedItems = request.lines.some((l) => l.itemCondition !== null);
+
         await req.prisma.$transaction(async (tx) => {
             // Update request details
             const updateData = {};
-            if (reasonCategory) updateData.reasonCategory = reasonCategory;
-            if (reasonDetails !== undefined) updateData.reasonDetails = reasonDetails;
+
+            // HIGH PRIORITY FIX: Lock reason after first item received
+            if (reasonCategory && reasonCategory !== request.reasonCategory) {
+                if (hasReceivedItems) {
+                    throw new Error('VALIDATION:Cannot change reason after items have been received');
+                }
+                updateData.reasonCategory = reasonCategory;
+            }
+
+            if (reasonDetails !== undefined) {
+                // Allow details update even after receiving (for additional notes)
+                updateData.reasonDetails = reasonDetails;
+            }
 
             if (Object.keys(updateData).length > 0) {
                 await tx.returnRequest.update({
@@ -686,6 +762,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
         res.json(updated);
     } catch (error) {
         console.error('Update return request error:', error);
+        // Handle validation errors
+        if (error.message && error.message.startsWith('VALIDATION:')) {
+            return res.status(400).json({ error: error.message.replace('VALIDATION:', '') });
+        }
         res.status(500).json({ error: 'Failed to update return request' });
     }
 });
@@ -721,8 +801,28 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             });
         }
 
+        // CRITICAL FIX: Check for processed repacking items that would orphan inventory
+        const processedRepackingItems = await req.prisma.repackingQueueItem.findMany({
+            where: {
+                returnRequestId: request.id,
+                status: { in: ['ready', 'write_off'] },
+            },
+        });
+
+        if (processedRepackingItems.length > 0) {
+            return res.status(400).json({
+                error: 'Cannot delete - some items have been processed in the QC queue. Cancel the request instead.',
+                processedItems: processedRepackingItems.length,
+            });
+        }
+
         // Delete in transaction (cascade delete related records)
         await req.prisma.$transaction(async (tx) => {
+            // CRITICAL FIX: Delete any repacking queue items (unprocessed ones)
+            await tx.repackingQueueItem.deleteMany({
+                where: { returnRequestId: request.id },
+            });
+
             // Delete status history
             await tx.returnStatusHistory.deleteMany({
                 where: { requestId: request.id },
@@ -730,6 +830,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
             // Delete shipping records
             await tx.returnShipping.deleteMany({
+                where: { requestId: request.id },
+            });
+
+            // Delete replacement items (for exchanges)
+            await tx.replacementItem.deleteMany({
                 where: { requestId: request.id },
             });
 
@@ -977,11 +1082,33 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
         }
 
         const result = await req.prisma.$transaction(async (tx) => {
+            // CRITICAL FIX: Use optimistic locking - verify line is still unreceived inside transaction
+            const freshLine = await tx.returnRequestLine.findUnique({
+                where: { id: lineId },
+            });
+
+            if (!freshLine) {
+                throw new Error('CONFLICT:Return line not found');
+            }
+
+            if (freshLine.itemCondition !== null) {
+                throw new Error('CONFLICT:Item already received by another user');
+            }
+
             // Update line with condition
             await tx.returnRequestLine.update({
                 where: { id: lineId },
                 data: { itemCondition: condition },
             });
+
+            // Check if repacking queue item already exists (prevent duplicate)
+            const existingRepackingItem = await tx.repackingQueueItem.findFirst({
+                where: { returnLineId: lineId },
+            });
+
+            if (existingRepackingItem) {
+                throw new Error('CONFLICT:Item already in repacking queue');
+            }
 
             // Add to repacking queue
             const repackingItem = await tx.repackingQueueItem.create({
@@ -1120,6 +1247,10 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
         });
     } catch (error) {
         console.error('Receive item error:', error);
+        // Handle conflict errors (race conditions)
+        if (error.message && error.message.startsWith('CONFLICT:')) {
+            return res.status(409).json({ error: error.message.replace('CONFLICT:', '') });
+        }
         res.status(500).json({ error: 'Failed to receive item' });
     }
 });
@@ -1162,8 +1293,23 @@ router.post('/:id/undo-receive', authenticateToken, async (req, res) => {
         }
 
         await req.prisma.$transaction(async (tx) => {
-            // Delete repacking queue item if it exists
+            // CRITICAL FIX: Delete any inventory transactions created for this repacking item
+            // This handles the case where the item was processed (added to stock) but we still need to undo
             if (repackingItem) {
+                // Delete inventory transactions that reference this repacking queue item
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: repackingItem.id,
+                        reason: 'return_receipt',
+                    },
+                });
+
+                // Also delete any write-off logs if the item was written off
+                await tx.writeOffLog.deleteMany({
+                    where: { sourceId: repackingItem.id },
+                });
+
+                // Delete the repacking queue item
                 await tx.repackingQueueItem.delete({
                     where: { id: repackingItem.id },
                 });
@@ -1316,29 +1462,98 @@ router.post('/:id/mark-received', authenticateToken, async (req, res) => {
 
 router.post('/:id/resolve', authenticateToken, async (req, res) => {
     try {
-        const { resolutionType, resolutionNotes } = req.body;
+        const { resolutionType, resolutionNotes, refundAmount } = req.body;
         const request = await req.prisma.returnRequest.findUnique({
             where: { id: req.params.id },
             include: { lines: true },
         });
 
+        if (!request) {
+            return res.status(404).json({ error: 'Return request not found' });
+        }
+
+        // CRITICAL FIX: Validate status transition
+        if (!isValidStatusTransition(request.status, 'resolved')) {
+            return res.status(400).json({
+                error: `Cannot resolve from status '${request.status}'. Must be in 'received' or 'processing' status first.`,
+            });
+        }
+
+        // CRITICAL FIX: Validate all lines are received (have itemCondition set)
+        const unreceivedLines = request.lines.filter((l) => l.itemCondition === null);
+        if (unreceivedLines.length > 0) {
+            return res.status(400).json({
+                error: `Cannot resolve - ${unreceivedLines.length} item(s) have not been received yet. All items must be received before resolving.`,
+                unreceived: unreceivedLines.length,
+            });
+        }
+
+        // CRITICAL FIX: Validate refund amount doesn't exceed original value
+        if (refundAmount !== undefined && refundAmount !== null) {
+            const maxRefundAmount = request.lines.reduce((sum, line) => {
+                const linePrice = line.unitPrice || 0;
+                return sum + (linePrice * line.qty);
+            }, 0);
+
+            if (refundAmount > maxRefundAmount) {
+                return res.status(400).json({
+                    error: `Refund amount (${refundAmount}) exceeds maximum allowed (${maxRefundAmount})`,
+                    maxAllowed: maxRefundAmount,
+                });
+            }
+        }
+
         await req.prisma.$transaction(async (tx) => {
+            const updateData = {
+                status: 'resolved',
+                resolutionType,
+                resolutionNotes,
+            };
+
+            // Set refund amount if provided
+            if (refundAmount !== undefined) {
+                updateData.refundAmount = refundAmount;
+                updateData.refundProcessedAt = new Date();
+            }
+
             await tx.returnRequest.update({
                 where: { id: req.params.id },
-                data: { status: 'resolved', resolutionType, resolutionNotes },
+                data: updateData,
             });
-            for (const line of request.lines) {
-                if (line.itemCondition !== 'damaged') {
-                    await tx.inventoryTransaction.create({
-                        data: {
-                            skuId: line.skuId,
-                            txnType: 'inward',
-                            qty: line.qty,
-                            reason: 'return_receipt',
-                            referenceId: request.id,
-                            createdById: req.user.id,
-                        },
-                    });
+
+            // Add status history
+            await tx.returnStatusHistory.create({
+                data: {
+                    requestId: req.params.id,
+                    fromStatus: request.status,
+                    toStatus: 'resolved',
+                    changedById: req.user.id,
+                    notes: resolutionNotes || `Resolved with type: ${resolutionType || 'none'}`,
+                },
+            });
+
+            // Note: Inventory transactions are now handled by the repacking queue process
+            // This legacy code is kept for backward compatibility with old tickets
+            // that may not have gone through the repacking queue
+            const processedViaRepacking = await tx.repackingQueueItem.findMany({
+                where: { returnRequestId: request.id },
+            });
+
+            // Only create inventory transactions if NOT processed via repacking queue
+            if (processedViaRepacking.length === 0) {
+                for (const line of request.lines) {
+                    if (line.itemCondition !== 'damaged') {
+                        await tx.inventoryTransaction.create({
+                            data: {
+                                skuId: line.skuId,
+                                txnType: 'inward',
+                                qty: line.qty,
+                                reason: 'return_receipt',
+                                referenceId: request.id,
+                                createdById: req.user.id,
+                            },
+                        });
+                    }
                 }
             }
         });
@@ -1952,11 +2167,27 @@ router.put('/:id/ship-replacement', authenticateToken, async (req, res) => {
 // HELPERS
 // ============================================
 
+/**
+ * Updates status with state machine validation
+ * @throws {Error} If transition is invalid
+ */
 async function updateStatus(prisma, requestId, newStatus, userId, notes = null) {
     const request = await prisma.returnRequest.findUnique({ where: { id: requestId } });
-    await prisma.returnRequest.update({ where: { id: requestId }, data: { status: newStatus } });
-    await prisma.returnStatusHistory.create({
-        data: { requestId, fromStatus: request.status, toStatus: newStatus, changedById: userId, notes },
+
+    if (!request) {
+        throw new Error('Return request not found');
+    }
+
+    // Validate status transition
+    if (!isValidStatusTransition(request.status, newStatus)) {
+        throw new Error(`Invalid status transition from '${request.status}' to '${newStatus}'`);
+    }
+
+    await prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({ where: { id: requestId }, data: { status: newStatus } });
+        await tx.returnStatusHistory.create({
+            data: { requestId, fromStatus: request.status, toStatus: newStatus, changedById: userId, notes },
+        });
     });
 }
 

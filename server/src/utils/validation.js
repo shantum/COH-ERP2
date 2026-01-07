@@ -40,16 +40,118 @@ export function validatePassword(password) {
 }
 
 // ============================================
+// AWB VALIDATION
+// ============================================
+
+/**
+ * AWB (Air Waybill) number validation patterns by courier
+ * Each courier has specific AWB formats
+ *
+ * Common formats:
+ * - iThink Logistics: 12-15 alphanumeric characters (e.g., "IT123456789012")
+ * - Delhivery: 10-15 digits or alphanumeric
+ * - BlueDart: 11-digit numeric
+ * - FedEx: 12-15 digits
+ * - DHL: 10-digit numeric
+ *
+ * Generic validation: alphanumeric, 8-20 characters
+ */
+const AWB_PATTERNS = {
+    // Generic pattern for any courier - alphanumeric, 8-20 chars
+    generic: /^[A-Za-z0-9]{8,20}$/,
+
+    // Specific courier patterns (can be extended)
+    ithink: /^[A-Za-z]{0,3}[0-9]{8,15}$/,      // Optional 1-3 letter prefix + 8-15 digits
+    delhivery: /^[0-9]{10,15}$/,               // 10-15 digits
+    bluedart: /^[0-9]{11}$/,                   // 11 digits
+    fedex: /^[0-9]{12,15}$/,                   // 12-15 digits
+    ecom_express: /^[A-Za-z]{3,5}[0-9]{9,12}$/ // 3-5 letters + 9-12 digits
+};
+
+/**
+ * Validate AWB number format
+ * @param {string} awbNumber - The AWB number to validate
+ * @param {string} courier - Optional courier name for specific validation
+ * @returns {{valid: boolean, error?: string}}
+ */
+export function validateAwbFormat(awbNumber, courier = null) {
+    if (!awbNumber || typeof awbNumber !== 'string') {
+        return { valid: false, error: 'AWB number is required' };
+    }
+
+    const cleanAwb = awbNumber.trim().toUpperCase();
+
+    // Basic length check
+    if (cleanAwb.length < 8 || cleanAwb.length > 20) {
+        return { valid: false, error: 'AWB number must be 8-20 characters' };
+    }
+
+    // Check for invalid characters (only alphanumeric allowed)
+    if (!/^[A-Za-z0-9]+$/.test(cleanAwb)) {
+        return { valid: false, error: 'AWB number can only contain letters and numbers' };
+    }
+
+    // If courier is specified, try courier-specific validation
+    if (courier) {
+        const courierLower = courier.toLowerCase();
+
+        // Try courier-specific pattern
+        if (courierLower.includes('ithink') || courierLower.includes('i-think')) {
+            if (!AWB_PATTERNS.ithink.test(cleanAwb)) {
+                // Still allow if it passes generic
+                if (!AWB_PATTERNS.generic.test(cleanAwb)) {
+                    return { valid: false, error: 'Invalid AWB format for iThink Logistics' };
+                }
+            }
+        } else if (courierLower.includes('delhivery')) {
+            if (!AWB_PATTERNS.delhivery.test(cleanAwb) && !AWB_PATTERNS.generic.test(cleanAwb)) {
+                return { valid: false, error: 'Invalid AWB format for Delhivery' };
+            }
+        } else if (courierLower.includes('bluedart') || courierLower.includes('blue dart')) {
+            if (!AWB_PATTERNS.bluedart.test(cleanAwb) && !AWB_PATTERNS.generic.test(cleanAwb)) {
+                return { valid: false, error: 'Invalid AWB format for BlueDart' };
+            }
+        }
+        // Add more courier-specific validations as needed
+    }
+
+    // Generic validation passed
+    return { valid: true };
+}
+
+/**
+ * Custom Zod refinement for AWB validation
+ */
+const awbSchema = z.string()
+    .min(1, 'AWB number is required')
+    .trim()
+    .transform(val => val.toUpperCase())
+    .refine(
+        (val) => /^[A-Za-z0-9]{8,20}$/.test(val),
+        { message: 'AWB number must be 8-20 alphanumeric characters' }
+    );
+
+// ============================================
 // ORDER SCHEMAS
 // ============================================
 
 /**
  * Ship order validation schema
+ * Validates AWB format and courier name
  */
 export const ShipOrderSchema = z.object({
-    awbNumber: z.string().min(1, 'AWB number is required').trim(),
+    awbNumber: awbSchema,
     courier: z.string().min(1, 'Courier is required').trim(),
-});
+}).refine(
+    (data) => {
+        const result = validateAwbFormat(data.awbNumber, data.courier);
+        return result.valid;
+    },
+    {
+        message: 'Invalid AWB number format for the specified courier',
+        path: ['awbNumber'],
+    }
+);
 
 /**
  * Create order validation schema
