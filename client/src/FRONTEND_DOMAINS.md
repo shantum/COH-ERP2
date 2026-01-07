@@ -6,7 +6,7 @@ Overview of frontend page organization and component structure.
 
 | Page | Size | Backend Domain | Purpose |
 |------|------|----------------|---------|
-| `Orders.tsx` | 38KB | Orders | Order management tabs (open/shipped/archived) |
+| `Orders.tsx` | 40KB | Orders | Order management tabs (5 tabs) |
 | `Returns.tsx` | 114KB | Returns | Full return workflow |
 | `ReturnInward.tsx` | 74KB | Returns | Receiving and QC |
 | `Inventory.tsx` | 42KB | Inventory | Stock levels |
@@ -21,6 +21,18 @@ Overview of frontend page organization and component structure.
 | `Picklist.tsx` | 7KB | Orders | Pick list generation |
 | `Settings.tsx` | 4KB | Admin | Settings tabs container |
 | `Login.tsx` | 3KB | Auth | Authentication |
+
+## Orders Page Tabs
+
+The Orders page has 5 tabs with dedicated grids:
+
+| Tab | Component | Endpoint | Purpose |
+|-----|-----------|----------|---------|
+| Open | `OrdersGrid.tsx` | `/orders/open` | Orders being fulfilled |
+| Shipped | `ShippedOrdersGrid.tsx` | `/orders/shipped` | Successfully shipped (excludes RTO/COD pending) |
+| RTO | `RtoOrdersGrid.tsx` | `/orders/rto` | Return to Origin orders |
+| COD Pending | `CodPendingGrid.tsx` | `/orders/cod-pending` | Delivered COD awaiting payment |
+| Archived | `ArchivedOrdersGrid.tsx` | `/orders/archived` | Historical orders |
 
 ## Large Files Warning
 
@@ -39,15 +51,17 @@ Files over 50KB are harder to fit in Claude's context:
 ```
 client/src/
 ├── components/
-│   ├── orders/          # Order-specific components (13 files)
+│   ├── orders/          # Order-specific components (15 files)
 │   │   ├── OrdersGrid.tsx        (56KB) — Main open orders grid
-│   │   ├── ShippedOrdersGrid.tsx (38KB) — Shipped orders with payment grouping
+│   │   ├── ShippedOrdersGrid.tsx (38KB) — Shipped orders grid
 │   │   ├── ArchivedOrdersGrid.tsx(26KB) — Archived orders with analytics
 │   │   ├── TrackingModal.tsx     (23KB) — iThink tracking with scan history
 │   │   ├── OrderViewModal.tsx    (21KB) — Order details
 │   │   ├── CreateOrderModal.tsx  (18KB) — Manual order creation
 │   │   ├── CustomerDetailModal.tsx(16KB)— Customer popup
+│   │   ├── RtoOrdersGrid.tsx     (15KB) — RTO orders grid [NEW]
 │   │   ├── EditOrderModal.tsx    (13KB) — Edit order
+│   │   ├── CodPendingGrid.tsx    (12KB) — COD pending grid [NEW]
 │   │   ├── OrderDetailModal.tsx  (8KB)  — Simple detail view
 │   │   ├── SummaryPanel.tsx      (6KB)  — Stats panel
 │   │   ├── ShipOrderModal.tsx    (4KB)  — Ship order form
@@ -58,7 +72,7 @@ client/src/
 │   │   └── tabs/        # 6 tab components
 │   │       ├── ShopifyTab.tsx     (80KB) — Shopify sync controls
 │   │       ├── GeneralTab.tsx     (35KB) — Users, tiers, tracking config
-│   │       ├── RemittanceTab.tsx  (28KB) — COD payment tracking [NEW]
+│   │       ├── RemittanceTab.tsx  (28KB) — COD payment tracking
 │   │       ├── InspectorTab.tsx   (11KB) — Database viewer
 │   │       ├── DatabaseTab.tsx    (10KB) — DB management
 │   │       ├── ImportExportTab.tsx(8KB)  — CSV import/export
@@ -74,10 +88,10 @@ client/src/
 ├── hooks/              # Custom hooks (3 files)
 │   ├── useAuth.tsx          (2KB)  — Auth context and hooks
 │   ├── useOrdersMutations.ts(9KB)  — Order action mutations
-│   └── useOrdersData.ts     (5KB)  — Order data fetching
+│   └── useOrdersData.ts     (6KB)  — Order data fetching (5 tabs)
 │
 ├── services/
-│   └── api.ts          (477 lines) — Axios client with all API functions
+│   └── api.ts          (480+ lines) — Axios client with all API functions
 │
 └── types/
     └── index.ts        (642 lines) — All TypeScript types
@@ -100,7 +114,6 @@ Order grids use AG-Grid with:
 - Row selection for bulk actions
 - Conditional row styling (colors by status)
 - Server-side pagination (archived only)
-- Row grouping (shipped orders by payment method)
 
 ### Modals
 Pattern for modals:
@@ -117,10 +130,11 @@ const [selected, setSelected] = useState(null)
 ```
 
 ### Custom Hooks
-**useOrdersData** - Centralized data fetching:
+**useOrdersData** - Centralized data fetching for all 5 tabs:
 ```typescript
 const {
-    openOrders, shippedOrders, archivedOrders,
+    openOrders, shippedOrders, rtoOrders, codPendingOrders, archivedOrders,
+    rtoTotalCount, codPendingTotalCount, codPendingTotalAmount,
     shippedSummary, isLoading
 } = useOrdersData({ activeTab, shippedDays, archivedDays, archivedSortBy })
 ```
@@ -144,13 +158,16 @@ Centralized axios instance with:
 Key exports:
 ```typescript
 ordersApi.getOpen()
+ordersApi.getShipped()
+ordersApi.getRto()                // NEW
+ordersApi.getCodPending()         // NEW
 ordersApi.allocateLine(lineId)
 ordersApi.ship(orderId, data)
-ordersApi.getArchivedAnalytics()  // NEW
+ordersApi.getArchivedAnalytics()
 inventoryApi.getBalance()
 shopifyApi.sync(type)
 trackingApi.getAwbTracking(awb)
-remittanceApi.upload(file)        // NEW
+remittanceApi.upload(file)
 // ... 100+ functions
 ```
 
@@ -180,9 +197,8 @@ interface InventoryTransaction { ... }
   - Green: Packed/allocated
   - Emerald: Picked
   - Blue: Ready to pack
-  - Amber: Production queued
-  - Purple: COD payment grouping
-  - Red: Errors/alerts/RTO
+  - Amber: Production queued / COD pending / RTO
+  - Red: Errors/alerts
 
 ## Settings Page Tabs
 
@@ -197,19 +213,22 @@ interface InventoryTransaction { ... }
 
 ## Recent Changes (January 7, 2026)
 
-- **RemittanceTab** added for COD payment tracking
-- **ShippedOrdersGrid** now groups by payment method (COD/Prepaid)
+- **RtoOrdersGrid** added for dedicated RTO order management
+- **CodPendingGrid** added for COD orders awaiting payment
+- **Orders page now has 5 tabs**: Open, Shipped, RTO, COD Pending, Archived
+- **useOrdersData** updated to fetch RTO and COD pending data
+- **Shipped orders** now exclude RTO and unpaid COD (they have dedicated tabs)
+- **RemittanceTab** for COD payment tracking
 - **ArchivedOrdersGrid** has analytics endpoint with revenue stats
-- **Manual archive** option added to shipped orders
-- **RTO tracking** improvements in order grids
 
 ## Common Gotchas
 
 1. **Large file sizes**: Some pages need refactoring
-2. **AG-Grid license**: Using community edition
+2. **AG-Grid license**: Using community edition (no row grouping)
 3. **Types in sync**: Update `types/index.ts` when backend changes
-4. **API client is large**: 477 lines, search for specific function
+4. **API client is large**: 480+ lines, search for specific function
 5. **useQuery keys**: Follow pattern `[entity, filter]`
 6. **Modal state in parent**: Modals don't manage their own visibility
 7. **Settings is tabbed**: Main page is just container, logic in tab components
 8. **Order hooks**: Use `useOrdersData` and `useOrdersMutations` for orders page
+9. **5 order tabs**: Each tab has dedicated grid and endpoint

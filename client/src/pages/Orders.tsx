@@ -26,6 +26,8 @@ import {
     OrdersGrid,
     ShippedOrdersGrid,
     ArchivedOrdersGrid,
+    RtoOrdersGrid,
+    CodPendingGrid,
     OrderDetailModal,
     OrderViewModal,
     CreateOrderModal,
@@ -79,6 +81,11 @@ export default function Orders() {
         openOrders,
         shippedOrders,
         shippedPagination,
+        rtoOrders,
+        rtoTotalCount,
+        codPendingOrders,
+        codPendingTotalCount,
+        codPendingTotalAmount,
         cancelledOrders,
         archivedOrders,
         archivedTotalCount,
@@ -94,11 +101,11 @@ export default function Orders() {
         isLoading,
     } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedSortBy });
 
-    // Shopify config for external links (needed for shipped and archived tabs)
+    // Shopify config for external links (needed for shipped, rto, cod-pending, and archived tabs)
     const { data: shopifyConfig } = useQuery({
         queryKey: ['shopifyConfig'],
         queryFn: () => shopifyApi.getConfig().then(r => r.data),
-        enabled: tab === 'shipped' || tab === 'archived',
+        enabled: tab === 'shipped' || tab === 'rto' || tab === 'cod-pending' || tab === 'archived',
         staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     });
 
@@ -149,6 +156,8 @@ export default function Orders() {
             queryClient.invalidateQueries({ queryKey: ['openOrders'] });
             queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
             queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
+            queryClient.invalidateQueries({ queryKey: ['rtoOrders'] });
+            queryClient.invalidateQueries({ queryKey: ['codPendingOrders'] });
             // Clear result after 5 seconds
             setTimeout(() => setSyncResult(null), 5000);
         },
@@ -376,6 +385,26 @@ export default function Orders() {
                         </span>
                     </button>
                     <button
+                        className={`pb-2 font-medium ${tab === 'rto' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
+                        onClick={() => setTab('rto')}
+                    >
+                        RTO{' '}
+                        {rtoTotalCount > 0 && (
+                            <span className="text-amber-600 ml-1">({rtoTotalCount})</span>
+                        )}
+                    </button>
+                    <button
+                        className={`pb-2 font-medium ${tab === 'cod-pending' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
+                        onClick={() => setTab('cod-pending')}
+                    >
+                        COD Pending{' '}
+                        {codPendingTotalCount > 0 && (
+                            <span className="text-amber-600 ml-1">
+                                ({codPendingTotalCount})
+                            </span>
+                        )}
+                    </button>
+                    <button
                         className={`pb-2 font-medium ${tab === 'cancelled' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
                         onClick={() => setTab('cancelled')}
                     >
@@ -579,6 +608,43 @@ export default function Orders() {
                         </div>
                     )}
                 </>
+            )}
+
+            {/* RTO Orders */}
+            {!isLoading && tab === 'rto' && (
+                <RtoOrdersGrid
+                    orders={rtoOrders}
+                    onViewOrder={(order) => setViewingOrderId(order.id)}
+                    onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                    onTrack={(awb, orderNumber) => {
+                        setTrackingAwb(awb);
+                        setTrackingOrderNumber(orderNumber);
+                    }}
+                    shopDomain={shopifyConfig?.shopDomain}
+                />
+            )}
+
+            {/* COD Pending Orders */}
+            {!isLoading && tab === 'cod-pending' && (
+                <div className="space-y-4">
+                    {codPendingTotalAmount > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <span className="text-sm text-amber-800">
+                                Total pending COD: <strong>₹{codPendingTotalAmount.toLocaleString()}</strong> from {codPendingTotalCount} orders
+                            </span>
+                        </div>
+                    )}
+                    <CodPendingGrid
+                        orders={codPendingOrders}
+                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                        onTrack={(awb, orderNumber) => {
+                            setTrackingAwb(awb);
+                            setTrackingOrderNumber(orderNumber);
+                        }}
+                        shopDomain={shopifyConfig?.shopDomain}
+                    />
+                </div>
             )}
 
             {/* Cancelled Orders */}

@@ -136,6 +136,8 @@ export const ordersApi = {
     },
     getCancelled: () => api.get('/orders/status/cancelled'),
     getArchived: (params?: { days?: number; sortBy?: 'orderDate' | 'archivedAt' }) => api.get('/orders/status/archived', { params }),
+    getRto: (params?: { limit?: number; offset?: number }) => api.get('/orders/rto', { params }),
+    getCodPending: (params?: { limit?: number; offset?: number }) => api.get('/orders/cod-pending', { params }),
     archive: (id: string) => api.post(`/orders/${id}/archive`),
     unarchive: (id: string) => api.post(`/orders/${id}/unarchive`),
     getById: (id: string) => api.get(`/orders/${id}`),

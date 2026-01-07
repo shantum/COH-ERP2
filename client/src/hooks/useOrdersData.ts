@@ -9,7 +9,7 @@ import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi, adminA
 // Poll interval for data refresh (30 seconds)
 const POLL_INTERVAL = 30000;
 
-export type OrderTab = 'open' | 'shipped' | 'cancelled' | 'archived';
+export type OrderTab = 'open' | 'shipped' | 'rto' | 'cod-pending' | 'cancelled' | 'archived';
 
 interface UseOrdersDataOptions {
     activeTab: OrderTab;
@@ -47,6 +47,18 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
             sortBy: archivedSortBy
         }).then(r => r.data),
         refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false
+    });
+
+    const rtoOrdersQuery = useQuery({
+        queryKey: ['rtoOrders'],
+        queryFn: () => ordersApi.getRto().then(r => r.data),
+        refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false
+    });
+
+    const codPendingOrdersQuery = useQuery({
+        queryKey: ['codPendingOrders'],
+        queryFn: () => ordersApi.getCodPending().then(r => r.data),
+        refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false
     });
 
     // Summary queries
@@ -93,6 +105,8 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     const isLoading =
         activeTab === 'open' ? openOrdersQuery.isLoading :
         activeTab === 'shipped' ? shippedOrdersQuery.isLoading :
+        activeTab === 'rto' ? rtoOrdersQuery.isLoading :
+        activeTab === 'cod-pending' ? codPendingOrdersQuery.isLoading :
         activeTab === 'cancelled' ? cancelledOrdersQuery.isLoading :
         archivedOrdersQuery.isLoading;
 
@@ -106,11 +120,27 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     const archivedOrders = archivedData?.orders || [];
     const archivedTotalCount = archivedData?.totalCount || 0;
 
+    // Extract RTO orders from response
+    const rtoData = rtoOrdersQuery.data;
+    const rtoOrders = rtoData?.orders || [];
+    const rtoTotalCount = rtoData?.total || 0;
+
+    // Extract COD pending orders from response
+    const codPendingData = codPendingOrdersQuery.data;
+    const codPendingOrders = codPendingData?.orders || [];
+    const codPendingTotalCount = codPendingData?.total || 0;
+    const codPendingTotalAmount = codPendingData?.totalPendingAmount || 0;
+
     return {
         // Order data
         openOrders: openOrdersQuery.data,
         shippedOrders,
         shippedPagination,
+        rtoOrders,
+        rtoTotalCount,
+        codPendingOrders,
+        codPendingTotalCount,
+        codPendingTotalAmount,
         cancelledOrders: cancelledOrdersQuery.data,
         archivedOrders,
         archivedTotalCount,
@@ -136,6 +166,8 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         // Individual loading states if needed
         loadingOpen: openOrdersQuery.isLoading,
         loadingShipped: shippedOrdersQuery.isLoading,
+        loadingRto: rtoOrdersQuery.isLoading,
+        loadingCodPending: codPendingOrdersQuery.isLoading,
         loadingCancelled: cancelledOrdersQuery.isLoading,
         loadingArchived: archivedOrdersQuery.isLoading,
     };
