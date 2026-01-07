@@ -33,10 +33,10 @@ COH-ERP2/
 │   └── types/index.ts     # TypeScript interfaces (642 lines)
 │
 ├── server/src/
-│   ├── routes/            # 17 route files (largest: returns.js 73KB, orders.js 71KB)
+│   ├── routes/            # 17 route files (largest: returns.js 73KB, orders/ modular 78KB)
 │   ├── services/          # 8 services (shopify sync, tracking, background jobs)
 │   ├── middleware/        # Auth middleware
-│   └── utils/             # queryPatterns.js, tierUtils.js, encryption.js
+│   └── utils/             # queryPatterns.js, tierUtils.js, validation.js, encryption.js
 │
 └── server/prisma/
     └── schema.prisma      # 920+ lines, 35+ models
@@ -122,7 +122,7 @@ Upload CSV → Match order → Update payment fields → Sync to Shopify
 
 | Route | File Size | Key Endpoints |
 |-------|-----------|---------------|
-| `/api/orders` | 71KB | `/open`, `/shipped`, `/archived`, `/lines/:id/allocate|pick|pack`, `/:id/ship`, `/archive-by-date` |
+| `/api/orders` | 78KB | `/open`, `/shipped`, `/rto`, `/cod-pending`, `/archived`, `/lines/:id/allocate|pick|pack`, `/:id/ship` |
 | `/api/remittance` | 33KB | `/upload`, `/pending`, `/summary`, `/failed`, `/retry-sync`, `/approve-manual` |
 | `/api/returns` | 73KB | `/pending`, `/action-queue`, `/:id/receive-item`, `/:id/ship-replacement` |
 | `/api/fabrics` | 27KB | `/reconciliation/*`, `/:id/transactions` |
@@ -147,13 +147,13 @@ Upload CSV → Match order → Update payment fields → Sync to Shopify
 | `Products.tsx` | 49KB | Product/Variation/SKU management |
 | `Inventory.tsx` | 42KB | Stock levels and transactions |
 | `Fabrics.tsx` | 37KB | Fabric management |
-| `Orders.tsx` | 38KB | Order fulfillment workflow |
+| `Orders.tsx` | 40KB | Order fulfillment workflow (5 tabs) |
 | `FabricReconciliation.tsx` | 24KB | Physical stock count |
 | `Ledgers.tsx` | 23KB | Transaction history |
 | `Customers.tsx` | 18KB | Customer database |
-| `Settings.tsx` | 14KB | System settings with tabs |
+| `Settings.tsx` | 4KB | System settings tabs container |
 
-### Order Components (13 components in `components/orders/`)
+### Order Components (15 components in `components/orders/`)
 
 | Component | Purpose |
 |-----------|---------|
@@ -162,6 +162,8 @@ Upload CSV → Match order → Update payment fields → Sync to Shopify
 | `ArchivedOrdersGrid.tsx` (26KB) | Paginated grid for archived orders |
 | `TrackingModal.tsx` (23KB) | Real-time shipment tracking (iThink Logistics) |
 | `OrderViewModal.tsx` (21KB) | Full order details modal |
+| `RtoOrdersGrid.tsx` (15KB) | RTO orders grid [NEW] |
+| `CodPendingGrid.tsx` (12KB) | COD pending orders grid [NEW] |
 | `SummaryPanel.tsx` (6KB) | Dashboard stats panel |
 
 ### Settings Tabs (in `components/settings/tabs/`)
@@ -237,7 +239,9 @@ Handles COD payment tracking and Shopify sync.
 
 | File | Why It Matters |
 |------|----------------|
-| `server/src/utils/queryPatterns.js` | Transaction constants, balance calculations, inventory helpers |
+| `server/src/routes/orders/` | Modular order routes: `index.js` (router), `listOrders.js` (GET endpoints), `fulfillment.js` (ship/allocate), `mutations.js` (CRUD/archive) |
+| `server/src/utils/queryPatterns.js` | ORDER_LIST_SELECT constants, enrichOrdersWithCustomerStats(), inventory helpers |
+| `server/src/utils/validation.js` | Zod schemas (ShipOrderSchema, CreateOrderSchema, etc.) with validate() middleware factory |
 | `server/src/services/shopifyOrderProcessor.js` | Cache-first order processing |
 | `server/src/services/ithinkLogistics.js` | Shipment tracking API client |
 | `server/src/services/trackingSync.js` | Background tracking sync with RTO detection |
@@ -260,6 +264,8 @@ Handles COD payment tracking and Shopify sync.
 8. **Scheduled sync**: Hourly Shopify sync via `scheduledSync.js`
 9. **COD payment sync**: Uses Shopify Transaction API, not Order update
 10. **RTO detection**: Tracking sync re-evaluates delivered orders for RTO status
+11. **Zod validation**: Order endpoints use `validate()` middleware with schemas from validation.js
+12. **Orders route modular**: Split into 3 sub-routers (listOrders.js, fulfillment.js, mutations.js)
 
 ---
 
@@ -285,7 +291,25 @@ npm test               # Jest tests
 
 ## Changelog
 
-### January 7, 2026
+### January 7, 2026 (Evening)
+- **Orders routes refactored into modular structure**: Split 2000-line `orders.js` into 4 files:
+  - `orders/index.js` - Router orchestration
+  - `orders/listOrders.js` - GET endpoints (open, shipped, RTO, COD pending, archived)
+  - `orders/fulfillment.js` - Line status updates, ship/unship, RTO actions
+  - `orders/mutations.js` - CRUD, cancel, archive operations
+- **Validation centralized**: Added Zod schemas to `utils/validation.js` (ShipOrderSchema, CreateOrderSchema, etc.)
+- **Query patterns enhanced**: Added ORDER_LIST_SELECT constants and helper functions to `utils/queryPatterns.js`
+- `autoArchiveOldOrders` now exported from `mutations.js` instead of main orders route
+
+### January 7, 2026 (Afternoon)
+- New **RTO tab** with dedicated endpoint `/orders/rto` and `RtoOrdersGrid.tsx`
+- New **COD Pending tab** with endpoint `/orders/cod-pending` and `CodPendingGrid.tsx`
+- Orders page now has **5 tabs**: Open, Shipped, RTO, COD Pending, Archived
+- Shipped orders now **exclude RTO and unpaid COD** (they have dedicated tabs)
+- `useOrdersData` hook updated to fetch RTO and COD pending data
+- Removed non-functional row grouping from ShippedOrdersGrid (needs AG-Grid Enterprise)
+
+### January 7, 2026 (Morning)
 - Added COD Remittance system (`/api/remittance/*`)
 - New `remittance.js` route for CSV upload and payment tracking
 - Shopify `markOrderAsPaid()` method for COD payment sync
@@ -295,8 +319,6 @@ npm test               # Jest tests
 - Enhanced RTO status detection using last scan status
 - Fixed RTO status mapping: properly distinguish `rto_in_transit` vs `rto_delivered`
 - Consolidated `rto_initiated` into `rto_in_transit` for simpler status display
-- Shipped orders grid now groups by payment method (COD/Prepaid)
-- Manual archive option added to shipped orders
 - Archived orders analytics endpoint (`/orders/archived/analytics`) with revenue/order stats
 - Archived orders now support sort by `orderDate` or `archivedAt`
 - Archive Delivered button now handles both prepaid and paid COD orders

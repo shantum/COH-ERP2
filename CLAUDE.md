@@ -72,7 +72,13 @@ Located at `server/prisma/schema.prisma`. Key models:
 
 ### Key Business Logic Files
 Critical files to understand before making changes:
-- `server/src/utils/queryPatterns.js` - Shared Prisma patterns, inventory calculations
+- `server/src/routes/orders/` - Modular order routes split into:
+  - `index.js` - Router orchestration (mounts sub-routers)
+  - `listOrders.js` - GET endpoints (open, shipped, RTO, COD pending, archived)
+  - `fulfillment.js` - Line status updates, ship/unship, RTO actions
+  - `mutations.js` - CRUD, cancel, archive operations
+- `server/src/utils/queryPatterns.js` - Shared Prisma patterns, ORDER_LIST_SELECT constants, enrichOrdersWithCustomerStats()
+- `server/src/utils/validation.js` - Zod schemas for order validation (ShipOrderSchema, CreateOrderSchema, etc.)
 - `server/src/services/shopifyOrderProcessor.js` - Order sync logic (cache-first pattern)
 - `server/src/services/trackingSync.js` - Background tracking sync with RTO detection
 - `server/src/routes/remittance.js` - COD payment processing and Shopify sync
@@ -94,7 +100,7 @@ All routes in `server/src/routes/`. Base URL: `/api`
 - **Products**: `/api/products` - Product/Variation/SKU CRUD
 - **Fabrics**: `/api/fabrics` - Fabric types and inventory
 - **Inventory**: `/api/inventory` - Stock balance, transactions, alerts
-- **Orders**: `/api/orders` - Order management, fulfillment workflow, archive management
+- **Orders**: `/api/orders` - Order management, fulfillment, RTO (`/rto`), COD pending (`/cod-pending`)
 - **Remittance**: `/api/remittance` - COD payment tracking and Shopify sync
 - **Customers**: `/api/customers` - Customer records
 - **Returns**: `/api/returns` - Return request workflow
@@ -168,19 +174,19 @@ Amount mismatches >5% are flagged for `manual_review`.
 - `POST /api/import/fabrics` - Import fabrics from CSV
 
 ## Orders UI Features
-- **Tabs**: Open Orders, Shipped Orders, Archived Orders (with separate grids)
-- **AG-Grid**: Full-featured grid with column filters, sorting, and grouping
+- **5 Tabs**: Open, Shipped, RTO, COD Pending, Archived (each with dedicated grid)
+- **AG-Grid**: Full-featured grid with column filters, sorting
 - **Summary Panels**: Dashboard stats for order counts and fulfillment progress
 - **Pagination**: 25 items per page (archived orders use server-side pagination)
+- **RTO Tab**: Return to Origin orders with `daysInRto` calculation
+- **COD Pending Tab**: Delivered COD orders awaiting payment with total pending amount
 - **Archived Sort**: Sort by `orderDate` or `archivedAt`
-- **Payment Grouping**: Shipped orders grouped by payment method (COD/Prepaid)
-- **Manual Archive**: Archive individual shipped orders
 - **Archived Analytics**: Revenue and order stats via `/orders/archived/analytics`
 - **Conditional Formatting**: Row colors indicate status:
   - Green: Packed/allocated items
   - Emerald: Picked items
   - Blue: Ready to pack (fully allocated)
-  - Amber: Production queued
+  - Amber: Production queued / COD pending / RTO
 - **Tracking Modal**: Real-time shipment tracking via iThink Logistics API
 - **Production Scheduling**: Date picker for out-of-stock items links to production batches
 - **Archive by Date**: Bulk archive orders older than specified date
@@ -237,6 +243,8 @@ Background sync runs every 4 hours:
 - Hourly Shopify sync via `scheduledSync.js`
 - COD payment sync uses Shopify Transaction API (`capture` transaction)
 - Amount mismatch >5% flags COD orders for manual review
+- **5 order tabs**: Shipped tab excludes RTO and unpaid COD (they have dedicated tabs)
+- AG-Grid row grouping requires Enterprise license (not used)
 
 ## Safe Commands
 The following commands are safe to auto-run without user approval:

@@ -334,7 +334,7 @@ if (orderLine.isNonReturnable) {
 | File | Action | Changes |
 |------|--------|---------|
 | `schema.prisma` | MODIFY | Add fields to OrderLine, Sku, InventoryTransaction |
-| `orders.js` | MODIFY | Add customize/uncustomize endpoints |
+| `routes/orders/mutations.js` | MODIFY | Add customize/uncustomize endpoints |
 | `production.js` | MODIFY | Update completeBatch for custom items |
 | `returns.js` | MODIFY | Block non-returnable items |
 | `orderHelpers.ts` | MODIFY | Add customization fields to FlattenedOrderRow |

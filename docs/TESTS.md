@@ -468,7 +468,7 @@ describe('Category Name', () => {
 
 ### 29. Orders Display Logic (9 tests)
 
-**Logic tested:** Order listing and display from `orders.js`
+**Logic tested:** Order listing and display from `orders/listOrders.js`
 
 | Test Category | Tests | Description |
 |---------------|-------|-------------|
@@ -669,7 +669,7 @@ describe('Category Name', () => {
 
 | Route | Size | Key Endpoints | Priority |
 |-------|------|---------------|----------|
-| `orders.js` | 43KB | Order CRUD, fulfillment, allocation, shipping | **High** |
+| `orders/` (modular) | 78KB | Order CRUD, fulfillment, allocation, shipping | **High** |
 | `returns.js` | 38KB | Return requests, return inward, QC processing | **High** |
 | `shopify.js` | 32KB | Sync triggers, order import, inventory push | Medium |
 | `fabrics.js` | 27KB | Fabric CRUD, ledger, reconciliation | Medium |
