@@ -280,19 +280,30 @@ router.get('/shipped/summary', async (req, res) => {
         const sinceDate = new Date();
         sinceDate.setDate(sinceDate.getDate() - Number(days));
 
+        // Use same filter as /shipped endpoint to match displayed orders
+        const whereClause = {
+            status: { in: ['shipped', 'delivered'] },
+            shippedAt: { gte: sinceDate },
+            isArchived: false,
+            NOT: [
+                { trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] } },
+                { AND: [
+                    { paymentMethod: 'COD' },
+                    { trackingStatus: 'delivered' },
+                    { codRemittedAt: null }
+                ]}
+            ]
+        };
+
         const orders = await req.prisma.order.findMany({
-            where: {
-                status: { in: ['shipped', 'delivered'] },
-                shippedAt: { gte: sinceDate },
-                isArchived: false,
-            },
+            where: whereClause,
             select: {
                 id: true,
                 status: true,
+                trackingStatus: true,
                 shippedAt: true,
                 deliveredAt: true,
-                rtoInitiatedAt: true,
-                rtoReceivedAt: true,
+                paymentMethod: true,
             },
         });
 
@@ -303,11 +314,17 @@ router.get('/shipped/summary', async (req, res) => {
         let rto = 0;
 
         for (const order of orders) {
-            if (order.rtoInitiatedAt) {
-                rto++;
-            } else if (order.status === 'delivered' || order.deliveredAt) {
+            // Check trackingStatus first (most reliable)
+            if (order.trackingStatus === 'delivered' || order.deliveredAt) {
                 delivered++;
+            } else if (order.trackingStatus && (
+                order.trackingStatus.includes('rto') ||
+                order.trackingStatus === 'cancelled'
+            )) {
+                // RTO orders are already filtered out by whereClause, but keep this for safety
+                rto++;
             } else {
+                // Order is in transit
                 const daysInTransit = order.shippedAt
                     ? Math.floor((now - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
                     : 0;
