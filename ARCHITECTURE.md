@@ -1,6 +1,6 @@
 # COH-ERP Architecture
 
-> **Living Reference** — Last updated: January 6, 2026
+> **Living Reference** — Last updated: January 7, 2026
 
 A lightweight ERP for Creatures of Habit's manufacturing operations, inventory, orders, and Shopify integration.
 
@@ -15,7 +15,7 @@ This file is an up to date project summary containing the most important details
 | Backend | Express.js, Prisma ORM, PostgreSQL |
 | Frontend | React 19, TypeScript, TanStack Query, Tailwind CSS |
 | Auth | JWT (7-day expiry), bcryptjs |
-| Integration | Shopify (webhooks + bulk sync) |
+| Integration | Shopify (webhooks + bulk sync), iThink Logistics (tracking) |
 
 **Default credentials:** `admin@coh.com` / `XOFiya@34`
 
@@ -29,17 +29,17 @@ COH-ERP2/
 │   ├── pages/             # 15 pages (largest: Returns.tsx 113KB, Products.tsx 49KB)
 │   ├── components/        # Layout, Modal, ErrorBoundary + orders/, settings/ subdirs
 │   ├── hooks/             # useAuth + custom hooks
-│   ├── services/api.ts    # Centralized API client (428 lines)
+│   ├── services/api.ts    # Centralized API client (470+ lines)
 │   └── types/index.ts     # TypeScript interfaces (642 lines)
 │
 ├── server/src/
-│   ├── routes/            # 16 route files (largest: returns.js 73KB, orders.js 60KB)
+│   ├── routes/            # 17 route files (largest: returns.js 73KB, orders.js 71KB)
 │   ├── services/          # 8 services (shopify sync, tracking, background jobs)
 │   ├── middleware/        # Auth middleware
 │   └── utils/             # queryPatterns.js, tierUtils.js, encryption.js
 │
 └── server/prisma/
-    └── schema.prisma      # 895 lines, 35+ models
+    └── schema.prisma      # 920+ lines, 35+ models
 ```
 
 ---
@@ -68,7 +68,7 @@ RepackingQueueItem → WriteOffLog
 | `Product` | name, styleCode, category, shopifyProductId |
 | `Variation` | productId, colorName, fabricId, imageUrl |
 | `Sku` | skuCode (also barcode), size, mrp, shopifyVariantId |
-| `Order` | orderNumber, shopifyOrderId, status, isArchived |
+| `Order` | orderNumber, shopifyOrderId, status, isArchived, COD remittance fields |
 | `OrderLine` | skuId, qty, lineStatus, productionBatchId |
 | `InventoryTransaction` | txnType (inward/outward), qty, reason |
 | `ReturnRequest` | requestNumber, status, resolution, valueDifference |
@@ -109,13 +109,21 @@ pending_pickup → in_transit → received → processing → completed
 
 When item received → goes to `RepackingQueueItem` → either restocked or `WriteOffLog`
 
+### COD Remittance Flow (New)
+```
+Upload CSV → Match order → Update payment fields → Sync to Shopify
+                                                      ↓
+                                  synced | failed | manual_review
+```
+
 ---
 
-## API Routes (16 files)
+## API Routes (17 files)
 
 | Route | File Size | Key Endpoints |
 |-------|-----------|---------------|
-| `/api/orders` | 62KB | `/open`, `/shipped`, `/archived`, `/lines/:id/allocate|pick|pack`, `/:id/ship`, `/archive-by-date` |
+| `/api/orders` | 71KB | `/open`, `/shipped`, `/archived`, `/lines/:id/allocate|pick|pack`, `/:id/ship`, `/archive-by-date` |
+| `/api/remittance` | 33KB | `/upload`, `/pending`, `/summary`, `/failed`, `/retry-sync`, `/approve-manual` |
 | `/api/returns` | 73KB | `/pending`, `/action-queue`, `/:id/receive-item`, `/:id/ship-replacement` |
 | `/api/fabrics` | 27KB | `/reconciliation/*`, `/:id/transactions` |
 | `/api/shopify` | 44KB | `/sync/full-dump`, `/sync/jobs/*`, `/config` |
@@ -139,21 +147,28 @@ When item received → goes to `RepackingQueueItem` → either restocked or `Wri
 | `Products.tsx` | 49KB | Product/Variation/SKU management |
 | `Inventory.tsx` | 42KB | Stock levels and transactions |
 | `Fabrics.tsx` | 37KB | Fabric management |
-| `Orders.tsx` | 30KB | Order fulfillment workflow |
+| `Orders.tsx` | 38KB | Order fulfillment workflow |
 | `FabricReconciliation.tsx` | 24KB | Physical stock count |
 | `Ledgers.tsx` | 23KB | Transaction history |
 | `Customers.tsx` | 18KB | Customer database |
+| `Settings.tsx` | 14KB | System settings with tabs |
 
 ### Order Components (13 components in `components/orders/`)
 
 | Component | Purpose |
-|-----------|--------|
-| `OrdersGrid.tsx` (53KB) | Main AG-Grid for open orders with fulfillment actions |
-| `ShippedOrdersGrid.tsx` (29KB) | Grid for shipped/delivered orders with tracking |
-| `ArchivedOrdersGrid.tsx` (11KB) | Paginated grid for archived orders |
+|-----------|---------|
+| `OrdersGrid.tsx` (56KB) | Main AG-Grid for open orders with fulfillment actions |
+| `ShippedOrdersGrid.tsx` (38KB) | Grid for shipped/delivered orders with tracking |
+| `ArchivedOrdersGrid.tsx` (26KB) | Paginated grid for archived orders |
 | `TrackingModal.tsx` (23KB) | Real-time shipment tracking (iThink Logistics) |
 | `OrderViewModal.tsx` (21KB) | Full order details modal |
 | `SummaryPanel.tsx` (6KB) | Dashboard stats panel |
+
+### Settings Tabs (in `components/settings/tabs/`)
+
+| Component | Purpose |
+|-----------|---------|
+| `RemittanceTab.tsx` (27KB) | COD remittance CSV upload and Shopify sync |
 
 ---
 
@@ -175,6 +190,12 @@ POST /api/webhooks/shopify/orders
 ```
 Handles create, update, cancel, fulfill events.
 
+### COD Payment Sync (New)
+```javascript
+shopifyClient.markOrderAsPaid(shopifyOrderId, amount, utr, paidAt)
+```
+Creates a capture transaction in Shopify to mark COD orders as paid.
+
 ---
 
 ## Tracking Integration (iThink Logistics)
@@ -182,16 +203,33 @@ Handles create, update, cancel, fulfill events.
 Real-time shipment tracking via iThink Logistics API.
 
 | Service | Purpose |
-|---------|--------|
-| `ithinkLogistics.js` | API client for tracking (186 lines) |
-| `trackingSync.js` | Background sync for tracking updates |
+|---------|---------|
+| `ithinkLogistics.js` | API client for tracking (253 lines) |
+| `trackingSync.js` | Background sync for tracking updates (393 lines) |
 | `tracking.js` (route) | `/api/tracking/*` endpoints |
 
 **Key features:**
 - Track single or batch AWBs (max 10)
 - Full scan history timeline
-- RTO detection and status mapping
+- RTO detection and status mapping (improved)
+- Re-evaluates delivered orders to catch RTO misclassification
 - Credentials stored in `SystemSetting` table
+
+---
+
+## COD Remittance System (New)
+
+Handles COD payment tracking and Shopify sync.
+
+| File | Purpose |
+|------|---------|
+| `remittance.js` | CSV upload, payment status updates |
+| `shopify.js` (service) | `markOrderAsPaid()` for Shopify sync |
+| `RemittanceTab.tsx` | Frontend UI for remittance upload |
+
+**Order COD Fields (schema.prisma):**
+- `codRemittedAt`, `codRemittanceUtr`, `codRemittedAmount`
+- `codShopifySyncStatus`, `codShopifySyncError`, `codShopifySyncedAt`
 
 ---
 
@@ -202,7 +240,9 @@ Real-time shipment tracking via iThink Logistics API.
 | `server/src/utils/queryPatterns.js` | Transaction constants, balance calculations, inventory helpers |
 | `server/src/services/shopifyOrderProcessor.js` | Cache-first order processing |
 | `server/src/services/ithinkLogistics.js` | Shipment tracking API client |
+| `server/src/services/trackingSync.js` | Background tracking sync with RTO detection |
 | `server/src/services/syncWorker.js` | Background sync job runner (23KB) |
+| `server/src/routes/remittance.js` | COD remittance processing |
 | `client/src/services/api.ts` | All API calls, auth interceptors |
 | `client/src/types/index.ts` | TypeScript interfaces (source of truth for types) |
 
@@ -218,6 +258,8 @@ Real-time shipment tracking via iThink Logistics API.
 6. **iThink creds**: Also in `SystemSetting` (`ithink_access_token`, `ithink_secret_key`)
 7. **Auto-archive**: Orders auto-archive after 90 days (runs on startup)
 8. **Scheduled sync**: Hourly Shopify sync via `scheduledSync.js`
+9. **COD payment sync**: Uses Shopify Transaction API, not Order update
+10. **RTO detection**: Tracking sync re-evaluates delivered orders for RTO status
 
 ---
 
@@ -242,6 +284,17 @@ npm test               # Jest tests
 ---
 
 ## Changelog
+
+### January 7, 2026
+- Added COD Remittance system (`/api/remittance/*`)
+- New `remittance.js` route for CSV upload and payment tracking
+- Shopify `markOrderAsPaid()` method for COD payment sync
+- New Order schema fields: `codRemittedAt`, `codRemittanceUtr`, `codRemittedAmount`, `codShopifySyncStatus`, etc.
+- Frontend: RemittanceTab in Settings for CSV upload
+- Improved tracking sync: re-evaluates delivered/RTO orders
+- Enhanced RTO status detection using last scan status
+- Archived orders now support sort by `orderDate` or `archivedAt`
+- Archive Delivered button now handles both prepaid and paid COD orders
 
 ### January 6, 2026 (Late Evening)
 - Enhanced order management with pagination for archived orders

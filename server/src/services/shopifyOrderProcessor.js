@@ -25,10 +25,29 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
         .map(d => d.code).join(', ') || '';
 
     // Calculate payment method from gateway names and financial status
+    // NOTE: Once an order is COD, it stays COD even after payment (don't confuse with Prepaid)
     const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-    const isPrepaid = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-    const paymentMethod = isPrepaid ? 'Prepaid' :
-        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
+    const isCodGateway = gatewayNames.includes('cod') || gatewayNames.includes('cash') || gatewayNames.includes('manual');
+
+    // Check existing cache entry to preserve COD status
+    const existingCache = await prisma.shopifyOrderCache.findUnique({
+        where: { id: orderId },
+        select: { paymentMethod: true }
+    });
+
+    let paymentMethod;
+    if (isPrepaidGateway) {
+        paymentMethod = 'Prepaid';
+    } else if (isCodGateway || existingCache?.paymentMethod === 'COD') {
+        // Gateway indicates COD or was already COD - preserve it
+        paymentMethod = 'COD';
+    } else if (shopifyOrder.financial_status === 'pending') {
+        // New order with pending payment and no prepaid gateway = likely COD
+        paymentMethod = 'COD';
+    } else {
+        paymentMethod = 'Prepaid';
+    }
 
     // Extract tracking info from fulfillments
     const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
@@ -168,10 +187,23 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     }
 
     // Determine payment method (COD vs Prepaid)
+    // NOTE: Once an order is COD, it stays COD even after payment (don't confuse with Prepaid)
     const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
     const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-    const paymentMethod = isPrepaidGateway ? 'Prepaid' :
-        (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+    const isCodGateway = gatewayNames.includes('cod') || gatewayNames.includes('cash') || gatewayNames.includes('manual');
+
+    let paymentMethod;
+    if (isPrepaidGateway) {
+        paymentMethod = 'Prepaid';
+    } else if (isCodGateway || existingOrder?.paymentMethod === 'COD') {
+        // Gateway indicates COD or was already COD - preserve it
+        paymentMethod = 'COD';
+    } else if (shopifyOrder.financial_status === 'pending') {
+        // New order with pending payment and no prepaid gateway = likely COD
+        paymentMethod = 'COD';
+    } else {
+        paymentMethod = 'Prepaid';
+    }
 
     // Extract tracking info from fulfillments
     let awbNumber = existingOrder?.awbNumber || null;

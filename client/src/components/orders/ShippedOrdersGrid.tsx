@@ -7,7 +7,7 @@ import { useMemo, useCallback } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Undo2, CheckCircle, AlertTriangle, Package, ExternalLink, Radio } from 'lucide-react';
+import { Undo2, CheckCircle, AlertTriangle, Package, ExternalLink, Radio, Archive } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
@@ -27,12 +27,14 @@ interface ShippedOrdersGridProps {
     onUnship: (orderId: string) => void;
     onMarkDelivered: (orderId: string) => void;
     onMarkRto: (orderId: string) => void;
+    onArchive?: (orderId: string) => void;
     onViewOrder?: (order: any) => void;
     onSelectCustomer?: (customer: any) => void;
     onTrack?: (awbNumber: string, orderNumber: string) => void;
     isUnshipping?: boolean;
     isMarkingDelivered?: boolean;
     isMarkingRto?: boolean;
+    isArchiving?: boolean;
     shopDomain?: string;
 }
 
@@ -129,12 +131,14 @@ export function ShippedOrdersGrid({
     onUnship,
     onMarkDelivered,
     onMarkRto,
+    onArchive,
     onViewOrder,
     onSelectCustomer,
     onTrack,
     isUnshipping,
     isMarkingDelivered,
     isMarkingRto,
+    isArchiving,
     shopDomain,
 }: ShippedOrdersGridProps) {
     // Transform orders for grid with grouping field and Shopify cache data
@@ -151,8 +155,13 @@ export function ShippedOrdersGrid({
                 deliveryDays = Math.round((deliveredDate.getTime() - shippedDate.getTime()) / (1000 * 60 * 60 * 24));
             }
 
+            // Determine payment group for row grouping
+            const paymentMethod = cache.paymentMethod || order.paymentMethod || '';
+            const paymentGroup = paymentMethod.toLowerCase().includes('cod') ? 'COD' : 'Prepaid';
+
             return {
                 ...order,
+                paymentGroup,
                 shipDateGroup: order.shippedAt
                     ? new Date(order.shippedAt).toLocaleDateString('en-IN', {
                         day: 'numeric',
@@ -183,10 +192,10 @@ export function ShippedOrdersGrid({
     }, [orders]);
 
     const columnDefs = useMemo<ColDef[]>(() => [
-        // Row grouping column (hidden)
+        // Row grouping column (hidden) - Group by Payment Method
         {
-            field: 'shipDateGroup',
-            headerName: 'Ship Date',
+            field: 'paymentGroup',
+            headerName: 'Payment',
             rowGroup: true,
             hide: true,
         },
@@ -367,6 +376,36 @@ export function ShippedOrdersGrid({
                         return (
                             <span className={`text-xs px-1.5 py-0.5 rounded ${colorClass}`}>
                                 {label}
+                            </span>
+                        );
+                    },
+                },
+                {
+                    field: 'codRemittedAt',
+                    headerName: 'COD Paid',
+                    width: 75,
+                    cellRenderer: (params: ICellRendererParams) => {
+                        const order = params.data;
+                        if (!order) return null;
+                        // Only show for COD orders
+                        const isCod = (order.shopifyPaymentMethod || order.paymentMethod || '').toLowerCase() === 'cod';
+                        if (!isCod) return <span className="text-gray-300 text-xs">-</span>;
+
+                        if (order.codRemittedAt) {
+                            const date = new Date(order.codRemittedAt);
+                            const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+                            return (
+                                <span
+                                    className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700"
+                                    title={`UTR: ${order.codRemittanceUtr || '-'}\nAmount: ₹${order.codRemittedAmount || '-'}`}
+                                >
+                                    {dateStr}
+                                </span>
+                            );
+                        }
+                        return (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                                Pending
                             </span>
                         );
                     },
@@ -678,6 +717,20 @@ export function ShippedOrdersGrid({
                                 <AlertTriangle size={14} />
                             </button>
                         )}
+                        {onArchive && (
+                            <button
+                                onClick={() => {
+                                    if (confirm(`Archive order ${order.orderNumber}? This will move it to the archived tab.`)) {
+                                        onArchive(order.id);
+                                    }
+                                }}
+                                disabled={isArchiving}
+                                className="p-1 rounded hover:bg-purple-100 text-gray-400 hover:text-purple-600"
+                                title="Archive order"
+                            >
+                                <Archive size={14} />
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 if (confirm(`Undo shipping for ${order.orderNumber}? This will move it back to open orders.`)) {
@@ -694,7 +747,7 @@ export function ShippedOrdersGrid({
                 );
             },
         },
-    ], [onUnship, onMarkDelivered, onMarkRto, onViewOrder, onSelectCustomer, onTrack, isUnshipping, isMarkingDelivered, isMarkingRto, shopDomain]);
+    ], [onUnship, onMarkDelivered, onMarkRto, onArchive, onViewOrder, onSelectCustomer, onTrack, isUnshipping, isMarkingDelivered, isMarkingRto, isArchiving, shopDomain]);
 
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
@@ -702,8 +755,8 @@ export function ShippedOrdersGrid({
     }), []);
 
     const autoGroupColumnDef = useMemo<ColDef>(() => ({
-        headerName: 'Ship Date',
-        minWidth: 180,
+        headerName: 'Payment Method',
+        minWidth: 140,
         cellRendererParams: {
             suppressCount: false,
         },

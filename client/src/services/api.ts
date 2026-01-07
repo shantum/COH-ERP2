@@ -135,7 +135,7 @@ export const ordersApi = {
         return api.get('/orders/shipped', { params: { limit, offset, ...rest } });
     },
     getCancelled: () => api.get('/orders/status/cancelled'),
-    getArchived: (params?: { days?: number }) => api.get('/orders/status/archived', { params }),
+    getArchived: (params?: { days?: number; sortBy?: 'orderDate' | 'archivedAt' }) => api.get('/orders/status/archived', { params }),
     archive: (id: string) => api.post(`/orders/${id}/archive`),
     unarchive: (id: string) => api.post(`/orders/${id}/unarchive`),
     getById: (id: string) => api.get(`/orders/${id}`),
@@ -444,6 +444,33 @@ export const trackingApi = {
     syncBackfill: (params?: { days?: number; limit?: number }) =>
         api.post('/tracking/sync/backfill', {}, { params }),
     triggerSync: () => api.post('/tracking/sync/trigger'),
+};
+
+// COD Remittance API
+export const remittanceApi = {
+    // Upload CSV file to mark orders as paid
+    upload: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/remittance/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    // Get pending COD orders (delivered but not yet paid)
+    getPending: (limit?: number) =>
+        api.get('/remittance/pending', { params: { limit } }),
+    // Get summary stats
+    getSummary: (days?: number) =>
+        api.get('/remittance/summary', { params: { days } }),
+    // Get failed Shopify sync orders
+    getFailed: (limit?: number) =>
+        api.get('/remittance/failed', { params: { limit } }),
+    // Retry Shopify sync for specific orders or all failed
+    retrySync: (data: { orderIds?: string[]; all?: boolean }) =>
+        api.post('/remittance/retry-sync', data),
+    // Approve manual review order and sync to Shopify
+    approveManual: (data: { orderId: string; approvedAmount?: number }) =>
+        api.post('/remittance/approve-manual', data),
 };
 
 export default api;

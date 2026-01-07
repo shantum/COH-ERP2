@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import {
-    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye
+    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign
 } from 'lucide-react';
 
 // Tab components
@@ -15,9 +15,10 @@ import {
     ImportExportTab,
     DatabaseTab,
     InspectorTab,
+    RemittanceTab,
 } from '../components/settings/tabs';
 
-type SettingsTab = 'general' | 'shopify' | 'importExport' | 'database' | 'inspector';
+type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'database' | 'inspector';
 
 export default function Settings() {
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -60,6 +61,16 @@ export default function Settings() {
                 </button>
                 <button
                     className={`px-4 py-2 font-medium flex items-center gap-2 ${
+                        activeTab === 'remittance'
+                            ? 'text-primary-600 border-b-2 border-primary-600'
+                            : 'text-gray-500'
+                    }`}
+                    onClick={() => setActiveTab('remittance')}
+                >
+                    <DollarSign size={18} /> COD Remittance
+                </button>
+                <button
+                    className={`px-4 py-2 font-medium flex items-center gap-2 ${
                         activeTab === 'database'
                             ? 'text-primary-600 border-b-2 border-primary-600'
                             : 'text-gray-500'
@@ -84,6 +95,7 @@ export default function Settings() {
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'shopify' && <ShopifyTab />}
             {activeTab === 'importExport' && <ImportExportTab />}
+            {activeTab === 'remittance' && <RemittanceTab />}
             {activeTab === 'database' && <DatabaseTab />}
             {activeTab === 'inspector' && <InspectorTab />}
         </div>

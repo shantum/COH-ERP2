@@ -249,6 +249,10 @@ router.get('/shipped', async (req, res) => {
                 lastScanAt: true,
                 lastTrackingUpdate: true,
                 courierStatusCode: true,
+                // COD Remittance fields
+                codRemittedAt: true,
+                codRemittanceUtr: true,
+                codRemittedAmount: true,
                 // Shopify data from cache - get rawData to extract any field we need
                 shopifyCache: {
                     select: {
@@ -1318,7 +1322,7 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
 // Get archived orders (paginated, optionally filtered by days)
 router.get('/status/archived', async (req, res) => {
     try {
-        const { limit = 100, offset = 0, days } = req.query;
+        const { limit = 100, offset = 0, days, sortBy = 'archivedAt' } = req.query;
         const take = Number(limit);
         const skip = Number(offset);
 
@@ -1330,29 +1334,127 @@ router.get('/status/archived', async (req, res) => {
             where.orderDate = { gte: sinceDate };
         }
 
+        // Determine sort order
+        const orderBy = sortBy === 'orderDate'
+            ? { orderDate: 'desc' }
+            : { archivedAt: 'desc' };
+
         const [orders, totalCount] = await Promise.all([
             req.prisma.order.findMany({
                 where,
-                include: {
-                    customer: true,
+                select: {
+                    id: true,
+                    orderNumber: true,
+                    shopifyOrderId: true,
+                    status: true,
+                    channel: true,
+                    orderDate: true,
+                    shippedAt: true,
+                    deliveredAt: true,
+                    archivedAt: true,
+                    totalAmount: true,
+                    paymentMethod: true,
+                    customerName: true,
+                    customerEmail: true,
+                    customerPhone: true,
+                    customerId: true,
+                    shippingAddress: true,
+
+                    // Shipping fields
+                    courier: true,
+                    awbNumber: true,
+
+                    // Tracking fields from iThink
+                    trackingStatus: true,
+                    expectedDeliveryDate: true,
+                    deliveryAttempts: true,
+                    courierStatusCode: true,
+                    lastScanLocation: true,
+                    lastScanAt: true,
+                    lastScanStatus: true,
+                    lastTrackingUpdate: true,
+
+                    // COD Remittance fields
+                    codRemittedAt: true,
+                    codRemittanceUtr: true,
+                    codRemittedAmount: true,
+
+                    // Customer relationship
+                    customer: {
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                        }
+                    },
+
+                    // Order lines
                     orderLines: {
-                        include: {
+                        select: {
+                            id: true,
+                            qty: true,
                             sku: {
-                                include: {
-                                    variation: { include: { product: true, fabric: true } },
-                                },
-                            },
-                        },
+                                select: {
+                                    skuCode: true,
+                                    variation: {
+                                        select: {
+                                            colorName: true,
+                                            product: { select: { name: true } },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+
+                    // Shopify cache for payment info
+                    shopifyCache: {
+                        select: {
+                            paymentMethod: true,
+                            financialStatus: true,
+                            fulfillmentStatus: true,
+                            shipmentStatus: true,
+                            deliveredAt: true,
+                            trackingNumber: true,
+                            trackingCompany: true,
+                        }
                     },
                 },
-                orderBy: { orderDate: 'desc' },  // newest orders first
+                orderBy,
                 take,
                 skip,
             }),
             req.prisma.order.count({ where }),
         ]);
 
-        res.json({ orders, totalCount, limit: take, offset: skip });
+        // Transform orders to add computed fields
+        const transformedOrders = orders.map(order => {
+            const cache = order.shopifyCache || {};
+
+            // Calculate delivery days
+            let deliveryDays = null;
+            const shippedDate = order.shippedAt ? new Date(order.shippedAt) : null;
+            const deliveredDate = order.deliveredAt ? new Date(order.deliveredAt) :
+                                  cache.deliveredAt ? new Date(cache.deliveredAt) : null;
+            if (shippedDate && deliveredDate) {
+                deliveryDays = Math.round((deliveredDate.getTime() - shippedDate.getTime()) / (1000 * 60 * 60 * 24));
+            }
+
+            return {
+                ...order,
+                deliveryDays,
+                customerTier: order.customer?.tier,
+                customerLtv: order.customer?.lifetimeValue,
+                // Shopify cache fields
+                shopifyPaymentMethod: cache.paymentMethod || order.paymentMethod,
+                shopifyFinancialStatus: cache.financialStatus,
+                shopifyFulfillmentStatus: cache.fulfillmentStatus,
+                shopifyShipmentStatus: cache.shipmentStatus,
+                shopifyDeliveredAt: cache.deliveredAt,
+            };
+        });
+
+        res.json({ orders: transformedOrders, totalCount, limit: take, offset: skip, sortBy });
     } catch (error) {
         console.error('Get archived orders error:', error);
         res.status(500).json({ error: 'Failed to fetch archived orders' });
@@ -1391,6 +1493,7 @@ router.post('/:id/archive', authenticateToken, async (req, res) => {
     try {
         const order = await req.prisma.order.findUnique({
             where: { id: req.params.id },
+            select: { id: true, orderNumber: true, isArchived: true },
         });
 
         if (!order) {
@@ -1404,12 +1507,14 @@ router.post('/:id/archive', authenticateToken, async (req, res) => {
         const updated = await req.prisma.order.update({
             where: { id: req.params.id },
             data: {
+                status: 'archived',
                 isArchived: true,
                 archivedAt: new Date(),
             },
             include: { orderLines: true },
         });
 
+        console.log(`[Manual Archive] Order ${order.orderNumber} archived`);
         res.json(updated);
     } catch (error) {
         console.error('Archive order error:', error);
@@ -1524,45 +1629,73 @@ router.post('/archive-before-date', authenticateToken, async (req, res) => {
 });
 
 /**
- * Archive delivered prepaid orders
+ * Archive delivered orders (prepaid and paid COD)
  * POST /api/orders/archive-delivered-prepaid
  *
- * Archives all prepaid orders that have:
- * - trackingStatus = 'delivered' (from iThink Logistics)
- * - paymentMethod = 'Prepaid'
- * - status = 'shipped' or 'delivered' (not yet archived)
+ * Archives all orders that are ready to be archived:
+ * 1. Prepaid orders: trackingStatus = 'delivered'
+ * 2. COD orders: trackingStatus = 'delivered' AND codRemittedAt IS NOT NULL (payment received)
+ *
+ * Both must have status = 'shipped' or 'delivered' (not yet archived)
  */
 router.post('/archive-delivered-prepaid', authenticateToken, async (req, res) => {
     try {
-        // Find all delivered prepaid orders that haven't been archived yet
-        const ordersToArchive = await req.prisma.order.findMany({
+        // Find all delivered prepaid orders
+        const prepaidOrders = await req.prisma.order.findMany({
             where: {
                 trackingStatus: 'delivered',
                 paymentMethod: 'Prepaid',
                 status: { in: ['shipped', 'delivered'] },
+                isArchived: false,
             },
             select: {
                 id: true,
                 orderNumber: true,
+                paymentMethod: true,
                 deliveredAt: true,
                 shippedAt: true,
             },
         });
 
+        // Find all delivered COD orders that have been paid
+        const codOrders = await req.prisma.order.findMany({
+            where: {
+                trackingStatus: 'delivered',
+                paymentMethod: 'COD',
+                codRemittedAt: { not: null }, // COD payment received
+                status: { in: ['shipped', 'delivered'] },
+                isArchived: false,
+            },
+            select: {
+                id: true,
+                orderNumber: true,
+                paymentMethod: true,
+                deliveredAt: true,
+                shippedAt: true,
+                codRemittedAt: true,
+            },
+        });
+
+        const ordersToArchive = [...prepaidOrders, ...codOrders];
+
         if (ordersToArchive.length === 0) {
             return res.json({
-                message: 'No delivered prepaid orders to archive',
+                message: 'No delivered orders ready to archive',
                 archived: 0,
+                prepaid: 0,
+                cod: 0,
             });
         }
 
-        // Archive them
+        // Archive them all
         const result = await req.prisma.order.updateMany({
             where: {
                 id: { in: ordersToArchive.map(o => o.id) },
             },
             data: {
                 status: 'archived',
+                isArchived: true,
+                archivedAt: new Date(),
             },
         });
 
@@ -1573,23 +1706,25 @@ router.post('/archive-delivered-prepaid', authenticateToken, async (req, res) =>
                 const daysToDeliver = Math.ceil(
                     (new Date(o.deliveredAt) - new Date(o.shippedAt)) / (1000 * 60 * 60 * 24)
                 );
-                return { orderNumber: o.orderNumber, daysToDeliver };
+                return { orderNumber: o.orderNumber, paymentMethod: o.paymentMethod, daysToDeliver };
             });
 
         const avgDaysToDeliver = deliveryStats.length > 0
             ? (deliveryStats.reduce((sum, s) => sum + s.daysToDeliver, 0) / deliveryStats.length).toFixed(1)
             : null;
 
-        console.log(`[Auto-Archive] Archived ${result.count} delivered prepaid orders. Avg delivery time: ${avgDaysToDeliver} days`);
+        console.log(`[Auto-Archive] Archived ${result.count} orders (${prepaidOrders.length} prepaid, ${codOrders.length} COD). Avg delivery time: ${avgDaysToDeliver} days`);
 
         res.json({
-            message: `Archived ${result.count} delivered prepaid orders`,
+            message: `Archived ${result.count} delivered orders`,
             archived: result.count,
+            prepaid: prepaidOrders.length,
+            cod: codOrders.length,
             avgDaysToDeliver,
             deliveryStats: deliveryStats.slice(0, 10), // Sample
         });
     } catch (error) {
-        console.error('Archive delivered prepaid error:', error);
+        console.error('Archive delivered orders error:', error);
         res.status(500).json({ error: 'Failed to archive orders' });
     }
 });

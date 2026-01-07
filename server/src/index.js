@@ -34,6 +34,7 @@ import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 import repackingRoutes from './routes/repacking.js';
 import trackingRoutes from './routes/tracking.js';
+import remittanceRoutes from './routes/remittance.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 
@@ -119,6 +120,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/repacking', repackingRoutes);
 app.use('/api/tracking', trackingRoutes);
+app.use('/api/remittance', remittanceRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

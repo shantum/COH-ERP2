@@ -53,6 +53,7 @@ export default function Orders() {
 
     // Archived orders period state (0 = all time)
     const [archivedDays, setArchivedDays] = useState(90);
+    const [archivedSortBy, setArchivedSortBy] = useState<'orderDate' | 'archivedAt'>('archivedAt');
 
     // Modal state
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -91,7 +92,7 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays });
+    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedSortBy });
 
     // Shopify config for external links (needed for shipped and archived tabs)
     const { data: shopifyConfig } = useQuery({
@@ -163,12 +164,16 @@ export default function Orders() {
         },
     });
 
-    // Archive delivered prepaid mutation
+    // Archive delivered orders mutation (prepaid + paid COD)
     const archivePrepaidMutation = useMutation({
         mutationFn: () => ordersApi.archiveDeliveredPrepaid(),
         onSuccess: (response) => {
             const result = response.data;
-            alert(`Archive complete!\n${result.archived} prepaid orders archived\nAvg delivery time: ${result.avgDaysToDeliver || 'N/A'} days`);
+            const breakdown = [];
+            if (result.prepaid > 0) breakdown.push(`${result.prepaid} prepaid`);
+            if (result.cod > 0) breakdown.push(`${result.cod} COD`);
+            const breakdownText = breakdown.length > 0 ? ` (${breakdown.join(', ')})` : '';
+            alert(`Archive complete!\n${result.archived} orders archived${breakdownText}\nAvg delivery time: ${result.avgDaysToDeliver || 'N/A'} days`);
             queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
             queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
             queryClient.invalidateQueries({ queryKey: ['archivedOrders'] });
@@ -476,13 +481,13 @@ export default function Orders() {
                         </button>
                         <button
                             onClick={() => {
-                                if (confirm('Archive all delivered prepaid orders?')) {
+                                if (confirm('Archive all delivered orders?\n\nThis will archive:\n• Prepaid orders marked as delivered\n• COD orders that are delivered AND paid')) {
                                     archivePrepaidMutation.mutate();
                                 }
                             }}
                             disabled={archivePrepaidMutation.isPending}
                             className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50 disabled:opacity-50"
-                            title="Archive all prepaid orders that are marked as delivered"
+                            title="Archive delivered prepaid orders and delivered+paid COD orders"
                         >
                             <Archive size={12} />
                             {archivePrepaidMutation.isPending ? 'Archiving...' : 'Archive Delivered'}
@@ -519,6 +524,7 @@ export default function Orders() {
                         onUnship={(id) => mutations.unship.mutate(id)}
                         onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
                         onMarkRto={(id) => mutations.markRto.mutate(id)}
+                        onArchive={(id) => mutations.archiveOrder.mutate(id)}
                         onViewOrder={(order) => setViewingOrderId(order.id)}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onTrack={(awb, orderNumber) => {
@@ -528,6 +534,7 @@ export default function Orders() {
                         isUnshipping={mutations.unship.isPending}
                         isMarkingDelivered={mutations.markDelivered.isPending}
                         isMarkingRto={mutations.markRto.isPending}
+                        isArchiving={mutations.archiveOrder.isPending}
                         shopDomain={shopifyConfig?.shopDomain}
                     />
                     {/* Pagination Controls */}
@@ -612,6 +619,8 @@ export default function Orders() {
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         isRestoring={mutations.unarchiveOrder.isPending}
                         shopDomain={shopifyConfig?.shopDomain}
+                        sortBy={archivedSortBy}
+                        onSortChange={setArchivedSortBy}
                     />
                 </div>
             )}

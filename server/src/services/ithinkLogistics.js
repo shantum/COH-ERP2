@@ -178,16 +178,16 @@ class IThinkLogisticsClient {
         const textLower = (statusText || '').toLowerCase();
 
         // First, check the status TEXT which is more reliable
-        // Delivered states
-        if (textLower.includes('delivered') && !textLower.includes('undelivered') && !textLower.includes('not delivered')) {
-            return 'delivered';
+        // IMPORTANT: Check RTO states BEFORE regular delivered check!
+        // "RTO Delivered" should map to rto_delivered, not delivered
+        if (textLower.includes('rto') || textLower.includes('return to origin') || textLower.includes('returned to origin')) {
+            if (textLower.includes('delivered')) return 'rto_delivered';
+            return 'rto_in_transit'; // All non-delivered RTO states map to rto_in_transit
         }
 
-        // RTO states
-        if (textLower.includes('rto') || textLower.includes('return to origin')) {
-            if (textLower.includes('delivered')) return 'rto_delivered';
-            if (textLower.includes('transit')) return 'rto_in_transit';
-            return 'rto_initiated';
+        // Delivered states (only regular delivery, not RTO)
+        if (textLower.includes('delivered') && !textLower.includes('undelivered') && !textLower.includes('not delivered')) {
+            return 'delivered';
         }
 
         // Undelivered/NDR - only if text explicitly says undelivered
@@ -236,7 +236,7 @@ class IThinkLogisticsClient {
             'UD': 'undelivered',
             'DL': 'delivered',
             'CA': 'cancelled',
-            'RTP': 'rto_pending',
+            'RTP': 'rto_in_transit',
             'RTI': 'rto_in_transit',
             'RTD': 'rto_delivered',
             'REVP': 'reverse_pickup',

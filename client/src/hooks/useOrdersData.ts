@@ -17,9 +17,10 @@ interface UseOrdersDataOptions {
     shippedPage?: number;
     shippedDays?: number;
     archivedDays?: number;
+    archivedSortBy?: 'orderDate' | 'archivedAt';
 }
 
-export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, archivedDays = 90 }: UseOrdersDataOptions) {
+export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, archivedDays = 90, archivedSortBy = 'archivedAt' }: UseOrdersDataOptions) {
     // Order queries with conditional polling based on active tab
     const openOrdersQuery = useQuery({
         queryKey: ['openOrders'],
@@ -40,8 +41,11 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     });
 
     const archivedOrdersQuery = useQuery({
-        queryKey: ['archivedOrders', archivedDays],
-        queryFn: () => ordersApi.getArchived(archivedDays > 0 ? { days: archivedDays } : undefined).then(r => r.data),
+        queryKey: ['archivedOrders', archivedDays, archivedSortBy],
+        queryFn: () => ordersApi.getArchived({
+            ...(archivedDays > 0 ? { days: archivedDays } : {}),
+            sortBy: archivedSortBy
+        }).then(r => r.data),
         refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false
     });
 

@@ -494,6 +494,79 @@ class ShopifyClient {
     }
 
     // ============================================
+    // PAYMENT/TRANSACTION METHODS
+    // ============================================
+
+    /**
+     * Mark a Shopify order as paid by creating a transaction
+     * Used for COD orders when remittance is received
+     *
+     * @param {string} shopifyOrderId - Shopify order ID (numeric string)
+     * @param {number} amount - Amount to mark as paid
+     * @param {string} utr - Bank UTR reference
+     * @param {Date} paidAt - When payment was received
+     * @returns {Object} - { success, transaction, error }
+     */
+    async markOrderAsPaid(shopifyOrderId, amount, utr, paidAt = new Date()) {
+        if (!this.isConfigured()) {
+            throw new Error('Shopify is not configured');
+        }
+
+        if (!shopifyOrderId) {
+            return { success: false, error: 'No Shopify order ID provided' };
+        }
+
+        try {
+            // Create a transaction to mark the order as paid
+            const response = await this.client.post(`/orders/${shopifyOrderId}/transactions.json`, {
+                transaction: {
+                    kind: 'capture',          // capture = payment received
+                    status: 'success',
+                    amount: String(amount),
+                    gateway: 'Cash on Delivery',
+                    source: 'external',
+                    authorization: utr || `COD-${Date.now()}`,
+                    processed_at: paidAt.toISOString(),
+                }
+            });
+
+            return {
+                success: true,
+                transaction: response.data.transaction,
+            };
+        } catch (error) {
+            const errorMessage = error.response?.data?.errors ||
+                                error.response?.data?.error ||
+                                error.message;
+
+            console.error(`Failed to mark order ${shopifyOrderId} as paid:`, errorMessage);
+
+            return {
+                success: false,
+                error: typeof errorMessage === 'object' ? JSON.stringify(errorMessage) : errorMessage,
+            };
+        }
+    }
+
+    /**
+     * Get transactions for a Shopify order
+     * @param {string} shopifyOrderId - Shopify order ID
+     */
+    async getOrderTransactions(shopifyOrderId) {
+        if (!this.isConfigured()) {
+            throw new Error('Shopify is not configured');
+        }
+
+        try {
+            const response = await this.client.get(`/orders/${shopifyOrderId}/transactions.json`);
+            return response.data.transactions || [];
+        } catch (error) {
+            console.error(`Failed to get transactions for order ${shopifyOrderId}:`, error.message);
+            return [];
+        }
+    }
+
+    // ============================================
     // UTILITY METHODS
     // ============================================
 

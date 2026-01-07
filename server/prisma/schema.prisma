@@ -332,6 +332,17 @@ model Order {
   lastScanAt           DateTime? // When the last scan occurred
   lastTrackingUpdate   DateTime? // When we last fetched tracking from API
   courierStatusCode    String?   // Raw status code from courier (e.g., IT, OFD, DL, UD)
+
+  // COD Remittance fields
+  codRemittedAt     DateTime? // When COD was remitted by logistics partner
+  codRemittanceUtr  String?   // Bank UTR reference for COD remittance
+  codRemittedAmount Float?    // Actual COD amount remitted
+
+  // COD Shopify sync status
+  codShopifySyncStatus String?   // pending, synced, failed, manual_review
+  codShopifySyncError  String?   // Error message if sync failed
+  codShopifySyncedAt   DateTime? // When payment was synced to Shopify
+
   discountCode    String?   // Discount/coupon code used on the order
   createdAt       DateTime  @default(now())
   syncedAt        DateTime?

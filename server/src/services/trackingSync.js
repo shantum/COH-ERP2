@@ -32,17 +32,20 @@ let lastSyncResult = null;
  */
 async function getInTransitOrders() {
     // Non-final tracking statuses that need updates
+    // Include 'delivered' and 'rto_delivered' to allow re-evaluation of misclassified orders
     const SYNC_STATUSES = [
         'in_transit',
         'out_for_delivery',
         'delivery_delayed',
-        'rto_initiated',
+        'rto_initiated', // Legacy - will be converted to rto_in_transit
         'rto_in_transit',
+        'rto_delivered', // Re-evaluate to catch orders incorrectly marked as RTO delivered
         'manifested',
         'picked_up',
         'reached_destination',
         'undelivered',
         'not_picked',
+        'delivered', // Re-evaluate to catch RTO Delivered orders
     ];
 
     // Get all orders with AWB that have non-final tracking status
@@ -125,10 +128,23 @@ async function updateOrderTracking(orderId, trackingData, orderInfo = {}) {
         }
     }
 
-    // If RTO initiated
-    if (trackingData.isRto) {
-        updateData.rtoInitiatedAt = new Date();
-        updateData.trackingStatus = 'rto_initiated';
+    // Handle RTO statuses - use the mapped status, don't override it
+    // The mapToInternalStatus function already correctly identifies rto_in_transit, rto_delivered, etc.
+    if (trackingData.isRto || trackingData.internalStatus?.startsWith('rto_')) {
+        // Set rtoInitiatedAt if not already set (first time we detect RTO)
+        if (!updateData.rtoInitiatedAt) {
+            updateData.rtoInitiatedAt = new Date();
+        }
+
+        // If RTO delivered, set rtoReceivedAt
+        if (trackingData.internalStatus === 'rto_delivered') {
+            updateData.rtoReceivedAt = trackingData.lastScan?.datetime
+                ? new Date(trackingData.lastScan.datetime)
+                : new Date();
+        }
+
+        // Don't override the trackingStatus - it's already set correctly from mapToInternalStatus
+        // The internalStatus already has the correct value (rto_initiated, rto_in_transit, rto_delivered)
     }
 
     // Update courier name if available
@@ -222,14 +238,23 @@ async function runTrackingSync() {
                     try {
                         // Transform raw iThink API response to our format
                         // Use correct field names from iThink API
-                        // Pass both status code AND status text for smarter mapping
+                        // For RTO statuses, use last_scan_details.status for more accurate mapping
+                        // (current_status can differ from last scan when system auto-updates)
+                        const lastScanStatus = rawData.last_scan_details?.status || '';
+                        const currentStatus = rawData.current_status || '';
+
+                        // Use last scan status for RTO mapping if available, otherwise use current_status
+                        const statusForMapping = lastScanStatus.toLowerCase().includes('rto')
+                            ? lastScanStatus
+                            : currentStatus;
+
                         const trackingData = {
                             courier: rawData.logistic,
                             statusCode: rawData.current_status_code,
-                            internalStatus: ithinkClient.mapToInternalStatus(rawData.current_status_code, rawData.current_status),
+                            internalStatus: ithinkClient.mapToInternalStatus(rawData.current_status_code, statusForMapping),
                             expectedDeliveryDate: rawData.expected_delivery_date,
                             ofdCount: parseInt(rawData.ofd_count) || 0,
-                            isRto: !!rawData.return_tracking_no,
+                            isRto: !!rawData.return_tracking_no || lastScanStatus.toLowerCase().includes('rto'),
                             lastScan: rawData.last_scan_details ? {
                                 status: rawData.last_scan_details.status,
                                 location: rawData.last_scan_details.scan_location,
@@ -239,7 +264,7 @@ async function runTrackingSync() {
                             } : null,
                         };
 
-                        const currentStatus = order.trackingStatus;
+                        const previousStatus = order.trackingStatus;
                         const newStatus = trackingData.internalStatus;
 
                         // Always update tracking data to keep it fresh
@@ -250,7 +275,7 @@ async function runTrackingSync() {
                         result.updated++;
 
                         // Track status transitions for logging
-                        if (currentStatus !== newStatus) {
+                        if (previousStatus !== newStatus) {
                             if (updateResult.trackingStatus === 'delivered') {
                                 result.delivered++;
                                 if (updateResult.status === 'archived') {
@@ -261,9 +286,16 @@ async function runTrackingSync() {
                                 }
                             }
 
-                            if (trackingData.isRto) {
+                            // Track RTO status transitions
+                            if (newStatus?.startsWith('rto_')) {
                                 result.rto++;
-                                console.log(`[Tracking Sync] Order ${order.orderNumber} marked as RTO`);
+                                if (newStatus === 'rto_delivered') {
+                                    console.log(`[Tracking Sync] Order ${order.orderNumber} RTO received/delivered`);
+                                } else if (newStatus === 'rto_in_transit') {
+                                    console.log(`[Tracking Sync] Order ${order.orderNumber} RTO in transit`);
+                                } else {
+                                    console.log(`[Tracking Sync] Order ${order.orderNumber} RTO initiated (${newStatus})`);
+                                }
                             }
                         }
                     } catch (err) {
