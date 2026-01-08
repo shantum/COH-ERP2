@@ -348,13 +348,11 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
                 }
             }
 
+            // Only update Order.status - tracking fields are on lines
             await tx.order.update({
                 where: { id: req.params.id },
                 data: {
                     status: 'shipped',
-                    awbNumber,
-                    courier,
-                    shippedAt: new Date(),
                 },
             });
 
@@ -363,9 +361,10 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
                 data: {
                     lineStatus: 'shipped',
                     shippedAt: new Date(),
-                    // Line-level tracking (multi-AWB support)
+                    // Line-level tracking (source of truth)
                     awbNumber,
-                    courier
+                    courier,
+                    trackingStatus: 'in_transit',
                 },
             });
 
@@ -447,21 +446,24 @@ router.post('/:id/unship', authenticateToken, async (req, res) => {
                 });
             }
 
-            // Update order status
+            // Only update Order.status - tracking fields are on lines
             await tx.order.update({
                 where: { id: req.params.id },
                 data: {
                     status: 'open',
-                    awbNumber: null,
-                    courier: null,
-                    shippedAt: null,
                 },
             });
 
-            // Revert line statuses to packed (ready to re-ship)
+            // Revert line statuses and clear tracking fields
             await tx.orderLine.updateMany({
                 where: { orderId: req.params.id },
-                data: { lineStatus: 'packed', shippedAt: null },
+                data: {
+                    lineStatus: 'packed',
+                    shippedAt: null,
+                    awbNumber: null,
+                    courier: null,
+                    trackingStatus: null,
+                },
             });
         });
 
@@ -663,7 +665,7 @@ router.post('/:id/quick-ship', authenticateToken, async (req, res) => {
                 userId: req.user.id,
             });
 
-            // Update line to shipped
+            // Update line to shipped with tracking
             await req.prisma.orderLine.update({
                 where: { id: line.id },
                 data: {
@@ -672,20 +674,19 @@ router.post('/:id/quick-ship', authenticateToken, async (req, res) => {
                     pickedAt: line.pickedAt || now,
                     packedAt: line.packedAt || now,
                     shippedAt: now,
-                    // Line-level tracking (multi-AWB support)
+                    // Line-level tracking (source of truth)
                     awbNumber: order.awbNumber,
                     courier: order.courier,
+                    trackingStatus: 'in_transit',
                 },
             });
         }
 
-        // Update order status
+        // Only update Order.status - tracking fields are on lines
         const updated = await req.prisma.order.update({
             where: { id: order.id },
             data: {
                 status: 'shipped',
-                shippedAt: now,
-                trackingStatus: 'in_transit',
             },
             include: { orderLines: true },
         });
@@ -781,9 +782,10 @@ router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
                     data: {
                         lineStatus: 'shipped',
                         shippedAt: now,
-                        // Line-level tracking (multi-AWB support)
+                        // Line-level tracking (source of truth)
                         awbNumber: orderData.awbNumber,
                         courier: orderData.courier,
+                        trackingStatus: 'in_transit',
                     },
                 });
             }
@@ -813,13 +815,11 @@ router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
                 });
             }
 
-            // 4. Update all orders to shipped in one batch
+            // 4. Only update Order.status - tracking fields are on lines
             await tx.order.updateMany({
                 where: { id: { in: orderIds } },
                 data: {
                     status: 'shipped',
-                    shippedAt: now,
-                    trackingStatus: 'in_transit',
                 },
             });
         });

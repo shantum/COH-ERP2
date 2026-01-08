@@ -1,12 +1,16 @@
 /**
- * Tracking Sync Service
+ * Tracking Sync Service (Line-Centric)
  *
- * Periodically fetches tracking updates from iThink Logistics for in-transit orders.
- * Updates order tracking status, detects deliveries and RTOs automatically.
+ * Periodically fetches tracking updates from iThink Logistics for in-transit shipments.
+ * Updates OrderLine tracking status (source of truth), and Order.status for terminal states.
+ *
+ * Line-centric architecture: OrderLine.awbNumber/trackingStatus are authoritative.
+ * Order-level tracking fields are deprecated and will be removed.
  */
 
 import prisma from '../lib/prisma.js';
 import ithinkClient from './ithinkLogistics.js';
+import { recomputeOrderStatus } from '../utils/orderStatus.js';
 
 // Sync interval in milliseconds (30 minutes)
 const SYNC_INTERVAL_MS = 30 * 60 * 1000;
@@ -20,41 +24,38 @@ let lastSyncAt = null;
 let lastSyncResult = null;
 
 /**
- * Get all orders that need tracking updates
- *
- * Criteria: Any order with AWB + courier that has a non-final tracking status
- * - trackingStatus is null (never synced) OR in SYNC_STATUSES (in progress)
- * - NOT archived
- *
- * Note: We don't filter by order.status because orders may be marked 'delivered'
- * in ERP before iThink confirms delivery (data inconsistency). We sync based on
- * trackingStatus (iThink status) not status (ERP workflow status).
+ * Non-final tracking statuses that need updates
+ * Include 'delivered' and 'rto_delivered' to allow re-evaluation of misclassified orders
  */
-async function getInTransitOrders() {
-    // Non-final tracking statuses that need updates
-    // Include 'delivered' and 'rto_delivered' to allow re-evaluation of misclassified orders
-    const SYNC_STATUSES = [
-        'in_transit',
-        'out_for_delivery',
-        'delivery_delayed',
-        'rto_initiated', // Legacy - will be converted to rto_in_transit
-        'rto_in_transit',
-        'rto_delivered', // Re-evaluate to catch orders incorrectly marked as RTO delivered
-        'manifested',
-        'picked_up',
-        'reached_destination',
-        'undelivered',
-        'not_picked',
-        'delivered', // Re-evaluate to catch RTO Delivered orders
-    ];
+const SYNC_STATUSES = [
+    'in_transit',
+    'out_for_delivery',
+    'delivery_delayed',
+    'rto_initiated',
+    'rto_in_transit',
+    'rto_delivered',
+    'manifested',
+    'picked_up',
+    'reached_destination',
+    'undelivered',
+    'not_picked',
+    'delivered',
+];
 
-    // Get all orders with AWB that have non-final tracking status
-    // Don't filter by order.status - sync based on trackingStatus instead
-    const orders = await prisma.order.findMany({
+/**
+ * Get all AWBs that need tracking updates (line-centric)
+ *
+ * Queries OrderLines with AWB that have non-final tracking status.
+ * Groups by AWB to avoid duplicate API calls for multi-line shipments.
+ */
+async function getAwbsNeedingUpdate() {
+    // Get distinct AWBs from lines that need tracking updates
+    const lines = await prisma.orderLine.findMany({
         where: {
-            NOT: { isArchived: true },
             awbNumber: { not: null },
-            courier: { not: null },
+            order: {
+                isArchived: false,
+            },
             OR: [
                 { trackingStatus: null },
                 { trackingStatus: { in: SYNC_STATUSES } },
@@ -62,163 +63,134 @@ async function getInTransitOrders() {
         },
         select: {
             id: true,
-            orderNumber: true,
             awbNumber: true,
-            shippedAt: true,
             trackingStatus: true,
-            paymentMethod: true,
-            status: true,
+            orderId: true,
+            order: {
+                select: {
+                    id: true,
+                    orderNumber: true,
+                    status: true,
+                    paymentMethod: true,
+                }
+            }
         },
-        orderBy: { shippedAt: 'desc' },
+        distinct: ['awbNumber'],
     });
 
-    return orders;
+    // Build AWB -> order info mapping
+    const awbMap = new Map();
+    for (const line of lines) {
+        if (line.awbNumber && !awbMap.has(line.awbNumber)) {
+            awbMap.set(line.awbNumber, {
+                orderId: line.orderId,
+                orderNumber: line.order.orderNumber,
+                orderStatus: line.order.status,
+                paymentMethod: line.order.paymentMethod,
+                previousTrackingStatus: line.trackingStatus,
+            });
+        }
+    }
+
+    return awbMap;
 }
 
 /**
- * Terminal tracking statuses - no further updates expected
- */
-const TERMINAL_STATUSES = ['delivered', 'rto_delivered', 'cancelled'];
-
-/**
- * Update order tracking status based on iThink response
- * Also updates order.status when tracking reaches terminal state
+ * Update tracking for all lines with given AWB (line-centric)
  *
- * @param {string} orderId - Order ID
+ * @param {string} awbNumber - AWB number
  * @param {object} trackingData - Tracking data from iThink
- * @param {object} orderInfo - Additional order info (paymentMethod, status)
+ * @param {object} orderInfo - Order info for status updates
  */
-async function updateOrderTracking(orderId, trackingData, orderInfo = {}) {
-    const updateData = {
+async function updateLineTracking(awbNumber, trackingData, orderInfo) {
+    const lineUpdateData = {
         trackingStatus: trackingData.internalStatus,
-        courierStatusCode: trackingData.statusCode || null,
-        deliveryAttempts: trackingData.ofdCount || 0,
         lastTrackingUpdate: new Date(),
     };
 
-    // Expected delivery date
-    if (trackingData.expectedDeliveryDate && trackingData.expectedDeliveryDate !== '0000-00-00') {
-        try {
-            updateData.expectedDeliveryDate = new Date(trackingData.expectedDeliveryDate);
-        } catch (e) {
-            // Invalid date, skip
-        }
-    }
-
-    // Last scan details
-    if (trackingData.lastScan) {
-        updateData.lastScanStatus = trackingData.lastScan.status || null;
-        updateData.lastScanLocation = trackingData.lastScan.location || null;
-        if (trackingData.lastScan.datetime) {
-            try {
-                updateData.lastScanAt = new Date(trackingData.lastScan.datetime);
-            } catch (e) {
-                // Invalid date, skip
-            }
-        }
-    }
-
-    // UPDATE ORDER STATUS FOR TERMINAL STATES
-    // This ensures order.status reflects what the tracking shows
-
-    // If delivered, update delivery date AND order status
+    // Set delivery timestamp
     if (trackingData.internalStatus === 'delivered') {
-        updateData.deliveredAt = trackingData.lastScan?.datetime
+        lineUpdateData.deliveredAt = trackingData.lastScan?.datetime
             ? new Date(trackingData.lastScan.datetime)
             : new Date();
+    }
 
-        // Update order status to 'delivered' if it's currently 'shipped'
-        if (orderInfo.status === 'shipped') {
-            updateData.status = 'delivered';
-        }
+    // Set RTO timestamps
+    if (trackingData.isRto || trackingData.internalStatus?.startsWith('rto_')) {
+        lineUpdateData.rtoInitiatedAt = new Date();
+    }
+    if (trackingData.internalStatus === 'rto_delivered') {
+        lineUpdateData.rtoReceivedAt = trackingData.lastScan?.datetime
+            ? new Date(trackingData.lastScan.datetime)
+            : new Date();
+    }
 
-        // Auto-archive prepaid orders that are delivered
-        // Prepaid orders don't need COD collection verification
+    // Update all lines with this AWB
+    await prisma.orderLine.updateMany({
+        where: { awbNumber },
+        data: lineUpdateData,
+    });
+
+    // Update Order.status for terminal states (delivered, RTO, cancelled)
+    // This is the ONLY Order update - no tracking fields
+    const orderUpdateData = {};
+    let statusChanged = false;
+
+    if (trackingData.internalStatus === 'delivered') {
+        // Auto-archive prepaid orders
         const isPrepaid = orderInfo.paymentMethod === 'Prepaid' ||
                           orderInfo.paymentMethod === 'prepaid';
 
-        if (isPrepaid) {
-            updateData.status = 'archived';
-            console.log(`[Tracking Sync] Auto-archived prepaid order (delivered)`);
+        if (isPrepaid && orderInfo.orderStatus === 'shipped') {
+            orderUpdateData.status = 'archived';
+            orderUpdateData.isArchived = true;
+            orderUpdateData.archivedAt = new Date();
+            statusChanged = true;
+            console.log(`[Tracking Sync] Auto-archived prepaid order ${orderInfo.orderNumber} (delivered)`);
         }
     }
 
-    // Handle RTO statuses - use the mapped status, don't override it
-    // The mapToInternalStatus function already correctly identifies rto_in_transit, rto_delivered, etc.
-    if (trackingData.isRto || trackingData.internalStatus?.startsWith('rto_')) {
-        // Set rtoInitiatedAt if not already set (first time we detect RTO)
-        if (!updateData.rtoInitiatedAt) {
-            updateData.rtoInitiatedAt = new Date();
+    if (trackingData.internalStatus === 'rto_delivered') {
+        if (orderInfo.orderStatus === 'shipped' || orderInfo.orderStatus === 'delivered') {
+            orderUpdateData.status = 'returned';
+            statusChanged = true;
+            console.log(`[Tracking Sync] Order ${orderInfo.orderNumber} status -> returned (RTO delivered)`);
         }
-
-        // If RTO delivered, set rtoReceivedAt AND update order status
-        if (trackingData.internalStatus === 'rto_delivered') {
-            updateData.rtoReceivedAt = trackingData.lastScan?.datetime
-                ? new Date(trackingData.lastScan.datetime)
-                : new Date();
-
-            // Update order status to 'returned' for RTO delivered
-            // This ensures the order appears in the RTO tab
-            if (orderInfo.status === 'shipped' || orderInfo.status === 'delivered') {
-                updateData.status = 'returned';
-                console.log(`[Tracking Sync] Updated order status to 'returned' (RTO delivered)`);
-            }
-        }
-
-        // Don't override the trackingStatus - it's already set correctly from mapToInternalStatus
-        // The internalStatus already has the correct value (rto_initiated, rto_in_transit, rto_delivered)
     }
 
-    // Handle cancelled orders
     if (trackingData.internalStatus === 'cancelled') {
-        if (orderInfo.status === 'shipped') {
-            updateData.status = 'cancelled';
-            console.log(`[Tracking Sync] Updated order status to 'cancelled' (tracking cancelled)`);
+        if (orderInfo.orderStatus === 'shipped') {
+            orderUpdateData.status = 'cancelled';
+            statusChanged = true;
+            console.log(`[Tracking Sync] Order ${orderInfo.orderNumber} status -> cancelled`);
         }
     }
 
-    // Update courier name if available
-    if (trackingData.courier) {
-        updateData.courier = trackingData.courier;
+    // Also update Order.trackingStatus as denormalized cache (for query compatibility)
+    // This maintains backward compatibility with existing queries while lines are source of truth
+    orderUpdateData.trackingStatus = trackingData.internalStatus;
+    if (trackingData.internalStatus === 'delivered') {
+        orderUpdateData.deliveredAt = lineUpdateData.deliveredAt;
+    }
+    if (lineUpdateData.rtoInitiatedAt) {
+        orderUpdateData.rtoInitiatedAt = lineUpdateData.rtoInitiatedAt;
+    }
+    if (lineUpdateData.rtoReceivedAt) {
+        orderUpdateData.rtoReceivedAt = lineUpdateData.rtoReceivedAt;
     }
 
-    // Update order
+    // Apply Order updates
     await prisma.order.update({
-        where: { id: orderId },
-        data: updateData,
+        where: { id: orderInfo.orderId },
+        data: orderUpdateData,
     });
 
-    // Also update all order lines with this AWB (line-centric tracking)
-    if (trackingData.awbNumber) {
-        const lineUpdateData = {
-            trackingStatus: trackingData.internalStatus,
-            lastTrackingUpdate: new Date(),
-        };
-
-        // Set delivery timestamp on lines
-        if (trackingData.internalStatus === 'delivered') {
-            lineUpdateData.deliveredAt = trackingData.lastScan?.datetime
-                ? new Date(trackingData.lastScan.datetime)
-                : new Date();
-        }
-
-        // Set RTO timestamps on lines
-        if (trackingData.internalStatus?.startsWith('rto_')) {
-            lineUpdateData.rtoInitiatedAt = new Date();
-        }
-        if (trackingData.internalStatus === 'rto_delivered') {
-            lineUpdateData.rtoReceivedAt = trackingData.lastScan?.datetime
-                ? new Date(trackingData.lastScan.datetime)
-                : new Date();
-        }
-
-        await prisma.orderLine.updateMany({
-            where: { awbNumber: trackingData.awbNumber },
-            data: lineUpdateData,
-        });
+    // Also recompute order status from lines
+    if (!statusChanged) {
+        await recomputeOrderStatus(orderInfo.orderId);
     }
 
-    return updateData;
+    return { lineUpdateData, orderUpdateData, statusChanged };
 }
 
 /**
@@ -235,10 +207,10 @@ async function runTrackingSync() {
 
     const result = {
         startedAt: new Date().toISOString(),
-        ordersChecked: 0,
+        awbsChecked: 0,
         updated: 0,
         delivered: 0,
-        archived: 0,  // Auto-archived prepaid orders
+        archived: 0,
         rto: 0,
         errors: 0,
         apiCalls: 0,
@@ -247,7 +219,7 @@ async function runTrackingSync() {
     };
 
     try {
-        console.log('[Tracking Sync] Starting tracking sync...');
+        console.log('[Tracking Sync] Starting tracking sync (line-centric)...');
 
         // Load iThink credentials
         await ithinkClient.loadFromDatabase();
@@ -258,28 +230,19 @@ async function runTrackingSync() {
             return result;
         }
 
-        // Get all in-transit orders
-        const orders = await getInTransitOrders();
-        result.ordersChecked = orders.length;
+        // Get AWBs needing update (line-centric query)
+        const awbMap = await getAwbsNeedingUpdate();
+        const awbNumbers = Array.from(awbMap.keys());
+        result.awbsChecked = awbNumbers.length;
 
-        if (orders.length === 0) {
-            console.log('[Tracking Sync] No in-transit orders to check');
+        if (awbNumbers.length === 0) {
+            console.log('[Tracking Sync] No AWBs need tracking updates');
             return result;
         }
 
-        console.log(`[Tracking Sync] Found ${orders.length} orders to check`);
-
-        // Create AWB to order mapping
-        const awbToOrder = new Map();
-        for (const order of orders) {
-            if (order.awbNumber) {
-                awbToOrder.set(order.awbNumber, order);
-            }
-        }
+        console.log(`[Tracking Sync] Found ${awbNumbers.length} AWBs to check`);
 
         // Process in batches
-        const awbNumbers = Array.from(awbToOrder.keys());
-
         for (let i = 0; i < awbNumbers.length; i += BATCH_SIZE) {
             const batch = awbNumbers.slice(i, i + BATCH_SIZE);
             result.apiCalls++;
@@ -290,45 +253,32 @@ async function runTrackingSync() {
                 const trackingResults = await ithinkClient.trackShipments(batch);
 
                 for (const [awb, rawData] of Object.entries(trackingResults)) {
-                    const order = awbToOrder.get(awb);
-                    if (!order) continue;
+                    const orderInfo = awbMap.get(awb);
+                    if (!orderInfo) continue;
 
-                    // PRESERVE TRACKING DATA ON API ERROR
-                    // If tracking API returns error, keep last known good data
-                    // Only mark lastTrackingUpdate to indicate sync was attempted
+                    // Skip if API returned error - preserve existing data
                     if (!rawData || rawData.message !== 'success') {
-                        // Update only lastTrackingUpdate timestamp to show we tried
-                        // This preserves existing tracking data
+                        // Just update lastTrackingUpdate on lines to show we tried
                         try {
-                            await prisma.order.update({
-                                where: { id: order.id },
-                                data: {
-                                    lastTrackingUpdate: new Date(),
-                                    // Optionally store error info for debugging
-                                    // trackingError: rawData?.message || 'Tracking data unavailable'
-                                }
+                            await prisma.orderLine.updateMany({
+                                where: { awbNumber: awb },
+                                data: { lastTrackingUpdate: new Date() }
                             });
                         } catch (e) {
-                            // Ignore update errors for failed tracking
+                            // Ignore
                         }
                         continue;
                     }
 
                     try {
-                        // Transform raw iThink API response to our format
-                        // Use correct field names from iThink API
-                        // For RTO statuses, use last_scan_details.status for more accurate mapping
-                        // (current_status can differ from last scan when system auto-updates)
+                        // Transform iThink API response
                         const lastScanStatus = rawData.last_scan_details?.status || '';
                         const currentStatus = rawData.current_status || '';
-
-                        // Use last scan status for RTO mapping if available, otherwise use current_status
                         const statusForMapping = lastScanStatus.toLowerCase().includes('rto')
                             ? lastScanStatus
                             : currentStatus;
 
                         const trackingData = {
-                            awbNumber: awb, // For line-level updates
                             courier: rawData.logistic,
                             statusCode: rawData.current_status_code,
                             internalStatus: ithinkClient.mapToInternalStatus(rawData.current_status_code, statusForMapping),
@@ -344,48 +294,38 @@ async function runTrackingSync() {
                             } : null,
                         };
 
-                        const previousStatus = order.trackingStatus;
+                        const previousStatus = orderInfo.previousTrackingStatus;
                         const newStatus = trackingData.internalStatus;
 
-                        // Always update tracking data to keep it fresh
-                        // Pass order info for auto-archive and status update logic
-                        const updateResult = await updateOrderTracking(order.id, trackingData, {
-                            paymentMethod: order.paymentMethod,
-                            status: order.status,  // Pass current order status for terminal state updates
-                        });
+                        // Update lines (source of truth)
+                        const updateResult = await updateLineTracking(awb, trackingData, orderInfo);
                         result.updated++;
 
                         // Track status transitions for logging
                         if (previousStatus !== newStatus) {
-                            if (updateResult.trackingStatus === 'delivered') {
+                            if (newStatus === 'delivered') {
                                 result.delivered++;
-                                if (updateResult.status === 'archived') {
+                                if (updateResult.orderUpdateData?.status === 'archived') {
                                     result.archived++;
-                                    console.log(`[Tracking Sync] Order ${order.orderNumber} delivered & auto-archived (prepaid)`);
-                                } else {
-                                    console.log(`[Tracking Sync] Order ${order.orderNumber} marked as delivered (COD - manual archive needed)`);
                                 }
                             }
 
-                            // Track RTO status transitions
                             if (newStatus?.startsWith('rto_')) {
                                 result.rto++;
                                 if (newStatus === 'rto_delivered') {
-                                    console.log(`[Tracking Sync] Order ${order.orderNumber} RTO received/delivered`);
+                                    console.log(`[Tracking Sync] AWB ${awb} (Order ${orderInfo.orderNumber}) RTO delivered`);
                                 } else if (newStatus === 'rto_in_transit') {
-                                    console.log(`[Tracking Sync] Order ${order.orderNumber} RTO in transit`);
-                                } else {
-                                    console.log(`[Tracking Sync] Order ${order.orderNumber} RTO initiated (${newStatus})`);
+                                    console.log(`[Tracking Sync] AWB ${awb} (Order ${orderInfo.orderNumber}) RTO in transit`);
                                 }
                             }
                         }
                     } catch (err) {
-                        console.error(`[Tracking Sync] Error updating ${order.orderNumber}:`, err.message);
+                        console.error(`[Tracking Sync] Error updating AWB ${awb}:`, err.message);
                         result.errors++;
                     }
                 }
 
-                // Rate limiting: wait 1 second between batches
+                // Rate limiting
                 if (i + BATCH_SIZE < awbNumbers.length) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
