@@ -690,7 +690,8 @@ export interface PendingSources {
     rtoWarning: number;  // Items 7-14 days - for orange badge
     repacking: number;
   };
-  items: {
+  // Items now loaded separately via /pending-queue/:source for performance
+  items?: {
     production: PendingProductionItem[];
     returns: PendingReturnItem[];
     rto: PendingRtoItem[];

@@ -21,77 +21,53 @@ const router = Router();
 
 /**
  * GET /pending-sources
- * Returns counts and items from all pending inward sources
- * Fixed: Uses Promise.all for parallel queries to improve performance
+ * Returns ONLY counts from all pending inward sources (fast endpoint for dashboard)
+ * Uses count() queries instead of loading all items
  */
 router.get('/pending-sources', authenticateToken, async (req, res) => {
     try {
-        // Execute all queries in parallel for better performance
-        const [productionPending, returnsPending, rtoPending, repackingPending] = await Promise.all([
-            // Get pending production batches (planned or in_progress)
-            req.prisma.productionBatch.findMany({
-                where: { status: { in: ['planned', 'in_progress'] } },
-                include: {
-                    sku: {
-                        include: {
-                            variation: { include: { product: true } }
-                        }
-                    }
-                }
+        // Use count queries for maximum speed - no data loading
+        const [productionCount, returnsCount, rtoData, repackingCount] = await Promise.all([
+            // Count pending production batches
+            req.prisma.productionBatch.count({
+                where: { status: { in: ['planned', 'in_progress'] } }
             }),
 
-            // Get return request lines that are in_transit or received but not yet inspected
-            req.prisma.returnRequestLine.findMany({
+            // Count return request lines pending inspection
+            req.prisma.returnRequestLine.count({
                 where: {
                     request: { status: { in: ['in_transit', 'received'] } },
-                    itemCondition: null  // Not yet inspected
-                },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } },
-                    request: true
+                    itemCondition: null
                 }
             }),
 
-            // Get RTO lines pending receipt (line-level, not order-level)
-            // Includes both rto_in_transit AND rto_delivered where lines are not yet processed
+            // For RTO, we need urgency counts so fetch minimal data
             req.prisma.orderLine.findMany({
                 where: {
                     order: {
                         trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
                         isArchived: false
                     },
-                    rtoCondition: null  // Not yet processed
+                    rtoCondition: null
                 },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } },
-                    order: {
-                        select: {
-                            id: true,
-                            orderNumber: true,
-                            customerName: true,
-                            trackingStatus: true,
-                            rtoInitiatedAt: true
-                        }
-                    }
+                select: {
+                    id: true,
+                    order: { select: { rtoInitiatedAt: true } }
                 }
             }),
 
-            // Get repacking queue items (pending or inspecting)
-            req.prisma.repackingQueueItem.findMany({
-                where: { status: { in: ['pending', 'inspecting'] } },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } },
-                    returnRequest: true
-                }
+            // Count repacking queue items
+            req.prisma.repackingQueueItem.count({
+                where: { status: { in: ['pending', 'inspecting'] } }
             })
         ]);
 
-        // Calculate RTO urgency based on days since rtoInitiatedAt
+        // Calculate RTO urgency from minimal data
         const now = Date.now();
         let rtoUrgent = 0;
         let rtoWarning = 0;
 
-        for (const line of rtoPending) {
+        for (const line of rtoData) {
             if (line.order.rtoInitiatedAt) {
                 const daysInRto = Math.floor((now - new Date(line.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24));
                 if (daysInRto > 14) rtoUrgent++;
@@ -99,71 +75,14 @@ router.get('/pending-sources', authenticateToken, async (req, res) => {
             }
         }
 
-        // Build response with counts and items
         res.json({
             counts: {
-                production: productionPending.length,
-                returns: returnsPending.length,
-                rto: rtoPending.length,
-                rtoUrgent,    // Items >14 days - for red badge
-                rtoWarning,   // Items 7-14 days - for orange badge
-                repacking: repackingPending.length
-            },
-            items: {
-                production: productionPending.map(b => ({
-                    source: 'production',
-                    batchId: b.id,
-                    batchCode: b.batchCode,
-                    skuId: b.skuId,
-                    skuCode: b.sku.skuCode,
-                    productName: b.sku.variation.product.name,
-                    colorName: b.sku.variation.colorName,
-                    size: b.sku.size,
-                    qtyPlanned: b.qtyPlanned,
-                    qtyCompleted: b.qtyCompleted || 0,
-                    qtyPending: b.qtyPlanned - (b.qtyCompleted || 0)
-                })),
-                returns: returnsPending.map(l => ({
-                    source: 'return',
-                    lineId: l.id,
-                    requestId: l.requestId,
-                    requestNumber: l.request.requestNumber,
-                    skuId: l.skuId,
-                    skuCode: l.sku.skuCode,
-                    productName: l.sku.variation.product.name,
-                    colorName: l.sku.variation.colorName,
-                    size: l.sku.size,
-                    qty: l.qty,
-                    reasonCategory: l.request.reasonCategory
-                })),
-                rto: rtoPending.map(l => ({
-                    source: 'rto',
-                    orderId: l.order.id,
-                    orderNumber: l.order.orderNumber,
-                    customerName: l.order.customerName,
-                    lineId: l.id,
-                    skuId: l.skuId,
-                    skuCode: l.sku.skuCode,
-                    productName: l.sku.variation.product.name,
-                    colorName: l.sku.variation.colorName,
-                    size: l.sku.size,
-                    qty: l.qty,
-                    trackingStatus: l.order.trackingStatus,
-                    atWarehouse: l.order.trackingStatus === 'rto_delivered',
-                    rtoInitiatedAt: l.order.rtoInitiatedAt
-                })),
-                repacking: repackingPending.map(r => ({
-                    source: 'repacking',
-                    queueItemId: r.id,
-                    skuId: r.skuId,
-                    skuCode: r.sku.skuCode,
-                    productName: r.sku.variation.product.name,
-                    colorName: r.sku.variation.colorName,
-                    size: r.sku.size,
-                    qty: r.qty,
-                    condition: r.condition,
-                    returnRequestNumber: r.returnRequest?.requestNumber
-                }))
+                production: productionCount,
+                returns: returnsCount,
+                rto: rtoData.length,
+                rtoUrgent,
+                rtoWarning,
+                repacking: repackingCount
             }
         });
     } catch (error) {
@@ -198,17 +117,71 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'SKU not found' });
         }
 
-        // Get current balance
-        const balance = await calculateInventoryBalance(req.prisma, sku.id);
+        // Run all queries in parallel for better performance
+        const [balance, repackingItem, returnLine, rtoLine, productionBatch] = await Promise.all([
+            // Get current balance
+            calculateInventoryBalance(req.prisma, sku.id),
 
-        // Check all pending sources for this SKU (priority order)
+            // 1. Repacking (highest priority - already in warehouse)
+            req.prisma.repackingQueueItem.findFirst({
+                where: { skuId: sku.id, status: { in: ['pending', 'inspecting'] } },
+                include: { returnRequest: { select: { requestNumber: true } } }
+            }),
+
+            // 2. Returns (in transit or received, not yet inspected)
+            req.prisma.returnRequestLine.findFirst({
+                where: {
+                    skuId: sku.id,
+                    itemCondition: null,
+                    request: { status: { in: ['in_transit', 'received'] } }
+                },
+                include: { request: { select: { id: true, requestNumber: true, reasonCategory: true } } }
+            }),
+
+            // 3. RTO orders (includes both rto_in_transit and rto_delivered)
+            req.prisma.orderLine.findFirst({
+                where: {
+                    skuId: sku.id,
+                    rtoCondition: null,
+                    order: {
+                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                        isArchived: false
+                    }
+                },
+                include: {
+                    order: {
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerName: true,
+                            trackingStatus: true,
+                            rtoInitiatedAt: true,
+                            // Include order line count for progress (aggregated)
+                            _count: { select: { orderLines: true } }
+                        }
+                    }
+                }
+            }),
+
+            // 4. Production batches (planned or in_progress)
+            req.prisma.productionBatch.findFirst({
+                where: {
+                    skuId: sku.id,
+                    status: { in: ['planned', 'in_progress'] }
+                },
+                select: {
+                    id: true,
+                    batchCode: true,
+                    batchDate: true,
+                    qtyPlanned: true,
+                    qtyCompleted: true
+                }
+            })
+        ]);
+
+        // Build matches array from parallel query results
         const matches = [];
 
-        // 1. Repacking (highest priority - already in warehouse)
-        const repackingItem = await req.prisma.repackingQueueItem.findFirst({
-            where: { skuId: sku.id, status: { in: ['pending', 'inspecting'] } },
-            include: { returnRequest: true }
-        });
         if (repackingItem) {
             matches.push({
                 source: 'repacking',
@@ -223,15 +196,6 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
             });
         }
 
-        // 2. Returns (in transit or received, not yet inspected)
-        const returnLine = await req.prisma.returnRequestLine.findFirst({
-            where: {
-                skuId: sku.id,
-                itemCondition: null,
-                request: { status: { in: ['in_transit', 'received'] } }
-            },
-            include: { request: true }
-        });
         if (returnLine) {
             matches.push({
                 source: 'return',
@@ -242,42 +206,17 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
                     requestNumber: returnLine.request.requestNumber,
                     qty: returnLine.qty,
                     reasonCategory: returnLine.request.reasonCategory,
-                    customerName: returnLine.request.customer?.firstName || null
+                    customerName: null
                 }
             });
         }
 
-        // 3. RTO orders (includes both rto_in_transit and rto_delivered)
-        const rtoLine = await req.prisma.orderLine.findFirst({
-            where: {
-                skuId: sku.id,
-                rtoCondition: null,  // Not yet processed
-                order: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    isArchived: false
-                }
-            },
-            include: {
-                order: {
-                    select: {
-                        id: true,
-                        orderNumber: true,
-                        customerName: true,
-                        trackingStatus: true,
-                        rtoInitiatedAt: true
-                    }
-                }
-            }
-        });
-
         if (rtoLine) {
-            // Get all lines for this order to show progress
-            const allOrderLines = await req.prisma.orderLine.findMany({
-                where: { orderId: rtoLine.orderId },
-                include: {
-                    sku: { select: { skuCode: true } }
-                }
+            // Get processed line count for progress (single query instead of fetching all lines)
+            const processedCount = await req.prisma.orderLine.count({
+                where: { orderId: rtoLine.orderId, rtoCondition: { not: null } }
             });
+            const totalLines = rtoLine.order._count.orderLines;
 
             matches.push({
                 source: 'rto',
@@ -291,25 +230,16 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
                     atWarehouse: rtoLine.order.trackingStatus === 'rto_delivered',
                     rtoInitiatedAt: rtoLine.order.rtoInitiatedAt,
                     qty: rtoLine.qty,
-                    // Include other lines for progress display
-                    orderLines: allOrderLines.map(l => ({
-                        lineId: l.id,
-                        skuCode: l.sku.skuCode,
-                        qty: l.qty,
-                        rtoCondition: l.rtoCondition,
-                        isCurrentLine: l.id === rtoLine.id
-                    }))
+                    // Progress as counts instead of full line array
+                    progress: {
+                        total: totalLines,
+                        processed: processedCount,
+                        remaining: totalLines - processedCount
+                    }
                 }
             });
         }
 
-        // 4. Production batches (planned or in_progress)
-        const productionBatch = await req.prisma.productionBatch.findFirst({
-            where: {
-                skuId: sku.id,
-                status: { in: ['planned', 'in_progress'] }
-            }
-        });
         if (productionBatch) {
             matches.push({
                 source: 'production',
@@ -349,6 +279,7 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
 /**
  * GET /pending-queue/:source
  * Returns detailed pending items for a specific source with search and pagination support
+ * Optimized: Uses database-level pagination when no search, minimal field selection
  */
 router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
     try {
@@ -356,52 +287,85 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
         const { search, limit = 50, offset = 0 } = req.query;
         const take = Number(limit);
         const skip = Number(offset);
+        const searchLower = search?.toLowerCase();
+
+        // Optimized SKU select - only fetch needed fields
+        const skuSelect = {
+            id: true,
+            skuCode: true,
+            size: true,
+            variation: {
+                select: {
+                    colorName: true,
+                    imageUrl: true,
+                    product: { select: { name: true, imageUrl: true } }
+                }
+            }
+        };
 
         if (source === 'rto') {
-            // Get RTO lines pending receipt
-            const rtoPending = await req.prisma.orderLine.findMany({
-                where: {
-                    order: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                        isArchived: false
-                    },
-                    rtoCondition: null  // Not yet processed
+            const baseWhere = {
+                order: {
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    isArchived: false
                 },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } },
-                    order: {
-                        select: {
-                            id: true,
-                            orderNumber: true,
-                            customerName: true,
-                            trackingStatus: true,
-                            rtoInitiatedAt: true
-                        }
-                    }
-                },
-                orderBy: [
-                    { order: { rtoInitiatedAt: 'asc' } }  // Oldest first (most urgent)
-                ]
-            });
+                rtoCondition: null
+            };
 
-            let items = rtoPending.map(l => {
+            // Build search WHERE clause for database-level filtering
+            const searchWhere = searchLower ? {
+                OR: [
+                    { sku: { skuCode: { contains: searchLower, mode: 'insensitive' } } },
+                    { order: { orderNumber: { contains: searchLower, mode: 'insensitive' } } },
+                    { order: { customerName: { contains: searchLower, mode: 'insensitive' } } },
+                    { sku: { variation: { product: { name: { contains: searchLower, mode: 'insensitive' } } } } }
+                ]
+            } : {};
+
+            const where = { ...baseWhere, ...searchWhere };
+
+            // Run count and data queries in parallel
+            const [totalCount, rtoPending] = await Promise.all([
+                req.prisma.orderLine.count({ where }),
+                req.prisma.orderLine.findMany({
+                    where,
+                    select: {
+                        id: true,
+                        skuId: true,
+                        qty: true,
+                        sku: { select: skuSelect },
+                        order: {
+                            select: {
+                                id: true,
+                                orderNumber: true,
+                                customerName: true,
+                                trackingStatus: true,
+                                rtoInitiatedAt: true
+                            }
+                        }
+                    },
+                    orderBy: [{ order: { rtoInitiatedAt: 'asc' } }],
+                    skip,
+                    take
+                })
+            ]);
+
+            const items = rtoPending.map(l => {
                 const daysInRto = l.order.rtoInitiatedAt
                     ? Math.floor((Date.now() - new Date(l.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24))
                     : 0;
 
                 return {
-                    // Normalized fields for QueuePanel
-                    id: l.id,  // Use lineId as the unique ID
+                    id: l.id,
                     skuId: l.skuId,
                     skuCode: l.sku.skuCode,
                     productName: l.sku.variation.product.name,
                     colorName: l.sku.variation.colorName,
                     size: l.sku.size,
                     qty: l.qty,
-                    imageUrl: l.sku.variation.product.imageUrl,
+                    imageUrl: l.sku.variation.imageUrl || l.sku.variation.product.imageUrl,
                     contextLabel: 'Order',
                     contextValue: l.order.orderNumber,
-                    // RTO-specific fields
                     source: 'rto',
                     lineId: l.id,
                     orderId: l.order.id,
@@ -415,55 +379,56 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 };
             });
 
-            // Apply search filter
-            if (search) {
-                const searchLower = search.toLowerCase();
-                items = items.filter(item =>
-                    item.skuCode.toLowerCase().includes(searchLower) ||
-                    item.orderNumber.toLowerCase().includes(searchLower) ||
-                    item.customerName.toLowerCase().includes(searchLower) ||
-                    item.productName.toLowerCase().includes(searchLower)
-                );
-            }
-
-            // Apply pagination
-            const totalCount = items.length;
-            const paginatedItems = items.slice(skip, skip + take);
-
             res.json({
                 source: 'rto',
-                items: paginatedItems,
+                items,
                 total: totalCount,
-                pagination: {
-                    total: totalCount,
-                    limit: take,
-                    offset: skip,
-                    hasMore: skip + paginatedItems.length < totalCount
-                }
-            });
-        } else if (source === 'production') {
-            // Production batches (planned or in_progress)
-            const productionPending = await req.prisma.productionBatch.findMany({
-                where: { status: { in: ['planned', 'in_progress'] } },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } }
-                },
-                orderBy: { batchDate: 'asc' }
+                pagination: { total: totalCount, limit: take, offset: skip, hasMore: skip + items.length < totalCount }
             });
 
-            let items = productionPending.map(b => ({
-                // Normalized fields for QueuePanel
+        } else if (source === 'production') {
+            const baseWhere = { status: { in: ['planned', 'in_progress'] } };
+
+            const searchWhere = searchLower ? {
+                OR: [
+                    { sku: { skuCode: { contains: searchLower, mode: 'insensitive' } } },
+                    { batchCode: { contains: searchLower, mode: 'insensitive' } },
+                    { sku: { variation: { product: { name: { contains: searchLower, mode: 'insensitive' } } } } }
+                ]
+            } : {};
+
+            const where = { ...baseWhere, ...searchWhere };
+
+            const [totalCount, productionPending] = await Promise.all([
+                req.prisma.productionBatch.count({ where }),
+                req.prisma.productionBatch.findMany({
+                    where,
+                    select: {
+                        id: true,
+                        skuId: true,
+                        batchCode: true,
+                        batchDate: true,
+                        qtyPlanned: true,
+                        qtyCompleted: true,
+                        sku: { select: skuSelect }
+                    },
+                    orderBy: { batchDate: 'asc' },
+                    skip,
+                    take
+                })
+            ]);
+
+            const items = productionPending.map(b => ({
                 id: b.id,
                 skuId: b.skuId,
                 skuCode: b.sku.skuCode,
                 productName: b.sku.variation.product.name,
                 colorName: b.sku.variation.colorName,
                 size: b.sku.size,
-                qty: b.qtyPlanned - (b.qtyCompleted || 0),  // Pending qty
+                qty: b.qtyPlanned - (b.qtyCompleted || 0),
                 imageUrl: b.sku.variation.imageUrl || b.sku.variation.product.imageUrl,
                 contextLabel: 'Batch',
                 contextValue: b.batchCode || `Batch ${b.id.slice(0, 8)}`,
-                // Production-specific fields
                 source: 'production',
                 batchId: b.id,
                 batchCode: b.batchCode,
@@ -473,45 +438,53 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 batchDate: b.batchDate
             }));
 
-            if (search) {
-                const searchLower = search.toLowerCase();
-                items = items.filter(item =>
-                    item.skuCode.toLowerCase().includes(searchLower) ||
-                    (item.batchCode && item.batchCode.toLowerCase().includes(searchLower)) ||
-                    item.productName.toLowerCase().includes(searchLower)
-                );
-            }
-
-            // Apply pagination
-            const totalCount = items.length;
-            const paginatedItems = items.slice(skip, skip + take);
-
             res.json({
                 source: 'production',
-                items: paginatedItems,
+                items,
                 total: totalCount,
-                pagination: {
-                    total: totalCount,
-                    limit: take,
-                    offset: skip,
-                    hasMore: skip + paginatedItems.length < totalCount
-                }
-            });
-        } else if (source === 'returns') {
-            // Return request lines
-            const returnsPending = await req.prisma.returnRequestLine.findMany({
-                where: {
-                    request: { status: { in: ['in_transit', 'received'] } },
-                    itemCondition: null
-                },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } },
-                    request: { include: { customer: true } }
-                }
+                pagination: { total: totalCount, limit: take, offset: skip, hasMore: skip + items.length < totalCount }
             });
 
-            let items = returnsPending.map(l => ({
-                // Normalized fields for QueuePanel
+        } else if (source === 'returns') {
+            const baseWhere = {
+                request: { status: { in: ['in_transit', 'received'] } },
+                itemCondition: null
+            };
+
+            const searchWhere = searchLower ? {
+                OR: [
+                    { sku: { skuCode: { contains: searchLower, mode: 'insensitive' } } },
+                    { request: { requestNumber: { contains: searchLower, mode: 'insensitive' } } },
+                    { sku: { variation: { product: { name: { contains: searchLower, mode: 'insensitive' } } } } }
+                ]
+            } : {};
+
+            const where = { ...baseWhere, ...searchWhere };
+
+            const [totalCount, returnsPending] = await Promise.all([
+                req.prisma.returnRequestLine.count({ where }),
+                req.prisma.returnRequestLine.findMany({
+                    where,
+                    select: {
+                        id: true,
+                        skuId: true,
+                        qty: true,
+                        requestId: true,
+                        sku: { select: skuSelect },
+                        request: {
+                            select: {
+                                requestNumber: true,
+                                reasonCategory: true,
+                                customer: { select: { firstName: true } }
+                            }
+                        }
+                    },
+                    skip,
+                    take
+                })
+            ]);
+
+            const items = returnsPending.map(l => ({
                 id: l.id,
                 skuId: l.skuId,
                 skuCode: l.sku.skuCode,
@@ -519,10 +492,9 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 colorName: l.sku.variation.colorName,
                 size: l.sku.size,
                 qty: l.qty,
-                imageUrl: l.sku.variation.product.imageUrl,
+                imageUrl: l.sku.variation.imageUrl || l.sku.variation.product.imageUrl,
                 contextLabel: 'Ticket',
                 contextValue: l.request.requestNumber,
-                // Return-specific fields
                 source: 'return',
                 lineId: l.id,
                 requestId: l.requestId,
@@ -531,42 +503,44 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 customerName: l.request.customer?.firstName || 'Unknown'
             }));
 
-            if (search) {
-                const searchLower = search.toLowerCase();
-                items = items.filter(item =>
-                    item.skuCode.toLowerCase().includes(searchLower) ||
-                    item.requestNumber.toLowerCase().includes(searchLower) ||
-                    item.productName.toLowerCase().includes(searchLower)
-                );
-            }
-
-            // Apply pagination
-            const totalCount = items.length;
-            const paginatedItems = items.slice(skip, skip + take);
-
             res.json({
                 source: 'returns',
-                items: paginatedItems,
+                items,
                 total: totalCount,
-                pagination: {
-                    total: totalCount,
-                    limit: take,
-                    offset: skip,
-                    hasMore: skip + paginatedItems.length < totalCount
-                }
-            });
-        } else if (source === 'repacking') {
-            // Repacking queue items
-            const repackingPending = await req.prisma.repackingQueueItem.findMany({
-                where: { status: { in: ['pending', 'inspecting'] } },
-                include: {
-                    sku: { include: { variation: { include: { product: true } } } },
-                    returnRequest: true
-                }
+                pagination: { total: totalCount, limit: take, offset: skip, hasMore: skip + items.length < totalCount }
             });
 
-            let items = repackingPending.map(r => ({
-                // Normalized fields for QueuePanel
+        } else if (source === 'repacking') {
+            const baseWhere = { status: { in: ['pending', 'inspecting'] } };
+
+            const searchWhere = searchLower ? {
+                OR: [
+                    { sku: { skuCode: { contains: searchLower, mode: 'insensitive' } } },
+                    { sku: { variation: { product: { name: { contains: searchLower, mode: 'insensitive' } } } } },
+                    { returnRequest: { requestNumber: { contains: searchLower, mode: 'insensitive' } } }
+                ]
+            } : {};
+
+            const where = { ...baseWhere, ...searchWhere };
+
+            const [totalCount, repackingPending] = await Promise.all([
+                req.prisma.repackingQueueItem.count({ where }),
+                req.prisma.repackingQueueItem.findMany({
+                    where,
+                    select: {
+                        id: true,
+                        skuId: true,
+                        qty: true,
+                        condition: true,
+                        sku: { select: skuSelect },
+                        returnRequest: { select: { requestNumber: true } }
+                    },
+                    skip,
+                    take
+                })
+            ]);
+
+            const items = repackingPending.map(r => ({
                 id: r.id,
                 skuId: r.skuId,
                 skuCode: r.sku.skuCode,
@@ -574,40 +548,22 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 colorName: r.sku.variation.colorName,
                 size: r.sku.size,
                 qty: r.qty,
-                imageUrl: r.sku.variation.product.imageUrl,
+                imageUrl: r.sku.variation.imageUrl || r.sku.variation.product.imageUrl,
                 contextLabel: 'Return',
                 contextValue: r.returnRequest?.requestNumber || 'N/A',
-                // Repacking-specific fields
                 source: 'repacking',
                 queueItemId: r.id,
                 condition: r.condition,
                 returnRequestNumber: r.returnRequest?.requestNumber
             }));
 
-            if (search) {
-                const searchLower = search.toLowerCase();
-                items = items.filter(item =>
-                    item.skuCode.toLowerCase().includes(searchLower) ||
-                    item.productName.toLowerCase().includes(searchLower) ||
-                    (item.returnRequestNumber && item.returnRequestNumber.toLowerCase().includes(searchLower))
-                );
-            }
-
-            // Apply pagination
-            const totalCount = items.length;
-            const paginatedItems = items.slice(skip, skip + take);
-
             res.json({
                 source: 'repacking',
-                items: paginatedItems,
+                items,
                 total: totalCount,
-                pagination: {
-                    total: totalCount,
-                    limit: take,
-                    offset: skip,
-                    hasMore: skip + paginatedItems.length < totalCount
-                }
+                pagination: { total: totalCount, limit: take, offset: skip, hasMore: skip + items.length < totalCount }
             });
+
         } else {
             res.status(400).json({ error: 'Invalid source. Must be one of: rto, production, returns, repacking' });
         }
@@ -838,6 +794,7 @@ router.post('/rto-inward-line', authenticateToken, async (req, res) => {
 /**
  * GET /recent-inwards
  * Returns recent inward transactions for the activity feed
+ * Optimized: Uses select instead of include for minimal payload
  */
 router.get('/recent-inwards', authenticateToken, async (req, res) => {
     try {
@@ -846,17 +803,30 @@ router.get('/recent-inwards', authenticateToken, async (req, res) => {
         const transactions = await req.prisma.inventoryTransaction.findMany({
             where: {
                 txnType: 'inward',
-                createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Last 24 hours
+                createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
             },
             orderBy: { createdAt: 'desc' },
             take: Number(limit),
-            include: {
+            select: {
+                id: true,
+                skuId: true,
+                qty: true,
+                reason: true,
+                notes: true,
+                createdAt: true,
                 sku: {
-                    include: {
-                        variation: { include: { product: true } }
+                    select: {
+                        skuCode: true,
+                        size: true,
+                        variation: {
+                            select: {
+                                colorName: true,
+                                product: { select: { name: true } }
+                            }
+                        }
                     }
                 },
-                createdBy: { select: { id: true, name: true } }
+                createdBy: { select: { name: true } }
             }
         });
 
@@ -872,7 +842,6 @@ router.get('/recent-inwards', authenticateToken, async (req, res) => {
             notes: t.notes,
             createdAt: t.createdAt,
             createdBy: t.createdBy?.name || 'System',
-            // Map reason to source for display
             source: mapReasonToSource(t.reason)
         })));
     } catch (error) {

@@ -549,7 +549,7 @@ export default function InwardHub() {
     // MUTATIONS
     // ============================================
 
-    // Production inward mutation
+    // Production inward mutation with optimistic updates
     const productionInwardMutation = useMutation({
         mutationFn: async () => {
             if (!scanResult?.sku) throw new Error('No SKU selected');
@@ -559,14 +559,67 @@ export default function InwardHub() {
                 reason: 'production',
             });
         },
+        onMutate: async () => {
+            // Cancel outgoing refetches
+            await queryClient.cancelQueries({ queryKey: ['recent-inwards'] });
+            await queryClient.cancelQueries({ queryKey: ['pending-sources'] });
+
+            // Snapshot previous values
+            const previousRecent = queryClient.getQueryData<RecentInward[]>(['recent-inwards']);
+            const previousSources = queryClient.getQueryData<PendingSources>(['pending-sources']);
+
+            // Optimistically add to recent inwards
+            if (scanResult?.sku) {
+                const optimisticInward: RecentInward = {
+                    id: `temp-${Date.now()}`,
+                    skuId: scanResult.sku.id,
+                    skuCode: scanResult.sku.skuCode,
+                    productName: scanResult.sku.productName,
+                    colorName: scanResult.sku.colorName,
+                    size: scanResult.sku.size,
+                    qty: quantity,
+                    reason: 'production',
+                    source: 'production',
+                    notes: null,
+                    createdAt: new Date().toISOString(),
+                    createdBy: 'You',
+                };
+                queryClient.setQueryData<RecentInward[]>(['recent-inwards'], (old) =>
+                    old ? [optimisticInward, ...old] : [optimisticInward]
+                );
+            }
+
+            // Optimistically decrement production count
+            if (previousSources) {
+                queryClient.setQueryData<PendingSources>(['pending-sources'], {
+                    ...previousSources,
+                    counts: {
+                        ...previousSources.counts,
+                        production: Math.max(0, previousSources.counts.production - 1),
+                    },
+                });
+            }
+
+            return { previousRecent, previousSources };
+        },
+        onError: (error: any, _, context) => {
+            // Revert on error
+            if (context?.previousRecent) {
+                queryClient.setQueryData(['recent-inwards'], context.previousRecent);
+            }
+            if (context?.previousSources) {
+                queryClient.setQueryData(['pending-sources'], context.previousSources);
+            }
+            setScanError(error.response?.data?.error || 'Failed to complete inward');
+        },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
-            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
             setSuccessMessage(`+${quantity} ${scanResult?.sku.skuCode} added from production`);
             clearScan();
         },
-        onError: (error: any) => {
-            setScanError(error.response?.data?.error || 'Failed to complete inward');
+        onSettled: () => {
+            // Sync with server
+            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
         },
     });
 
@@ -657,17 +710,38 @@ export default function InwardHub() {
         },
     });
 
-    // Undo transaction mutation
+    // Undo transaction mutation with optimistic updates
     const undoMutation = useMutation({
         mutationFn: async (id: string) => {
             return inventoryApi.undoTransaction(id);
         },
+        onMutate: async (id: string) => {
+            // Cancel outgoing refetches
+            await queryClient.cancelQueries({ queryKey: ['recent-inwards'] });
+
+            // Snapshot previous value
+            const previousRecent = queryClient.getQueryData<RecentInward[]>(['recent-inwards']);
+
+            // Optimistically remove from recent inwards
+            queryClient.setQueryData<RecentInward[]>(['recent-inwards'], (old) =>
+                old ? old.filter(item => item.id !== id) : []
+            );
+
+            return { previousRecent };
+        },
+        onError: (error: any, _, context) => {
+            // Revert on error
+            if (context?.previousRecent) {
+                queryClient.setQueryData(['recent-inwards'], context.previousRecent);
+            }
+            setScanError(error.response?.data?.error || 'Failed to undo transaction');
+        },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
             setSuccessMessage('Transaction undone');
         },
-        onError: (error: any) => {
-            setScanError(error.response?.data?.error || 'Failed to undo transaction');
+        onSettled: () => {
+            // Sync with server
+            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
         },
     });
 
