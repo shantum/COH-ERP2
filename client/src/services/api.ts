@@ -205,6 +205,20 @@ export const ordersApi = {
     archiveDeliveredPrepaid: () => api.post('/orders/archive-delivered-prepaid'),
 };
 
+// Catalog (combined products + inventory view)
+export const catalogApi = {
+    getSkuInventory: (params?: {
+        gender?: string;
+        category?: string;
+        productId?: string;
+        status?: string;
+        search?: string;
+        limit?: number;
+        offset?: number;
+    }) => api.get('/catalog/sku-inventory', { params }),
+    getFilters: () => api.get('/catalog/filters'),
+};
+
 // Customers
 export const customersApi = {
     getAll: (params?: Record<string, string>) => api.get('/customers', { params }),

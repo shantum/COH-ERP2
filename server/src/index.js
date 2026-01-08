@@ -37,6 +37,7 @@ import webhookRoutes from './routes/webhooks.js';
 import repackingRoutes from './routes/repacking.js';
 import trackingRoutes from './routes/tracking.js';
 import remittanceRoutes from './routes/remittance.js';
+import catalogRoutes from './routes/catalog.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
@@ -125,6 +126,7 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/repacking', repackingRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/remittance', remittanceRoutes);
+app.use('/api/catalog', catalogRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -10,6 +10,7 @@ import './index.css';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Products = lazy(() => import('./pages/Products'));
 const Inventory = lazy(() => import('./pages/Inventory'));
+const Catalog = lazy(() => import('./pages/Catalog'));
 const Fabrics = lazy(() => import('./pages/Fabrics'));
 const FabricReconciliation = lazy(() => import('./pages/FabricReconciliation'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
@@ -73,6 +74,7 @@ function App() {
                 <Route index element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Dashboard /></ErrorBoundary></Suspense>} />
                 <Route path="products" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Products /></ErrorBoundary></Suspense>} />
                 <Route path="inventory" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Inventory /></ErrorBoundary></Suspense>} />
+                <Route path="catalog" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Catalog /></ErrorBoundary></Suspense>} />
                 <Route path="fabrics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Fabrics /></ErrorBoundary></Suspense>} />
                 <Route path="fabric-reconciliation" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><FabricReconciliation /></ErrorBoundary></Suspense>} />
                 <Route path="inventory-count" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><InventoryReconciliation /></ErrorBoundary></Suspense>} />
