@@ -180,16 +180,25 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     const customerId = dbCustomer?.id || null;
 
     // Determine order status
-    // NOTE: Shopify fulfillment is informational only. ERP manages shipped/delivered statuses.
-    // Preserve ERP-managed statuses (shipped, delivered) - only allow cancelled to override
     let status = shopifyClient.mapOrderStatus(shopifyOrder);
+
+    // Check auto-ship setting (default: true = auto-ship enabled)
+    // When enabled, open orders automatically ship when Shopify marks them fulfilled
+    // When disabled (strict ERP mode), Shopify fulfillment is ignored
+    const autoShipSetting = await prisma.systemSetting.findUnique({ where: { key: 'auto_ship_fulfilled' } });
+    const autoShipEnabled = autoShipSetting?.value !== 'false';
 
     if (existingOrder) {
         const erpManagedStatuses = ['shipped', 'delivered'];
+
         if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
-            // Preserve ERP status unless Shopify cancels the order
+            // Preserve ERP-managed statuses (shipped, delivered)
             status = existingOrder.status;
+        } else if (!autoShipEnabled && existingOrder.status === 'open' && status === 'shipped') {
+            // Strict ERP mode: ignore Shopify fulfillment for open orders
+            status = 'open';
         }
+        // When auto-ship enabled: open + fulfilled → stays 'shipped' (from mapOrderStatus)
     }
 
     // Determine payment method (COD vs Prepaid)
