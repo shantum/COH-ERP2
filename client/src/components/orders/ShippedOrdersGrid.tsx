@@ -3,24 +3,19 @@
  * AG Grid implementation for shipped orders with row grouping by ship date
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Undo2, CheckCircle, AlertTriangle, Package, ExternalLink, Radio, Archive, Columns, RotateCcw } from 'lucide-react';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import { Undo2, ExternalLink, Radio, Archive } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
+import { compactTheme, formatDate, formatRelativeTime, getTrackingUrl } from '../../utils/agGridHelpers';
+import { useGridState, getColumnOrderFromApi } from '../../hooks/useGridState';
+import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
+import { TrackingStatusBadge } from '../common/grid/TrackingStatusBadge';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
-
-// Custom compact theme
-const compactTheme = themeQuartz.withParams({
-    spacing: 4,
-    fontSize: 12,
-    headerFontSize: 12,
-    rowHeight: 32,
-    headerHeight: 36,
-});
 
 // All column IDs for visibility/order persistence
 const ALL_COLUMN_IDS = [
@@ -43,65 +38,6 @@ const DEFAULT_HEADERS: Record<string, string> = {
     lastScanStatus: 'Last Status', actions: 'Actions'
 };
 
-// Column visibility dropdown component
-const ColumnVisibilityDropdown = ({
-    visibleColumns,
-    onToggleColumn,
-    onResetAll,
-}: {
-    visibleColumns: Set<string>;
-    onToggleColumn: (colId: string) => void;
-    onResetAll: () => void;
-}) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        if (isOpen) document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen]);
-
-    return (
-        <div ref={dropdownRef} className="relative">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
-            >
-                <Columns size={12} />
-                Columns
-            </button>
-            {isOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-                    <div className="p-2 border-b">
-                        <button onClick={onResetAll} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
-                            <RotateCcw size={10} />
-                            Reset All
-                        </button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map((colId) => (
-                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                                <input
-                                    type="checkbox"
-                                    checked={visibleColumns.has(colId)}
-                                    onChange={() => onToggleColumn(colId)}
-                                    className="w-3 h-3"
-                                />
-                                {DEFAULT_HEADERS[colId] || colId}
-                            </label>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-
 interface ShippedOrdersGridProps {
     orders: any[];
     onUnship: (orderId: string) => void;
@@ -118,92 +54,15 @@ interface ShippedOrdersGridProps {
     shopDomain?: string;
 }
 
-// Helper to format dates
-function formatDate(date: string | null | undefined): string {
+// Helper to format date with time
+function formatDateTime(date: string | null | undefined): string {
     if (!date) return '-';
-    return new Date(date).toLocaleDateString('en-IN', {
+    return new Date(date).toLocaleString('en-IN', {
         day: 'numeric',
         month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
     });
-}
-
-// Helper to format relative time (XX ago)
-function formatRelativeTime(date: string | Date | null | undefined): string {
-    if (!date) return '-';
-    const d = typeof date === 'string' ? new Date(date) : date;
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-    return `${Math.floor(diffDays / 30)}mo ago`;
-}
-
-// Generate tracking URL based on courier
-function getTrackingUrl(awb: string, courier?: string): string | null {
-    if (!awb) return null;
-    const courierLower = (courier || '').toLowerCase();
-
-    // Courier-specific tracking URLs
-    if (courierLower.includes('delhivery')) {
-        return `https://www.delhivery.com/track/package/${awb}`;
-    }
-    if (courierLower.includes('bluedart')) {
-        return `https://www.bluedart.com/tracking/${awb}`;
-    }
-    if (courierLower.includes('ekart')) {
-        return `https://ekartlogistics.com/track/${awb}`;
-    }
-    if (courierLower.includes('xpressbees')) {
-        return `https://www.xpressbees.com/shipment/tracking?awb=${awb}`;
-    }
-    if (courierLower.includes('dtdc')) {
-        return `https://www.dtdc.in/tracking.asp?strCnno=${awb}`;
-    }
-    if (courierLower.includes('ecom')) {
-        return `https://www.ecomexpress.in/tracking/?awb=${awb}`;
-    }
-    // Default to iThink Logistics tracking
-    return `https://www.ithinklogistics.com/tracking/${awb}`;
-}
-
-// Tracking status badge component
-function TrackingStatusBadge({ status, daysInTransit, ofdCount }: { status: string; daysInTransit?: number; ofdCount?: number }) {
-    const configs: Record<string, { bg: string; text: string; label: string; icon: any }> = {
-        in_transit: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Transit', icon: Package },
-        manifested: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Manifested', icon: Package },
-        picked_up: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Picked Up', icon: Package },
-        reached_destination: { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'At Hub', icon: Package },
-        out_for_delivery: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Out for Delivery', icon: Package },
-        undelivered: { bg: 'bg-red-100', text: 'text-red-700', label: 'NDR', icon: AlertTriangle },
-        delivered: { bg: 'bg-green-100', text: 'text-green-700', label: 'Delivered', icon: CheckCircle },
-        delivery_delayed: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Delayed', icon: AlertTriangle },
-        rto_pending: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO Pending', icon: AlertTriangle },
-        rto_initiated: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO', icon: AlertTriangle },
-        rto_in_transit: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'RTO In Transit', icon: Package },
-        rto_delivered: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received', icon: CheckCircle },
-        rto_received: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received', icon: CheckCircle },
-        cancelled: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled', icon: AlertTriangle },
-    };
-    const config = configs[status] || configs.in_transit;
-    const Icon = config.icon;
-
-    // Show OFD count for NDR/undelivered
-    const showOfd = (status === 'undelivered' || status === 'out_for_delivery') && ofdCount && ofdCount > 0;
-
-    return (
-        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded ${config.bg} ${config.text}`}>
-            <Icon size={12} />
-            {config.label}
-            {showOfd ? ` (${ofdCount})` : (status === 'in_transit' && daysInTransit ? ` (${daysInTransit}d)` : '')}
-        </span>
-    );
 }
 
 export function ShippedOrdersGrid({
@@ -224,55 +83,25 @@ export function ShippedOrdersGrid({
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
 
-    // Column visibility state (persisted to localStorage)
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem('shippedGridVisibleColumns');
-        if (saved) {
-            try { return new Set(JSON.parse(saved)); } catch { return new Set(ALL_COLUMN_IDS); }
-        }
-        return new Set(ALL_COLUMN_IDS);
+    // Use shared grid state hook
+    const {
+        visibleColumns,
+        columnOrder,
+        handleToggleColumn,
+        handleResetAll,
+        handleColumnMoved,
+    } = useGridState({
+        gridId: 'shippedGrid',
+        allColumnIds: ALL_COLUMN_IDS,
     });
 
-    // Column order state (persisted to localStorage)
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem('shippedGridColumnOrder');
-        if (saved) {
-            try { return JSON.parse(saved); } catch { return ALL_COLUMN_IDS; }
-        }
-        return ALL_COLUMN_IDS;
-    });
-
-    // Save to localStorage
-    useEffect(() => {
-        localStorage.setItem('shippedGridVisibleColumns', JSON.stringify([...visibleColumns]));
-    }, [visibleColumns]);
-
-    useEffect(() => {
-        localStorage.setItem('shippedGridColumnOrder', JSON.stringify(columnOrder));
-    }, [columnOrder]);
-
-    // Column handlers
-    const handleToggleColumn = useCallback((colId: string) => {
-        setVisibleColumns(prev => {
-            const next = new Set(prev);
-            if (next.has(colId)) next.delete(colId); else next.add(colId);
-            return next;
-        });
-    }, []);
-
-    const handleColumnMoved = useCallback(() => {
+    // Handle column moved event from AG-Grid
+    const onColumnMoved = useCallback(() => {
         const api = gridRef.current?.api;
         if (!api) return;
-        const newOrder = api.getAllDisplayedColumns()
-            .map(col => col.getColId())
-            .filter((id): id is string => id !== undefined);
-        if (newOrder.length > 0) setColumnOrder(newOrder);
-    }, []);
-
-    const handleResetAll = useCallback(() => {
-        setVisibleColumns(new Set(ALL_COLUMN_IDS));
-        setColumnOrder([...ALL_COLUMN_IDS]);
-    }, []);
+        const newOrder = getColumnOrderFromApi(api);
+        handleColumnMoved(newOrder);
+    }, [handleColumnMoved]);
 
     // Transform orders for grid with grouping field and Shopify cache data
     const rowData = useMemo(() => {
@@ -313,9 +142,7 @@ export function ShippedOrdersGrid({
     }, [orders]);
 
     const columnDefs = useMemo<ColDef[]>(() => [
-        // ═══════════════════════════════════════════════════════════════════
         // ERP DATA - Internal order and customer information
-        // ═══════════════════════════════════════════════════════════════════
         {
             headerName: 'ERP',
             headerClass: 'bg-slate-100 font-semibold text-slate-700',
@@ -403,20 +230,21 @@ export function ShippedOrdersGrid({
                 {
                     field: 'shippedAt',
                     headerName: 'Shipped',
-                    width: 70,
+                    width: 100,
+                    sort: 'desc' as const,
                     cellRenderer: (params: ICellRendererParams) => (
-                        <span className="text-xs text-gray-600">{formatDate(params.value)}</span>
+                        <span className="text-xs text-gray-600">{formatDateTime(params.value)}</span>
                     ),
                 },
                 {
                     field: 'deliveredAt',
                     headerName: 'Delivered',
-                    width: 70,
+                    width: 100,
                     cellRenderer: (params: ICellRendererParams) => {
                         const date = params.value || params.data?.shopifyDeliveredAt;
                         if (!date) return <span className="text-gray-400 text-xs">-</span>;
                         return (
-                            <span className="text-xs text-green-600">{formatDate(date)}</span>
+                            <span className="text-xs text-green-600">{formatDateTime(date)}</span>
                         );
                     },
                 },
@@ -441,9 +269,7 @@ export function ShippedOrdersGrid({
             ],
         },
 
-        // ═══════════════════════════════════════════════════════════════════
         // SHOPIFY DATA - Fulfillment info from Shopify
-        // ═══════════════════════════════════════════════════════════════════
         {
             headerName: 'Shopify',
             headerClass: 'bg-green-50 font-semibold text-green-700',
@@ -584,9 +410,7 @@ export function ShippedOrdersGrid({
             ],
         },
 
-        // ═══════════════════════════════════════════════════════════════════
         // iTHINK LOGISTICS DATA - Real-time tracking from courier API
-        // ═══════════════════════════════════════════════════════════════════
         {
             headerName: 'iThink Logistics',
             headerClass: 'bg-blue-50 font-semibold text-blue-700',
@@ -779,9 +603,7 @@ export function ShippedOrdersGrid({
             ],
         },
 
-        // ═══════════════════════════════════════════════════════════════════
         // ACTIONS - Pinned to right so always visible
-        // ═══════════════════════════════════════════════════════════════════
         {
             colId: 'actions',
             headerName: 'Actions',
@@ -815,7 +637,7 @@ export function ShippedOrdersGrid({
                                 className="p-1.5 rounded-md hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors disabled:opacity-50"
                                 title="Mark as Delivered"
                             >
-                                <CheckCircle size={14} />
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                             </button>
                         )}
                         {canMarkRto && (
@@ -829,7 +651,7 @@ export function ShippedOrdersGrid({
                                 className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
                                 title="Mark as RTO"
                             >
-                                <AlertTriangle size={14} />
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             </button>
                         )}
                         {onArchive && (
@@ -910,6 +732,8 @@ export function ShippedOrdersGrid({
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
                     onResetAll={handleResetAll}
+                    columnIds={ALL_COLUMN_IDS}
+                    columnHeaders={DEFAULT_HEADERS}
                 />
             </div>
             <div className="border rounded" style={{ height: '500px', width: '100%' }}>
@@ -921,7 +745,7 @@ export function ShippedOrdersGrid({
                     theme={compactTheme}
                     getRowStyle={getRowStyle}
                     animateRows={true}
-                    onColumnMoved={handleColumnMoved}
+                    onColumnMoved={onColumnMoved}
                     maintainColumnOrder={true}
                 />
             </div>

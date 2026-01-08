@@ -92,12 +92,23 @@ interface ArchivedOrdersGridProps {
     onSortChange: (sortBy: 'orderDate' | 'archivedAt') => void;
 }
 
-// Helper to format dates
+// Helper to format dates (short format)
 function formatDate(date: string | null | undefined): string {
     if (!date) return '-';
     return new Date(date).toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'short',
+    });
+}
+
+// Helper to format date with time
+function formatDateTime(date: string | null | undefined): string {
+    if (!date) return '-';
+    return new Date(date).toLocaleString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
     });
 }
 
@@ -309,20 +320,20 @@ export function ArchivedOrdersGrid({
                 {
                     field: 'shippedAt',
                     headerName: 'Shipped',
-                    width: 70,
+                    width: 100,
                     cellRenderer: (params: ICellRendererParams) => (
-                        <span className="text-xs text-gray-600">{formatDate(params.value)}</span>
+                        <span className="text-xs text-gray-600">{formatDateTime(params.value)}</span>
                     ),
                 },
                 {
                     field: 'deliveredAt',
                     headerName: 'Delivered',
-                    width: 70,
+                    width: 100,
                     cellRenderer: (params: ICellRendererParams) => {
                         const date = params.value || params.data?.shopifyDeliveredAt;
                         if (!date) return <span className="text-gray-400 text-xs">-</span>;
                         return (
-                            <span className="text-xs text-green-600">{formatDate(date)}</span>
+                            <span className="text-xs text-green-600">{formatDateTime(date)}</span>
                         );
                     },
                 },
@@ -346,9 +357,10 @@ export function ArchivedOrdersGrid({
                 {
                     field: 'archivedAt',
                     headerName: 'Archived',
-                    width: 75,
+                    width: 100,
+                    sort: 'desc' as const,
                     cellRenderer: (params: ICellRendererParams) => (
-                        <span className="text-xs text-gray-500">{formatDate(params.value)}</span>
+                        <span className="text-xs text-gray-500">{formatDateTime(params.value)}</span>
                     ),
                 },
             ],

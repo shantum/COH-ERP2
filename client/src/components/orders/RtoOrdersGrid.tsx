@@ -85,12 +85,14 @@ interface RtoOrdersGridProps {
     shopDomain?: string;
 }
 
-// Helper to format dates
-function formatDate(date: string | null | undefined): string {
+// Helper to format date with time
+function formatDateTime(date: string | null | undefined): string {
     if (!date) return '-';
-    return new Date(date).toLocaleDateString('en-IN', {
+    return new Date(date).toLocaleString('en-IN', {
         day: 'numeric',
         month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
     });
 }
 
@@ -360,9 +362,10 @@ export function RtoOrdersGrid({
         {
             field: 'rtoInitiatedAt',
             headerName: 'RTO Started',
-            width: 90,
+            width: 100,
+            sort: 'desc' as const,
             cellRenderer: (params: ICellRendererParams) => (
-                <span className="text-xs text-gray-600">{formatDate(params.value)}</span>
+                <span className="text-xs text-gray-600">{formatDateTime(params.value)}</span>
             ),
         },
         {

@@ -83,12 +83,14 @@ interface CodPendingGridProps {
     shopDomain?: string;
 }
 
-// Helper to format dates
-function formatDate(date: string | null | undefined): string {
+// Helper to format date with time
+function formatDateTime(date: string | null | undefined): string {
     if (!date) return '-';
-    return new Date(date).toLocaleDateString('en-IN', {
+    return new Date(date).toLocaleString('en-IN', {
         day: 'numeric',
         month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
     });
 }
 
@@ -314,9 +316,10 @@ export function CodPendingGrid({
         {
             field: 'deliveredAt',
             headerName: 'Delivered',
-            width: 90,
+            width: 100,
+            sort: 'desc' as const,
             cellRenderer: (params: ICellRendererParams) => (
-                <span className="text-xs text-gray-600">{formatDate(params.value)}</span>
+                <span className="text-xs text-gray-600">{formatDateTime(params.value)}</span>
             ),
         },
         {
@@ -327,14 +330,13 @@ export function CodPendingGrid({
                 const days = params.value || 0;
                 return <DaysWaitingBadge days={days} />;
             },
-            sort: 'desc',
         },
         {
             field: 'shippedAt',
             headerName: 'Shipped',
-            width: 80,
+            width: 100,
             cellRenderer: (params: ICellRendererParams) => (
-                <span className="text-xs text-gray-500">{formatDate(params.value)}</span>
+                <span className="text-xs text-gray-500">{formatDateTime(params.value)}</span>
             ),
         },
         {
