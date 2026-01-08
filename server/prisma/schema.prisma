@@ -333,9 +333,15 @@ model Order {
   customerNotes   String?
   internalNotes   String?
   paymentMethod   String?   // COD, Prepaid, etc.
-  status          String    @default("open") // open, shipped, delivered, cancelled, returned
+  status          String    @default("open") // open, on_hold, partially_on_hold, partially_shipped, shipped, delivered, cancelled, archived
   isArchived      Boolean   @default(false)
   archivedAt      DateTime?
+
+  // Order-level hold (blocks all lines)
+  isOnHold        Boolean   @default(false)
+  holdReason      String?   // fraud_review, address_issue, payment_issue, customer_request, other
+  holdNotes       String?
+  holdAt          DateTime?
   awbNumber       String?
   courier         String?
   shippedAt       DateTime?
@@ -415,6 +421,27 @@ model OrderLine {
   rtoInwardedById   String?
   rtoNotes          String?
 
+  // Line-level hold (allows partial order holds)
+  isOnHold          Boolean   @default(false)
+  holdReason        String?   // size_confirmation, stock_issue, customization, customer_request, other
+  holdNotes         String?
+  holdAt            DateTime?
+
+  // Line-level tracking (enables multi-AWB shipping)
+  awbNumber         String?
+  courier           String?
+  trackingStatus    String?   // in_transit, out_for_delivery, delivered, rto_initiated, rto_delivered
+  deliveredAt       DateTime?
+  rtoInitiatedAt    DateTime?
+  rtoReceivedAt     DateTime?
+  lastTrackingUpdate DateTime?
+
+  // Line-level refund (enables partial refunds)
+  refundAmount      Float?
+  refundReason      String?   // quality_issue, size_issue, customer_request, damaged, other
+  refundedAt        DateTime?
+  refundNotes       String?
+
   order              Order               @relation(fields: [orderId], references: [id])
   sku                Sku                 @relation(fields: [skuId], references: [id])
   productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
@@ -429,6 +456,7 @@ model OrderLine {
   @@index([lineStatus, orderId])  // Compound: filter lines by status within order
   @@index([rtoInwardedById])
   @@index([customizedById])
+  @@index([awbNumber])            // Fast lookup for tracking webhooks
 }
 
 // ============================================

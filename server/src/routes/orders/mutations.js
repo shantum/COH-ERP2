@@ -8,6 +8,7 @@ import { authenticateToken } from '../../middleware/auth.js';
 import { releaseReservedInventory, createReservedTransaction, calculateInventoryBalance, recalculateOrderStatus, createCustomSku, removeCustomization } from '../../utils/queryPatterns.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { validate, CreateOrderSchema, UpdateOrderSchema, CustomizeLineSchema } from '../../utils/validation.js';
+import { recomputeOrderStatus } from '../../utils/orderStatus.js';
 
 const router = Router();
 
@@ -296,6 +297,235 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Uncancel order error:', error);
         res.status(500).json({ error: 'Failed to restore order' });
+    }
+});
+
+// ============================================
+// HOLD / RELEASE OPERATIONS
+// ============================================
+
+// Hold entire order (blocks all lines from fulfillment)
+router.put('/:id/hold', authenticateToken, async (req, res) => {
+    try {
+        const { reason, notes } = req.body;
+
+        if (!reason) {
+            return res.status(400).json({ error: 'Hold reason is required' });
+        }
+
+        const validReasons = ['fraud_review', 'address_issue', 'payment_issue', 'customer_request', 'other'];
+        if (!validReasons.includes(reason)) {
+            return res.status(400).json({
+                error: 'Invalid hold reason',
+                validReasons
+            });
+        }
+
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true }
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.isOnHold) {
+            return res.status(400).json({ error: 'Order is already on hold' });
+        }
+
+        if (order.isArchived) {
+            return res.status(400).json({ error: 'Cannot hold archived orders' });
+        }
+
+        if (['shipped', 'delivered', 'cancelled'].includes(order.status)) {
+            return res.status(400).json({
+                error: `Cannot hold order in ${order.status} status`
+            });
+        }
+
+        const updated = await req.prisma.$transaction(async (tx) => {
+            const result = await tx.order.update({
+                where: { id: req.params.id },
+                data: {
+                    isOnHold: true,
+                    holdReason: reason,
+                    holdNotes: notes || null,
+                    holdAt: new Date()
+                },
+                include: { orderLines: true }
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(req.params.id, tx);
+
+            return tx.order.findUnique({
+                where: { id: req.params.id },
+                include: { orderLines: true }
+            });
+        });
+
+        console.log(`[Hold] Order ${order.orderNumber} placed on hold: ${reason}`);
+        res.json(updated);
+    } catch (error) {
+        console.error('Hold order error:', error);
+        res.status(500).json({ error: 'Failed to hold order' });
+    }
+});
+
+// Release order from hold
+router.put('/:id/release', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true }
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (!order.isOnHold) {
+            return res.status(400).json({ error: 'Order is not on hold' });
+        }
+
+        const updated = await req.prisma.$transaction(async (tx) => {
+            await tx.order.update({
+                where: { id: req.params.id },
+                data: {
+                    isOnHold: false,
+                    holdReason: null,
+                    holdNotes: null,
+                    holdAt: null
+                }
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(req.params.id, tx);
+
+            return tx.order.findUnique({
+                where: { id: req.params.id },
+                include: { orderLines: true }
+            });
+        });
+
+        console.log(`[Release] Order ${order.orderNumber} released from hold`);
+        res.json(updated);
+    } catch (error) {
+        console.error('Release order error:', error);
+        res.status(500).json({ error: 'Failed to release order' });
+    }
+});
+
+// Hold a single order line
+router.put('/lines/:lineId/hold', authenticateToken, async (req, res) => {
+    try {
+        const { reason, notes } = req.body;
+
+        if (!reason) {
+            return res.status(400).json({ error: 'Hold reason is required' });
+        }
+
+        const validReasons = ['size_confirmation', 'stock_issue', 'customization', 'customer_request', 'other'];
+        if (!validReasons.includes(reason)) {
+            return res.status(400).json({
+                error: 'Invalid hold reason',
+                validReasons
+            });
+        }
+
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+            include: { order: true }
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (line.isOnHold) {
+            return res.status(400).json({ error: 'Line is already on hold' });
+        }
+
+        if (['shipped', 'cancelled'].includes(line.lineStatus)) {
+            return res.status(400).json({
+                error: `Cannot hold line in ${line.lineStatus} status`
+            });
+        }
+
+        if (line.order.isArchived) {
+            return res.status(400).json({ error: 'Cannot hold lines in archived orders' });
+        }
+
+        const updated = await req.prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: req.params.lineId },
+                data: {
+                    isOnHold: true,
+                    holdReason: reason,
+                    holdNotes: notes || null,
+                    holdAt: new Date()
+                }
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(line.orderId, tx);
+
+            return tx.orderLine.findUnique({
+                where: { id: req.params.lineId },
+                include: { order: true }
+            });
+        });
+
+        console.log(`[Hold] Line ${req.params.lineId} placed on hold: ${reason}`);
+        res.json(updated);
+    } catch (error) {
+        console.error('Hold line error:', error);
+        res.status(500).json({ error: 'Failed to hold line' });
+    }
+});
+
+// Release a single order line from hold
+router.put('/lines/:lineId/release', authenticateToken, async (req, res) => {
+    try {
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+            include: { order: true }
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (!line.isOnHold) {
+            return res.status(400).json({ error: 'Line is not on hold' });
+        }
+
+        const updated = await req.prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: req.params.lineId },
+                data: {
+                    isOnHold: false,
+                    holdReason: null,
+                    holdNotes: null,
+                    holdAt: null
+                }
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(line.orderId, tx);
+
+            return tx.orderLine.findUnique({
+                where: { id: req.params.lineId },
+                include: { order: true }
+            });
+        });
+
+        console.log(`[Release] Line ${req.params.lineId} released from hold`);
+        res.json(updated);
+    } catch (error) {
+        console.error('Release line error:', error);
+        res.status(500).json({ error: 'Failed to release line' });
     }
 });
 
@@ -897,6 +1127,83 @@ router.delete('/lines/:lineId/customize', authenticateToken, async (req, res) =>
 
         console.error('Uncustomize line error:', error);
         res.status(500).json({ error: 'Failed to remove customization' });
+    }
+});
+
+// ============================================
+// DATA MIGRATION: Copy order tracking to lines
+// One-time migration for line-centric architecture
+// ============================================
+
+/**
+ * Migrate tracking data from Order to OrderLines
+ * This is a one-time migration to support multi-AWB shipping
+ */
+router.post('/migrate-tracking-to-lines', authenticateToken, async (req, res) => {
+    try {
+        // Find all shipped/delivered orders that have AWB on order but not on lines
+        const ordersToMigrate = await req.prisma.order.findMany({
+            where: {
+                awbNumber: { not: null },
+                orderLines: {
+                    some: {
+                        awbNumber: null,
+                        lineStatus: { in: ['shipped', 'delivered'] }
+                    }
+                }
+            },
+            include: {
+                orderLines: {
+                    where: {
+                        awbNumber: null,
+                        lineStatus: { in: ['shipped', 'delivered'] }
+                    }
+                }
+            }
+        });
+
+        if (ordersToMigrate.length === 0) {
+            return res.json({
+                message: 'No orders need migration',
+                migrated: 0
+            });
+        }
+
+        let migratedOrders = 0;
+        let migratedLines = 0;
+
+        for (const order of ordersToMigrate) {
+            await req.prisma.orderLine.updateMany({
+                where: {
+                    orderId: order.id,
+                    awbNumber: null,
+                    lineStatus: { in: ['shipped', 'delivered'] }
+                },
+                data: {
+                    awbNumber: order.awbNumber,
+                    courier: order.courier,
+                    trackingStatus: order.trackingStatus,
+                    deliveredAt: order.deliveredAt,
+                    rtoInitiatedAt: order.rtoInitiatedAt,
+                    rtoReceivedAt: order.rtoReceivedAt,
+                    lastTrackingUpdate: order.lastTrackingUpdate
+                }
+            });
+
+            migratedOrders++;
+            migratedLines += order.orderLines.length;
+        }
+
+        console.log(`[Migration] Migrated tracking data for ${migratedOrders} orders (${migratedLines} lines)`);
+
+        res.json({
+            message: 'Migration completed',
+            migratedOrders,
+            migratedLines
+        });
+    } catch (error) {
+        console.error('Migration error:', error);
+        res.status(500).json({ error: 'Failed to migrate tracking data' });
     }
 });
 

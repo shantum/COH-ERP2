@@ -182,10 +182,41 @@ async function updateOrderTracking(orderId, trackingData, orderInfo = {}) {
         updateData.courier = trackingData.courier;
     }
 
+    // Update order
     await prisma.order.update({
         where: { id: orderId },
         data: updateData,
     });
+
+    // Also update all order lines with this AWB (line-centric tracking)
+    if (trackingData.awbNumber) {
+        const lineUpdateData = {
+            trackingStatus: trackingData.internalStatus,
+            lastTrackingUpdate: new Date(),
+        };
+
+        // Set delivery timestamp on lines
+        if (trackingData.internalStatus === 'delivered') {
+            lineUpdateData.deliveredAt = trackingData.lastScan?.datetime
+                ? new Date(trackingData.lastScan.datetime)
+                : new Date();
+        }
+
+        // Set RTO timestamps on lines
+        if (trackingData.internalStatus?.startsWith('rto_')) {
+            lineUpdateData.rtoInitiatedAt = new Date();
+        }
+        if (trackingData.internalStatus === 'rto_delivered') {
+            lineUpdateData.rtoReceivedAt = trackingData.lastScan?.datetime
+                ? new Date(trackingData.lastScan.datetime)
+                : new Date();
+        }
+
+        await prisma.orderLine.updateMany({
+            where: { awbNumber: trackingData.awbNumber },
+            data: lineUpdateData,
+        });
+    }
 
     return updateData;
 }
@@ -297,6 +328,7 @@ async function runTrackingSync() {
                             : currentStatus;
 
                         const trackingData = {
+                            awbNumber: awb, // For line-level updates
                             courier: rawData.logistic,
                             statusCode: rawData.current_status_code,
                             internalStatus: ithinkClient.mapToInternalStatus(rawData.current_status_code, statusForMapping),

@@ -360,7 +360,13 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
 
             await tx.orderLine.updateMany({
                 where: { orderId: req.params.id },
-                data: { lineStatus: 'shipped', shippedAt: new Date() },
+                data: {
+                    lineStatus: 'shipped',
+                    shippedAt: new Date(),
+                    // Line-level tracking (multi-AWB support)
+                    awbNumber,
+                    courier
+                },
             });
 
             for (const line of order.orderLines) {
@@ -666,6 +672,9 @@ router.post('/:id/quick-ship', authenticateToken, async (req, res) => {
                     pickedAt: line.pickedAt || now,
                     packedAt: line.packedAt || now,
                     shippedAt: now,
+                    // Line-level tracking (multi-AWB support)
+                    awbNumber: order.awbNumber,
+                    courier: order.courier,
                 },
             });
         }
@@ -717,12 +726,16 @@ router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
         const orderIds = [];
         const lineIdsToShip = [];
         const saleTransactions = [];
+        // Map orderId -> { awbNumber, courier, lineIds } for per-order line updates
+        const orderLineMap = new Map();
 
         for (const order of eligibleOrders) {
             orderIds.push(order.id);
+            const orderLineIds = [];
             for (const line of order.orderLines) {
                 if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
                 lineIdsToShip.push(line.id);
+                orderLineIds.push(line.id);
                 saleTransactions.push({
                     skuId: line.skuId,
                     txnType: TXN_TYPE.OUTWARD,
@@ -730,6 +743,13 @@ router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
                     reason: TXN_REASON.SALE,
                     referenceId: line.id,
                     createdById: req.user.id,
+                });
+            }
+            if (orderLineIds.length > 0) {
+                orderLineMap.set(order.id, {
+                    awbNumber: order.awbNumber,
+                    courier: order.courier,
+                    lineIds: orderLineIds
                 });
             }
         }
@@ -754,17 +774,22 @@ router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
                 });
             }
 
-            // 3. Update all order lines to shipped in one batch
-            if (lineIdsToShip.length > 0) {
+            // 3. Update order lines to shipped per order (to set correct AWB/courier)
+            for (const [orderId, orderData] of orderLineMap) {
                 await tx.orderLine.updateMany({
-                    where: { id: { in: lineIdsToShip } },
+                    where: { id: { in: orderData.lineIds } },
                     data: {
                         lineStatus: 'shipped',
                         shippedAt: now,
+                        // Line-level tracking (multi-AWB support)
+                        awbNumber: orderData.awbNumber,
+                        courier: orderData.courier,
                     },
                 });
+            }
 
-                // Set timestamps for lines that don't have them (separate query needed for conditional update)
+            // Set timestamps for lines that don't have them (separate query needed for conditional update)
+            if (lineIdsToShip.length > 0) {
                 await tx.orderLine.updateMany({
                     where: {
                         id: { in: lineIdsToShip },
