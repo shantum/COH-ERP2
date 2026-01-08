@@ -1,15 +1,13 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
-    LayoutDashboard, Package, Boxes, Scissors, ShoppingCart,
+    LayoutDashboard, Scissors, ShoppingCart,
     Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardList, ClipboardCheck, PackagePlus, Clipboard, Table2
 } from 'lucide-react';
 import { useState } from 'react';
 
 const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/products', icon: Package, label: 'Products' },
-    { to: '/inventory', icon: Boxes, label: 'Inventory' },
     { to: '/catalog', icon: Table2, label: 'Catalog' },
     { to: '/fabrics', icon: Scissors, label: 'Fabrics' },
     { to: '/fabric-reconciliation', icon: ClipboardCheck, label: 'Fabric Count' },

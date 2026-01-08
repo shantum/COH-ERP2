@@ -453,17 +453,17 @@ export default function Orders() {
     return (
         <div className="space-y-4">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
-                <div className="flex items-center gap-3">
-                    <div className="relative">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Orders</h1>
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <div className="relative flex-1 sm:flex-none">
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                             type="text"
                             placeholder="Search order #..."
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            className="pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-lg w-56 focus:outline-none focus:ring-2 focus:ring-primary-100 focus:border-primary-300 bg-gray-50/50"
+                            className="pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-lg w-full sm:w-48 md:w-56 focus:outline-none focus:ring-2 focus:ring-primary-100 focus:border-primary-300 bg-gray-50/50"
                         />
                         {searchInput && (
                             <button
@@ -476,7 +476,7 @@ export default function Orders() {
                     </div>
                     <button
                         onClick={() => setShowCreateOrder(true)}
-                        className="btn-primary flex items-center gap-1.5 text-sm px-4 py-2"
+                        className="btn-primary flex items-center gap-1.5 text-sm px-4 py-2 whitespace-nowrap"
                     >
                         <Plus size={16} />
                         New Order
@@ -487,8 +487,8 @@ export default function Orders() {
             {/* Tabs */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
                 {/* Tab Navigation */}
-                <div className="flex items-center justify-between px-4 border-b border-gray-100 bg-gray-50/50">
-                    <div className="flex">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between px-2 md:px-4 border-b border-gray-100 bg-gray-50/50">
+                    <div className="flex overflow-x-auto">
                         {tabs.map((t) => (
                             <button
                                 key={t.id}
@@ -521,7 +521,7 @@ export default function Orders() {
                     </div>
 
                     {/* Tab-specific controls */}
-                    <div className="flex items-center gap-2 py-2">
+                    <div className="flex flex-wrap items-center gap-2 py-2 px-2 md:px-0">
                         {tab === 'open' && (
                             <>
                                 <select

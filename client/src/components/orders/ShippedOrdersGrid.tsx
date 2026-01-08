@@ -3,11 +3,11 @@
  * AG Grid implementation for shipped orders with row grouping by ship date
  */
 
-import { useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Undo2, CheckCircle, AlertTriangle, Package, ExternalLink, Radio, Archive } from 'lucide-react';
+import { Undo2, CheckCircle, AlertTriangle, Package, ExternalLink, Radio, Archive, Columns, RotateCcw } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
@@ -21,6 +21,86 @@ const compactTheme = themeQuartz.withParams({
     rowHeight: 32,
     headerHeight: 36,
 });
+
+// All column IDs for visibility/order persistence
+const ALL_COLUMN_IDS = [
+    'orderNumber', 'customerName', 'city', 'itemCount', 'totalAmount',
+    'orderDate', 'shippedAt', 'deliveredAt', 'deliveryDays',
+    'shopifyPaymentMethod', 'shopifyFinancialStatus', 'codRemittedAt', 'shopifyShipmentStatus', 'shopifyDeliveredAt', 'shopifyLink',
+    'courier', 'awbNumber', 'daysInTransit', 'expectedDeliveryDate', 'deliveryAttempts',
+    'courierStatusCode', 'trackingStatus', 'lastScanLocation', 'lastScanAt', 'lastScanStatus',
+    'actions'
+];
+
+const DEFAULT_HEADERS: Record<string, string> = {
+    orderNumber: 'Order', customerName: 'Customer', city: 'City', itemCount: 'Items',
+    totalAmount: 'Total', orderDate: 'Ordered', shippedAt: 'Shipped', deliveredAt: 'Delivered',
+    deliveryDays: 'Del Days', shopifyPaymentMethod: 'Payment', shopifyFinancialStatus: 'Paid',
+    codRemittedAt: 'COD Paid', shopifyShipmentStatus: 'Status', shopifyDeliveredAt: 'Delivered',
+    shopifyLink: 'Link', courier: 'Courier', awbNumber: 'AWB', daysInTransit: 'Days',
+    expectedDeliveryDate: 'EDD', deliveryAttempts: 'OFD', courierStatusCode: 'Code',
+    trackingStatus: 'Status', lastScanLocation: 'Location', lastScanAt: 'Scan Time',
+    lastScanStatus: 'Last Status', actions: 'Actions'
+};
+
+// Column visibility dropdown component
+const ColumnVisibilityDropdown = ({
+    visibleColumns,
+    onToggleColumn,
+    onResetAll,
+}: {
+    visibleColumns: Set<string>;
+    onToggleColumn: (colId: string) => void;
+    onResetAll: () => void;
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+
+    return (
+        <div ref={dropdownRef} className="relative">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
+            >
+                <Columns size={12} />
+                Columns
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                    <div className="p-2 border-b">
+                        <button onClick={onResetAll} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
+                            <RotateCcw size={10} />
+                            Reset All
+                        </button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map((colId) => (
+                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                                <input
+                                    type="checkbox"
+                                    checked={visibleColumns.has(colId)}
+                                    onChange={() => onToggleColumn(colId)}
+                                    className="w-3 h-3"
+                                />
+                                {DEFAULT_HEADERS[colId] || colId}
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 interface ShippedOrdersGridProps {
     orders: any[];
@@ -141,6 +221,59 @@ export function ShippedOrdersGrid({
     isArchiving,
     shopDomain,
 }: ShippedOrdersGridProps) {
+    // Grid ref for API access
+    const gridRef = useRef<AgGridReact>(null);
+
+    // Column visibility state (persisted to localStorage)
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+        const saved = localStorage.getItem('shippedGridVisibleColumns');
+        if (saved) {
+            try { return new Set(JSON.parse(saved)); } catch { return new Set(ALL_COLUMN_IDS); }
+        }
+        return new Set(ALL_COLUMN_IDS);
+    });
+
+    // Column order state (persisted to localStorage)
+    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+        const saved = localStorage.getItem('shippedGridColumnOrder');
+        if (saved) {
+            try { return JSON.parse(saved); } catch { return ALL_COLUMN_IDS; }
+        }
+        return ALL_COLUMN_IDS;
+    });
+
+    // Save to localStorage
+    useEffect(() => {
+        localStorage.setItem('shippedGridVisibleColumns', JSON.stringify([...visibleColumns]));
+    }, [visibleColumns]);
+
+    useEffect(() => {
+        localStorage.setItem('shippedGridColumnOrder', JSON.stringify(columnOrder));
+    }, [columnOrder]);
+
+    // Column handlers
+    const handleToggleColumn = useCallback((colId: string) => {
+        setVisibleColumns(prev => {
+            const next = new Set(prev);
+            if (next.has(colId)) next.delete(colId); else next.add(colId);
+            return next;
+        });
+    }, []);
+
+    const handleColumnMoved = useCallback(() => {
+        const api = gridRef.current?.api;
+        if (!api) return;
+        const newOrder = api.getAllDisplayedColumns()
+            .map(col => col.getColId())
+            .filter((id): id is string => id !== undefined);
+        if (newOrder.length > 0) setColumnOrder(newOrder);
+    }, []);
+
+    const handleResetAll = useCallback(() => {
+        setVisibleColumns(new Set(ALL_COLUMN_IDS));
+        setColumnOrder([...ALL_COLUMN_IDS]);
+    }, []);
+
     // Transform orders for grid with grouping field and Shopify cache data
     const rowData = useMemo(() => {
         return orders.map((order) => {

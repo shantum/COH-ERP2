@@ -639,28 +639,28 @@ export default function Returns() {
             {/* TAB 1: ACTION QUEUE */}
             {/* ============================================ */}
             {tab === 'actions' && (
-                <div className="space-y-6">
+                <div className="space-y-4 md:space-y-6">
                     {/* Stats Cards */}
-                    <div className="grid grid-cols-4 gap-4">
-                        <div className="card bg-yellow-50 border-yellow-200">
-                            <div className="text-yellow-600 text-sm font-medium">Pickup Pending</div>
-                            <div className="text-2xl font-bold text-yellow-800">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+                        <div className="card bg-yellow-50 border-yellow-200 p-3 md:p-4">
+                            <div className="text-yellow-600 text-xs md:text-sm font-medium">Pickup Pending</div>
+                            <div className="text-xl md:text-2xl font-bold text-yellow-800">
                                 {actionQueue?.summary?.pendingPickup || 0}
                             </div>
                         </div>
-                        <div className="card bg-purple-50 border-purple-200">
-                            <div className="text-purple-600 text-sm font-medium">In Transit</div>
-                            <div className="text-2xl font-bold text-purple-800">
+                        <div className="card bg-purple-50 border-purple-200 p-3 md:p-4">
+                            <div className="text-purple-600 text-xs md:text-sm font-medium">In Transit</div>
+                            <div className="text-xl md:text-2xl font-bold text-purple-800">
                                 {actionQueue?.summary?.inTransit || 0}
                             </div>
                         </div>
-                        <div className="card bg-blue-50 border-blue-200">
-                            <div className="text-blue-600 text-sm font-medium">QC Pending</div>
-                            <div className="text-2xl font-bold text-blue-800">{actionQueue?.summary?.qcPending || qcPendingCount}</div>
+                        <div className="card bg-blue-50 border-blue-200 p-3 md:p-4">
+                            <div className="text-blue-600 text-xs md:text-sm font-medium">QC Pending</div>
+                            <div className="text-xl md:text-2xl font-bold text-blue-800">{actionQueue?.summary?.qcPending || qcPendingCount}</div>
                         </div>
-                        <div className="card bg-green-50 border-green-200">
-                            <div className="text-green-600 text-sm font-medium">Resolution Needed</div>
-                            <div className="text-2xl font-bold text-green-800">
+                        <div className="card bg-green-50 border-green-200 p-3 md:p-4">
+                            <div className="text-green-600 text-xs md:text-sm font-medium">Resolution Needed</div>
+                            <div className="text-xl md:text-2xl font-bold text-green-800">
                                 {(actionQueue?.summary?.exchangesReadyToShip || 0) + (actionQueue?.summary?.refundsPending || 0)}
                             </div>
                         </div>

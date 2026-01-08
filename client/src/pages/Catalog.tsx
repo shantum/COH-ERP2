@@ -173,10 +173,28 @@ export default function Catalog() {
         return new Set(ALL_COLUMN_IDS);
     });
 
+    // Column order state (persisted to localStorage)
+    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+        const saved = localStorage.getItem('catalogGridColumnOrder');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch {
+                return ALL_COLUMN_IDS;
+            }
+        }
+        return ALL_COLUMN_IDS;
+    });
+
     // Save column visibility to localStorage
     useEffect(() => {
         localStorage.setItem('catalogGridVisibleColumns', JSON.stringify([...visibleColumns]));
     }, [visibleColumns]);
+
+    // Save column order to localStorage
+    useEffect(() => {
+        localStorage.setItem('catalogGridColumnOrder', JSON.stringify(columnOrder));
+    }, [columnOrder]);
 
     // Save page size to localStorage
     useEffect(() => {
@@ -245,9 +263,22 @@ export default function Catalog() {
         });
     }, []);
 
-    // Reset all columns
+    // Column moved handler - persist order
+    const handleColumnMoved = useCallback(() => {
+        const api = gridRef.current?.api;
+        if (!api) return;
+        const newOrder = api.getAllDisplayedColumns()
+            .map(col => col.getColId())
+            .filter((id): id is string => id !== undefined);
+        if (newOrder.length > 0) {
+            setColumnOrder(newOrder);
+        }
+    }, []);
+
+    // Reset all columns (visibility and order)
     const handleResetAll = useCallback(() => {
         setVisibleColumns(new Set(ALL_COLUMN_IDS));
+        setColumnOrder([...ALL_COLUMN_IDS]);
     }, []);
 
     // Column definitions
@@ -460,6 +491,25 @@ export default function Catalog() {
         hide: !visibleColumns.has(col.colId!),
     })), [visibleColumns]);
 
+    // Order columns based on saved order
+    const orderedColumnDefs = useMemo(() => {
+        const colMap = new Map(columnDefs.map(col => [col.colId, col]));
+        const ordered: ColDef[] = [];
+        // Add columns in saved order
+        for (const colId of columnOrder) {
+            const col = colMap.get(colId);
+            if (col) {
+                ordered.push(col);
+                colMap.delete(colId);
+            }
+        }
+        // Add any remaining columns (new columns not in saved order)
+        for (const col of colMap.values()) {
+            ordered.push(col);
+        }
+        return ordered;
+    }, [columnDefs, columnOrder]);
+
     // Summary stats
     const stats = useMemo(() => {
         const items = catalogData?.items || [];
@@ -583,7 +633,7 @@ export default function Catalog() {
                         ref={gridRef}
                         theme={compactTheme}
                         rowData={catalogData?.items || []}
-                        columnDefs={columnDefs}
+                        columnDefs={orderedColumnDefs}
                         loading={isLoading}
                         defaultColDef={{
                             sortable: true,
@@ -599,6 +649,9 @@ export default function Catalog() {
                         paginationPageSizeSelector={false}
                         // Quick filter for fast search
                         cacheQuickFilter={true}
+                        // Column order persistence
+                        onColumnMoved={handleColumnMoved}
+                        maintainColumnOrder={true}
                     />
                 </div>
             </div>

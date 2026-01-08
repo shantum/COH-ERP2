@@ -1304,21 +1304,21 @@ export default function InwardHub() {
     // ============================================
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-3">
-                    <Package className="text-blue-600" size={28} />
+                    <Package className="text-blue-600" size={24} />
                     <div>
-                        <h1 className="text-2xl font-bold">Inward Hub</h1>
-                        <p className="text-sm text-gray-500">Centralized inventory receiving</p>
+                        <h1 className="text-xl md:text-2xl font-bold">Inward Hub</h1>
+                        <p className="text-xs md:text-sm text-gray-500">Centralized inventory receiving</p>
                     </div>
                 </div>
 
-                <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
-                    <span className="text-green-600 text-sm">Today's Total:</span>{' '}
-                    <span className="text-green-700 font-bold text-lg">+{todayTotal}</span>
-                    <span className="text-green-600 text-sm ml-1">pcs</span>
+                <div className="bg-green-50 border border-green-200 rounded-lg px-3 md:px-4 py-2">
+                    <span className="text-green-600 text-xs md:text-sm">Today's Total:</span>{' '}
+                    <span className="text-green-700 font-bold text-base md:text-lg">+{todayTotal}</span>
+                    <span className="text-green-600 text-xs md:text-sm ml-1">pcs</span>
                 </div>
             </div>
 
@@ -1364,7 +1364,7 @@ export default function InwardHub() {
             </div>
 
             {/* Source Cards */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
                 <SourceCard
                     title="Production"
                     count={pendingSources?.counts.production ?? 0}
