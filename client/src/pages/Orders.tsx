@@ -84,7 +84,8 @@ export default function Orders() {
     // Shipping form state
     const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
     const [shippingChecked, setShippingChecked] = useState<Set<string>>(new Set());
-    const [allocatingLines, setAllocatingLines] = useState<Set<string>>(new Set());
+    // Optimistic updates handle button state - use empty set for grid interface compatibility
+    const allocatingLines = new Set<string>();
 
     // Tracking modal state
     const [trackingAwb, setTrackingAwb] = useState<string | null>(null);
@@ -270,93 +271,34 @@ export default function Orders() {
         [shippingChecked]
     );
 
+    // Optimistic updates handle UI state instantly - no need for loading tracking
     const handleAllocate = useCallback(
-        (lineId: string) => {
-            setAllocatingLines((p) => new Set(p).add(lineId));
-            mutations.allocate.mutate(lineId, {
-                onSettled: () =>
-                    setAllocatingLines((p) => {
-                        const n = new Set(p);
-                        n.delete(lineId);
-                        return n;
-                    }),
-            });
-        },
+        (lineId: string) => mutations.allocate.mutate(lineId),
         [mutations.allocate]
     );
 
     const handleUnallocate = useCallback(
-        (lineId: string) => {
-            setAllocatingLines((p) => new Set(p).add(lineId));
-            mutations.unallocate.mutate(lineId, {
-                onSettled: () =>
-                    setAllocatingLines((p) => {
-                        const n = new Set(p);
-                        n.delete(lineId);
-                        return n;
-                    }),
-            });
-        },
+        (lineId: string) => mutations.unallocate.mutate(lineId),
         [mutations.unallocate]
     );
 
     const handlePick = useCallback(
-        (lineId: string) => {
-            setAllocatingLines((p) => new Set(p).add(lineId));
-            mutations.pickLine.mutate(lineId, {
-                onSettled: () =>
-                    setAllocatingLines((p) => {
-                        const n = new Set(p);
-                        n.delete(lineId);
-                        return n;
-                    }),
-            });
-        },
+        (lineId: string) => mutations.pickLine.mutate(lineId),
         [mutations.pickLine]
     );
 
     const handleUnpick = useCallback(
-        (lineId: string) => {
-            setAllocatingLines((p) => new Set(p).add(lineId));
-            mutations.unpickLine.mutate(lineId, {
-                onSettled: () =>
-                    setAllocatingLines((p) => {
-                        const n = new Set(p);
-                        n.delete(lineId);
-                        return n;
-                    }),
-            });
-        },
+        (lineId: string) => mutations.unpickLine.mutate(lineId),
         [mutations.unpickLine]
     );
 
     const handlePack = useCallback(
-        (lineId: string) => {
-            setAllocatingLines((p) => new Set(p).add(lineId));
-            mutations.packLine.mutate(lineId, {
-                onSettled: () =>
-                    setAllocatingLines((p) => {
-                        const n = new Set(p);
-                        n.delete(lineId);
-                        return n;
-                    }),
-            });
-        },
+        (lineId: string) => mutations.packLine.mutate(lineId),
         [mutations.packLine]
     );
 
     const handleUnpack = useCallback(
-        (lineId: string) => {
-            setAllocatingLines((p) => new Set(p).add(lineId));
-            mutations.unpackLine.mutate(lineId, {
-                onSettled: () =>
-                    setAllocatingLines((p) => {
-                        const n = new Set(p);
-                        n.delete(lineId);
-                        return n;
-                    }),
-            });
-        },
+        (lineId: string) => mutations.unpackLine.mutate(lineId),
         [mutations.unpackLine]
     );
 
@@ -555,10 +497,10 @@ export default function Orders() {
                         className={`pb-2 font-medium ${tab === 'shipped' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
                         onClick={() => setTab('shipped')}
                     >
-                        Shipped{' '}
-                        <span className="text-gray-400 ml-1">
-                            ({shippedPagination.total})
-                        </span>
+                        Shipped
+                        {shippedPagination.total > 0 && (
+                            <span className="text-gray-400 ml-1">({shippedPagination.total})</span>
+                        )}
                     </button>
                     <button
                         className={`pb-2 font-medium ${tab === 'rto' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
@@ -584,13 +526,19 @@ export default function Orders() {
                         className={`pb-2 font-medium ${tab === 'cancelled' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
                         onClick={() => setTab('cancelled')}
                     >
-                        Cancelled <span className="text-gray-400 ml-1">({cancelledOrders?.length || 0})</span>
+                        Cancelled
+                        {cancelledOrders && cancelledOrders.length > 0 && (
+                            <span className="text-gray-400 ml-1">({cancelledOrders.length})</span>
+                        )}
                     </button>
                     <button
                         className={`pb-2 font-medium ${tab === 'archived' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`}
                         onClick={() => setTab('archived')}
                     >
-                        Archived <span className="text-gray-400 ml-1">({archivedTotalCount || archivedOrders?.length || 0})</span>
+                        Archived
+                        {(archivedTotalCount > 0 || (archivedOrders && archivedOrders.length > 0)) && (
+                            <span className="text-gray-400 ml-1">({archivedTotalCount || archivedOrders?.length})</span>
+                        )}
                     </button>
                 </div>
                 {tab === 'open' && (

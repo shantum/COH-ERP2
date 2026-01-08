@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi, productsApi } from '../services/api';
 import { useState } from 'react';
-import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2 } from 'lucide-react';
+import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors } from 'lucide-react';
 
 export default function Production() {
     const queryClient = useQueryClient();
@@ -51,27 +51,44 @@ export default function Production() {
 
     // Copy production plan to clipboard
     const copyToClipboard = (group: any) => {
-        // Consolidate batches by SKU
-        const consolidatedMap = new Map<string, { sku: any; totalQty: number; notes: string[] }>();
+        // For custom SKUs, don't consolidate - each custom batch is unique
+        // For regular SKUs, consolidate by SKU ID
+        const consolidatedMap = new Map<string, { sku: any; totalQty: number; notes: string[]; isCustomSku: boolean; customization: any }>();
+        const customBatches: any[] = [];
+
         group.batches.forEach((batch: any) => {
-            const key = batch.skuId;
-            if (!consolidatedMap.has(key)) {
-                consolidatedMap.set(key, { sku: batch.sku, totalQty: 0, notes: [] });
+            // Custom SKU batches are kept separate (not consolidated)
+            if (batch.isCustomSku) {
+                customBatches.push({
+                    sku: batch.sku,
+                    totalQty: batch.qtyPlanned,
+                    notes: batch.notes ? [batch.notes] : [],
+                    isCustomSku: true,
+                    customization: batch.customization
+                });
+            } else {
+                const key = batch.skuId;
+                if (!consolidatedMap.has(key)) {
+                    consolidatedMap.set(key, { sku: batch.sku, totalQty: 0, notes: [], isCustomSku: false, customization: null });
+                }
+                const entry = consolidatedMap.get(key)!;
+                entry.totalQty += batch.qtyPlanned;
+                if (batch.notes) entry.notes.push(batch.notes);
             }
-            const entry = consolidatedMap.get(key)!;
-            entry.totalQty += batch.qtyPlanned;
-            if (batch.notes) entry.notes.push(batch.notes);
         });
 
-        const consolidated = Array.from(consolidatedMap.values())
-            .sort((a, b) => {
-                const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
-                if (productCompare !== 0) return productCompare;
-                const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
-                if (colorCompare !== 0) return colorCompare;
-                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
-                return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
-            });
+        // Combine regular consolidated entries with custom batches
+        const consolidated = [
+            ...Array.from(consolidatedMap.values()),
+            ...customBatches
+        ].sort((a, b) => {
+            const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
+            if (productCompare !== 0) return productCompare;
+            const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
+            if (colorCompare !== 0) return colorCompare;
+            const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
+            return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+        });
 
         // Format date as "19 Aug 2025"
         const date = new Date(group.date);
@@ -86,12 +103,34 @@ export default function Production() {
             const product = entry.sku?.variation?.product?.name || '';
             const size = entry.sku?.size || '';
             const color = entry.sku?.variation?.colorName || '';
-            const styleCode = entry.sku?.variation?.product?.styleCode || '';
+            const skuCode = entry.sku?.skuCode || '';
             const qty = entry.totalQty;
             totalPcs += qty;
 
-            let line = `${index + 1}. ${product} - ${size} - ${color} - ${qty} pc - ${styleCode}`;
-            if (entry.notes.length > 0) {
+            let line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${skuCode}`;
+
+            // Add CUSTOM badge and customization details for custom SKUs
+            if (entry.isCustomSku && entry.customization) {
+                const customParts = ['[CUSTOM'];
+                if (entry.customization.type && entry.customization.value) {
+                    customParts.push(`: ${entry.customization.type} ${entry.customization.value}`);
+                }
+                customParts.push(']');
+                line += ` ${customParts.join('')}`;
+
+                // Add notes if present
+                if (entry.customization.notes) {
+                    line += ` (Notes: ${entry.customization.notes})`;
+                }
+
+                // Add linked order info
+                if (entry.customization.linkedOrder) {
+                    line += ` - For Order: ${entry.customization.linkedOrder.orderNumber}`;
+                    if (entry.customization.linkedOrder.customerName) {
+                        line += ` (${entry.customization.linkedOrder.customerName})`;
+                    }
+                }
+            } else if (entry.notes.length > 0) {
                 line += ` (${entry.notes.join(', ')})`;
             }
             lines.push(line);
@@ -489,6 +528,7 @@ export default function Production() {
                                             <th className="py-2 px-4 font-medium">Colour</th>
                                             <th className="py-2 px-4 font-medium">Size</th>
                                             <th className="py-2 px-4 font-medium text-center">Qty</th>
+                                            <th className="py-2 px-4 font-medium">Customization</th>
                                             <th className="py-2 px-4 font-medium">Status</th>
                                             <th className="py-2 px-4 font-medium w-24"></th>
                                         </tr>
@@ -504,14 +544,55 @@ export default function Production() {
                                                 return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
                                             })
                                             .map((batch: any) => (
-                                            <tr key={batch.id} className="border-t hover:bg-gray-50">
+                                            <tr key={batch.id} className={`border-t hover:bg-gray-50 ${batch.isCustomSku ? 'bg-orange-50/50' : ''}`}>
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-500">{batch.batchCode || '-'}</td>
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-600">{batch.sku?.variation?.product?.styleCode || '-'}</td>
-                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">{batch.sku?.skuCode}</td>
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">
+                                                    <div className="flex items-center gap-1.5">
+                                                        {batch.isCustomSku && (
+                                                            <Scissors size={12} className="text-orange-500 flex-shrink-0" />
+                                                        )}
+                                                        <span>{batch.sku?.skuCode}</span>
+                                                    </div>
+                                                </td>
                                                 <td className="py-2 px-4 font-medium text-gray-900">{batch.sku?.variation?.product?.name}</td>
                                                 <td className="py-2 px-4 text-gray-600">{batch.sku?.variation?.colorName}</td>
                                                 <td className="py-2 px-4 text-gray-600">{batch.sku?.size}</td>
                                                 <td className="py-2 px-4 text-center font-medium">{batch.qtyPlanned}</td>
+                                                <td className="py-2 px-4">
+                                                    {batch.isCustomSku && batch.customization ? (
+                                                        <div className="space-y-1">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-medium border border-orange-200">
+                                                                <Scissors size={10} />
+                                                                CUSTOM
+                                                            </span>
+                                                            <div className="text-xs">
+                                                                {batch.customization.type && (
+                                                                    <div className="text-orange-800 font-medium">
+                                                                        {batch.customization.type}: {batch.customization.value}
+                                                                    </div>
+                                                                )}
+                                                                {batch.customization.notes && (
+                                                                    <div className="text-orange-600 italic" title={batch.customization.notes}>
+                                                                        {batch.customization.notes.length > 30
+                                                                            ? batch.customization.notes.substring(0, 30) + '...'
+                                                                            : batch.customization.notes}
+                                                                    </div>
+                                                                )}
+                                                                {batch.customization.linkedOrder && (
+                                                                    <div className="text-gray-500 mt-0.5">
+                                                                        For: {batch.customization.linkedOrder.orderNumber}
+                                                                        {batch.customization.linkedOrder.customerName && (
+                                                                            <span className="text-gray-400"> ({batch.customization.linkedOrder.customerName})</span>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-xs">-</span>
+                                                    )}
+                                                </td>
                                                 <td className="py-2 px-4">
                                                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                                                         batch.status === 'completed' ? 'bg-green-100 text-green-700' :

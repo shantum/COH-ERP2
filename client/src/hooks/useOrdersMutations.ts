@@ -14,8 +14,27 @@ interface UseOrdersMutationsOptions {
     onNotesSuccess?: () => void;
 }
 
+// Context types for optimistic update mutations
+type LineUpdateContext = { skipped: true } | { skipped?: false; previousOrders: unknown };
+type InventoryUpdateContext = { skipped: true } | { skipped?: false; previousOrders: unknown; previousInventory: unknown };
+
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const queryClient = useQueryClient();
+
+    // Debounced invalidation for rapid-fire operations (allocate/unallocate/pick/pack)
+    // Waits for 800ms of inactivity before syncing with server
+    const debounceTimerRef = { current: null as ReturnType<typeof setTimeout> | null };
+
+    const debouncedInvalidateOpenOrders = () => {
+        if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+        }
+        debounceTimerRef.current = setTimeout(() => {
+            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            debounceTimerRef.current = null;
+        }, 800);
+    };
 
     // Granular invalidation functions - only invalidate what's actually affected
     const invalidateOpenOrders = () => {
@@ -99,80 +118,242 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         return { previousOrders };
     };
 
+    // Helper to get current line status from cache
+    const getLineStatus = (lineId: string): string | null => {
+        const orders = queryClient.getQueryData(['openOrders']) as any[] | undefined;
+        if (!orders) return null;
+        for (const order of orders) {
+            const line = order.orderLines?.find((l: any) => l.id === lineId);
+            if (line) return line.lineStatus;
+        }
+        return null;
+    };
+
+    // Helper for optimistic inventory balance updates (allocate/unallocate)
+    // delta: +1 for allocate (increase reserved), -1 for unallocate (decrease reserved)
+    const optimisticInventoryUpdate = async (lineId: string, newStatus: string, delta: number) => {
+        await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+        await queryClient.cancelQueries({ queryKey: ['inventoryBalance'] });
+
+        const previousOrders = queryClient.getQueryData(['openOrders']);
+        const previousInventory = queryClient.getQueryData(['inventoryBalance']);
+
+        // Find the line to get skuId and qty
+        let skuId: string | null = null;
+        let qty = 0;
+        const orders = previousOrders as any[] | undefined;
+        if (orders) {
+            for (const order of orders) {
+                const line = order.orderLines?.find((l: any) => l.id === lineId);
+                if (line) {
+                    skuId = line.skuId;
+                    qty = line.qty || 1;
+                    break;
+                }
+            }
+        }
+
+        // Update line status in openOrders
+        queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+            if (!old) return old;
+            return old.map(order => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.id === lineId ? { ...line, lineStatus: newStatus } : line
+                )
+            }));
+        });
+
+        // Update inventory balance for the affected SKU
+        if (skuId && previousInventory) {
+            queryClient.setQueryData(['inventoryBalance'], (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map((item: any) => {
+                    if (item.skuId === skuId) {
+                        const reservedChange = qty * delta;
+                        return {
+                            ...item,
+                            totalReserved: (item.totalReserved || 0) + reservedChange,
+                            availableBalance: (item.availableBalance || 0) - reservedChange,
+                        };
+                    }
+                    return item;
+                });
+            });
+        }
+
+        return { previousOrders, previousInventory };
+    };
+
     // Allocate/unallocate line mutations - only affects open orders (with optimistic updates)
-    const allocate = useMutation({
+    // These also optimistically update inventory balance for instant stock column feedback
+    // Uses debounced invalidation for rapid-fire clicking through the table
+    const allocate = useMutation<unknown, any, string, InventoryUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.allocateLine(lineId),
-        onMutate: (lineId) => optimisticLineUpdate(lineId, 'allocated'),
+        onMutate: async (lineId): Promise<InventoryUpdateContext> => {
+            const status = getLineStatus(lineId);
+            // Skip if already allocated or has wrong status
+            if (status !== 'pending') return { skipped: true };
+            return optimisticInventoryUpdate(lineId, 'allocated', 1);
+        },
         onError: (err: any, _lineId, context) => {
-            // Rollback on error
-            if (context?.previousOrders) {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            // Suppress state-mismatch errors from rapid clicking - just sync with server
+            if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            // Rollback for other errors
+            if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to allocate line');
+            if (context && 'previousInventory' in context) {
+                queryClient.setQueryData(['inventoryBalance'], context.previousInventory);
+            }
+            alert(errorMsg || 'Failed to allocate line');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
     });
 
-    const unallocate = useMutation({
+    const unallocate = useMutation<unknown, any, string, InventoryUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unallocateLine(lineId),
-        onMutate: (lineId) => optimisticLineUpdate(lineId, 'pending'),
+        onMutate: async (lineId): Promise<InventoryUpdateContext> => {
+            const status = getLineStatus(lineId);
+            // Skip if not allocated
+            if (status !== 'allocated') return { skipped: true };
+            return optimisticInventoryUpdate(lineId, 'pending', -1);
+        },
         onError: (err: any, _lineId, context) => {
-            if (context?.previousOrders) {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            // Suppress state-mismatch errors from rapid clicking - just sync with server
+            if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            // Rollback for other errors
+            if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to unallocate line');
+            if (context && 'previousInventory' in context) {
+                queryClient.setQueryData(['inventoryBalance'], context.previousInventory);
+            }
+            alert(errorMsg || 'Failed to unallocate line');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
     });
 
     // Pick/unpick line mutations - only affects open orders (with optimistic updates)
-    const pickLine = useMutation({
+    const pickLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.pickLine(lineId),
-        onMutate: (lineId) => optimisticLineUpdate(lineId, 'picked'),
+        onMutate: async (lineId): Promise<LineUpdateContext> => {
+            const status = getLineStatus(lineId);
+            if (status !== 'allocated') return { skipped: true };
+            return optimisticLineUpdate(lineId, 'picked');
+        },
         onError: (err: any, _lineId, context) => {
-            if (context?.previousOrders) {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            // Suppress state-mismatch errors from rapid clicking
+            if (errorMsg.includes('allocated') || errorMsg.includes('picked')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to pick line');
+            alert(errorMsg || 'Failed to pick line');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
     });
 
-    const unpickLine = useMutation({
+    const unpickLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unpickLine(lineId),
-        onMutate: (lineId) => optimisticLineUpdate(lineId, 'allocated'),
+        onMutate: async (lineId): Promise<LineUpdateContext> => {
+            const status = getLineStatus(lineId);
+            if (status !== 'picked') return { skipped: true };
+            return optimisticLineUpdate(lineId, 'allocated');
+        },
         onError: (err: any, _lineId, context) => {
-            if (context?.previousOrders) {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            // Suppress state-mismatch errors from rapid clicking
+            if (errorMsg.includes('allocated') || errorMsg.includes('picked')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to unpick line');
+            alert(errorMsg || 'Failed to unpick line');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
     });
 
     // Pack/unpack line mutations - only affects open orders (with optimistic updates)
-    const packLine = useMutation({
+    const packLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.packLine(lineId),
-        onMutate: (lineId) => optimisticLineUpdate(lineId, 'packed'),
+        onMutate: async (lineId): Promise<LineUpdateContext> => {
+            const status = getLineStatus(lineId);
+            if (status !== 'picked') return { skipped: true };
+            return optimisticLineUpdate(lineId, 'packed');
+        },
         onError: (err: any, _lineId, context) => {
-            if (context?.previousOrders) {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            // Suppress state-mismatch errors from rapid clicking
+            if (errorMsg.includes('picked') || errorMsg.includes('packed')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to pack line');
+            alert(errorMsg || 'Failed to pack line');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
     });
 
-    const unpackLine = useMutation({
+    const unpackLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unpackLine(lineId),
-        onMutate: (lineId) => optimisticLineUpdate(lineId, 'picked'),
+        onMutate: async (lineId): Promise<LineUpdateContext> => {
+            const status = getLineStatus(lineId);
+            if (status !== 'packed') return { skipped: true };
+            return optimisticLineUpdate(lineId, 'picked');
+        },
         onError: (err: any, _lineId, context) => {
-            if (context?.previousOrders) {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            // Suppress state-mismatch errors from rapid clicking
+            if (errorMsg.includes('picked') || errorMsg.includes('packed')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to unpack line');
+            alert(errorMsg || 'Failed to unpack line');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
     });
 
     // Production batch mutations - only affects open orders (with optimistic updates)

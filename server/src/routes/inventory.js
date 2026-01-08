@@ -28,9 +28,9 @@ router.get('/pending-sources', authenticateToken, async (req, res) => {
     try {
         // Execute all queries in parallel for better performance
         const [productionPending, returnsPending, rtoPending, repackingPending] = await Promise.all([
-            // Get pending production batches (status: in_progress)
+            // Get pending production batches (planned or in_progress)
             req.prisma.productionBatch.findMany({
-                where: { status: 'in_progress' },
+                where: { status: { in: ['planned', 'in_progress'] } },
                 include: {
                     sku: {
                         include: {
@@ -303,11 +303,11 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
             });
         }
 
-        // 4. Production batches
+        // 4. Production batches (planned or in_progress)
         const productionBatch = await req.prisma.productionBatch.findFirst({
             where: {
                 skuId: sku.id,
-                status: 'in_progress'
+                status: { in: ['planned', 'in_progress'] }
             }
         });
         if (productionBatch) {
@@ -317,6 +317,7 @@ router.get('/scan-lookup', authenticateToken, async (req, res) => {
                 data: {
                     batchId: productionBatch.id,
                     batchCode: productionBatch.batchCode,
+                    batchDate: productionBatch.batchDate,
                     qtyPlanned: productionBatch.qtyPlanned,
                     qtyCompleted: productionBatch.qtyCompleted || 0,
                     qtyPending: productionBatch.qtyPlanned - (productionBatch.qtyCompleted || 0)
@@ -441,9 +442,9 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 }
             });
         } else if (source === 'production') {
-            // Production batches
+            // Production batches (planned or in_progress)
             const productionPending = await req.prisma.productionBatch.findMany({
-                where: { status: 'in_progress' },
+                where: { status: { in: ['planned', 'in_progress'] } },
                 include: {
                     sku: { include: { variation: { include: { product: true } } } }
                 },
@@ -459,7 +460,7 @@ router.get('/pending-queue/:source', authenticateToken, async (req, res) => {
                 colorName: b.sku.variation.colorName,
                 size: b.sku.size,
                 qty: b.qtyPlanned - (b.qtyCompleted || 0),  // Pending qty
-                imageUrl: b.sku.variation.product.imageUrl,
+                imageUrl: b.sku.variation.imageUrl || b.sku.variation.product.imageUrl,
                 contextLabel: 'Batch',
                 contextValue: b.batchCode || `Batch ${b.id.slice(0, 8)}`,
                 // Production-specific fields

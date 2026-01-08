@@ -57,6 +57,7 @@ export function calculateLTV(orders) {
 
 /**
  * Get LTV and order count map for multiple customers
+ * Uses aggregate query for performance - avoids loading all orders
  * @param {object} prisma - Prisma client instance
  * @param {string[]} customerIds - Array of customer IDs
  * @returns {Promise<Record<string, {ltv: number, orderCount: number}>>} - Map of customerId to stats
@@ -64,22 +65,32 @@ export function calculateLTV(orders) {
 export async function getCustomerStatsMap(prisma, customerIds) {
     if (!customerIds || customerIds.length === 0) return {};
 
-    const customers = await prisma.customer.findMany({
-        where: { id: { in: customerIds } },
-        include: {
-            orders: {
-                select: { totalAmount: true, status: true }
-            }
-        }
+    // Use aggregate query - much faster than loading all orders
+    const stats = await prisma.order.groupBy({
+        by: ['customerId'],
+        where: {
+            customerId: { in: customerIds },
+            status: { not: 'cancelled' }
+        },
+        _sum: { totalAmount: true },
+        _count: { id: true }
     });
 
     const statsMap = {};
-    for (const customer of customers) {
-        const validOrders = customer.orders.filter(o => o.status !== 'cancelled');
-        statsMap[customer.id] = {
-            ltv: calculateLTV(customer.orders),
-            orderCount: validOrders.length
-        };
+
+    // Initialize all customerIds with defaults (in case some have no orders)
+    for (const id of customerIds) {
+        statsMap[id] = { ltv: 0, orderCount: 0 };
+    }
+
+    // Populate from aggregate results
+    for (const stat of stats) {
+        if (stat.customerId) {
+            statsMap[stat.customerId] = {
+                ltv: stat._sum.totalAmount || 0,
+                orderCount: stat._count.id || 0
+            };
+        }
     }
 
     return statsMap;

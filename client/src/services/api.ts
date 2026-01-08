@@ -109,7 +109,7 @@ export const fabricsApi = {
 
 // Inventory
 export const inventoryApi = {
-    getBalance: (params?: { belowTarget?: string; search?: string; limit?: number; offset?: number }) =>
+    getBalance: (params?: { belowTarget?: string; search?: string; limit?: number; offset?: number; includeCustomSkus?: string }) =>
         api.get('/inventory/balance', { params }),
     getSkuBalance: (skuId: string) => api.get(`/inventory/balance/${skuId}`),
     getTransactions: (params?: Record<string, string>) => api.get('/inventory/transactions', { params }),

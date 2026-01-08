@@ -1,6 +1,11 @@
 /**
  * useOrdersData hook
  * Centralizes all data queries for the Orders page
+ *
+ * Loading strategy:
+ * 1. Active tab loads immediately
+ * 2. Once active tab completes, remaining tabs load sequentially in background
+ * 3. Priority order: Open → Shipped → RTO → COD Pending → Cancelled → Archived
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -23,38 +28,68 @@ interface UseOrdersDataOptions {
 }
 
 export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, archivedDays = 90, archivedSortBy = 'archivedAt' }: UseOrdersDataOptions) {
-    // Order queries with conditional polling based on active tab
-    // Optimized settings:
-    // - staleTime: prevents double-fetches when data is still fresh
-    // - refetchOnWindowFocus: disabled since we have polling
-    // - refetchIntervalInBackground: pauses polling when tab is hidden
+    // Order queries with SEQUENTIAL BACKGROUND LOADING
+    // Active tab loads immediately, then remaining tabs load one-by-one after it completes
+    // This ensures:
+    // 1. Active tab data appears as fast as possible
+    // 2. Tab counts populate progressively as background loads complete
+    // 3. Switching tabs feels instant since data is pre-loaded
+
     const openOrdersQuery = useQuery({
         queryKey: ['openOrders'],
         queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data),
         staleTime: STALE_TIME,
         refetchOnWindowFocus: false,
         refetchInterval: activeTab === 'open' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false
+        refetchIntervalInBackground: false,
+        // Open tab is the default, always fetch it immediately
     });
 
+    // Shipped loads: when tab is active OR after open completes
     const shippedOrdersQuery = useQuery({
         queryKey: ['shippedOrders', shippedPage, shippedDays],
         queryFn: () => ordersApi.getShipped({ page: shippedPage, days: shippedDays }).then(r => r.data),
         staleTime: STALE_TIME,
         refetchOnWindowFocus: false,
         refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false
+        refetchIntervalInBackground: false,
+        enabled: activeTab === 'shipped' || openOrdersQuery.isSuccess,
     });
 
+    // RTO loads: when tab is active OR after shipped completes
+    const rtoOrdersQuery = useQuery({
+        queryKey: ['rtoOrders'],
+        queryFn: () => ordersApi.getRto().then(r => r.data),
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false,
+        enabled: activeTab === 'rto' || shippedOrdersQuery.isSuccess,
+    });
+
+    // COD Pending loads: when tab is active OR after RTO completes
+    const codPendingOrdersQuery = useQuery({
+        queryKey: ['codPendingOrders'],
+        queryFn: () => ordersApi.getCodPending().then(r => r.data),
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false,
+        enabled: activeTab === 'cod-pending' || rtoOrdersQuery.isSuccess,
+    });
+
+    // Cancelled loads: when tab is active OR after COD Pending completes
     const cancelledOrdersQuery = useQuery({
         queryKey: ['cancelledOrders'],
         queryFn: () => ordersApi.getCancelled().then(r => r.data),
         staleTime: STALE_TIME,
         refetchOnWindowFocus: false,
         refetchInterval: activeTab === 'cancelled' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false
+        refetchIntervalInBackground: false,
+        enabled: activeTab === 'cancelled' || codPendingOrdersQuery.isSuccess,
     });
 
+    // Archived loads last: when tab is active OR after Cancelled completes
     const archivedOrdersQuery = useQuery({
         queryKey: ['archivedOrders', archivedDays, archivedSortBy],
         queryFn: () => ordersApi.getArchived({
@@ -64,65 +99,60 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         staleTime: STALE_TIME,
         refetchOnWindowFocus: false,
         refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false
+        refetchIntervalInBackground: false,
+        enabled: activeTab === 'archived' || cancelledOrdersQuery.isSuccess,
     });
 
-    const rtoOrdersQuery = useQuery({
-        queryKey: ['rtoOrders'],
-        queryFn: () => ordersApi.getRto().then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false
-    });
-
-    const codPendingOrdersQuery = useQuery({
-        queryKey: ['codPendingOrders'],
-        queryFn: () => ordersApi.getCodPending().then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false
-    });
-
-    // Summary queries
+    // Summary queries - load with their respective tabs or in background
     const shippedSummaryQuery = useQuery({
         queryKey: ['shippedSummary', shippedDays],
         queryFn: () => ordersApi.getShippedSummary({ days: shippedDays }).then(r => r.data),
-        enabled: activeTab === 'shipped',
+        staleTime: STALE_TIME,
+        enabled: activeTab === 'shipped' || shippedOrdersQuery.isSuccess,
     });
 
     const rtoSummaryQuery = useQuery({
         queryKey: ['rtoSummary'],
         queryFn: () => ordersApi.getRtoSummary().then(r => r.data),
-        enabled: activeTab === 'rto',
+        staleTime: STALE_TIME,
+        enabled: activeTab === 'rto' || rtoOrdersQuery.isSuccess,
     });
 
-    // Supporting data queries
+    // Supporting data queries - lazy loaded based on what's needed for active tab
+    // allSkus and inventoryBalance are heavy queries only needed for Open tab
     const allSkusQuery = useQuery({
         queryKey: ['allSkus'],
-        queryFn: () => productsApi.getAllSkus().then(r => r.data)
+        queryFn: () => productsApi.getAllSkus().then(r => r.data),
+        staleTime: 60000, // SKU list doesn't change often
+        enabled: activeTab === 'open', // Only needed for Open tab (to change SKU)
     });
 
     const inventoryBalanceQuery = useQuery({
         queryKey: ['inventoryBalance'],
         // Include custom SKUs so orders with customized lines show correct stock
-        queryFn: () => inventoryApi.getBalance({ includeCustomSkus: 'true' }).then(r => r.data.items || r.data)
+        queryFn: () => inventoryApi.getBalance({ includeCustomSkus: 'true' }).then(r => r.data.items || r.data),
+        staleTime: STALE_TIME,
+        enabled: activeTab === 'open', // Only needed for Open tab (stock column)
     });
 
     const fabricStockQuery = useQuery({
         queryKey: ['fabricStock'],
-        queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data)
+        queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data),
+        staleTime: 60000, // Fabric stock doesn't change rapidly
+        enabled: activeTab === 'open', // Only needed for Open tab (fabric column)
     });
 
     const channelsQuery = useQuery({
         queryKey: ['orderChannels'],
-        queryFn: () => adminApi.getChannels().then(r => r.data)
+        queryFn: () => adminApi.getChannels().then(r => r.data),
+        staleTime: 300000, // Channels rarely change (5 min cache)
     });
 
     const lockedDatesQuery = useQuery({
         queryKey: ['lockedProductionDates'],
-        queryFn: () => productionApi.getLockedDates().then(r => r.data)
+        queryFn: () => productionApi.getLockedDates().then(r => r.data),
+        staleTime: 60000, // Locked dates don't change rapidly
+        enabled: activeTab === 'open', // Only needed for Open tab (production date picker)
     });
 
     // Customer detail query - only fetches when a customer is selected

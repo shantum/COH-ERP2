@@ -15,6 +15,13 @@ const CUSTOMIZATION_TYPES = [
     { value: 'other', label: 'Other' },
 ];
 
+// Initial data for edit mode
+interface CustomizationInitialData {
+    type: string;
+    value: string;
+    notes?: string;
+}
+
 interface CustomizationModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -28,6 +35,10 @@ interface CustomizationModalProps {
         qty: number;
     } | null;
     isSubmitting: boolean;
+    /** Edit mode: pre-populate form with existing customization data */
+    initialData?: CustomizationInitialData | null;
+    /** Edit mode indicator */
+    isEditMode?: boolean;
 }
 
 export function CustomizationModal({
@@ -36,6 +47,8 @@ export function CustomizationModal({
     onConfirm,
     lineData,
     isSubmitting,
+    initialData,
+    isEditMode = false,
 }: CustomizationModalProps) {
     const [type, setType] = useState('length');
     const [value, setValue] = useState('');
@@ -44,17 +57,27 @@ export function CustomizationModal({
 
     const valueInputRef = useRef<HTMLInputElement>(null);
 
-    // Reset form when modal opens
+    // Reset form when modal opens, or populate with initial data in edit mode
     useEffect(() => {
         if (isOpen) {
-            setType('length');
-            setValue('');
-            setNotes('');
-            setConfirmed(false);
+            if (isEditMode && initialData) {
+                // Edit mode: populate form with existing data
+                setType(initialData.type || 'length');
+                setValue(initialData.value || '');
+                setNotes(initialData.notes || '');
+                // In edit mode, pre-check the confirmation since user already agreed before
+                setConfirmed(true);
+            } else {
+                // Create mode: reset form
+                setType('length');
+                setValue('');
+                setNotes('');
+                setConfirmed(false);
+            }
             // Focus value input after modal opens
             setTimeout(() => valueInputRef.current?.focus(), 100);
         }
-    }, [isOpen]);
+    }, [isOpen, isEditMode, initialData]);
 
     // Handle escape key
     useEffect(() => {
@@ -102,7 +125,9 @@ export function CustomizationModal({
                     <div className="flex items-center gap-2">
                         <Scissors className="text-orange-500" size={20} />
                         <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Customize Order Line</h2>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                                {isEditMode ? 'Edit Customization' : 'Customize Order Line'}
+                            </h2>
                             <p className="text-sm text-gray-500">
                                 {lineData.productName} - {lineData.colorName} - {lineData.size}
                             </p>
@@ -243,12 +268,12 @@ export function CustomizationModal({
                         {isSubmitting ? (
                             <>
                                 <span className="animate-spin">...</span>
-                                Creating...
+                                {isEditMode ? 'Updating...' : 'Creating...'}
                             </>
                         ) : (
                             <>
                                 <Scissors size={16} />
-                                Generate Custom SKU
+                                {isEditMode ? 'Update Customization' : 'Generate Custom SKU'}
                             </>
                         )}
                     </button>

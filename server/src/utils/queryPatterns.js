@@ -958,6 +958,9 @@ export async function createCustomSku(prisma, baseSkuId, customizationData, orde
             orderLine: updatedLine,
             originalSkuCode: baseSku.skuCode,
         };
+    }, {
+        maxWait: 15000, // Wait up to 15 seconds to start the transaction
+        timeout: 15000, // Allow up to 15 seconds for the transaction to complete
     });
 }
 
@@ -1046,5 +1049,8 @@ export async function removeCustomization(prisma, orderLineId) {
             orderLine: updatedLine,
             deletedCustomSkuCode: orderLine.sku.skuCode,
         };
+    }, {
+        maxWait: 15000,
+        timeout: 15000,
     });
 }

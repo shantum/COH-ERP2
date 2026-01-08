@@ -378,6 +378,8 @@ model Order {
   @@index([isArchived])
   @@index([status, orderDate])      // Compound: filter by status + sort by date
   @@index([customerId, orderDate])  // Compound: customer order history
+  @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)
+  @@index([status, isArchived, orderDate]) // Compound: open orders with date sort
 }
 
 model OrderLine {

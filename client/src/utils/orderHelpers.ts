@@ -43,6 +43,40 @@ export function getFabricBalance(fabricStock: any[] | undefined, fabricId: strin
     return fab ? parseFloat(fab.currentBalance) : 0;
 }
 
+// Pre-built Maps for O(1) lookups during flattenOrders
+let inventoryMap: Map<string, number> | null = null;
+let fabricMap: Map<string, number> | null = null;
+let lastInventoryRef: any[] | undefined = undefined;
+let lastFabricRef: any[] | undefined = undefined;
+
+function getInventoryMap(inventoryBalance: any[] | undefined): Map<string, number> {
+    // Only rebuild if reference changed
+    if (inventoryBalance !== lastInventoryRef) {
+        inventoryMap = new Map();
+        if (inventoryBalance) {
+            for (const item of inventoryBalance) {
+                inventoryMap.set(item.skuId, item.availableBalance ?? item.currentBalance ?? 0);
+            }
+        }
+        lastInventoryRef = inventoryBalance;
+    }
+    return inventoryMap!;
+}
+
+function getFabricMap(fabricStock: any[] | undefined): Map<string, number> {
+    // Only rebuild if reference changed
+    if (fabricStock !== lastFabricRef) {
+        fabricMap = new Map();
+        if (fabricStock) {
+            for (const item of fabricStock) {
+                fabricMap.set(item.fabricId, parseFloat(item.currentBalance) || 0);
+            }
+        }
+        lastFabricRef = fabricStock;
+    }
+    return fabricMap!;
+}
+
 /**
  * Compute customer order counts from orders
  * Note: LTV is now provided by the server for consistency
@@ -97,6 +131,7 @@ export interface FlattenedOrderRow {
     customSkuCode: string | null;
     customizationType: string | null;
     customizationValue: string | null;
+    customizationNotes: string | null;
     originalSkuCode: string | null;
 }
 
@@ -114,6 +149,10 @@ export function flattenOrders(
 ): FlattenedOrderRow[] {
     if (!orders) return [];
 
+    // Build O(1) lookup maps (cached if data hasn't changed)
+    const invMap = getInventoryMap(inventoryBalance);
+    const fabMap = getFabricMap(fabricStock);
+
     // Sort orders by date descending (newest first)
     const sortedOrders = [...orders].sort((a, b) =>
         new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()
@@ -121,13 +160,15 @@ export function flattenOrders(
 
     const rows: FlattenedOrderRow[] = [];
 
-    // Debug: log orders with 0 items
-    const zeroItemOrders = sortedOrders.filter(o => !o.orderLines || o.orderLines.length === 0);
-    if (zeroItemOrders.length > 0) {
-        console.log('[flattenOrders] Orders with 0 items:', zeroItemOrders.map(o => o.orderNumber));
+    // Debug: log orders with 0 items (only in dev)
+    if (import.meta.env.DEV) {
+        const zeroItemOrders = sortedOrders.filter(o => !o.orderLines || o.orderLines.length === 0);
+        if (zeroItemOrders.length > 0) {
+            console.log('[flattenOrders] Orders with 0 items:', zeroItemOrders.map(o => o.orderNumber));
+        }
     }
 
-    sortedOrders.forEach(order => {
+    for (const order of sortedOrders) {
         const orderLines = order.orderLines || [];
         // Use server-provided values (calculated from ALL customer orders)
         const serverLtv = order.customerLtv || 0;
@@ -167,15 +208,19 @@ export function flattenOrders(
                 customSkuCode: null,
                 customizationType: null,
                 customizationValue: null,
+                customizationNotes: null,
                 originalSkuCode: null,
             });
-            return;
+            continue;
         }
 
-        orderLines.forEach((line: any, idx: number) => {
+        const lineCount = orderLines.length;
+        for (let idx = 0; idx < lineCount; idx++) {
+            const line = orderLines[idx];
             const fabricId = line.sku?.variation?.fabric?.id;
-            const skuStock = getSkuBalance(inventoryBalance, line.skuId);
-            const fabricBal = fabricId ? getFabricBalance(fabricStock, fabricId) : 0;
+            // O(1) Map lookups instead of O(n) array.find()
+            const skuStock = line.skuId ? (invMap.get(line.skuId) ?? 0) : 0;
+            const fabricBal = fabricId ? (fabMap.get(fabricId) ?? 0) : 0;
             const productionBatch = line.productionBatch;
 
             // Extract customization data
@@ -185,6 +230,7 @@ export function flattenOrders(
             const customSkuCode = isCustomized && sku?.isCustomSku ? sku.skuCode : null;
             const customizationType = sku?.customizationType || null;
             const customizationValue = sku?.customizationValue || null;
+            const customizationNotes = sku?.customizationNotes || null;
             // originalSkuCode would need to be populated by the backend
             const originalSkuCode = line.originalSkuId ? (line.originalSku?.skuCode || null) : null;
 
@@ -220,10 +266,11 @@ export function flattenOrders(
                 customSkuCode,
                 customizationType,
                 customizationValue,
+                customizationNotes,
                 originalSkuCode,
             });
-        });
-    });
+        }
+    }
 
     return rows;
 }
@@ -358,6 +405,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     production: 'Production',
     notes: 'Notes',
     pick: 'P',
+    pack: 'Pk',
     ship: 'S',
     shopifyStatus: 'Shopify',
     awb: 'AWB',
