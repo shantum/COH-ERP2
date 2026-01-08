@@ -969,9 +969,17 @@ router.get('/balance', authenticateToken, async (req, res) => {
         const shouldIncludeCustomSkus = includeCustomSkus === 'true';
 
         // Build SKU filter - by default exclude custom SKUs from standard inventory view
+        // Move search filtering to database level for better performance
         const skuWhere = {
             isActive: true,
-            ...(shouldIncludeCustomSkus ? {} : { isCustomSku: false })
+            ...(shouldIncludeCustomSkus ? {} : { isCustomSku: false }),
+            // Server-side search on SKU code and product name
+            ...(search && {
+                OR: [
+                    { skuCode: { contains: search, mode: 'insensitive' } },
+                    { variation: { product: { name: { contains: search, mode: 'insensitive' } } } }
+                ]
+            })
         };
 
         const skus = await req.prisma.sku.findMany({
@@ -1028,18 +1036,12 @@ router.get('/balance', authenticateToken, async (req, res) => {
 
         let filteredBalances = balances;
 
+        // Filter by below target status (done in memory since it requires calculated balance)
         if (belowTarget === 'true') {
             filteredBalances = balances.filter((b) => b.status === 'below_target');
         }
 
-        if (search) {
-            const searchLower = search.toLowerCase();
-            filteredBalances = filteredBalances.filter(
-                (b) =>
-                    b.skuCode.toLowerCase().includes(searchLower) ||
-                    b.productName.toLowerCase().includes(searchLower)
-            );
-        }
+        // Note: search filtering is now done at database level (see skuWhere above)
 
         // Sort by status (below_target first)
         filteredBalances.sort((a, b) => {

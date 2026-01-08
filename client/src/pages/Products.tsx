@@ -100,16 +100,16 @@ export default function Products() {
                 isActive: editVariationForm.isActive
             });
 
-            // Update each existing SKU
-            for (const sku of editVariationForm.skus) {
-                await productsApi.updateSku(sku.id, {
+            // Update all existing SKUs in parallel
+            await Promise.all(editVariationForm.skus.map((sku: any) =>
+                productsApi.updateSku(sku.id, {
                     mrp: sku.mrp,
                     fabricConsumption: sku.fabricConsumption,
                     isActive: sku.isActive
-                });
-            }
+                })
+            ));
 
-            // Create new SKUs
+            // Create new SKUs in parallel
             if (editVariationForm.newSkus.length > 0) {
                 const product = products?.find((p: any) =>
                     p.variations?.some((v: any) => v.id === showEditVariation.id)
@@ -117,15 +117,15 @@ export default function Products() {
                 const productCode = product?.name?.substring(0, 3).toUpperCase() || 'PRD';
                 const colorCode = editVariationForm.colorName.substring(0, 3).toUpperCase();
 
-                for (const newSku of editVariationForm.newSkus) {
+                await Promise.all(editVariationForm.newSkus.map((newSku: any) => {
                     const skuCode = `${productCode}-${colorCode}-${newSku.size}`;
-                    await productsApi.createSku(showEditVariation.id, {
+                    return productsApi.createSku(showEditVariation.id, {
                         skuCode,
                         size: newSku.size,
                         mrp: newSku.mrp,
                         fabricConsumption: newSku.fabricConsumption
                     });
-                }
+                }));
             }
 
             queryClient.invalidateQueries({ queryKey: ['products'] });
