@@ -56,6 +56,43 @@ router.put('/config', authenticateToken, async (req, res) => {
     }
 });
 
+// Get auto-ship setting
+router.get('/settings/auto-ship', authenticateToken, async (req, res) => {
+    try {
+        const setting = await req.prisma.systemSetting.findUnique({
+            where: { key: 'auto_ship_fulfilled' }
+        });
+        // Default to true if not set
+        const enabled = setting?.value !== 'false';
+        res.json({ enabled });
+    } catch (error) {
+        console.error('Get auto-ship setting error:', error);
+        res.status(500).json({ error: 'Failed to get auto-ship setting' });
+    }
+});
+
+// Update auto-ship setting
+router.put('/settings/auto-ship', authenticateToken, async (req, res) => {
+    try {
+        const { enabled } = req.body;
+
+        if (typeof enabled !== 'boolean') {
+            return res.status(400).json({ error: 'enabled must be a boolean' });
+        }
+
+        await req.prisma.systemSetting.upsert({
+            where: { key: 'auto_ship_fulfilled' },
+            update: { value: enabled ? 'true' : 'false' },
+            create: { key: 'auto_ship_fulfilled', value: enabled ? 'true' : 'false' }
+        });
+
+        res.json({ success: true, enabled });
+    } catch (error) {
+        console.error('Update auto-ship setting error:', error);
+        res.status(500).json({ error: 'Failed to update auto-ship setting' });
+    }
+});
+
 router.post('/test-connection', authenticateToken, async (req, res) => {
     try {
         // Reload config from database

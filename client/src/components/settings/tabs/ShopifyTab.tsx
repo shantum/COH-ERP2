@@ -10,7 +10,7 @@ import JsonViewer from '../../JsonViewer';
 import {
     Key, CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
     AlertCircle, Package, Webhook, Copy, ExternalLink, Search, Database, Download,
-    Activity, Clock, Zap, Pause
+    Activity, Clock, Zap, Pause, ToggleLeft, ToggleRight
 } from 'lucide-react';
 
 export function ShopifyTab() {
@@ -80,6 +80,12 @@ export function ShopifyTab() {
         refetchInterval: 15000,
     });
 
+    // Auto-ship setting
+    const { data: autoShipSetting } = useQuery({
+        queryKey: ['autoShipSetting'],
+        queryFn: () => shopifyApi.getAutoShipSetting().then(r => r.data),
+    });
+
     // Mutations
     const updateConfigMutation = useMutation({
         mutationFn: (data: { shopDomain: string; accessToken: string }) =>
@@ -91,6 +97,16 @@ export function ShopifyTab() {
         },
         onError: (error: any) => {
             alert(error.response?.data?.error || 'Failed to save configuration');
+        },
+    });
+
+    const updateAutoShipMutation = useMutation({
+        mutationFn: (enabled: boolean) => shopifyApi.updateAutoShipSetting(enabled),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['autoShipSetting'] });
+        },
+        onError: (error: any) => {
+            alert(error.response?.data?.error || 'Failed to update auto-ship setting');
         },
     });
 
@@ -324,6 +340,42 @@ export function ShopifyTab() {
                     )}
                 </div>
             </div>
+
+            {/* Auto-Ship Setting */}
+            {config?.hasAccessToken && (
+                <div className="card">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            {autoShipSetting?.enabled ? (
+                                <ToggleRight size={24} className="text-green-600" />
+                            ) : (
+                                <ToggleLeft size={24} className="text-gray-400" />
+                            )}
+                            <div>
+                                <h2 className="text-lg font-semibold">Auto-Ship Fulfilled Orders</h2>
+                                <p className="text-sm text-gray-600">
+                                    {autoShipSetting?.enabled
+                                        ? 'Orders automatically ship when Shopify marks them fulfilled'
+                                        : 'Strict ERP mode: Shopify fulfillment is ignored, manual workflow required'}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => updateAutoShipMutation.mutate(!autoShipSetting?.enabled)}
+                            disabled={updateAutoShipMutation.isPending}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                autoShipSetting?.enabled ? 'bg-green-600' : 'bg-gray-300'
+                            }`}
+                        >
+                            <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                    autoShipSetting?.enabled ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                            />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Sync Status Card */}
             {config?.hasAccessToken && (
