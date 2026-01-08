@@ -85,6 +85,21 @@ Available = Balance - SUM(reserved)
 
 `.env` requires: `DATABASE_URL`, `JWT_SECRET`
 
+## Session Cleanup (Proactive)
+
+**Auto-run cleanup after:**
+- 3+ features implemented
+- 5+ files modified
+- 3+ bug fixes
+- Major refactors
+- Before ending long sessions
+
+**Cleanup agent** (`.claude/agents/session-cleanup.md`):
+1. Review recent git history
+2. Quick code cleanup (unused imports, console.logs)
+3. Capture learnings -> gotchas/docs
+4. Trigger documentation-optimizer if needed
+
 ## Safe Auto-Run Commands
 
 `npm run dev`, `npm test`, `curl` to localhost:3001
