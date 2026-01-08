@@ -241,23 +241,16 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
             ? `${customer.first_name} ${customer.last_name || ''}`.trim()
             : 'Unknown';
 
-    // Extract discount codes (join multiple codes with comma)
-    const discountCodes = shopifyOrder.discount_codes || [];
-    const discountCode = discountCodes.length > 0
-        ? discountCodes.map(d => d.code).join(', ')
-        : null;
-
-    // Extract tags (Shopify order tags)
-    const orderTags = shopifyOrder.tags || null;
+    // NOTE: discountCodes, customerNotes, shopifyFulfillmentStatus are stored in ShopifyOrderCache only
+    // Access them via order.shopifyCache JOIN pattern (like VLOOKUP)
 
     // Extract internal notes from Shopify note_attributes (staff-only notes)
     // Shopify note_attributes is an array of {name, value} objects
     const noteAttributes = shopifyOrder.note_attributes || [];
     const internalNote = noteAttributes.find(n => n.name === 'internal_note' || n.name === 'staff_note')?.value;
 
-    // Build order data
-    // NOTE: Raw Shopify data is stored in ShopifyOrderCache, not duplicated in Order
-    // Comprehensive field mapping for order updates
+    // Build order data - ONLY ERP-owned fields (not Shopify fields)
+    // Shopify data is accessed via order.shopifyCache relation
     const orderData = {
         shopifyOrderId,
         orderNumber: shopifyOrder.name || String(shopifyOrder.order_number) || `SHOP-${shopifyOrderId.slice(-8)}`,
@@ -269,10 +262,7 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
         shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
         totalAmount: parseFloat(shopifyOrder.total_price) || 0,
-        discountCode,
-        shopifyFulfillmentStatus: shopifyOrder.fulfillment_status || 'unfulfilled',
         orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
-        customerNotes: shopifyOrder.note || null,
         // Preserve existing internal notes, append Shopify note_attributes if present
         internalNotes: existingOrder?.internalNotes || internalNote || null,
         paymentMethod,
@@ -290,20 +280,16 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     }
 
     if (existingOrder) {
-        // Comprehensive update detection - check all syncable fields
+        // Update detection - only check ERP-owned fields
+        // Shopify fields (discountCode, customerNotes, shopifyFulfillmentStatus) are in cache only
         const needsUpdate =
             // Core status changes
             existingOrder.status !== status ||
-            existingOrder.shopifyFulfillmentStatus !== orderData.shopifyFulfillmentStatus ||
             // Fulfillment/shipping info
             existingOrder.awbNumber !== awbNumber ||
             existingOrder.courier !== courier ||
             // Payment
             existingOrder.paymentMethod !== paymentMethod ||
-            // Customer-facing notes
-            existingOrder.customerNotes !== orderData.customerNotes ||
-            // Discounts
-            existingOrder.discountCode !== discountCode ||
             // Contact info (can change if customer updates)
             existingOrder.customerEmail !== orderData.customerEmail ||
             existingOrder.customerPhone !== orderData.customerPhone ||

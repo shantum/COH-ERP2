@@ -1,6 +1,9 @@
 /**
  * List Orders Router
  * GET endpoints for listing and viewing orders
+ * 
+ * Unified view-based architecture:
+ * GET /orders?view=open|shipped|rto|cod_pending|archived
  */
 
 import { Router } from 'express';
@@ -14,54 +17,124 @@ import {
     calculateDaysSince,
     determineTrackingStatus,
 } from '../../utils/queryPatterns.js';
+import {
+    ORDER_VIEWS,
+    buildViewWhereClause,
+    enrichOrdersForView,
+    ORDER_UNIFIED_SELECT,
+    getValidViewNames,
+    getViewConfig,
+} from '../../utils/orderViews.js';
 
 const router = Router();
 
 // ============================================
-// ORDERS LIST
+// UNIFIED ORDERS LIST (View-based)
 // ============================================
 
-// Get all orders (with filters)
+/**
+ * GET /orders?view=<viewName>
+ * 
+ * Unified endpoint for all order views.
+ * Replaces individual /open, /shipped, /rto, /cod-pending endpoints.
+ * 
+ * Query params:
+ * - view: open|shipped|rto|cod_pending|archived|all (default: open)
+ * - limit: Number of orders to return
+ * - offset: Pagination offset
+ * - days: Date range filter (for views with dateFilter)
+ * - search: Search across orderNumber, customerName, awbNumber, email, phone
+ */
 router.get('/', async (req, res) => {
     try {
-        const { status, channel, startDate, endDate, search, limit = 50, offset = 0 } = req.query;
+        const {
+            view = 'open',
+            limit,
+            offset = 0,
+            days,
+            search,
+            sortBy,  // Extract sortBy to prevent it from being added to WHERE clause
+            ...additionalFilters
+        } = req.query;
 
-        const where = {};
-        if (status) where.status = status;
-        if (channel) where.channel = channel;
-        if (startDate || endDate) {
-            where.orderDate = {};
-            if (startDate) where.orderDate.gte = new Date(startDate);
-            if (endDate) where.orderDate.lte = new Date(endDate);
-        }
-        if (search) {
-            where.OR = [
-                { orderNumber: { contains: search, mode: 'insensitive' } },
-                { customerName: { contains: search, mode: 'insensitive' } },
-                { customerEmail: { contains: search, mode: 'insensitive' } },
-            ];
+        // Validate view
+        const viewConfig = getViewConfig(view);
+        if (!viewConfig) {
+            return res.status(400).json({
+                error: `Invalid view: ${view}`,
+                validViews: getValidViewNames(),
+            });
         }
 
-        const orders = await req.prisma.order.findMany({
-            where,
-            include: {
-                customer: true,
-                orderLines: {
-                    include: {
-                        sku: {
-                            include: {
-                                variation: { include: { product: true } },
-                            },
-                        },
-                    },
-                },
-            },
-            orderBy: { orderDate: 'desc' },
-            take: Number(limit),
-            skip: Number(offset),
+        // Use view's default limit if not specified
+        const take = Number(limit) || viewConfig.defaultLimit || 100;
+        const skip = Number(offset);
+
+        // Build WHERE clause using view config
+        const where = buildViewWhereClause(view, {
+            days,
+            search,
+            additionalFilters,
         });
 
-        res.json(orders);
+        // Determine sort order - use sortBy param if valid, otherwise use view default
+        let orderBy = viewConfig.orderBy;
+        if (sortBy && ['orderDate', 'archivedAt', 'shippedAt', 'createdAt'].includes(sortBy)) {
+            orderBy = { [sortBy]: 'desc' };
+        }
+
+        // Execute query with pagination
+        // For COD pending view, also fetch total pending amount
+        const queries = [
+            req.prisma.order.count({ where }),
+            req.prisma.order.findMany({
+                where,
+                select: ORDER_UNIFIED_SELECT,
+                orderBy,
+                take,
+                skip,
+            }),
+        ];
+
+        // Add aggregate for COD pending view
+        if (view === 'cod_pending') {
+            queries.push(
+                req.prisma.order.aggregate({ where, _sum: { totalAmount: true } })
+            );
+        }
+
+        const results = await Promise.all(queries);
+        const totalCount = results[0];
+        const orders = results[1];
+        const totalPendingAmount = view === 'cod_pending' ? (results[2]?._sum?.totalAmount || 0) : undefined;
+
+        // Apply view-specific enrichments
+        const enriched = await enrichOrdersForView(
+            req.prisma,
+            orders,
+            viewConfig.enrichment
+        );
+
+        const response = {
+            orders: enriched,
+            view,
+            viewName: viewConfig.name,
+            pagination: {
+                total: totalCount,
+                limit: take,
+                offset: skip,
+                hasMore: skip + orders.length < totalCount,
+                page: Math.floor(skip / take) + 1,
+                totalPages: Math.ceil(totalCount / take),
+            },
+        };
+
+        // Add view-specific fields
+        if (totalPendingAmount !== undefined) {
+            response.totalPendingAmount = totalPendingAmount;
+        }
+
+        res.json(response);
     } catch (error) {
         console.error('Get orders error:', error);
         res.status(500).json({ error: 'Failed to fetch orders' });
@@ -630,7 +703,7 @@ router.get('/status/archived', async (req, res) => {
             let deliveryDays = null;
             const shippedDate = order.shippedAt ? new Date(order.shippedAt) : null;
             const deliveredDate = order.deliveredAt ? new Date(order.deliveredAt) :
-                                  cache.deliveredAt ? new Date(cache.deliveredAt) : null;
+                cache.deliveredAt ? new Date(cache.deliveredAt) : null;
             if (shippedDate && deliveredDate) {
                 deliveryDays = Math.round((deliveredDate.getTime() - shippedDate.getTime()) / (1000 * 60 * 60 * 24));
             }

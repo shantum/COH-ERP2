@@ -177,20 +177,23 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     const shippedPagination = shippedData?.pagination || { total: 0, page: 1, totalPages: 1 };
 
     // Extract archived orders and total count from response
+    // Handles both legacy (totalCount) and unified (pagination.total) response shapes
     const archivedData = archivedOrdersQuery.data;
     const archivedOrders = archivedData?.orders || [];
-    const archivedTotalCount = archivedData?.totalCount || 0;
+    const archivedTotalCount = archivedData?.totalCount ?? archivedData?.pagination?.total ?? 0;
 
     // Extract RTO orders from response
+    // Handles both legacy (total) and unified (pagination.total) response shapes
     const rtoData = rtoOrdersQuery.data;
     const rtoOrders = rtoData?.orders || [];
-    const rtoTotalCount = rtoData?.total || 0;
+    const rtoTotalCount = rtoData?.total ?? rtoData?.pagination?.total ?? 0;
 
     // Extract COD pending orders from response
+    // Handles both legacy (total, totalPendingAmount) and unified (pagination.total) response shapes
     const codPendingData = codPendingOrdersQuery.data;
     const codPendingOrders = codPendingData?.orders || [];
-    const codPendingTotalCount = codPendingData?.total || 0;
-    const codPendingTotalAmount = codPendingData?.totalPendingAmount || 0;
+    const codPendingTotalCount = codPendingData?.total ?? codPendingData?.pagination?.total ?? 0;
+    const codPendingTotalAmount = codPendingData?.totalPendingAmount ?? 0;
 
     return {
         // Order data

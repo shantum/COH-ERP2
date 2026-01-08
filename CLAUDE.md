@@ -29,15 +29,25 @@ npm run db:push
 
 **Inventory**: `Balance = SUM(inward) - SUM(outward)` | `Available = Balance - SUM(reserved)`
 
-## Orders Page (5 Tabs)
+## Orders API (Unified Views)
 
-| Tab | Filters | Notes |
-|-----|---------|-------|
-| Open | Active fulfillment | Default tab |
-| Shipped | Excludes RTO, unpaid COD | - |
-| RTO | `isRto: true` | Return to Origin |
-| COD Pending | Delivered, awaiting payment | - |
-| Archived | >90 days old | Auto-archived on startup |
+**Single endpoint**: `GET /orders?view=<name>` replaces 5 separate endpoints.
+
+| View | Filter | Sort | Default Limit |
+|------|--------|------|---------------|
+| `open` | status='open', not archived | orderDate ASC (FIFO) | 10000 |
+| `shipped` | shipped/delivered, excludes RTO & COD pending | shippedAt DESC | 100 |
+| `rto` | trackingStatus in rto_* | rtoInitiatedAt DESC | 200 |
+| `cod_pending` | COD + delivered + not remitted | deliveredAt DESC | 200 |
+| `archived` | isArchived=true | archivedAt DESC | 100 |
+
+**Query params**: `view`, `limit`, `offset`, `days`, `search`
+
+**Search** works on: orderNumber, customerName, awbNumber, email, phone
+
+**Frontend API** (`ordersApi`): Uses `getOpen()`, `getShipped()`, etc. wrappers that call unified endpoint.
+
+**Key files**: `server/src/utils/orderViews.js` (view configs), `server/src/routes/orders/listOrders.js`
 
 ## Key Files
 

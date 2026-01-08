@@ -135,9 +135,9 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
                                 {shopify.financialStatus.replace('_', ' ').toUpperCase()}
                             </span>
                         )}
-                        {(shopify?.fulfillmentStatus || order.shopifyFulfillmentStatus) && (
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${fulfillmentColors[shopify?.fulfillmentStatus || order.shopifyFulfillmentStatus] || 'bg-gray-100'}`}>
-                                {(shopify?.fulfillmentStatus || order.shopifyFulfillmentStatus || 'unfulfilled').toUpperCase()}
+                        {shopify?.fulfillmentStatus && (
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${fulfillmentColors[shopify.fulfillmentStatus] || 'bg-gray-100'}`}>
+                                {(shopify.fulfillmentStatus || 'unfulfilled').toUpperCase()}
                             </span>
                         )}
                         <button onClick={onClose} className="p-1 hover:bg-gray-200 rounded">
@@ -200,16 +200,16 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
                         </div>
                     )}
 
-                    {/* Order Notes */}
-                    {(order.customerNotes || order.internalNotes || shopify?.customerNote) && (
+                    {/* Order Notes - use shopify cache only for customer notes */}
+                    {(shopify?.customerNote || order.internalNotes) && (
                         <div className="bg-yellow-50 rounded-lg p-3">
                             <h3 className="text-sm font-medium text-yellow-700 mb-2 flex items-center gap-2">
                                 <FileText className="w-4 h-4" /> Notes
                             </h3>
-                            {(order.customerNotes || shopify?.customerNote) && (
+                            {shopify?.customerNote && (
                                 <div className="text-sm mb-2">
                                     <span className="text-yellow-600 font-medium">Customer: </span>
-                                    <span className="text-gray-700">{order.customerNotes || shopify?.customerNote}</span>
+                                    <span className="text-gray-700">{shopify.customerNote}</span>
                                 </div>
                             )}
                             {order.internalNotes && (
@@ -344,9 +344,8 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
                                         <CreditCard className="w-3 h-3" />
                                         Payment
                                     </span>
-                                    <span className={`px-2 py-0.5 rounded text-xs ${
-                                        order.paymentMethod === 'COD' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
-                                    }`}>
+                                    <span className={`px-2 py-0.5 rounded text-xs ${order.paymentMethod === 'COD' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                                        }`}>
                                         {order.paymentMethod}
                                     </span>
                                 </div>

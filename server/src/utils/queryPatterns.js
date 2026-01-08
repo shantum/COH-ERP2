@@ -76,6 +76,9 @@ export const ORDER_LINES_INCLUDE = {
 /**
  * Base select for order list views - common fields across all list endpoints
  * Used by /open, /shipped, /rto, /cod-pending
+ * 
+ * NOTE: Shopify-owned fields (discountCode, customerNotes, shopifyFulfillmentStatus)
+ * are accessed via shopifyCache JOIN, not stored on Order.
  */
 export const ORDER_LIST_SELECT = {
     id: true,
@@ -88,7 +91,7 @@ export const ORDER_LIST_SELECT = {
     customerPhone: true,
     shippingAddress: true,
     orderDate: true,
-    customerNotes: true,
+    // NOTE: customerNotes removed - use shopifyCache.customerNotes
     internalNotes: true,
     status: true,
     awbNumber: true,
@@ -97,7 +100,7 @@ export const ORDER_LIST_SELECT = {
     deliveredAt: true,
     totalAmount: true,
     createdAt: true,
-    shopifyFulfillmentStatus: true,
+    // NOTE: shopifyFulfillmentStatus removed - use shopifyCache.fulfillmentStatus
     paymentMethod: true,
     // iThink tracking fields
     trackingStatus: true,
@@ -369,6 +372,50 @@ export function extractShopifyTrackingFields(shopifyCache) {
         return rest;
     }
 }
+
+// ============================================
+// SHOPIFY FIELD ACCESSORS (VLOOKUP Pattern)
+// ============================================
+
+/**
+ * Get discount codes for an order (from Shopify cache)
+ * Use this instead of order.discountCode
+ * @param {Object} order - Order with shopifyCache relation
+ * @returns {string|null} Discount codes
+ */
+export function getOrderDiscountCodes(order) {
+    return order.shopifyCache?.discountCodes || null;
+}
+
+/**
+ * Get customer notes for an order (from Shopify cache)
+ * Use this instead of order.customerNotes
+ * @param {Object} order - Order with shopifyCache relation
+ * @returns {string|null} Customer notes
+ */
+export function getOrderCustomerNotes(order) {
+    return order.shopifyCache?.customerNotes || null;
+}
+
+/**
+ * Get Shopify fulfillment status for an order (from cache)
+ * Use this instead of order.shopifyFulfillmentStatus
+ * @param {Object} order - Order with shopifyCache relation
+ * @returns {string|null} Fulfillment status
+ */
+export function getShopifyFulfillmentStatus(order) {
+    return order.shopifyCache?.fulfillmentStatus || null;
+}
+
+/**
+ * Get financial status for an order (from Shopify cache)
+ * @param {Object} order - Order with shopifyCache relation
+ * @returns {string|null} Financial status (paid, pending, refunded)
+ */
+export function getOrderFinancialStatus(order) {
+    return order.shopifyCache?.financialStatus || null;
+}
+
 
 /**
  * Calculate days in transit/RTO/delivery for shipped orders

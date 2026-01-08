@@ -93,15 +93,22 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 | Route | Purpose |
 |-------|---------|
 | `/api/auth` | Login, register |
-| `/api/orders` | Order management, fulfillment, 5 tabs |
+| `/api/orders?view=` | **Unified order views** (open, shipped, rto, cod_pending, archived) |
 | `/api/inventory` | Stock balance, transactions, RTO inward |
 | `/api/returns` | Return workflow |
 | `/api/repacking` | QC and restocking |
 | `/api/production` | Batch scheduling |
 | `/api/remittance` | COD payment tracking |
-| `/api/shopify` | Sync endpoints |
+| `/api/shopify` | Sync endpoints, auto-ship setting |
 | `/api/webhooks` | Shopify webhooks |
 | `/api/tracking` | iThink shipment tracking |
+
+### Unified Order Views
+Single endpoint `GET /orders?view=<name>` with config-driven architecture:
+- View definitions in `server/src/utils/orderViews.js`
+- WHERE clause builder handles exclusions and search
+- Enrichment functions applied per-view (customerStats, daysInTransit, etc.)
+- Legacy endpoints (`/orders/open`, `/orders/shipped`) still work for backward compatibility
 
 ---
 
@@ -128,9 +135,10 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 | File | Purpose |
 |------|---------|
 | `server/src/routes/orders/` | Modular: index, listOrders, fulfillment, mutations |
+| `server/src/utils/orderViews.js` | **View configs, WHERE builder, enrichment functions** |
 | `server/src/utils/queryPatterns.js` | ORDER_LIST_SELECT, inventory helpers |
 | `server/src/utils/validation.js` | Zod schemas with validate() middleware |
-| `server/src/services/shopifyOrderProcessor.js` | Cache-first order processing |
+| `server/src/services/shopifyOrderProcessor.js` | Cache-first order processing, auto-ship logic |
 | `server/src/services/ithinkLogistics.js` | Tracking API client |
 | `client/src/services/api.ts` | All API calls |
 | `client/src/types/index.ts` | TypeScript interfaces |
@@ -140,6 +148,9 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 ## Changelog
 
 ### January 8, 2026
+- **Unified Order Views**: Single endpoint `GET /orders?view=` replaces 5 endpoints
+- **Auto-ship fulfilled orders**: Toggle in Settings > Shopify to auto-ship when Shopify fulfills
+- New `orderViews.js`: View configs, WHERE builder, enrichment functions
 - Fabrics page: Rewrote from nested cards to flat AG-Grid table
 - New AG-Grid shared utilities: `utils/agGridHelpers.ts`, `hooks/useGridState.ts`, `components/common/grid/`
 - New fabric endpoints: `/fabrics/flat`, `/fabrics/filters`

@@ -428,11 +428,10 @@ export function OrdersGrid({
                                 e.stopPropagation();
                                 if (customerId) onSelectCustomer(customerId);
                             }}
-                            className={`text-left truncate max-w-full ${
-                                customerId
-                                    ? 'text-blue-600 hover:text-blue-800 hover:underline'
-                                    : 'text-gray-700'
-                            }`}
+                            className={`text-left truncate max-w-full ${customerId
+                                ? 'text-blue-600 hover:text-blue-800 hover:underline'
+                                : 'text-gray-700'
+                                }`}
                             title={params.value}
                             disabled={!customerId}
                         >
@@ -504,9 +503,8 @@ export function OrdersGrid({
                     const isCod = method.toLowerCase().includes('cod');
                     return (
                         <span
-                            className={`text-xs px-1.5 py-0.5 rounded ${
-                                isCod ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
-                            }`}
+                            className={`text-xs px-1.5 py-0.5 rounded ${isCod ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'
+                                }`}
                         >
                             {isCod ? 'COD' : 'Prepaid'}
                         </span>
@@ -521,10 +519,10 @@ export function OrdersGrid({
                 autoHeight: true,
                 wrapText: true,
                 valueGetter: (params: ValueGetterParams) =>
-                    params.data?.isFirstLine ? params.data.order?.customerNotes || '' : '',
+                    params.data?.isFirstLine ? params.data.order?.shopifyCache?.customerNotes || '' : '',
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
-                    const notes = params.data.order?.customerNotes || '';
+                    const notes = params.data.order?.shopifyCache?.customerNotes || '';
                     if (!notes) return null;
                     return (
                         <span className="text-xs text-purple-600 whitespace-pre-wrap break-words">
@@ -806,11 +804,10 @@ export function OrdersGrid({
                                     if (row.lineStatus === 'allocated') onUnallocate(row.lineId);
                                 }}
                                 disabled={isToggling || row.lineStatus !== 'allocated'}
-                                className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${
-                                    row.lineStatus === 'allocated'
-                                        ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
-                                        : 'bg-green-100 text-green-600'
-                                }`}
+                                className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${row.lineStatus === 'allocated'
+                                    ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
+                                    : 'bg-green-100 text-green-600'
+                                    }`}
                                 title={row.lineStatus === 'allocated' ? 'Unallocate' : row.lineStatus}
                             >
                                 <Check size={10} />
@@ -826,11 +823,10 @@ export function OrdersGrid({
                                 if (canAllocate) onAllocate(row.lineId);
                             }}
                             disabled={isToggling || !canAllocate}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
-                                canAllocate
-                                    ? 'border-gray-300 hover:border-purple-400 hover:bg-purple-50 cursor-pointer'
-                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                            }`}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${canAllocate
+                                ? 'border-gray-300 hover:border-purple-400 hover:bg-purple-50 cursor-pointer'
+                                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                                }`}
                             title={canAllocate ? 'Allocate' : 'No stock available'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
@@ -866,11 +862,10 @@ export function OrdersGrid({
                                 <div className="flex items-center gap-0.5">
                                     <input
                                         type="date"
-                                        className={`text-xs border rounded px-0.5 py-0 w-24 ${
-                                            isDateLocked(row.productionDate || '')
-                                                ? 'border-red-200 bg-red-50'
-                                                : 'border-orange-200 bg-orange-50'
-                                        }`}
+                                        className={`text-xs border rounded px-0.5 py-0 w-24 ${isDateLocked(row.productionDate || '')
+                                            ? 'border-red-200 bg-red-50'
+                                            : 'border-orange-200 bg-orange-50'
+                                            }`}
                                         value={row.productionDate || ''}
                                         min={new Date().toISOString().split('T')[0]}
                                         onClick={(e) => e.stopPropagation()}
@@ -985,11 +980,10 @@ export function OrdersGrid({
                                     if (row.lineStatus === 'picked') onUnpick(row.lineId);
                                 }}
                                 disabled={isToggling || row.lineStatus !== 'picked'}
-                                className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${
-                                    row.lineStatus === 'picked'
-                                        ? 'bg-green-500 text-white hover:bg-green-600'
-                                        : 'bg-green-500 text-white'
-                                }`}
+                                className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${row.lineStatus === 'picked'
+                                    ? 'bg-green-500 text-white hover:bg-green-600'
+                                    : 'bg-green-500 text-white'
+                                    }`}
                                 title={row.lineStatus === 'picked' ? 'Unpick' : 'Packed'}
                             >
                                 <Check size={10} />
@@ -1005,11 +999,10 @@ export function OrdersGrid({
                                 if (canPick) onPick(row.lineId);
                             }}
                             disabled={isToggling || !canPick}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
-                                canPick
-                                    ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
-                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                            }`}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${canPick
+                                ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
+                                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                                }`}
                             title={canPick ? 'Pick' : 'Not allocated yet'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
@@ -1053,11 +1046,10 @@ export function OrdersGrid({
                                 if (canPack) onPack(row.lineId);
                             }}
                             disabled={isToggling || !canPack}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
-                                canPack
-                                    ? 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
-                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                            }`}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${canPack
+                                ? 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+                                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                                }`}
                             title={canPack ? 'Pack' : 'Not picked yet'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
@@ -1096,13 +1088,12 @@ export function OrdersGrid({
                                 if (allLinesPicked) onShippingCheck(row.lineId, row.order);
                             }}
                             disabled={!allLinesPicked}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
-                                isChecked
-                                    ? 'bg-green-500 border-green-500 text-white'
-                                    : allLinesPicked
-                                        ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
-                                        : 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                            }`}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${isChecked
+                                ? 'bg-green-500 border-green-500 text-white'
+                                : allLinesPicked
+                                    ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
+                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                                }`}
                             title={allLinesPicked ? 'Mark for shipping' : allLinesAllocated ? 'Pick all items first' : 'Allocate all items first'}
                         >
                             {isChecked && <Check size={10} />}
@@ -1117,9 +1108,8 @@ export function OrdersGrid({
                 width: 80,
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
-                    // Use shopifyCache first, fallback to order field for backward compatibility
-                    const status = params.data.order?.shopifyCache?.fulfillmentStatus
-                        || params.data.order?.shopifyFulfillmentStatus;
+                    // Use shopifyCache only - deprecated order.shopifyFulfillmentStatus removed
+                    const status = params.data.order?.shopifyCache?.fulfillmentStatus;
                     if (!status || status === '-') return null;
 
                     const statusStyles: Record<string, string> = {
@@ -1207,11 +1197,10 @@ export function OrdersGrid({
                                 }
                             }}
                             disabled={isCancellingLine || isUncancellingLine}
-                            className={`p-1.5 rounded-md transition-colors disabled:opacity-50 ${
-                                isCancelledLine
-                                    ? 'text-green-500 hover:text-green-600 hover:bg-green-50'
-                                    : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
-                            }`}
+                            className={`p-1.5 rounded-md transition-colors disabled:opacity-50 ${isCancelledLine
+                                ? 'text-green-500 hover:text-green-600 hover:bg-green-50'
+                                : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
+                                }`}
                             title={isCancelledLine ? 'Restore line' : 'Cancel line'}
                         >
                             {isCancelledLine ? <Undo2 size={13} /> : <X size={13} />}

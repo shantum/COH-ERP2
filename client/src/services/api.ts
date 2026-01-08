@@ -155,19 +155,32 @@ export const inventoryApi = {
     },
 };
 
-// Orders
+// Orders - Unified view-based API
 export const ordersApi = {
-    getAll: (params?: Record<string, string>) => api.get('/orders', { params }),
-    getOpen: (params?: { limit?: number; offset?: number }) => api.get('/orders/open', { params }),
-    getShipped: (params?: { limit?: number; offset?: number; days?: number; page?: number }) => {
+    // Unified endpoint - can fetch any view
+    getAll: (params?: { view?: string; limit?: number; offset?: number; days?: number; search?: string }) =>
+        api.get('/orders', { params }),
+
+    // Convenience methods that use the unified endpoint
+    getOpen: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'open', ...params } }),
+
+    getShipped: (params?: { limit?: number; offset?: number; days?: number; page?: number; search?: string }) => {
         const { page, limit = 100, ...rest } = params || {};
         const offset = page ? (page - 1) * limit : rest.offset || 0;
-        return api.get('/orders/shipped', { params: { limit, offset, ...rest } });
+        return api.get('/orders', { params: { view: 'shipped', limit, offset, ...rest } });
     },
+
+    getRto: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'rto', ...params } }),
+
+    getCodPending: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'cod_pending', ...params } }),
+
+    getArchived: (params?: { limit?: number; offset?: number; days?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'archived', ...params } }),
+
     getCancelled: () => api.get('/orders/status/cancelled'),
-    getArchived: (params?: { days?: number; sortBy?: 'orderDate' | 'archivedAt' }) => api.get('/orders/status/archived', { params }),
-    getRto: (params?: { limit?: number; offset?: number }) => api.get('/orders/rto', { params }),
-    getCodPending: (params?: { limit?: number; offset?: number }) => api.get('/orders/cod-pending', { params }),
     archive: (id: string) => api.post(`/orders/${id}/archive`),
     unarchive: (id: string) => api.post(`/orders/${id}/unarchive`),
     getById: (id: string) => api.get(`/orders/${id}`),

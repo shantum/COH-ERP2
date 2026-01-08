@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 8, 2026** (Fabrics domain, AG-Grid utilities)
+> All backend and frontend domains consolidated. **Last updated: January 8, 2026** (Unified Order Views, Auto-ship toggle)
 
 ---
 
@@ -12,12 +12,36 @@ Order management and fulfillment workflow.
 ```
 orders/
 ├── index.js        ← Router combiner
-├── listOrders.js   ← GET: /open, /shipped, /rto, /cod-pending, /archived
+├── listOrders.js   ← GET /?view= (unified), legacy /open, /shipped, etc.
 ├── fulfillment.js  ← POST: /lines/:id/allocate|pick|pack, /:id/ship|unship
 └── mutations.js    ← POST/PUT/DELETE: create, update, cancel, archive
 ```
 
-**Related:** `remittance.js` (COD), `queryPatterns.js`, `validation.js`, `tierUtils.js`
+**Related:** `orderViews.js` (view configs), `queryPatterns.js`, `validation.js`, `tierUtils.js`
+
+### Unified Order Views API
+
+**Single endpoint**: `GET /orders?view=<name>` replaces 5 separate endpoints.
+
+| View | Filter | Sort | Enrichments |
+|------|--------|------|-------------|
+| `open` | status='open', not archived | orderDate ASC | fulfillmentStage, lineStatusCounts |
+| `shipped` | shipped/delivered, excludes RTO & COD pending | shippedAt DESC | daysInTransit, trackingStatus |
+| `rto` | trackingStatus in rto_* | rtoInitiatedAt DESC | daysInRto, rtoStatus |
+| `cod_pending` | COD + delivered + not remitted | deliveredAt DESC | daysSinceDelivery |
+| `archived` | isArchived=true | archivedAt DESC | - |
+
+**Query params**: `view`, `limit`, `offset`, `days`, `search`
+
+**Search** works across: orderNumber, customerName, awbNumber, email, phone
+
+**Architecture** (`server/src/utils/orderViews.js`):
+- `ORDER_VIEWS`: Config objects with where, orderBy, enrichment arrays
+- `buildViewWhereClause()`: Handles exclusions, date filters, search
+- `enrichOrdersForView()`: Applies view-specific enrichments
+- `ORDER_UNIFIED_SELECT`: Comprehensive SELECT pattern for all views
+
+**Legacy endpoints** (`/orders/open`, `/orders/shipped`, etc.) still work for backward compatibility.
 
 ### Order Line Status Machine
 ```
@@ -151,8 +175,21 @@ Shopify Store
 | Path | Purpose |
 |------|---------|
 | `GET/PUT /config` | Shopify credentials |
+| `GET/PUT /settings/auto-ship` | Auto-ship toggle |
 | `POST /sync/full-dump` | Background order sync |
 | `POST /webhooks/shopify/orders` | Unified webhook (recommended) |
+
+### Auto-Ship Setting
+Controls whether open orders automatically ship when Shopify marks them fulfilled.
+
+| Setting | Behavior |
+|---------|----------|
+| `auto_ship_fulfilled: true` (default) | Open orders auto-ship on Shopify fulfillment |
+| `auto_ship_fulfilled: false` | Strict ERP mode - Shopify fulfillment ignored |
+
+**UI**: Settings → Shopify tab → "Auto-Ship Fulfilled Orders" toggle
+
+**Backend**: `shopifyOrderProcessor.js` checks setting during sync
 
 ### COD Payment Sync
 ```javascript
@@ -325,38 +362,41 @@ components/
 ## Common Gotchas (All Domains)
 
 ### Orders
-1. Router mount order matters - specific routes before parameterized
-2. Zod validation via `validate()` middleware
-3. Shipped tab excludes RTO and unpaid COD
+1. **Unified views**: Use `GET /orders?view=` - legacy endpoints still work but unified is preferred
+2. Router mount order matters - specific routes before parameterized
+3. Zod validation via `validate()` middleware
+4. Shipped view excludes RTO and unpaid COD (they have separate views)
+5. Search works on any view - one implementation via `buildViewWhereClause()`
 
 ### Inventory
-4. Reserved not deducted from balance, only from available
-5. RTO condition determines action (good/unopened = inward, others = write-off)
-6. Use `calculateAllInventoryBalances()` for batch, not N+1
+6. Reserved not deducted from balance, only from available
+7. RTO condition determines action (good/unopened = inward, others = write-off)
+8. Use `calculateAllInventoryBalances()` for batch, not N+1
 
 ### Returns
-7. Status vs Resolution - status is workflow, resolution is outcome
-8. Repacking is separate from return completion
+9. Status vs Resolution - status is workflow, resolution is outcome
+10. Repacking is separate from return completion
 
 ### Shopify
-9. Cache-first - check `ShopifyOrderCache`, not API
-10. Credentials in `SystemSetting` table, not env vars
-11. COD payment sync uses Transaction API, not Order update
+11. Cache-first - check `ShopifyOrderCache`, not API
+12. Credentials in `SystemSetting` table, not env vars
+13. COD payment sync uses Transaction API, not Order update
+14. **Auto-ship setting**: Check `auto_ship_fulfilled` - default true auto-ships on Shopify fulfill
 
 ### Production
-12. Completion creates BOTH inventory inward AND fabric outward
-13. Fabric consumption fallback: SKU -> Product -> 1.5
+15. Completion creates BOTH inventory inward AND fabric outward
+16. Fabric consumption fallback: SKU -> Product -> 1.5
 
 ### Tracking
-14. Batch limit: max 10 AWBs per iThink request
-15. Re-evaluates delivered orders for RTO misclassification
+17. Batch limit: max 10 AWBs per iThink request
+18. Re-evaluates delivered orders for RTO misclassification
 
 ### Fabrics
-16. Use `/flat` endpoint for AG-Grid, not nested `/` endpoint
-17. Balance is computed server-side via transaction aggregation
+19. Use `/flat` endpoint for AG-Grid, not nested `/` endpoint
+20. Balance is computed server-side via transaction aggregation
 
 ### Frontend
-18. Tab counts delayed - populate progressively as loading completes
-19. Map caching - use `getInventoryMap()`/`getFabricMap()` for loops
-20. Optimistic updates use context with `skipped` for conditional invalidation
-21. AG-Grid shared utilities in `utils/agGridHelpers.ts` - don't recreate
+21. Tab counts delayed - populate progressively as loading completes
+22. Map caching - use `getInventoryMap()`/`getFabricMap()` for loops
+23. Optimistic updates use context with `skipped` for conditional invalidation
+24. AG-Grid shared utilities in `utils/agGridHelpers.ts` - don't recreate
