@@ -261,10 +261,10 @@ export function CodPendingGrid({
                 const awb = order.awbNumber;
 
                 return (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
                         <button
                             onClick={() => onViewOrder?.(order)}
-                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
                             title="View order"
                         >
                             <Eye size={14} />
@@ -272,7 +272,7 @@ export function CodPendingGrid({
                         {awb && onTrack && (
                             <button
                                 onClick={() => onTrack(awb, order.orderNumber)}
-                                className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600"
+                                className="p-1.5 rounded-md hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
                                 title="Live tracking"
                             >
                                 <Radio size={14} />
@@ -283,7 +283,7 @@ export function CodPendingGrid({
                                 href={`https://${shopDomain}/admin/orders/${order.shopifyOrderId}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="p-1 rounded hover:bg-green-100 text-gray-400 hover:text-green-600"
+                                className="p-1.5 rounded-md hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors"
                                 title="Open in Shopify"
                             >
                                 <ExternalLink size={14} />

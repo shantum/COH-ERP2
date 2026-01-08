@@ -665,11 +665,11 @@ export function ShippedOrdersGrid({
                 const awb = order.awbNumber || order.shopifyTrackingNumber;
 
                 return (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
                         {awb && onTrack && (
                             <button
                                 onClick={() => onTrack(awb, order.orderNumber)}
-                                className="p-1 rounded hover:bg-blue-100 text-gray-400 hover:text-blue-600"
+                                className="p-1.5 rounded-md hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
                                 title="Live tracking"
                             >
                                 <Radio size={14} />
@@ -679,7 +679,7 @@ export function ShippedOrdersGrid({
                             <button
                                 onClick={() => onMarkDelivered(order.id)}
                                 disabled={isMarkingDelivered}
-                                className="p-1 rounded hover:bg-green-100 text-gray-400 hover:text-green-600"
+                                className="p-1.5 rounded-md hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors disabled:opacity-50"
                                 title="Mark as Delivered"
                             >
                                 <CheckCircle size={14} />
@@ -693,7 +693,7 @@ export function ShippedOrdersGrid({
                                     }
                                 }}
                                 disabled={isMarkingRto}
-                                className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600"
+                                className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
                                 title="Mark as RTO"
                             >
                                 <AlertTriangle size={14} />
@@ -707,7 +707,7 @@ export function ShippedOrdersGrid({
                                     }
                                 }}
                                 disabled={isArchiving}
-                                className="p-1 rounded hover:bg-purple-100 text-gray-400 hover:text-purple-600"
+                                className="p-1.5 rounded-md hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition-colors disabled:opacity-50"
                                 title="Archive order"
                             >
                                 <Archive size={14} />
@@ -720,7 +720,7 @@ export function ShippedOrdersGrid({
                                 }
                             }}
                             disabled={isUnshipping}
-                            className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-orange-600"
+                            className="p-1.5 rounded-md hover:bg-amber-50 text-gray-400 hover:text-orange-600 transition-colors disabled:opacity-50"
                             title="Undo shipping"
                         >
                             <Undo2 size={14} />

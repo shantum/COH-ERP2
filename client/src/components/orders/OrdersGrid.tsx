@@ -1207,14 +1207,14 @@ export function OrdersGrid({
                                 }
                             }}
                             disabled={isCancellingLine || isUncancellingLine}
-                            className={`p-1 rounded hover:bg-gray-100 ${
+                            className={`p-1.5 rounded-md transition-colors disabled:opacity-50 ${
                                 isCancelledLine
-                                    ? 'text-green-500 hover:text-green-600'
-                                    : 'text-gray-400 hover:text-red-500'
+                                    ? 'text-green-500 hover:text-green-600 hover:bg-green-50'
+                                    : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
                             }`}
                             title={isCancelledLine ? 'Restore line' : 'Cancel line'}
                         >
-                            {isCancelledLine ? <Undo2 size={12} /> : <X size={12} />}
+                            {isCancelledLine ? <Undo2 size={13} /> : <X size={13} />}
                         </button>
                     ) : null;
 
@@ -1223,16 +1223,16 @@ export function OrdersGrid({
                     }
 
                     return (
-                        <div className="flex items-center gap-0.5">
+                        <div className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity">
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     onEditOrder(order);
                                 }}
-                                className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-blue-600"
+                                className="p-1.5 rounded-md hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
                                 title="Edit order"
                             >
-                                <Pencil size={12} />
+                                <Pencil size={13} />
                             </button>
                             <button
                                 onClick={(e) => {
@@ -1245,10 +1245,10 @@ export function OrdersGrid({
                                     }
                                 }}
                                 disabled={isCancellingOrder}
-                                className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-600"
+                                className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
                                 title="Cancel order"
                             >
-                                <Ban size={12} />
+                                <Ban size={13} />
                             </button>
                             <button
                                 onClick={(e) => {
@@ -1262,10 +1262,10 @@ export function OrdersGrid({
                                     }
                                 }}
                                 disabled={isArchiving}
-                                className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-amber-600"
+                                className="p-1.5 rounded-md hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50"
                                 title="Archive order"
                             >
-                                <Archive size={12} />
+                                <Archive size={13} />
                             </button>
                             {onQuickShip && order.awbNumber && order.courier && (
                                 <button
@@ -1279,10 +1279,10 @@ export function OrdersGrid({
                                             onQuickShip(order.id);
                                         }
                                     }}
-                                    className="p-1 rounded hover:bg-gray-100 text-green-500 hover:text-green-600"
+                                    className="p-1.5 rounded-md hover:bg-green-50 text-green-500 hover:text-green-600 transition-colors"
                                     title="Quick Ship (bypass workflow)"
                                 >
-                                    <Truck size={12} />
+                                    <Truck size={13} />
                                 </button>
                             )}
                             {row.totalLines === 0 && (
@@ -1298,10 +1298,10 @@ export function OrdersGrid({
                                         }
                                     }}
                                     disabled={isDeletingOrder}
-                                    className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-600"
+                                    className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
                                     title="Delete order (permanently)"
                                 >
-                                    <Trash2 size={12} />
+                                    <Trash2 size={13} />
                                 </button>
                             )}
                             {lineAction}
@@ -1501,7 +1501,7 @@ export function OrdersGrid({
                         enableCellTextSelection={true}
                         ensureDomOrder={true}
                         suppressRowClickSelection={false}
-                        suppressRowHoverHighlight={true}
+                        suppressRowHoverHighlight={false}
                         onColumnMoved={handleColumnMoved}
                         maintainColumnOrder={true}
                     />

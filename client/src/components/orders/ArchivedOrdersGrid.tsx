@@ -467,7 +467,7 @@ export function ArchivedOrdersGrid({
                             }
                         }}
                         disabled={isRestoring}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+                        className="flex items-center gap-1.5 px-2 py-1 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-50"
                     >
                         <Undo2 size={12} /> Restore
                     </button>
