@@ -1,69 +1,51 @@
 # CLAUDE.md
 
-Primary instructions for Claude Code. See `ARCHITECTURE.md` for system overview, `docs/DOMAINS.md` for domain details.
+Primary instructions for Claude Code. See `docs/DOMAINS.md` for domain details, `ARCHITECTURE.md` for system overview.
 
 ## Quick Start
 
 ```bash
-# Server (port 3001)
-cd server && npm run dev
+# Server (port 3001)       # Client (port 5173)
+cd server && npm run dev   cd client && npm run dev
 
-# Client (port 5173)
-cd client && npm run dev
-
-# Database
-npm run db:generate   # After schema changes
-npm run db:push       # Push to database
-npm run db:studio     # Prisma GUI
-
-# Tests
-cd server && npm test
+# Database                  # Tests
+npm run db:generate        cd server && npm test
+npm run db:push
 ```
 
 **Login**: `admin@coh.com` / `XOFiya@34`
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Backend | Express.js (ES modules), Prisma ORM, PostgreSQL |
-| Frontend | React 19, TypeScript, TanStack Query, Tailwind, AG-Grid |
-| Auth | JWT (7-day), bcryptjs |
-| Integrations | Shopify (webhooks + sync), iThink Logistics |
+| Layer | Stack |
+|-------|-------|
+| Backend | Express.js (ES modules), Prisma ORM, PostgreSQL, Zod |
+| Frontend | React 19, TypeScript, TanStack Query, AG-Grid, Tailwind |
+| Integrations | Shopify (webhooks + sync), iThink Logistics, JWT auth |
 
-## Core Concepts
+## Core Flows
 
-### Order Fulfillment
-```
-pending -> allocated -> picked -> packed -> shipped
-```
-- **Allocate**: Creates `reserved` inventory
-- **Ship**: Deletes `reserved`, creates `outward`
+**Order**: `pending -> allocated -> picked -> packed -> shipped`
 
-### Inventory Ledger
-```
-Balance = SUM(inward) - SUM(outward)
-Available = Balance - SUM(reserved)
-```
+**Inventory**: `Balance = SUM(inward) - SUM(outward)` | `Available = Balance - SUM(reserved)`
 
-### Orders Page (5 Tabs)
-| Tab | Endpoint | Notes |
-|-----|----------|-------|
-| Open | `/orders/open` | Active fulfillment |
-| Shipped | `/orders/shipped` | Excludes RTO and unpaid COD |
-| RTO | `/orders/rto` | Return to Origin |
-| COD Pending | `/orders/cod-pending` | Delivered, awaiting payment |
-| Archived | `/orders/archived` | Historical |
+## Orders Page (5 Tabs)
+
+| Tab | Filters | Notes |
+|-----|---------|-------|
+| Open | Active fulfillment | Default tab |
+| Shipped | Excludes RTO, unpaid COD | - |
+| RTO | `isRto: true` | Return to Origin |
+| COD Pending | Delivered, awaiting payment | - |
+| Archived | >90 days old | Auto-archived on startup |
 
 ## Key Files
 
 | Purpose | Location |
 |---------|----------|
-| Routes | `server/src/routes/` - orders/, returns.js, shopify.js, etc. |
-| Prisma patterns | `server/src/utils/queryPatterns.js` |
-| Zod schemas | `server/src/utils/validation.js` |
-| API client | `client/src/services/api.ts` |
-| Types | `client/src/types/index.ts` |
+| Routes | `server/src/routes/` (orders/ is modular) |
+| Shared patterns | `server/src/utils/queryPatterns.js`, `validation.js` |
+| Frontend | `client/src/services/api.ts`, `types/index.ts`, `hooks/` |
 
 ## Common Gotchas
 
@@ -79,46 +61,29 @@ Available = Balance - SUM(reserved)
 10. **RTO condition logic**: Only `good`/`unopened` create inventory; others write-off
 11. **Sequential loading**: Order tabs load progressively via `useOrdersData.ts`
 12. **Map caching**: Use `getInventoryMap()`/`getFabricMap()` for O(1) lookups in loops
-13. **API debugging**: Store `TOKEN` in env var, use `curl -s`, prefer exact jq matches over `contains()`
+13. **Optimistic updates**: Use `context.skipped` pattern in mutations to prevent stale cache overwrites
+14. **AG-Grid pinned columns**: Set `pinned: 'right'` after resize to keep Actions visible
 
-## Environment Variables
+## Environment
 
 `.env` requires: `DATABASE_URL`, `JWT_SECRET`
 
-## Session Cleanup (Proactive)
+**Safe commands**: `npm run dev`, `npm test`, `curl` to localhost:3001
 
-**Auto-run cleanup after:**
-- 3+ features implemented
-- 5+ files modified
-- 3+ bug fixes
-- Major refactors
-- Before ending long sessions
+## Session Cleanup
 
-**Cleanup agent** (`.claude/agents/session-cleanup.md`):
-1. Review recent git history
-2. Quick code cleanup (unused imports, console.logs)
-3. Capture learnings -> gotchas/docs
-4. Trigger documentation-optimizer if needed
-
-## Safe Auto-Run Commands
-
-`npm run dev`, `npm test`, `curl` to localhost:3001
+Run `.claude/agents/session-cleanup.md` after: 3+ features, 5+ files modified, major refactors, or before ending long sessions. Captures learnings and triggers doc optimizer.
 
 ## Shell Tips
 
 ```bash
-# API debugging - store token once, reuse
+# Store token once, reuse
 export TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@coh.com","password":"XOFiya@34"}' | jq -r '.token')
 
-# Reuse in subsequent calls (use -s for silent)
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/orders/shipped | jq .
 
-# JSON payloads - use single quotes
-curl -s -d '{"key":"value"}' ...
-
-# jq - prefer exact matches over contains() to avoid null errors
+# jq - prefer exact matches over contains()
 jq '.orders[] | select(.orderNumber == "64040")'   # exact match
-jq '.orders[] | select(.orderNumber? // "" | contains("640"))'  # safe contains
 ```

@@ -618,16 +618,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const customizeLine = useMutation({
         mutationFn: ({ lineId, data }: { lineId: string; data: { type: string; value: string; notes?: string } }) =>
             ordersApi.customizeLine(lineId, data),
-        onSuccess: (response) => {
-            console.log('[Customization Success]', response.data);
+        onSuccess: () => {
             invalidateOpenOrders();
         },
         onError: (err: any) => {
-            console.error('[Customization Error]', {
-                status: err.response?.status,
-                data: err.response?.data,
-                message: err.message,
-            });
             const errorData = err.response?.data;
             if (errorData?.details && Array.isArray(errorData.details)) {
                 // Show validation details

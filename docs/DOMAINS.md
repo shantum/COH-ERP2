@@ -28,6 +28,8 @@ pending → allocated → picked → packed → [ship order] → shipped
 
 **Undo actions:** unallocate (deletes reserved), unpick, unpack, unship (reverses sale + recreates reserved)
 
+**Quick Ship:** `POST /:id/quick-ship` - Allocates all pending lines and ships in one action (requires all lines have stock)
+
 ### Validation Schemas (Zod)
 | Schema | Endpoint | Validates |
 |--------|----------|-----------|
@@ -254,11 +256,21 @@ const stock = invMap.get(line.skuId) ?? 0;  // O(1) vs O(n) find()
 **Server-side Aggregation** (`tierUtils.js`):
 - Customer stats use Prisma `groupBy` with `_sum`/`_count`
 
+**Optimistic Updates** (`useOrdersMutations.ts`):
+```typescript
+// Context pattern to prevent stale cache overwrites
+onMutate: () => ({ skipped: false }),
+onSuccess: (_, __, ctx) => {
+  if (ctx?.skipped) return; // Skip if newer data arrived
+  queryClient.invalidateQueries(['orders']);
+}
+```
+
 ### Custom Hooks
 | Hook | Purpose |
 |------|---------|
-| `useOrdersData` | All 5 tabs data fetching |
-| `useOrdersMutations` | All order action mutations |
+| `useOrdersData` | All 5 tabs data fetching with sequential loading |
+| `useOrdersMutations` | All order action mutations with optimistic updates |
 | `useAuth` | Auth context |
 
 ### Component Organization

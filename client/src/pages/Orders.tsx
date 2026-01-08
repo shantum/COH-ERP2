@@ -360,34 +360,25 @@ export default function Orders() {
     const handleConfirmCustomization = useCallback(
         (data: { type: string; value: string; notes?: string }) => {
             if (!customizingLine) return;
-            console.log('[Customization] Submitting:', { lineId: customizingLine.lineId, data, isEdit: isEditingCustomization });
 
             if (isEditingCustomization) {
                 // Edit mode: delete existing customization then create new one
                 // Using a chain of mutations for delete + create
                 mutations.removeCustomization.mutate(customizingLine.lineId, {
                     onSuccess: () => {
-                        console.log('[Customization] Removed old customization, creating new one');
                         mutations.customizeLine.mutate(
                             { lineId: customizingLine.lineId, data },
                             {
                                 onSuccess: () => {
-                                    console.log('[Customization] Edit Success - closing modal');
                                     setCustomizingLine(null);
                                     setIsEditingCustomization(false);
                                     setCustomizationInitialData(null);
                                 },
-                                onError: () => {
-                                    console.log('[Customization] Edit Error (create phase) - keeping modal open');
-                                    // Keep modal open on error so user can see the error message
-                                },
+                                // Keep modal open on error so user can see the error message
                             }
                         );
                     },
-                    onError: () => {
-                        console.log('[Customization] Edit Error (delete phase) - keeping modal open');
-                        // Keep modal open on error
-                    },
+                    // Keep modal open on error
                 });
             } else {
                 // Create mode: just create new customization
@@ -395,15 +386,11 @@ export default function Orders() {
                     { lineId: customizingLine.lineId, data },
                     {
                         onSuccess: () => {
-                            console.log('[Customization] Success - closing modal');
                             setCustomizingLine(null);
                             setIsEditingCustomization(false);
                             setCustomizationInitialData(null);
                         },
-                        onError: () => {
-                            console.log('[Customization] Error - keeping modal open');
-                            // Keep modal open on error so user can see the error message
-                        },
+                        // Keep modal open on error so user can see the error message
                     }
                 );
             }
