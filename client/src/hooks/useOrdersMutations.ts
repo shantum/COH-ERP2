@@ -525,7 +525,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             const { shipped, failed, message } = response.data;
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(message || `Shipped ${shipped?.length || 0} orders`);
+            const failedMsg = failed?.length ? `, ${failed.length} failed` : '';
+            alert(message || `Shipped ${shipped?.length || 0} orders${failedMsg}`);
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to bulk quick ship')
     });
