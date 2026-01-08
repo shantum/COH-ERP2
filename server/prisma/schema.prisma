@@ -131,6 +131,7 @@ model Sku {
   shopifyInventoryCache ShopifyInventoryCache?
   repackingQueueItems   RepackingQueueItem[]
   writeOffLogs          WriteOffLog[]
+  reconciliationItems   InventoryReconciliationItem[]
 
   @@index([variationId])
   @@index([parentSkuId])
@@ -946,4 +947,41 @@ model FabricReconciliationItem {
 
   @@index([reconciliationId])
   @@index([fabricId])
+}
+
+// ============================================
+// INVENTORY RECONCILIATION (SKU Count)
+// ============================================
+
+model InventoryReconciliation {
+  id            String    @id @default(uuid())
+  reconcileDate DateTime  @default(now())
+  status        String    @default("draft") // draft, submitted
+  notes         String?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items InventoryReconciliationItem[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model InventoryReconciliationItem {
+  id               String  @id @default(uuid())
+  reconciliationId String
+  skuId            String
+  systemQty        Int                     // Qty as per system at time of count
+  physicalQty      Int?                    // Qty counted physically
+  variance         Int?                    // physicalQty - systemQty
+  adjustmentReason String?                 // shrinkage, damaged, found, counting_error, etc.
+  notes            String?
+  txnId            String? @unique         // Reference to created InventoryTransaction
+
+  reconciliation InventoryReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  sku            Sku                     @relation(fields: [skuId], references: [id])
+
+  @@index([reconciliationId])
+  @@index([skuId])
 }

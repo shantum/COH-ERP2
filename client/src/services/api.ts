@@ -136,6 +136,21 @@ export const inventoryApi = {
         api.get(`/inventory/pending-queue/${source}`, { params }),
     rtoInwardLine: (data: { lineId: string; condition: string; notes?: string }) =>
         api.post('/inventory/rto-inward-line', data),
+    // Reconciliation
+    getReconciliationHistory: (limit?: number) => api.get('/inventory/reconciliation/history', { params: { limit } }),
+    startReconciliation: () => api.post('/inventory/reconciliation/start'),
+    getReconciliation: (id: string) => api.get(`/inventory/reconciliation/${id}`),
+    updateReconciliation: (id: string, items: Array<{ id: string; physicalQty: number | null; systemQty: number; adjustmentReason?: string; notes?: string }>) =>
+        api.put(`/inventory/reconciliation/${id}`, { items }),
+    submitReconciliation: (id: string) => api.post(`/inventory/reconciliation/${id}/submit`),
+    deleteReconciliation: (id: string) => api.delete(`/inventory/reconciliation/${id}`),
+    uploadReconciliationCsv: (id: string, file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post(`/inventory/reconciliation/${id}/upload-csv`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
 };
 
 // Orders
