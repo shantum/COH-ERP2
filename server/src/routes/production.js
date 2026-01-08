@@ -741,8 +741,18 @@ router.get('/requirements', authenticateToken, async (req, res) => {
             orderBy: { orderDate: 'asc' }
         });
 
-        // Get current inventory for all SKUs (using shared helper)
-        const balanceMap = await calculateAllInventoryBalances(req.prisma);
+        // Collect unique SKU IDs from pending order lines (optimization: only calculate balances for these)
+        const pendingSkuIds = new Set();
+        openOrders.forEach(order => {
+            order.orderLines.forEach(line => {
+                pendingSkuIds.add(line.skuId);
+            });
+        });
+
+        // Get current inventory only for pending SKUs (major performance improvement)
+        const balanceMap = pendingSkuIds.size > 0
+            ? await calculateAllInventoryBalances(req.prisma, Array.from(pendingSkuIds))
+            : new Map();
 
         // Convert to simple object for lookup (use availableBalance for production planning)
         const inventoryBalance = {};
@@ -750,11 +760,16 @@ router.get('/requirements', authenticateToken, async (req, res) => {
             inventoryBalance[skuId] = balance.availableBalance;
         }
 
-        // Get planned/in-progress production batches per SKU
-        const plannedBatches = await req.prisma.productionBatch.findMany({
-            where: { status: { in: ['planned', 'in_progress'] } },
-            select: { skuId: true, qtyPlanned: true, qtyCompleted: true, sourceOrderLineId: true }
-        });
+        // Get planned/in-progress production batches only for relevant SKUs
+        const plannedBatches = pendingSkuIds.size > 0
+            ? await req.prisma.productionBatch.findMany({
+                where: {
+                    status: { in: ['planned', 'in_progress'] },
+                    skuId: { in: Array.from(pendingSkuIds) }
+                },
+                select: { skuId: true, qtyPlanned: true, qtyCompleted: true, sourceOrderLineId: true }
+            })
+            : [];
 
         // Calculate scheduled production per SKU
         const scheduledProduction = {};
