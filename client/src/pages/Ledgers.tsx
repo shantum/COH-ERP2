@@ -105,14 +105,12 @@ export default function Ledgers() {
     const inventoryReasons = [...new Set(inventoryTxns?.map((t: any) => t.reason as string) || [])] as string[];
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Ledgers</h1>
-            </div>
+        <div className="space-y-4 md:space-y-6">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900">Ledgers</h1>
 
             {/* Tabs */}
             <div className="border-b border-gray-200">
-                <nav className="flex gap-8">
+                <nav className="flex gap-4 md:gap-8 overflow-x-auto">
                     <button
                         onClick={() => setActiveTab('inventory')}
                         className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'inventory'
@@ -138,19 +136,19 @@ export default function Ledgers() {
             {activeTab === 'inventory' && (
                 <div className="space-y-4">
                     {/* Filters */}
-                    <div className="card flex flex-wrap gap-4 items-center">
-                        <div className="relative flex-1 min-w-[200px] max-w-xs">
+                    <div className="card flex flex-wrap gap-2 md:gap-4 items-center">
+                        <div className="relative w-full sm:flex-1 sm:min-w-[200px] sm:max-w-xs">
                             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
                                 type="text"
                                 placeholder="Search SKU or product..."
-                                className="input pl-9"
+                                className="input pl-9 w-full"
                                 value={inventoryFilter.search}
                                 onChange={(e) => setInventoryFilter(f => ({ ...f, search: e.target.value }))}
                             />
                         </div>
                         <select
-                            className="input max-w-[150px]"
+                            className="input w-full sm:w-auto sm:max-w-[150px]"
                             value={inventoryFilter.txnType}
                             onChange={(e) => setInventoryFilter(f => ({ ...f, txnType: e.target.value }))}
                         >
@@ -159,7 +157,7 @@ export default function Ledgers() {
                             <option value="outward">Outward</option>
                         </select>
                         <select
-                            className="input max-w-[180px]"
+                            className="input w-full sm:w-auto sm:max-w-[180px]"
                             value={inventoryFilter.reason}
                             onChange={(e) => setInventoryFilter(f => ({ ...f, reason: e.target.value }))}
                         >
@@ -251,19 +249,19 @@ export default function Ledgers() {
             {activeTab === 'fabric' && (
                 <div className="space-y-4">
                     {/* Filters */}
-                    <div className="card flex flex-wrap gap-4 items-center">
-                        <div className="relative flex-1 min-w-[200px] max-w-xs">
+                    <div className="card flex flex-wrap gap-2 md:gap-4 items-center">
+                        <div className="relative w-full sm:flex-1 sm:min-w-[200px] sm:max-w-xs">
                             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
                                 type="text"
                                 placeholder="Search fabric or type..."
-                                className="input pl-9"
+                                className="input pl-9 w-full"
                                 value={fabricFilter.search}
                                 onChange={(e) => setFabricFilter(f => ({ ...f, search: e.target.value }))}
                             />
                         </div>
                         <select
-                            className="input max-w-[150px]"
+                            className="input w-full sm:w-auto sm:max-w-[150px]"
                             value={fabricFilter.txnType}
                             onChange={(e) => setFabricFilter(f => ({ ...f, txnType: e.target.value }))}
                         >

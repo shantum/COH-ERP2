@@ -74,9 +74,23 @@ body {
   .table-header {
     @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50;
   }
-  
+
   .table-cell {
     @apply px-4 py-3 whitespace-nowrap text-sm text-gray-900;
+  }
+
+  /* Responsive table scroll container with shadow indicators */
+  .table-scroll-container {
+    @apply overflow-x-auto;
+    background:
+      linear-gradient(to right, white 30%, transparent),
+      linear-gradient(to left, white 30%, transparent),
+      linear-gradient(to right, rgba(0,0,0,0.08), transparent 15px),
+      linear-gradient(to left, rgba(0,0,0,0.08), transparent 15px);
+    background-position: left, right, left, right;
+    background-repeat: no-repeat;
+    background-size: 40px 100%, 40px 100%, 15px 100%, 15px 100%;
+    background-attachment: local, local, scroll, scroll;
   }
 }
 

@@ -559,11 +559,11 @@ export default function Returns() {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Returns Hub</h1>
-                <button className="btn-primary" onClick={() => setShowModal(true)}>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Returns Hub</h1>
+                <button className="btn-primary w-full sm:w-auto justify-center" onClick={() => setShowModal(true)}>
                     <Plus size={16} className="mr-2" />
                     New Return Request
                 </button>

@@ -16,19 +16,19 @@ export default function Dashboard() {
     ];
 
     return (
-        <div className="space-y-6">
-            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <div className="space-y-4 md:space-y-6">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900">Dashboard</h1>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
                 {stats.map((stat) => (
-                    <div key={stat.label} className="card flex items-center">
-                        <div className={`p-3 rounded-lg ${stat.color}`}>
-                            <stat.icon className="w-6 h-6 text-white" />
+                    <div key={stat.label} className="card flex items-center p-3 md:p-4">
+                        <div className={`p-2 md:p-3 rounded-lg ${stat.color}`}>
+                            <stat.icon className="w-5 h-5 md:w-6 md:h-6 text-white" />
                         </div>
-                        <div className="ml-4">
-                            <p className="text-sm text-gray-500">{stat.label}</p>
-                            <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                        <div className="ml-3 md:ml-4">
+                            <p className="text-xs md:text-sm text-gray-500">{stat.label}</p>
+                            <p className="text-xl md:text-2xl font-bold text-gray-900">{stat.value}</p>
                         </div>
                     </div>
                 ))}
@@ -80,8 +80,8 @@ export default function Dashboard() {
                 {/* Top Sellers */}
                 <div className="card lg:col-span-2">
                     <h2 className="text-lg font-semibold mb-4">Top Sellers (7 days)</h2>
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
+                    <div className="table-scroll-container">
+                        <table className="w-full" style={{ minWidth: '500px' }}>
                             <thead>
                                 <tr className="border-b">
                                     <th className="table-header">SKU</th>

@@ -9,7 +9,10 @@ import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
 import { Search, Columns, RotateCcw, Eye, Plus, AlertCircle, CheckCircle } from 'lucide-react';
-import { catalogApi, inventoryApi } from '../services/api';
+import { catalogApi } from '../services/api';
+
+// Page size options
+const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -139,13 +142,21 @@ const StatusBadge = ({ status }: { status: string }) => {
 };
 
 export default function Catalog() {
+    // Grid ref for API access
+    const gridRef = useRef<AgGridReact>(null);
+
+    // Page size state (persisted to localStorage)
+    const [pageSize, setPageSize] = useState<number>(() => {
+        const saved = localStorage.getItem('catalogGridPageSize');
+        return saved ? parseInt(saved, 10) : 100;
+    });
+
     // Filter state
     const [filter, setFilter] = useState({
         gender: '',
         category: '',
         productId: '',
         status: '',
-        search: '',
     });
     const [searchInput, setSearchInput] = useState('');
 
@@ -167,25 +178,42 @@ export default function Catalog() {
         localStorage.setItem('catalogGridVisibleColumns', JSON.stringify([...visibleColumns]));
     }, [visibleColumns]);
 
-    // Debounced search
+    // Save page size to localStorage
+    useEffect(() => {
+        localStorage.setItem('catalogGridPageSize', String(pageSize));
+    }, [pageSize]);
+
+    // Apply quick filter when search input changes (client-side, instant)
     useEffect(() => {
         const timer = setTimeout(() => {
-            setFilter(f => ({ ...f, search: searchInput }));
-        }, 300);
+            gridRef.current?.api?.setGridOption('quickFilterText', searchInput);
+        }, 150); // Short debounce for typing
         return () => clearTimeout(timer);
     }, [searchInput]);
 
-    // Fetch catalog data
+    // Fetch catalog data (without search - that's done client-side via quick filter)
     const { data: catalogData, isLoading } = useQuery({
-        queryKey: ['catalog', filter.gender, filter.category, filter.productId, filter.status, filter.search],
+        queryKey: ['catalog', filter.gender, filter.category, filter.productId, filter.status],
         queryFn: () => catalogApi.getSkuInventory({
             gender: filter.gender || undefined,
             category: filter.category || undefined,
             productId: filter.productId || undefined,
             status: filter.status || undefined,
-            search: filter.search || undefined,
         }).then(r => r.data),
     });
+
+    // Handle page size change
+    const handlePageSizeChange = useCallback((newSize: number) => {
+        setPageSize(newSize);
+        if (gridRef.current?.api) {
+            if (newSize === 0) {
+                // Show all - set to a very large number
+                gridRef.current.api.setGridOption('paginationPageSize', 999999);
+            } else {
+                gridRef.current.api.setGridOption('paginationPageSize', newSize);
+            }
+        }
+    }, []);
 
     // Fetch filter options
     const { data: filterOptions } = useQuery({
@@ -230,7 +258,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.productName,
             field: 'productName',
             width: 180,
-            pinned: 'left',
+            pinned: 'left' as const,
             cellClass: 'font-medium',
         },
         {
@@ -396,7 +424,7 @@ export default function Catalog() {
             colId: 'actions',
             headerName: '',
             width: 60,
-            pinned: 'right',
+            pinned: 'right' as const,
             sortable: false,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
@@ -445,12 +473,12 @@ export default function Catalog() {
     return (
         <div className="space-y-4">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Catalog</h1>
+                    <h1 className="text-xl md:text-2xl font-bold text-gray-900">Catalog</h1>
                     <p className="text-sm text-gray-500">Combined products and inventory view</p>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-3 md:gap-4 text-sm">
                     <div className="text-gray-500">
                         <span className="font-medium text-gray-900">{stats.totalSkus}</span> SKUs
                     </div>
@@ -468,22 +496,22 @@ export default function Catalog() {
             </div>
 
             {/* Filters */}
-            <div className="flex items-center gap-3 flex-wrap">
-                <div className="relative">
+            <div className="flex flex-wrap gap-2 md:gap-3">
+                <div className="relative w-full sm:w-auto">
                     <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
                         type="text"
                         placeholder="Search SKU, product, color..."
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
-                        className="pl-8 pr-3 py-1.5 text-sm border rounded-lg w-56 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        className="pl-8 pr-3 py-1.5 text-sm border rounded-lg w-full sm:w-48 md:w-56 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     />
                 </div>
 
                 <select
                     value={filter.gender}
                     onChange={(e) => setFilter(f => ({ ...f, gender: e.target.value, productId: '' }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white"
+                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
                 >
                     <option value="">All Genders</option>
                     {filterOptions?.genders?.map((g: string) => (
@@ -494,7 +522,7 @@ export default function Catalog() {
                 <select
                     value={filter.category}
                     onChange={(e) => setFilter(f => ({ ...f, category: e.target.value, productId: '' }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white"
+                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
                 >
                     <option value="">All Categories</option>
                     {filterOptions?.categories?.map((c: string) => (
@@ -505,7 +533,7 @@ export default function Catalog() {
                 <select
                     value={filter.productId}
                     onChange={(e) => setFilter(f => ({ ...f, productId: e.target.value }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white max-w-[200px]"
+                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto sm:max-w-[200px]"
                 >
                     <option value="">All Products</option>
                     {filteredProducts.map((p: any) => (
@@ -516,14 +544,30 @@ export default function Catalog() {
                 <select
                     value={filter.status}
                     onChange={(e) => setFilter(f => ({ ...f, status: e.target.value }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white"
+                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
                 >
                     <option value="">All Status</option>
                     <option value="ok">In Stock</option>
                     <option value="below_target">Below Target</option>
                 </select>
 
-                <div className="flex-1" />
+                <div className="hidden sm:block sm:flex-1" />
+
+                {/* Page size selector */}
+                <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-500">Show:</span>
+                    <select
+                        value={pageSize}
+                        onChange={(e) => handlePageSizeChange(parseInt(e.target.value, 10))}
+                        className="text-xs border rounded px-1.5 py-1 bg-white"
+                    >
+                        {PAGE_SIZE_OPTIONS.map(size => (
+                            <option key={size} value={size}>
+                                {size === 0 ? 'All' : size}
+                            </option>
+                        ))}
+                    </select>
+                </div>
 
                 <ColumnVisibilityDropdown
                     visibleColumns={visibleColumns}
@@ -533,21 +577,30 @@ export default function Catalog() {
             </div>
 
             {/* AG-Grid */}
-            <div className="border rounded" style={{ height: '600px', width: '100%' }}>
-                <AgGridReact
-                    theme={compactTheme}
-                    rowData={catalogData?.items || []}
-                    columnDefs={columnDefs}
-                    loading={isLoading}
-                    defaultColDef={{
-                        sortable: true,
-                        resizable: true,
-                        suppressMovable: false,
-                    }}
-                    animateRows={false}
-                    suppressCellFocus={true}
-                    getRowId={(params) => params.data.skuId}
-                />
+            <div className="table-scroll-container border rounded">
+                <div style={{ minWidth: '1100px', height: 'calc(100vh - 280px)', minHeight: '400px' }}>
+                    <AgGridReact
+                        ref={gridRef}
+                        theme={compactTheme}
+                        rowData={catalogData?.items || []}
+                        columnDefs={columnDefs}
+                        loading={isLoading}
+                        defaultColDef={{
+                            sortable: true,
+                            resizable: true,
+                            suppressMovable: false,
+                        }}
+                        animateRows={false}
+                        suppressCellFocus={true}
+                        getRowId={(params) => params.data.skuId}
+                        // Pagination
+                        pagination={true}
+                        paginationPageSize={pageSize === 0 ? 999999 : pageSize}
+                        paginationPageSizeSelector={false}
+                        // Quick filter for fast search
+                        cacheQuickFilter={true}
+                    />
+                </div>
             </div>
         </div>
     );

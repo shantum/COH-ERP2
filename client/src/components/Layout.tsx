@@ -44,7 +44,7 @@ export default function Layout() {
             </div>
 
             {/* Sidebar */}
-            <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200 transform transition-transform duration-200 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
+            <aside className={`fixed inset-y-0 left-0 z-40 w-56 lg:w-64 bg-white border-r border-gray-200 transform transition-transform duration-200 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
                 <div className="flex flex-col h-full">
                     {/* Logo */}
                     <div className="flex items-center h-16 px-6 border-b border-gray-200">
@@ -88,8 +88,8 @@ export default function Layout() {
             </aside>
 
             {/* Main content */}
-            <main className="lg:pl-64">
-                <div className="p-6 lg:p-8">
+            <main className="lg:pl-56 xl:pl-64">
+                <div className="p-4 md:p-6 lg:p-8">
                     <Outlet />
                 </div>
             </main>

@@ -573,38 +573,38 @@ export default function Inventory() {
                         </div>
 
                         {/* Summary Stats */}
-                        <div className="grid grid-cols-4 gap-3 mb-4">
-                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4">
+                            <div className="bg-gray-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-gray-500">Physical Stock</p>
-                                <p className="text-xl font-semibold">{showDetail.currentBalance}</p>
+                                <p className="text-lg md:text-xl font-semibold">{showDetail.currentBalance}</p>
                             </div>
-                            <div className="bg-yellow-50 rounded-lg p-3 text-center">
+                            <div className="bg-yellow-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-yellow-600">Reserved/Held</p>
-                                <p className="text-xl font-semibold text-yellow-700">{showDetail.reservedBalance || 0}</p>
+                                <p className="text-lg md:text-xl font-semibold text-yellow-700">{showDetail.reservedBalance || 0}</p>
                             </div>
-                            <div className="bg-primary-50 rounded-lg p-3 text-center">
+                            <div className="bg-primary-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-primary-600">Available</p>
-                                <p className="text-xl font-semibold text-primary-700">{showDetail.availableBalance}</p>
+                                <p className="text-lg md:text-xl font-semibold text-primary-700">{showDetail.availableBalance}</p>
                             </div>
-                            <div className="bg-green-50 rounded-lg p-3 text-center">
+                            <div className="bg-green-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-green-600">Shopify Qty</p>
-                                <p className="text-xl font-semibold text-green-700">{showDetail.shopifyQty ?? '-'}</p>
+                                <p className="text-lg md:text-xl font-semibold text-green-700">{showDetail.shopifyQty ?? '-'}</p>
                             </div>
                         </div>
-                        <div className="grid grid-cols-4 gap-3 mb-4">
-                            <div className="bg-green-50 rounded-lg p-3 text-center">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4">
+                            <div className="bg-green-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-green-600">Total Inward</p>
-                                <p className="text-xl font-semibold text-green-700">{showDetail.totalInward}</p>
+                                <p className="text-lg md:text-xl font-semibold text-green-700">{showDetail.totalInward}</p>
                             </div>
-                            <div className="bg-red-50 rounded-lg p-3 text-center">
+                            <div className="bg-red-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-red-600">Total Outward</p>
-                                <p className="text-xl font-semibold text-red-700">{showDetail.totalOutward}</p>
+                                <p className="text-lg md:text-xl font-semibold text-red-700">{showDetail.totalOutward}</p>
                             </div>
-                            <div className="bg-blue-50 rounded-lg p-3 text-center">
+                            <div className="bg-blue-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-blue-600">Target</p>
-                                <p className="text-xl font-semibold text-blue-700">{showDetail.targetStockQty}</p>
+                                <p className="text-lg md:text-xl font-semibold text-blue-700">{showDetail.targetStockQty}</p>
                             </div>
-                            <div className={`${showDetail.status === 'ok' ? 'bg-green-50' : 'bg-red-50'} rounded-lg p-3 text-center`}>
+                            <div className={`${showDetail.status === 'ok' ? 'bg-green-50' : 'bg-red-50'} rounded-lg p-2 md:p-3 text-center`}>
                                 <p className="text-xs text-gray-600">Status</p>
                                 <p className={`text-sm font-semibold ${showDetail.status === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
                                     {showDetail.status === 'ok' ? 'OK' : 'Below Target'}

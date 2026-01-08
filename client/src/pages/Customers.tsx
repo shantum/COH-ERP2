@@ -75,22 +75,22 @@ export default function Customers() {
     if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>;
 
     return (
-        <div className="space-y-6">
-            <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
+        <div className="space-y-4 md:space-y-6">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900">Customers</h1>
 
             {/* Tabs */}
-            <div className="flex flex-wrap gap-2 border-b">
+            <div className="flex flex-wrap gap-1 md:gap-2 border-b overflow-x-auto">
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'all' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => { setTab('all'); setPage(0); }}>All</button>
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'highValue' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('highValue')}><Crown size={16} />High Value</button>
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'atRisk' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('atRisk')}><TrendingDown size={16} />At Risk</button>
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'returners' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('returners')}><AlertTriangle size={16} />Frequent Returners</button>
             </div>
 
-            {tab === 'all' && <input type="text" placeholder="Search by name or email..." className="input max-w-md" value={search} onChange={(e) => setSearch(e.target.value)} />}
+            {tab === 'all' && <input type="text" placeholder="Search by name or email..." className="input w-full sm:max-w-md" value={search} onChange={(e) => setSearch(e.target.value)} />}
 
             {/* Customer Table */}
-            <div className="card overflow-x-auto">
-                <table className="w-full">
+            <div className="card table-scroll-container">
+                <table className="w-full" style={{ minWidth: '600px' }}>
                     <thead><tr className="border-b">
                         <th className="table-header">Customer</th><th className="table-header">Email</th><th className="table-header text-right">Orders</th><th className="table-header text-right">LTV</th>
                         {tab === 'all' && <th className="table-header">Tier</th>}
@@ -181,18 +181,18 @@ export default function Customers() {
                                 </div>
 
                                 {/* Stats Grid */}
-                                <div className="grid grid-cols-3 gap-4 p-4 border-b bg-gray-50">
+                                <div className="grid grid-cols-3 gap-2 md:gap-4 p-3 md:p-4 border-b bg-gray-50">
                                     <div className="text-center">
-                                        <p className="text-2xl font-bold text-gray-900">{customerDetail.totalOrders}</p>
-                                        <p className="text-sm text-gray-500">Total Orders</p>
+                                        <p className="text-xl md:text-2xl font-bold text-gray-900">{customerDetail.totalOrders}</p>
+                                        <p className="text-xs md:text-sm text-gray-500">Total Orders</p>
                                     </div>
                                     <div className="text-center">
-                                        <p className="text-2xl font-bold text-gray-900">{customerDetail.returnRequests?.length || 0}</p>
-                                        <p className="text-sm text-gray-500">Returns</p>
+                                        <p className="text-xl md:text-2xl font-bold text-gray-900">{customerDetail.returnRequests?.length || 0}</p>
+                                        <p className="text-xs md:text-sm text-gray-500">Returns</p>
                                     </div>
                                     <div className="text-center">
-                                        <p className="text-2xl font-bold text-gray-900">{customerDetail.productAffinity?.length || 0}</p>
-                                        <p className="text-sm text-gray-500">Products Ordered</p>
+                                        <p className="text-xl md:text-2xl font-bold text-gray-900">{customerDetail.productAffinity?.length || 0}</p>
+                                        <p className="text-xs md:text-sm text-gray-500">Products Ordered</p>
                                     </div>
                                 </div>
 

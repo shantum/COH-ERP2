@@ -141,12 +141,12 @@ export default function Fabrics() {
     if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>;
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Fabrics</h1>
-                <div className="flex gap-3">
-                    <button onClick={() => setShowAddSupplier(true)} className="btn-secondary flex items-center"><Users size={20} className="mr-2" />Add Supplier</button>
-                    <button onClick={() => setShowAddType(true)} className="btn-primary flex items-center"><Plus size={20} className="mr-2" />Add Fabric Type</button>
+        <div className="space-y-4 md:space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Fabrics</h1>
+                <div className="flex flex-wrap gap-2 sm:gap-3">
+                    <button onClick={() => setShowAddSupplier(true)} className="btn-secondary flex items-center text-sm"><Users size={18} className="mr-1.5" />Add Supplier</button>
+                    <button onClick={() => setShowAddType(true)} className="btn-primary flex items-center text-sm"><Plus size={18} className="mr-1.5" />Add Type</button>
                 </div>
             </div>
 
@@ -424,24 +424,24 @@ export default function Fabrics() {
                         </div>
 
                         {/* Summary Stats */}
-                        <div className="grid grid-cols-4 gap-4 mb-4">
-                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-4">
+                            <div className="bg-gray-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-gray-500">Current Balance</p>
-                                <p className="text-lg font-semibold">{showDetail.stock?.currentBalance || 0} {showDetail.unit === 'meter' ? 'm' : 'kg'}</p>
+                                <p className="text-base md:text-lg font-semibold">{showDetail.stock?.currentBalance || 0} {showDetail.unit === 'meter' ? 'm' : 'kg'}</p>
                             </div>
-                            <div className="bg-green-50 rounded-lg p-3 text-center">
+                            <div className="bg-green-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-green-600">Total Inward</p>
-                                <p className="text-lg font-semibold text-green-700">
+                                <p className="text-base md:text-lg font-semibold text-green-700">
                                     {transactions?.filter((t: any) => t.txnType === 'inward').reduce((sum: number, t: any) => sum + Number(t.qty), 0).toFixed(1) || 0}
                                 </p>
                             </div>
-                            <div className="bg-red-50 rounded-lg p-3 text-center">
+                            <div className="bg-red-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-red-600">Total Outward</p>
-                                <p className="text-lg font-semibold text-red-700">
+                                <p className="text-base md:text-lg font-semibold text-red-700">
                                     {transactions?.filter((t: any) => t.txnType === 'outward').reduce((sum: number, t: any) => sum + Number(t.qty), 0).toFixed(1) || 0}
                                 </p>
                             </div>
-                            <div className="bg-blue-50 rounded-lg p-3 text-center">
+                            <div className="bg-blue-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-blue-600">Status</p>
                                 <p className={`text-sm font-semibold ${showDetail.stock?.status === 'OK' ? 'text-green-600' : showDetail.stock?.status === 'ORDER SOON' ? 'text-yellow-600' : 'text-red-600'}`}>
                                     {showDetail.stock?.status || 'N/A'}

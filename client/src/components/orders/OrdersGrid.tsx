@@ -1482,29 +1482,31 @@ export function OrdersGrid({
                         border-left: 4px solid #f59e0b !important;
                     }
                 `}</style>
-                <div className="border rounded" style={{ height: '600px', width: '100%' }}>
-                    <AgGridReact
-                        ref={gridRef}
-                        rowData={rows}
-                        columnDefs={orderedColumnDefs}
-                        defaultColDef={defaultColDef}
-                        getRowId={getRowId}
-                        getRowStyle={getRowStyle}
-                        getRowClass={getRowClass}
-                        theme={compactTheme}
-                        rowSelection={{
-                            mode: 'multiRow',
-                            checkboxes: true,
-                            headerCheckbox: true,
-                            enableClickSelection: true,
-                        }}
-                        enableCellTextSelection={true}
-                        ensureDomOrder={true}
-                        suppressRowClickSelection={false}
-                        suppressRowHoverHighlight={false}
-                        onColumnMoved={handleColumnMoved}
-                        maintainColumnOrder={true}
-                    />
+                <div className="table-scroll-container border rounded">
+                    <div style={{ minWidth: '1200px', height: 'calc(100vh - 280px)', minHeight: '400px' }}>
+                        <AgGridReact
+                            ref={gridRef}
+                            rowData={rows}
+                            columnDefs={orderedColumnDefs}
+                            defaultColDef={defaultColDef}
+                            getRowId={getRowId}
+                            getRowStyle={getRowStyle}
+                            getRowClass={getRowClass}
+                            theme={compactTheme}
+                            rowSelection={{
+                                mode: 'multiRow',
+                                checkboxes: true,
+                                headerCheckbox: true,
+                                enableClickSelection: true,
+                            }}
+                            enableCellTextSelection={true}
+                            ensureDomOrder={true}
+                            suppressRowClickSelection={false}
+                            suppressRowHoverHighlight={false}
+                            onColumnMoved={handleColumnMoved}
+                            maintainColumnOrder={true}
+                        />
+                    </div>
                 </div>
             </>
         ),

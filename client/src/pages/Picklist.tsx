@@ -55,8 +55,8 @@ export default function Picklist() {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Picklist</h1>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Picklist</h1>
                 <div className="text-sm text-gray-500">
                     {allocatedLines.filter(l => l.lineStatus === 'picked').length} / {allocatedLines.length} picked
                 </div>
@@ -73,8 +73,8 @@ export default function Picklist() {
             )}
 
             {!isLoading && allocatedLines.length > 0 && (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                <div className="table-scroll-container">
+                    <table className="w-full text-sm" style={{ minWidth: '700px' }}>
                         <thead>
                             <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wide">
                                 <th className="pb-2 pr-3 font-medium">Date</th>

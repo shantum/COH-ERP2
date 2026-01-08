@@ -392,18 +392,18 @@ export default function Production() {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-900">Production</h1>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Production</h1>
                 <button
                     onClick={() => setShowAddItem(today)}
-                    className="btn-primary flex items-center text-sm"
+                    className="btn-primary flex items-center text-sm w-full sm:w-auto justify-center"
                 >
                     <Plus size={18} className="mr-1" />Add to Plan
                 </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-4 border-b text-sm">
+            <div className="flex gap-2 md:gap-4 border-b text-sm overflow-x-auto">
                 <button className={`pb-2 font-medium ${tab === 'schedule' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('schedule')}>Schedule</button>
                 <button className={`pb-2 font-medium ${tab === 'capacity' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('capacity')}>Capacity</button>
                 <button className={`pb-2 font-medium ${tab === 'tailors' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-400'}`} onClick={() => setTab('tailors')}>Tailors</button>
@@ -430,8 +430,8 @@ export default function Production() {
                             </div>
 
                             {showPlanner && (
-                                <div className="bg-white">
-                                    <table className="w-full text-sm">
+                                <div className="bg-white table-scroll-container">
+                                    <table className="w-full text-sm" style={{ minWidth: '700px' }}>
                                         <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
                                             <tr>
                                                 <th className="px-3 py-2">Order</th>
@@ -621,7 +621,8 @@ export default function Production() {
 
                             {/* Batch Items - Individual rows */}
                             {expandedDates.has(group.date) && (
-                                <table className="w-full text-sm bg-white">
+                                <div className="table-scroll-container">
+                                <table className="w-full text-sm bg-white" style={{ minWidth: '900px' }}>
                                     <thead>
                                         <tr className="border-t text-left text-gray-500 text-xs uppercase tracking-wide">
                                             <th className="py-2 px-4 font-medium">Batch #</th>
@@ -769,6 +770,7 @@ export default function Production() {
                                         ))}
                                     </tbody>
                                 </table>
+                                </div>
                             )}
                         </div>
                     ))}
@@ -797,8 +799,8 @@ export default function Production() {
 
             {/* Tailors */}
             {tab === 'tailors' && (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                <div className="table-scroll-container">
+                    <table className="w-full text-sm" style={{ minWidth: '500px' }}>
                         <thead>
                             <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wide">
                                 <th className="pb-2 pr-4 font-medium">Name</th>
