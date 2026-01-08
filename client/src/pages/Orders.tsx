@@ -509,7 +509,7 @@ export default function Orders() {
                                                     ? 'bg-amber-100 text-amber-700'
                                                     : 'bg-gray-100 text-gray-600'
                                         }`}>
-                                            {t.filteredCount !== null ? `${t.filteredCount}/${t.count}` : t.count}
+                                            {t.filteredCount !== undefined && t.filteredCount !== null ? `${t.filteredCount}/${t.count}` : t.count}
                                         </span>
                                     )}
                                 </span>
