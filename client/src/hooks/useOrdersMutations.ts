@@ -465,6 +465,39 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to update notes')
     });
 
+    // Update line notes - affects open orders (with optimistic updates for instant feedback)
+    const updateLineNotes = useMutation({
+        mutationFn: ({ lineId, notes }: { lineId: string; notes: string }) =>
+            ordersApi.updateLine(lineId, { notes }),
+        onMutate: async ({ lineId, notes }) => {
+            // Cancel outgoing refetches
+            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+            const previousOrders = queryClient.getQueryData(['openOrders']);
+
+            // Optimistically update line notes in cache (openOrders is stored as array)
+            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map(order => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.id === lineId ? { ...line, notes } : line
+                    )
+                }));
+            });
+
+            return { previousOrders };
+        },
+        onError: (err: any, _vars, context) => {
+            // Rollback on error
+            if (context?.previousOrders) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to update line notes');
+        },
+        onSuccess: () => options.onNotesSuccess?.(),
+        // No need to invalidate - optimistic update is sufficient, server confirmed
+    });
+
     // Shipping status mutations - moves between shipped and open
     const unship = useMutation({
         mutationFn: (id: string) => ordersApi.unship(id),
@@ -473,6 +506,16 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             invalidateShippedOrders();
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to unship order')
+    });
+
+    // Quick ship - force ship without allocate/pick/pack (testing only)
+    const quickShip = useMutation({
+        mutationFn: (id: string) => ordersApi.quickShip(id),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to quick ship order')
     });
 
     // Delivery tracking mutations - affects shipped tab and potentially COD pending
@@ -610,6 +653,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // Ship
         ship,
         unship,
+        quickShip,
 
         // Delivery tracking
         markDelivered,
@@ -645,6 +689,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         cancelLine,
         uncancelLine,
         updateLine,
+        updateLineNotes,
         addLine,
 
         // Customization

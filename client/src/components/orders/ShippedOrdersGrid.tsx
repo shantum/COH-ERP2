@@ -571,11 +571,12 @@ export function ShippedOrdersGrid({
                     width: 120,
                     cellRenderer: (params: ICellRendererParams) => {
                         const order = params.data;
-                        // Only show iThink status if we have actual iThink data
-                        // (indicated by courierStatusCode, lastScanAt, or lastTrackingUpdate)
-                        const hasIThinkData = order?.courierStatusCode || order?.lastScanAt || order?.lastTrackingUpdate;
-                        if (!hasIThinkData) {
-                            return <span className="text-gray-400 text-xs">-</span>;
+                        // Only show iThink status if we have actual courier data
+                        // lastTrackingUpdate is set on sync attempt, but courierStatusCode/lastScanAt
+                        // are only set when we get real data from the courier
+                        const hasRealTrackingData = order?.courierStatusCode || order?.lastScanAt;
+                        if (!hasRealTrackingData) {
+                            return <span className="text-gray-400 text-xs">No data</span>;
                         }
                         return (
                             <TrackingStatusBadge

@@ -217,10 +217,11 @@ interface OrdersGridProps {
     onPack: (lineId: string) => void;
     onUnpack: (lineId: string) => void;
     onShippingCheck: (lineId: string, order: any) => void;
+    onQuickShip?: (orderId: string) => void;
     onCreateBatch: (data: any) => void;
     onUpdateBatch: (id: string, data: any) => void;
     onDeleteBatch: (id: string) => void;
-    onUpdateNotes: (id: string, notes: string) => void;
+    onUpdateLineNotes: (lineId: string, notes: string) => void;
     onViewOrder: (orderId: string) => void;
     onEditOrder: (order: any) => void;
     onCancelOrder: (id: string, reason?: string) => void;
@@ -268,10 +269,11 @@ export function OrdersGrid({
     onPack,
     onUnpack,
     onShippingCheck,
+    onQuickShip,
     onCreateBatch,
     onUpdateBatch,
     onDeleteBatch,
-    onUpdateNotes,
+    onUpdateLineNotes,
     onViewOrder,
     onEditOrder,
     onCancelOrder,
@@ -737,18 +739,19 @@ export function OrdersGrid({
                 width: 45,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    // For customized lines, stock is not applicable (requires production)
-                    if (row?.isCustomized) {
+                    const stock = params.value ?? 0;
+                    const hasStock = stock >= row?.qty;
+                    // For customized lines with no stock, show "Custom" hint
+                    if (row?.isCustomized && stock === 0) {
                         return (
                             <span className="text-gray-400" title="Custom item - requires production">
-                                N/A
+                                Custom
                             </span>
                         );
                     }
-                    const hasStock = params.value >= row?.qty;
                     return (
                         <span className={hasStock ? 'text-green-600' : 'text-red-500'}>
-                            {params.value}
+                            {stock}
                         </span>
                     );
                 },
@@ -937,25 +940,23 @@ export function OrdersGrid({
                 colId: 'notes',
                 headerName: getHeaderName('notes'),
                 width: 120,
-                editable: (params: EditableCallbackParams) => params.data?.isFirstLine,
-                valueGetter: (params: ValueGetterParams) =>
-                    params.data?.isFirstLine ? params.data.order?.internalNotes || '' : '',
+                editable: (params: EditableCallbackParams) => !!params.data?.lineId,
+                valueGetter: (params: ValueGetterParams) => params.data?.lineNotes || '',
                 valueSetter: (params: ValueSetterParams) => {
-                    if (params.data?.isFirstLine && params.data?.order) {
-                        onUpdateNotes(params.data.order.id, params.newValue);
+                    if (params.data?.lineId) {
+                        onUpdateLineNotes(params.data.lineId, params.newValue || '');
                     }
                     return true;
                 },
                 cellClass: (params: CellClassParams) => {
-                    if (!params.data?.isFirstLine) return 'text-transparent';
-                    return params.data?.order?.internalNotes
+                    return params.data?.lineNotes
                         ? 'text-xs text-yellow-700 bg-yellow-50'
                         : 'text-xs text-gray-400';
                 },
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    if (!row?.isFirstLine) return null;
-                    const notes = row.order?.internalNotes || '';
+                    if (!row?.lineId) return null;
+                    const notes = row.lineNotes || '';
                     if (!notes)
                         return <span className="text-gray-300 italic">click to add</span>;
                     return (
@@ -1266,6 +1267,24 @@ export function OrdersGrid({
                             >
                                 <Archive size={12} />
                             </button>
+                            {onQuickShip && order.awbNumber && order.courier && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (
+                                            confirm(
+                                                `Quick Ship order ${order.orderNumber}?\n\nThis will bypass allocate/pick/pack and mark as shipped directly.`
+                                            )
+                                        ) {
+                                            onQuickShip(order.id);
+                                        }
+                                    }}
+                                    className="p-1 rounded hover:bg-gray-100 text-green-500 hover:text-green-600"
+                                    title="Quick Ship (bypass workflow)"
+                                >
+                                    <Truck size={12} />
+                                </button>
+                            )}
                             {row.totalLines === 0 && (
                                 <button
                                     onClick={(e) => {

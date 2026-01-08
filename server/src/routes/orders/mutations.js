@@ -651,10 +651,10 @@ router.post('/lines/:lineId/uncancel', authenticateToken, async (req, res) => {
     }
 });
 
-// Update order line (change qty)
+// Update order line (change qty, unitPrice, or notes)
 router.put('/lines/:lineId', authenticateToken, async (req, res) => {
     try {
-        const { qty, unitPrice } = req.body;
+        const { qty, unitPrice, notes } = req.body;
         const line = await req.prisma.orderLine.findUnique({
             where: { id: req.params.lineId },
             include: { order: true },
@@ -664,14 +664,28 @@ router.put('/lines/:lineId', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Order line not found' });
         }
 
-        if (line.lineStatus !== 'pending') {
-            return res.status(400).json({ error: 'Can only edit pending lines' });
+        // Notes can be updated regardless of line status
+        // qty/unitPrice require pending status
+        const hasQtyOrPrice = qty !== undefined || unitPrice !== undefined;
+        if (hasQtyOrPrice && line.lineStatus !== 'pending') {
+            return res.status(400).json({ error: 'Can only edit qty/price on pending lines' });
         }
 
         const updateData = {};
         if (qty !== undefined) updateData.qty = qty;
         if (unitPrice !== undefined) updateData.unitPrice = unitPrice;
+        if (notes !== undefined) updateData.notes = notes;
 
+        // If only updating notes, simple update without transaction
+        if (!hasQtyOrPrice) {
+            const updated = await req.prisma.orderLine.update({
+                where: { id: req.params.lineId },
+                data: updateData,
+            });
+            return res.json(updated);
+        }
+
+        // qty/unitPrice changes need transaction to update order total
         await req.prisma.$transaction(async (tx) => {
             await tx.orderLine.update({
                 where: { id: req.params.lineId },

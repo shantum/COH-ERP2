@@ -50,8 +50,8 @@ let lastInventoryRef: any[] | undefined = undefined;
 let lastFabricRef: any[] | undefined = undefined;
 
 function getInventoryMap(inventoryBalance: any[] | undefined): Map<string, number> {
-    // Only rebuild if reference changed
-    if (inventoryBalance !== lastInventoryRef) {
+    // Rebuild if reference changed OR map is null (first call)
+    if (inventoryMap === null || inventoryBalance !== lastInventoryRef) {
         inventoryMap = new Map();
         if (inventoryBalance) {
             for (const item of inventoryBalance) {
@@ -60,12 +60,12 @@ function getInventoryMap(inventoryBalance: any[] | undefined): Map<string, numbe
         }
         lastInventoryRef = inventoryBalance;
     }
-    return inventoryMap!;
+    return inventoryMap;
 }
 
 function getFabricMap(fabricStock: any[] | undefined): Map<string, number> {
-    // Only rebuild if reference changed
-    if (fabricStock !== lastFabricRef) {
+    // Rebuild if reference changed OR map is null (first call)
+    if (fabricMap === null || fabricStock !== lastFabricRef) {
         fabricMap = new Map();
         if (fabricStock) {
             for (const item of fabricStock) {
@@ -74,7 +74,7 @@ function getFabricMap(fabricStock: any[] | undefined): Map<string, number> {
         }
         lastFabricRef = fabricStock;
     }
-    return fabricMap!;
+    return fabricMap;
 }
 
 /**
@@ -115,6 +115,7 @@ export interface FlattenedOrderRow {
     qty: number;
     lineId: string | null;
     lineStatus: string | null;
+    lineNotes: string;
     skuStock: number;
     fabricBalance: number;
     shopifyStatus: string;
@@ -250,6 +251,7 @@ export function flattenOrders(
                 qty: line.qty,
                 lineId: line.id,
                 lineStatus: line.lineStatus,
+                lineNotes: line.notes || '',
                 skuStock,
                 fabricBalance: fabricBal,
                 shopifyStatus: order.shopifyFulfillmentStatus || '-',

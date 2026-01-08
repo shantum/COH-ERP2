@@ -599,4 +599,94 @@ router.post('/:id/receive-rto', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
+// QUICK SHIP: Force ship order (skip allocate/pick/pack checks)
+// TEMPORARY - For testing phase only
+// ============================================
+
+router.post('/:id/quick-ship', authenticateToken, async (req, res) => {
+    try {
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.status === 'shipped') {
+            return res.json({ ...order, message: 'Order is already shipped' });
+        }
+
+        if (order.status !== 'open') {
+            return res.status(400).json({ error: `Cannot ship order with status: ${order.status}` });
+        }
+
+        // Require AWB and courier
+        if (!order.awbNumber || !order.courier) {
+            return res.status(400).json({ error: 'AWB number and courier are required' });
+        }
+
+        const now = new Date();
+
+        // Process each line - auto allocate/pick/pack/ship
+        for (const line of order.orderLines) {
+            if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
+
+            // If pending, try to allocate (create reserved then release)
+            if (line.lineStatus === 'pending') {
+                // Check inventory - skip allocation if insufficient (allow shipping without inventory for testing)
+                const balance = await calculateInventoryBalance(req.prisma, line.skuId);
+                if (balance.available >= line.qty) {
+                    await createReservedTransaction(req.prisma, {
+                        skuId: line.skuId,
+                        qty: line.qty,
+                        orderLineId: line.id,
+                        userId: req.user.id,
+                    });
+                }
+            }
+
+            // Release any reserved inventory and create sale
+            await releaseReservedInventory(req.prisma, line.id);
+            await createSaleTransaction(req.prisma, {
+                skuId: line.skuId,
+                qty: line.qty,
+                orderLineId: line.id,
+                userId: req.user.id,
+            });
+
+            // Update line to shipped
+            await req.prisma.orderLine.update({
+                where: { id: line.id },
+                data: {
+                    lineStatus: 'shipped',
+                    allocatedAt: line.allocatedAt || now,
+                    pickedAt: line.pickedAt || now,
+                    packedAt: line.packedAt || now,
+                    shippedAt: now,
+                },
+            });
+        }
+
+        // Update order status
+        const updated = await req.prisma.order.update({
+            where: { id: order.id },
+            data: {
+                status: 'shipped',
+                shippedAt: now,
+                trackingStatus: 'in_transit',
+            },
+            include: { orderLines: true },
+        });
+
+        console.log(`[Quick Ship] Order ${order.orderNumber} shipped`);
+        res.json(updated);
+    } catch (error) {
+        console.error('Quick ship error:', error);
+        res.status(500).json({ error: 'Failed to quick ship order' });
+    }
+});
+
 export default router;
