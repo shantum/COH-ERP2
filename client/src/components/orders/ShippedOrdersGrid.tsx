@@ -86,7 +86,6 @@ export function ShippedOrdersGrid({
     // Use shared grid state hook
     const {
         visibleColumns,
-        columnOrder,
         handleToggleColumn,
         handleResetAll,
         handleColumnMoved,
