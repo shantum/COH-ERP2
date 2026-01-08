@@ -47,10 +47,59 @@ export default function Production() {
         queryClient.invalidateQueries({ queryKey: ['productionRequirements'] });
     };
 
-    const startBatch = useMutation({ mutationFn: (id: string) => productionApi.startBatch(id), onSuccess: invalidateAll });
-    const completeBatch = useMutation({ mutationFn: ({ id, data }: any) => productionApi.completeBatch(id, data), onSuccess: () => { invalidateAll(); setShowComplete(null); } });
-    const deleteBatch = useMutation({ mutationFn: (id: string) => productionApi.deleteBatch(id), onSuccess: invalidateAll });
-    const uncompleteBatch = useMutation({ mutationFn: (id: string) => productionApi.uncompleteBatch(id), onSuccess: invalidateAll });
+    // Optimistic update helper for batch status changes
+    const optimisticBatchUpdate = (batchId: string, updates: Partial<{ status: string; qtyCompleted: number }>) => {
+        const queryKey = ['productionBatches', dateRange.startDate, dateRange.endDate];
+        queryClient.setQueryData(queryKey, (old: any) => {
+            if (!old) return old;
+            return old.map((batch: any) =>
+                batch.id === batchId ? { ...batch, ...updates } : batch
+            );
+        });
+    };
+
+    const startBatch = useMutation({
+        mutationFn: (id: string) => productionApi.startBatch(id),
+        onMutate: async (id) => {
+            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
+            optimisticBatchUpdate(id, { status: 'in_progress' });
+        },
+        onSuccess: invalidateAll,
+        onError: () => invalidateAll() // Revert on error
+    });
+
+    const completeBatch = useMutation({
+        mutationFn: ({ id, data }: any) => productionApi.completeBatch(id, data),
+        onMutate: async ({ id, data }) => {
+            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
+            optimisticBatchUpdate(id, { status: 'completed', qtyCompleted: data.qtyCompleted });
+        },
+        onSuccess: () => { invalidateAll(); setShowComplete(null); },
+        onError: () => invalidateAll()
+    });
+
+    const deleteBatch = useMutation({
+        mutationFn: (id: string) => productionApi.deleteBatch(id),
+        onMutate: async (id) => {
+            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
+            const queryKey = ['productionBatches', dateRange.startDate, dateRange.endDate];
+            queryClient.setQueryData(queryKey, (old: any) =>
+                old ? old.filter((batch: any) => batch.id !== id) : old
+            );
+        },
+        onSuccess: invalidateAll,
+        onError: () => invalidateAll()
+    });
+
+    const uncompleteBatch = useMutation({
+        mutationFn: (id: string) => productionApi.uncompleteBatch(id),
+        onMutate: async (id) => {
+            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
+            optimisticBatchUpdate(id, { status: 'in_progress', qtyCompleted: 0 });
+        },
+        onSuccess: invalidateAll,
+        onError: () => invalidateAll()
+    });
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
         onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); setItemSelection({ productId: '', variationId: '' }); },
