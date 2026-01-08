@@ -11,8 +11,9 @@
 COH-ERP2/
 ├── client/src/
 │   ├── pages/             # 15 pages
-│   ├── components/        # Layout, Modal + orders/, settings/
-│   ├── hooks/             # useAuth, useOrdersData, useOrdersMutations
+│   ├── components/        # Layout, Modal + orders/, settings/, common/grid/
+│   ├── hooks/             # useAuth, useOrdersData, useGridState
+│   ├── utils/             # agGridHelpers.ts (shared AG-Grid config)
 │   ├── services/api.ts    # Centralized API client
 │   └── types/index.ts     # TypeScript interfaces
 │
@@ -139,6 +140,9 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 ## Changelog
 
 ### January 8, 2026
+- Fabrics page: Rewrote from nested cards to flat AG-Grid table
+- New AG-Grid shared utilities: `utils/agGridHelpers.ts`, `hooks/useGridState.ts`, `components/common/grid/`
+- New fabric endpoints: `/fabrics/flat`, `/fabrics/filters`
 - Documentation optimization: consolidated 7 domain READMEs into `docs/DOMAINS.md`
 
 ### January 7, 2026

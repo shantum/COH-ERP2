@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 8, 2026**
+> All backend and frontend domains consolidated. **Last updated: January 8, 2026** (Fabrics domain, AG-Grid utilities)
 
 ---
 
@@ -226,6 +226,31 @@ Runs every 4 hours. Now re-evaluates `delivered` orders to catch RTO misclassifi
 
 ---
 
+## Fabrics Domain
+
+Fabric inventory management with ledger-based transactions.
+
+### Key Endpoints
+| Path | Purpose |
+|------|---------|
+| `GET /flat` | All fabrics with computed balances (for AG-Grid) |
+| `GET /filters` | Unique fabric types for filter dropdowns |
+| `GET /` | Nested fabric list (legacy) |
+| `POST /` | Create fabric |
+| `POST /:id/transactions` | Add inward/outward transaction |
+| `GET /reconciliation/history` | Stock reconciliation history |
+| `POST /reconciliation/start` | Begin physical stock count |
+
+### Balance Formula
+```javascript
+Balance = SUM(inward) - SUM(outward)
+```
+
+### Frontend
+- `Fabrics.tsx` - Flat AG-Grid table with filters
+
+---
+
 ## Frontend Patterns
 
 ### Page-to-Domain Mapping
@@ -271,13 +296,27 @@ onSuccess: (_, __, ctx) => {
 |------|---------|
 | `useOrdersData` | All 5 tabs data fetching with sequential loading |
 | `useOrdersMutations` | All order action mutations with optimistic updates |
+| `useGridState` | AG-Grid column visibility/order with localStorage |
 | `useAuth` | Auth context |
+
+### AG-Grid Shared Utilities
+
+**Location**: `utils/agGridHelpers.ts`, `hooks/useGridState.ts`, `components/common/grid/`
+
+| File | Purpose |
+|------|---------|
+| `agGridHelpers.ts` | Theme config, formatters (date, currency, relative time), tracking URLs |
+| `useGridState.ts` | Column visibility, order, page size with localStorage persistence |
+| `common/grid/` | Reusable components: StatusBadge, TrackingStatusBadge, ColumnVisibilityDropdown |
+
+**Usage**: Fabrics and Catalog pages use shared utilities. Order grids kept inline (complexity didn't justify abstraction).
 
 ### Component Organization
 ```
 components/
 ├── orders/          # 15 order components
 ├── settings/tabs/   # 6 settings tabs
+├── common/grid/     # AG-Grid shared components
 ├── Layout.tsx, Modal.tsx, ErrorBoundary.tsx
 ```
 
@@ -312,7 +351,12 @@ components/
 14. Batch limit: max 10 AWBs per iThink request
 15. Re-evaluates delivered orders for RTO misclassification
 
+### Fabrics
+16. Use `/flat` endpoint for AG-Grid, not nested `/` endpoint
+17. Balance is computed server-side via transaction aggregation
+
 ### Frontend
-16. Tab counts delayed - populate progressively as loading completes
-17. Map caching - use `getInventoryMap()`/`getFabricMap()` for loops
-18. Optimistic updates use context with `skipped` for conditional invalidation
+18. Tab counts delayed - populate progressively as loading completes
+19. Map caching - use `getInventoryMap()`/`getFabricMap()` for loops
+20. Optimistic updates use context with `skipped` for conditional invalidation
+21. AG-Grid shared utilities in `utils/agGridHelpers.ts` - don't recreate

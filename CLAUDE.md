@@ -63,6 +63,8 @@ npm run db:push
 12. **Map caching**: Use `getInventoryMap()`/`getFabricMap()` for O(1) lookups in loops
 13. **Optimistic updates**: Use `context.skipped` pattern in mutations to prevent stale cache overwrites
 14. **AG-Grid pinned columns**: Set `pinned: 'right'` after resize to keep Actions visible
+15. **AG-Grid shared utilities**: Theme, formatters in `utils/agGridHelpers.ts`; state persistence in `hooks/useGridState.ts`
+16. **Don't over-engineer shared utilities**: Working code with inline patterns often better than abstraction (order grids kept inline)
 
 ## Environment
 
