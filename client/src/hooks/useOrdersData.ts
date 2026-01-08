@@ -131,7 +131,7 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         queryKey: ['inventoryBalance'],
         // Include custom SKUs so orders with customized lines show correct stock
         queryFn: () => inventoryApi.getBalance({ includeCustomSkus: 'true' }).then(r => r.data.items || r.data),
-        staleTime: STALE_TIME,
+        staleTime: 60000, // Inventory balance doesn't change rapidly (60s cache)
         enabled: activeTab === 'open', // Only needed for Open tab (stock column)
     });
 

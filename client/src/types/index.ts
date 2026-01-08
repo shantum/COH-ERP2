@@ -801,6 +801,7 @@ export interface RtoScanMatchData {
 
 export interface RecentInward {
   id: string;
+  skuId?: string;
   skuCode: string;
   productName: string;
   colorName: string;
@@ -810,6 +811,7 @@ export interface RecentInward {
   source: string;
   notes: string | null;
   createdAt: string;
+  createdBy?: string;
 }
 
 // ============================================

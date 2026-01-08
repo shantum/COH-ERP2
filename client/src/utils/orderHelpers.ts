@@ -193,6 +193,7 @@ export function flattenOrders(
                 qty: 0,
                 lineId: null,
                 lineStatus: null,
+                lineNotes: '',
                 skuStock: 0,
                 fabricBalance: 0,
                 shopifyStatus: order.shopifyFulfillmentStatus || '-',

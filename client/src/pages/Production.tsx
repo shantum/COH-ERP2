@@ -1,13 +1,32 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi, productsApi } from '../services/api';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors } from 'lucide-react';
+
+// Default date range for production batches (14 days past to 45 days future)
+const getDefaultDateRange = () => {
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - 14);
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + 45);
+    return {
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0]
+    };
+};
 
 export default function Production() {
     const queryClient = useQueryClient();
     const [tab, setTab] = useState<'schedule' | 'capacity' | 'tailors'>('schedule');
     const [showPlanner, setShowPlanner] = useState(true);
-    const { data: batches, isLoading } = useQuery({ queryKey: ['productionBatches'], queryFn: () => productionApi.getBatches().then(r => r.data) });
+
+    // Memoize date range to prevent query key changes on every render
+    const dateRange = useMemo(() => getDefaultDateRange(), []);
+    const { data: batches, isLoading } = useQuery({
+        queryKey: ['productionBatches', dateRange.startDate, dateRange.endDate],
+        queryFn: () => productionApi.getBatches({ startDate: dateRange.startDate, endDate: dateRange.endDate }).then(r => r.data)
+    });
     const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
     const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
     const { data: allSkus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });

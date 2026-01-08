@@ -21,8 +21,8 @@ export default function Ledgers() {
         enabled: activeTab === 'inventory'
     });
 
-    // Fetch fabric types with fabrics to get transactions
-    const { data: fabricTypes } = useQuery({
+    // Fetch fabric types (kept for potential future use)
+    const { data: _fabricTypes } = useQuery({
         queryKey: ['fabricTypes'],
         queryFn: () => fabricsApi.getTypes().then(r => r.data),
         enabled: activeTab === 'fabric'

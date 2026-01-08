@@ -1,12 +1,39 @@
 import { useQuery } from '@tanstack/react-query';
 import { customersApi } from '../services/api';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, X, Package, ShoppingBag, Calendar, Phone, Mail, Palette, Layers } from 'lucide-react';
+
+// Debounce hook for search
+function useDebounce<T>(value: T, delay: number): T {
+    const [debouncedValue, setDebouncedValue] = useState<T>(value);
+    useMemo(() => {
+        const handler = setTimeout(() => setDebouncedValue(value), delay);
+        return () => clearTimeout(handler);
+    }, [value, delay]);
+    return debouncedValue;
+}
+
+const PAGE_SIZE = 50;
 
 export default function Customers() {
     const [tab, setTab] = useState<'all' | 'highValue' | 'atRisk' | 'returners'>('all');
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-    const { data: customers, isLoading } = useQuery({ queryKey: ['customers'], queryFn: () => customersApi.getAll().then(r => r.data) });
+    const [search, setSearch] = useState('');
+    const [page, setPage] = useState(0);
+    const debouncedSearch = useDebounce(search, 300);
+
+    // Reset page when search changes
+    useMemo(() => { setPage(0); }, [debouncedSearch]);
+
+    // Server-side search and pagination
+    const { data: customers, isLoading, isFetching } = useQuery({
+        queryKey: ['customers', debouncedSearch, page],
+        queryFn: () => customersApi.getAll({
+            ...(debouncedSearch && { search: debouncedSearch }),
+            limit: String(PAGE_SIZE),
+            offset: String(page * PAGE_SIZE)
+        }).then(r => r.data),
+    });
     const { data: highValue } = useQuery({ queryKey: ['highValueCustomers'], queryFn: () => customersApi.getHighValue().then(r => r.data) });
     const { data: atRisk } = useQuery({ queryKey: ['atRiskCustomers'], queryFn: () => customersApi.getAtRisk().then(r => r.data) });
     const { data: returners } = useQuery({ queryKey: ['frequentReturners'], queryFn: () => customersApi.getFrequentReturners().then(r => r.data) });
@@ -15,7 +42,8 @@ export default function Customers() {
         queryFn: () => customersApi.getById(selectedCustomerId!).then(r => r.data),
         enabled: !!selectedCustomerId
     });
-    const [search, setSearch] = useState('');
+
+    const hasMore = customers?.length === PAGE_SIZE;
 
     const getTierIcon = (tier: string) => {
         if (tier === 'platinum') return <Crown size={16} className="text-purple-600" />;
@@ -40,7 +68,8 @@ export default function Customers() {
         return colors[status] || 'bg-gray-100 text-gray-800';
     };
 
-    const displayData = tab === 'all' ? customers?.filter((c: any) => !search || c.email.toLowerCase().includes(search.toLowerCase()) || `${c.firstName} ${c.lastName}`.toLowerCase().includes(search.toLowerCase()))
+    // Display data - server handles filtering for 'all' tab
+    const displayData = tab === 'all' ? customers
         : tab === 'highValue' ? highValue : tab === 'atRisk' ? atRisk : returners;
 
     if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>;
@@ -51,7 +80,7 @@ export default function Customers() {
 
             {/* Tabs */}
             <div className="flex flex-wrap gap-2 border-b">
-                <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'all' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('all')}>All ({customers?.length || 0})</button>
+                <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'all' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => { setTab('all'); setPage(0); }}>All</button>
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'highValue' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('highValue')}><Crown size={16} />High Value</button>
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'atRisk' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('atRisk')}><TrendingDown size={16} />At Risk</button>
                 <button className={`px-4 py-2 font-medium flex items-center gap-2 ${tab === 'returners' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-500'}`} onClick={() => setTab('returners')}><AlertTriangle size={16} />Frequent Returners</button>
@@ -83,6 +112,32 @@ export default function Customers() {
                     </tbody>
                 </table>
                 {displayData?.length === 0 && <p className="text-center py-8 text-gray-500">No customers found</p>}
+
+                {/* Pagination controls - only for 'all' tab */}
+                {tab === 'all' && (customers?.length ?? 0) > 0 && (
+                    <div className="flex items-center justify-between p-4 border-t">
+                        <div className="text-sm text-gray-500">
+                            Showing {page * PAGE_SIZE + 1} - {page * PAGE_SIZE + (customers?.length || 0)}
+                            {isFetching && <span className="ml-2 text-gray-400">(loading...)</span>}
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                className="btn btn-secondary text-sm"
+                                onClick={() => setPage(p => Math.max(0, p - 1))}
+                                disabled={page === 0}
+                            >
+                                Previous
+                            </button>
+                            <button
+                                className="btn btn-secondary text-sm"
+                                onClick={() => setPage(p => p + 1)}
+                                disabled={!hasMore}
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Customer Detail Modal */}
