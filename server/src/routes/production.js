@@ -288,10 +288,21 @@ router.put('/batches/:id', authenticateToken, async (req, res) => {
             }
         }
 
+        // Return minimal data - frontend uses optimistic updates with cached data
         const batch = await req.prisma.productionBatch.update({
             where: { id: req.params.id },
             data: updateData,
-            include: { tailor: true, sku: { include: { variation: { include: { product: true } } } } },
+            select: {
+                id: true,
+                batchCode: true,
+                batchDate: true,
+                status: true,
+                qtyPlanned: true,
+                qtyCompleted: true,
+                tailorId: true,
+                priority: true,
+                notes: true,
+            },
         });
         res.json(batch);
     } catch (error) {

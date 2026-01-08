@@ -669,6 +669,7 @@ model ProductionBatch {
   @@index([tailorId])
   @@index([batchDate])
   @@index([status])
+  @@index([batchDate, batchCode])  // For efficient batch code generation query
 }
 
 // ============================================

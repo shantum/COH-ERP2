@@ -175,7 +175,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onSettled: () => invalidateOpenOrders()
     });
 
-    // Production batch mutations - only affects open orders
+    // Production batch mutations - only affects open orders (with optimistic updates)
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
         onSuccess: () => invalidateOpenOrders(),
@@ -184,14 +184,66 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     const updateBatch = useMutation({
         mutationFn: ({ id, data }: { id: string; data: any }) => productionApi.updateBatch(id, data),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update batch')
+        onMutate: async ({ id, data }) => {
+            // Cancel outgoing refetches to avoid overwriting optimistic update
+            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+
+            // Snapshot previous value for rollback
+            const previousOrders = queryClient.getQueryData(['openOrders']);
+
+            // Optimistically update the batch in nested orderLines
+            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map(order => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.productionBatch?.id === id
+                            ? { ...line, productionBatch: { ...line.productionBatch, ...data } }
+                            : line
+                    )
+                }));
+            });
+
+            return { previousOrders };
+        },
+        onError: (err: any, _vars, context) => {
+            // Rollback on error
+            if (context?.previousOrders) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to update batch');
+        },
+        onSettled: () => invalidateOpenOrders()
     });
 
     const deleteBatch = useMutation({
         mutationFn: (id: string) => productionApi.deleteBatch(id),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete batch')
+        onMutate: async (id) => {
+            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+            const previousOrders = queryClient.getQueryData(['openOrders']);
+
+            // Optimistically remove the batch from orderLines
+            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map(order => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.productionBatch?.id === id
+                            ? { ...line, productionBatch: null, productionBatchId: null }
+                            : line
+                    )
+                }));
+            });
+
+            return { previousOrders };
+        },
+        onError: (err: any, _id, context) => {
+            if (context?.previousOrders) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to delete batch');
+        },
+        onSettled: () => invalidateOpenOrders()
     });
 
     // Order CRUD mutations - these affect multiple tabs
