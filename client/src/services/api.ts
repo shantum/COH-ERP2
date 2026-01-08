@@ -87,6 +87,8 @@ export const productsApi = {
 // Fabrics
 export const fabricsApi = {
     getAll: (params?: Record<string, string>) => api.get('/fabrics', { params }),
+    getFlat: (params?: { search?: string; status?: string; fabricTypeId?: string }) => api.get('/fabrics/flat', { params }),
+    getFilters: () => api.get('/fabrics/filters'),
     getById: (id: string) => api.get(`/fabrics/${id}`),
     create: (data: CreateFabricData) => api.post('/fabrics', data),
     getTypes: () => api.get('/fabrics/types'),

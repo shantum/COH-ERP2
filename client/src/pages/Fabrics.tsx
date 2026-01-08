@@ -1,96 +1,346 @@
+/**
+ * Fabrics page - Flat AG-Grid table with all fabric data
+ * One row per fabric color showing type, supplier, stock, and analysis
+ */
+
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { AgGridReact } from 'ag-grid-react';
+import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
+import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
+import { Search, Columns, RotateCcw, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { fabricsApi } from '../services/api';
-import { useState } from 'react';
-import { AlertTriangle, Plus, X, ChevronDown, ChevronRight, Package, Users, Eye, ArrowDownCircle, ArrowUpCircle, Trash2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+
+// Page size options
+const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const;
+
+// Register AG Grid modules
+ModuleRegistry.registerModules([AllCommunityModule]);
+
+// Custom compact theme based on Quartz
+const compactTheme = themeQuartz.withParams({
+    spacing: 4,
+    fontSize: 12,
+    headerFontSize: 12,
+    rowHeight: 28,
+    headerHeight: 32,
+});
+
+// All column IDs in display order
+const ALL_COLUMN_IDS = [
+    'fabricTypeName', 'composition', 'colorName', 'standardColor',
+    'supplierName', 'costPerUnit', 'leadTimeDays', 'minOrderQty',
+    'currentBalance', 'totalInward', 'totalOutward', 'avgDailyConsumption',
+    'daysOfStock', 'reorderPoint', 'stockStatus', 'suggestedOrderQty',
+    'actions'
+];
+
+// Default headers
+const DEFAULT_HEADERS: Record<string, string> = {
+    fabricTypeName: 'Fabric Type',
+    composition: 'Composition',
+    colorName: 'Color',
+    standardColor: 'Std Color',
+    supplierName: 'Supplier',
+    costPerUnit: 'Cost/Unit',
+    leadTimeDays: 'Lead (days)',
+    minOrderQty: 'Min Order',
+    currentBalance: 'Balance',
+    totalInward: 'Total In',
+    totalOutward: 'Total Out',
+    avgDailyConsumption: 'Avg/Day',
+    daysOfStock: 'Days Stock',
+    reorderPoint: 'Reorder At',
+    stockStatus: 'Status',
+    suggestedOrderQty: 'Suggested Qty',
+    actions: '',
+};
+
+// Standard colors for add color form
+const STANDARD_COLORS = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
+
+// Column visibility dropdown component
+const ColumnVisibilityDropdown = ({
+    visibleColumns,
+    onToggleColumn,
+    onResetAll,
+}: {
+    visibleColumns: Set<string>;
+    onToggleColumn: (colId: string) => void;
+    onResetAll: () => void;
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+
+    return (
+        <div ref={dropdownRef} className="relative">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
+            >
+                <Columns size={12} />
+                Columns
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                    <div className="p-2 border-b">
+                        <button
+                            onClick={onResetAll}
+                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+                        >
+                            <RotateCcw size={10} />
+                            Reset All
+                        </button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map((colId) => (
+                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                                <input
+                                    type="checkbox"
+                                    checked={visibleColumns.has(colId)}
+                                    onChange={() => onToggleColumn(colId)}
+                                    className="w-3 h-3"
+                                />
+                                {DEFAULT_HEADERS[colId] || colId}
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// Status badge component
+const StatusBadge = ({ status }: { status: string }) => {
+    if (status === 'OK') {
+        return (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                OK
+            </span>
+        );
+    }
+    if (status === 'ORDER SOON') {
+        return (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
+                Soon
+            </span>
+        );
+    }
+    return (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+            Order Now
+        </span>
+    );
+};
 
 export default function Fabrics() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
-    const { data: fabricTypes, isLoading } = useQuery({ queryKey: ['fabricTypes'], queryFn: () => fabricsApi.getTypes().then(r => r.data) });
-    const { data: suppliers } = useQuery({ queryKey: ['suppliers'], queryFn: () => fabricsApi.getSuppliers().then(r => r.data) });
-    const { data: stockAnalysis } = useQuery({ queryKey: ['fabricStock'], queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data) });
+    const gridRef = useRef<AgGridReact>(null);
 
-    const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set());
+    // Page size state
+    const [pageSize, setPageSize] = useState<number>(() => {
+        const saved = localStorage.getItem('fabricsGridPageSize');
+        return saved ? parseInt(saved, 10) : 100;
+    });
+
+    // Filter state
+    const [filter, setFilter] = useState({ fabricTypeId: '', status: '' });
+    const [searchInput, setSearchInput] = useState('');
+
+    // Column visibility state
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+        const saved = localStorage.getItem('fabricsGridVisibleColumns');
+        if (saved) {
+            try {
+                return new Set(JSON.parse(saved));
+            } catch {
+                return new Set(ALL_COLUMN_IDS);
+            }
+        }
+        return new Set(ALL_COLUMN_IDS);
+    });
+
+    // Column order state
+    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+        const saved = localStorage.getItem('fabricsGridColumnOrder');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch {
+                return ALL_COLUMN_IDS;
+            }
+        }
+        return ALL_COLUMN_IDS;
+    });
+
+    // Modal states
     const [showAddType, setShowAddType] = useState(false);
     const [showAddColor, setShowAddColor] = useState<string | null>(null);
     const [showInward, setShowInward] = useState<any>(null);
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [showDetail, setShowDetail] = useState<any>(null);
 
-    // Fetch transactions when detail view is open
-    const { data: transactions, isLoading: txnLoading } = useQuery({
-        queryKey: ['fabricTransactions', showDetail?.id],
-        queryFn: () => fabricsApi.getTransactions(showDetail.id).then(r => r.data),
-        enabled: !!showDetail?.id
-    });
-
+    // Form states
     const [typeForm, setTypeForm] = useState({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0 });
     const [colorForm, setColorForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
     const [inwardForm, setInwardForm] = useState({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
     const [supplierForm, setSupplierForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
-    const standardColors = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
 
+    // Save preferences to localStorage
+    useEffect(() => {
+        localStorage.setItem('fabricsGridVisibleColumns', JSON.stringify([...visibleColumns]));
+    }, [visibleColumns]);
+
+    useEffect(() => {
+        localStorage.setItem('fabricsGridColumnOrder', JSON.stringify(columnOrder));
+    }, [columnOrder]);
+
+    useEffect(() => {
+        localStorage.setItem('fabricsGridPageSize', String(pageSize));
+    }, [pageSize]);
+
+    // Apply quick filter when search input changes
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            gridRef.current?.api?.setGridOption('quickFilterText', searchInput);
+        }, 150);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
+
+    // Fetch flat fabric data
+    const { data: fabricData, isLoading } = useQuery({
+        queryKey: ['fabricsFlat', filter.fabricTypeId, filter.status],
+        queryFn: () => fabricsApi.getFlat({
+            fabricTypeId: filter.fabricTypeId || undefined,
+            status: filter.status || undefined,
+        }).then(r => r.data),
+    });
+
+    // Fetch filter options
+    const { data: filterOptions } = useQuery({
+        queryKey: ['fabricFilters'],
+        queryFn: () => fabricsApi.getFilters().then(r => r.data),
+        staleTime: 5 * 60 * 1000,
+    });
+
+    // Fetch suppliers for forms
+    const { data: suppliers } = useQuery({
+        queryKey: ['suppliers'],
+        queryFn: () => fabricsApi.getSuppliers().then(r => r.data),
+    });
+
+    // Fetch transactions when detail view is open
+    const { data: transactions, isLoading: txnLoading } = useQuery({
+        queryKey: ['fabricTransactions', showDetail?.fabricId],
+        queryFn: () => fabricsApi.getTransactions(showDetail.fabricId).then(r => r.data),
+        enabled: !!showDetail?.fabricId,
+    });
+
+    // Mutations
     const createType = useMutation({
         mutationFn: (data: any) => fabricsApi.createType(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddType(false);
             setTypeForm({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0 });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric type')
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric type'),
     });
 
     const createFabric = useMutation({
         mutationFn: (data: any) => fabricsApi.create(data),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
-            queryClient.invalidateQueries({ queryKey: ['fabrics'] });
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddColor(null);
             setColorForm({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric')
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric'),
     });
 
     const createInward = useMutation({
-        mutationFn: ({ fabricId, data }: { fabricId: string, data: any }) => fabricsApi.createTransaction(fabricId, data),
+        mutationFn: ({ fabricId, data }: { fabricId: string; data: any }) => fabricsApi.createTransaction(fabricId, data),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             setShowInward(null);
             setInwardForm({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to record inward')
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to record inward'),
     });
 
     const createSupplier = useMutation({
         mutationFn: (data: any) => fabricsApi.createSupplier(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddSupplier(false);
             setSupplierForm({ name: '', contactName: '', email: '', phone: '', address: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create supplier')
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create supplier'),
     });
 
     const deleteTransaction = useMutation({
         mutationFn: (txnId: string) => fabricsApi.deleteTransaction(txnId),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['fabricTransactions', showDetail?.id] });
-            queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricTransactions', showDetail?.fabricId] });
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction'),
     });
 
-    const toggleExpand = (id: string) => {
-        const newSet = new Set(expandedTypes);
-        if (newSet.has(id)) newSet.delete(id);
-        else newSet.add(id);
-        setExpandedTypes(newSet);
-    };
+    // Handlers
+    const handlePageSizeChange = useCallback((newSize: number) => {
+        setPageSize(newSize);
+        if (gridRef.current?.api) {
+            gridRef.current.api.setGridOption('paginationPageSize', newSize === 0 ? 999999 : newSize);
+        }
+    }, []);
+
+    const handleToggleColumn = useCallback((colId: string) => {
+        setVisibleColumns(prev => {
+            const next = new Set(prev);
+            if (next.has(colId)) {
+                next.delete(colId);
+            } else {
+                next.add(colId);
+            }
+            return next;
+        });
+    }, []);
+
+    const handleColumnMoved = useCallback(() => {
+        const api = gridRef.current?.api;
+        if (!api) return;
+        const newOrder = api.getAllDisplayedColumns()
+            .map(col => col.getColId())
+            .filter((id): id is string => id !== undefined);
+        if (newOrder.length > 0) {
+            setColumnOrder(newOrder);
+        }
+    }, []);
+
+    const handleResetAll = useCallback(() => {
+        setVisibleColumns(new Set(ALL_COLUMN_IDS));
+        setColumnOrder([...ALL_COLUMN_IDS]);
+    }, []);
 
     const handleSubmitType = (e: React.FormEvent) => {
         e.preventDefault();
@@ -100,17 +350,17 @@ export default function Fabrics() {
     const handleSubmitColor = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showAddColor) return;
-        const type = fabricTypes?.find((t: any) => t.id === showAddColor);
+        const fabricType = filterOptions?.fabricTypes?.find((t: any) => t.id === showAddColor);
         createFabric.mutate({
             fabricTypeId: showAddColor,
-            name: `${type?.name} - ${colorForm.colorName}`,
+            name: `${fabricType?.name || 'Fabric'} - ${colorForm.colorName}`,
             colorName: colorForm.colorName,
             standardColor: colorForm.standardColor || null,
             colorHex: colorForm.colorHex,
             costPerUnit: colorForm.costPerUnit,
             supplierId: colorForm.supplierId || null,
             leadTimeDays: colorForm.leadTimeDays,
-            minOrderQty: colorForm.minOrderQty
+            minOrderQty: colorForm.minOrderQty,
         });
     };
 
@@ -118,7 +368,7 @@ export default function Fabrics() {
         e.preventDefault();
         if (!showInward) return;
         createInward.mutate({
-            fabricId: showInward.id,
+            fabricId: showInward.fabricId,
             data: {
                 txnType: 'inward',
                 qty: inwardForm.qty,
@@ -126,8 +376,8 @@ export default function Fabrics() {
                 reason: 'supplier_receipt',
                 notes: inwardForm.notes,
                 costPerUnit: inwardForm.costPerUnit || null,
-                supplierId: inwardForm.supplierId || null
-            }
+                supplierId: inwardForm.supplierId || null,
+            },
         });
     };
 
@@ -136,95 +386,362 @@ export default function Fabrics() {
         createSupplier.mutate(supplierForm);
     };
 
-    const getStockInfo = (fabricId: string) => stockAnalysis?.find((s: any) => s.fabricId === fabricId);
+    // Column definitions
+    const columnDefs: ColDef[] = useMemo(() => [
+        {
+            colId: 'fabricTypeName',
+            headerName: DEFAULT_HEADERS.fabricTypeName,
+            field: 'fabricTypeName',
+            width: 130,
+            pinned: 'left' as const,
+            cellClass: 'font-medium',
+        },
+        {
+            colId: 'composition',
+            headerName: DEFAULT_HEADERS.composition,
+            field: 'composition',
+            width: 100,
+            cellClass: 'text-xs text-gray-600',
+        },
+        {
+            colId: 'colorName',
+            headerName: DEFAULT_HEADERS.colorName,
+            field: 'colorName',
+            width: 140,
+            cellRenderer: (params: ICellRendererParams) => {
+                const { colorHex, colorName } = params.data || {};
+                return (
+                    <div className="flex items-center gap-2">
+                        <div
+                            className="w-4 h-4 rounded-full border border-gray-300 flex-shrink-0"
+                            style={{ backgroundColor: colorHex || '#ccc' }}
+                        />
+                        <span className="truncate">{colorName}</span>
+                    </div>
+                );
+            },
+        },
+        {
+            colId: 'standardColor',
+            headerName: DEFAULT_HEADERS.standardColor,
+            field: 'standardColor',
+            width: 80,
+            cellClass: 'text-xs text-gray-500',
+        },
+        {
+            colId: 'supplierName',
+            headerName: DEFAULT_HEADERS.supplierName,
+            field: 'supplierName',
+            width: 110,
+            cellClass: 'text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value || '-',
+        },
+        {
+            colId: 'costPerUnit',
+            headerName: DEFAULT_HEADERS.costPerUnit,
+            field: 'costPerUnit',
+            width: 80,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${params.value}` : '-',
+            cellClass: 'text-right',
+        },
+        {
+            colId: 'leadTimeDays',
+            headerName: DEFAULT_HEADERS.leadTimeDays,
+            field: 'leadTimeDays',
+            width: 80,
+            cellClass: 'text-right text-xs',
+        },
+        {
+            colId: 'minOrderQty',
+            headerName: DEFAULT_HEADERS.minOrderQty,
+            field: 'minOrderQty',
+            width: 80,
+            cellClass: 'text-right text-xs',
+        },
+        {
+            colId: 'currentBalance',
+            headerName: DEFAULT_HEADERS.currentBalance,
+            field: 'currentBalance',
+            width: 80,
+            valueFormatter: (params: ValueFormatterParams) => {
+                const val = params.value || 0;
+                const unit = params.data?.unit === 'kg' ? 'kg' : 'm';
+                return `${val.toFixed(1)} ${unit}`;
+            },
+            cellClass: (params: CellClassParams) => {
+                const val = params.value || 0;
+                if (val === 0) return 'text-right text-gray-400';
+                return 'text-right font-medium';
+            },
+        },
+        {
+            colId: 'totalInward',
+            headerName: DEFAULT_HEADERS.totalInward,
+            field: 'totalInward',
+            width: 75,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? params.value.toFixed(1) : '0',
+            cellClass: 'text-right text-green-600 text-xs',
+        },
+        {
+            colId: 'totalOutward',
+            headerName: DEFAULT_HEADERS.totalOutward,
+            field: 'totalOutward',
+            width: 75,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? params.value.toFixed(1) : '0',
+            cellClass: 'text-right text-red-600 text-xs',
+        },
+        {
+            colId: 'avgDailyConsumption',
+            headerName: DEFAULT_HEADERS.avgDailyConsumption,
+            field: 'avgDailyConsumption',
+            width: 70,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? params.value.toFixed(2) : '-',
+            cellClass: 'text-right text-xs text-gray-500',
+        },
+        {
+            colId: 'daysOfStock',
+            headerName: DEFAULT_HEADERS.daysOfStock,
+            field: 'daysOfStock',
+            width: 80,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `${params.value}d` : '-',
+            cellClass: (params: CellClassParams) => {
+                const days = params.value;
+                if (days == null) return 'text-right text-xs';
+                if (days <= 7) return 'text-right text-xs text-red-600 font-medium';
+                if (days <= 14) return 'text-right text-xs text-yellow-600';
+                return 'text-right text-xs text-green-600';
+            },
+        },
+        {
+            colId: 'reorderPoint',
+            headerName: DEFAULT_HEADERS.reorderPoint,
+            field: 'reorderPoint',
+            width: 80,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? params.value.toFixed(1) : '-',
+            cellClass: 'text-right text-xs text-gray-500',
+        },
+        {
+            colId: 'stockStatus',
+            headerName: DEFAULT_HEADERS.stockStatus,
+            field: 'stockStatus',
+            width: 80,
+            cellRenderer: (params: ICellRendererParams) => (
+                <StatusBadge status={params.value || 'OK'} />
+            ),
+        },
+        {
+            colId: 'suggestedOrderQty',
+            headerName: DEFAULT_HEADERS.suggestedOrderQty,
+            field: 'suggestedOrderQty',
+            width: 100,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null && params.value > 0 ? params.value.toFixed(1) : '-',
+            cellClass: (params: CellClassParams) => {
+                const val = params.value;
+                if (val && val > 0) return 'text-right font-medium text-blue-600';
+                return 'text-right text-gray-400';
+            },
+        },
+        {
+            colId: 'actions',
+            headerName: '',
+            width: 80,
+            pinned: 'right' as const,
+            sortable: false,
+            cellRenderer: (params: ICellRendererParams) => {
+                const row = params.data;
+                if (!row) return null;
+                return (
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setShowDetail(row)}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                            title="View details"
+                        >
+                            <Eye size={14} />
+                        </button>
+                        <button
+                            onClick={() => setShowInward(row)}
+                            className="p-1 rounded hover:bg-green-100 text-green-500 hover:text-green-700"
+                            title="Add inward"
+                        >
+                            <Package size={14} />
+                        </button>
+                    </div>
+                );
+            },
+        },
+    ].map(col => ({
+        ...col,
+        hide: !visibleColumns.has(col.colId!),
+    })), [visibleColumns]);
 
-    if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>;
+    // Order columns based on saved order
+    const orderedColumnDefs = useMemo(() => {
+        const colMap = new Map(columnDefs.map(col => [col.colId, col]));
+        const ordered: ColDef[] = [];
+        for (const colId of columnOrder) {
+            const col = colMap.get(colId);
+            if (col) {
+                ordered.push(col);
+                colMap.delete(colId);
+            }
+        }
+        for (const col of colMap.values()) {
+            ordered.push(col);
+        }
+        return ordered;
+    }, [columnDefs, columnOrder]);
+
+    // Summary stats
+    const summary = fabricData?.summary || { total: 0, orderNow: 0, orderSoon: 0, ok: 0 };
 
     return (
-        <div className="space-y-4 md:space-y-6">
+        <div className="space-y-4">
+            {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Fabrics</h1>
+                <div>
+                    <h1 className="text-xl md:text-2xl font-bold text-gray-900">Fabrics</h1>
+                    <p className="text-sm text-gray-500">Fabric inventory and stock management</p>
+                </div>
                 <div className="flex flex-wrap gap-2 sm:gap-3">
-                    <button onClick={() => setShowAddSupplier(true)} className="btn-secondary flex items-center text-sm"><Users size={18} className="mr-1.5" />Add Supplier</button>
-                    <button onClick={() => setShowAddType(true)} className="btn-primary flex items-center text-sm"><Plus size={18} className="mr-1.5" />Add Type</button>
+                    <button onClick={() => setShowAddSupplier(true)} className="btn-secondary flex items-center text-sm">
+                        <Users size={18} className="mr-1.5" />Add Supplier
+                    </button>
+                    <button onClick={() => setShowAddType(true)} className="btn-primary flex items-center text-sm">
+                        <Plus size={18} className="mr-1.5" />Add Type
+                    </button>
                 </div>
             </div>
 
-            {/* Alerts */}
-            {stockAnalysis?.filter((f: any) => f.status !== 'OK').length > 0 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-center gap-3">
-                    <AlertTriangle className="text-yellow-600" />
-                    <span className="text-yellow-800 font-medium">{stockAnalysis.filter((f: any) => f.status !== 'OK').length} fabrics need reordering</span>
+            {/* Stats bar */}
+            <div className="flex items-center gap-3 md:gap-4 text-sm">
+                <div className="text-gray-500">
+                    <span className="font-medium text-gray-900">{summary.total}</span> fabrics
                 </div>
-            )}
-
-            {/* Fabric Types List */}
-            <div className="space-y-4">
-                {fabricTypes?.map((type: any) => (
-                    <div key={type.id} className="card">
-                        <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleExpand(type.id)}>
-                            <div className="flex items-center">
-                                {expandedTypes.has(type.id) ? <ChevronDown size={20} className="mr-2 text-gray-400" /> : <ChevronRight size={20} className="mr-2 text-gray-400" />}
-                                <div>
-                                    <h3 className="font-semibold text-gray-900">{type.name}</h3>
-                                    <p className="text-sm text-gray-500">{type.composition || 'No composition'} • {type.unit} • {type.avgShrinkagePct}% shrinkage</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className="text-sm text-gray-500">{type.fabrics?.length || 0} colors</span>
-                            </div>
-                        </div>
-
-                        {expandedTypes.has(type.id) && (
-                            <div className="mt-4 border-t pt-4 space-y-3">
-                                {type.fabrics?.map((fabric: any) => {
-                                    const stock = getStockInfo(fabric.id);
-                                    return (
-                                        <div key={fabric.id} className="ml-6 p-3 bg-gray-50 rounded-lg">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center">
-                                                    <div className="w-6 h-6 rounded-full border-2 border-gray-300 mr-3" style={{ backgroundColor: fabric.colorHex || '#ccc' }} />
-                                                    <div>
-                                                        <p className="font-medium">{fabric.colorName}</p>
-                                                        <p className="text-xs text-gray-500">₹{fabric.costPerUnit}/unit • {fabric.leadTimeDays}d lead</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-center gap-3">
-                                                    {stock && (
-                                                        <div className="text-right">
-                                                            <span className="text-sm font-medium">{stock.currentBalance} {type.unit === 'meter' ? 'm' : 'kg'}</span>
-                                                            <span className={`ml-2 badge ${stock.status === 'OK' ? 'badge-success' : stock.status === 'ORDER SOON' ? 'badge-warning' : 'badge-danger'}`}>{stock.status}</span>
-                                                        </div>
-                                                    )}
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); setShowDetail({ ...fabric, unit: type.unit, stock }); }}
-                                                        className="btn-secondary text-xs py-1 px-2 flex items-center gap-1"
-                                                    >
-                                                        <Eye size={14} /> View
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); setShowInward({ ...fabric, unit: type.unit }); }}
-                                                        className="btn-secondary text-xs py-1 px-2 flex items-center gap-1"
-                                                    >
-                                                        <Package size={14} /> Inward
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                <button onClick={(e) => { e.stopPropagation(); setShowAddColor(type.id); }} className="ml-6 text-sm text-primary-600 hover:underline flex items-center">
-                                    <Plus size={16} className="mr-1" /> Add Color
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                ))}
-                {(!fabricTypes || fabricTypes.length === 0) && (
-                    <div className="card text-center text-gray-500 py-8">
-                        No fabric types yet. Click "Add Fabric Type" to get started.
+                {summary.orderNow > 0 && (
+                    <div className="flex items-center gap-1 text-red-600">
+                        <AlertTriangle size={14} />
+                        <span className="font-medium">{summary.orderNow}</span> order now
                     </div>
                 )}
+                {summary.orderSoon > 0 && (
+                    <div className="text-yellow-600">
+                        <span className="font-medium">{summary.orderSoon}</span> order soon
+                    </div>
+                )}
+                {summary.ok > 0 && (
+                    <div className="text-green-600">
+                        <span className="font-medium">{summary.ok}</span> OK
+                    </div>
+                )}
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2 md:gap-3">
+                <div className="relative w-full sm:w-auto">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                        type="text"
+                        placeholder="Search fabric, color, supplier..."
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        className="pl-8 pr-3 py-1.5 text-sm border rounded-lg w-full sm:w-48 md:w-56 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                </div>
+
+                <select
+                    value={filter.fabricTypeId}
+                    onChange={(e) => setFilter(f => ({ ...f, fabricTypeId: e.target.value }))}
+                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
+                >
+                    <option value="">All Types</option>
+                    {filterOptions?.fabricTypes?.map((t: any) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={filter.status}
+                    onChange={(e) => setFilter(f => ({ ...f, status: e.target.value }))}
+                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
+                >
+                    <option value="">All Status</option>
+                    <option value="ORDER NOW">Order Now</option>
+                    <option value="ORDER SOON">Order Soon</option>
+                    <option value="OK">OK</option>
+                </select>
+
+                <div className="hidden sm:block sm:flex-1" />
+
+                {/* Add Color button */}
+                {filterOptions?.fabricTypes?.length > 0 && (
+                    <select
+                        value=""
+                        onChange={(e) => e.target.value && setShowAddColor(e.target.value)}
+                        className="text-sm border rounded px-2 py-1.5 bg-white text-primary-600 w-full sm:w-auto"
+                    >
+                        <option value="">+ Add Color...</option>
+                        {filterOptions?.fabricTypes?.map((t: any) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                    </select>
+                )}
+
+                {/* Page size selector */}
+                <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-gray-500">Show:</span>
+                    <select
+                        value={pageSize}
+                        onChange={(e) => handlePageSizeChange(parseInt(e.target.value, 10))}
+                        className="text-xs border rounded px-1.5 py-1 bg-white"
+                    >
+                        {PAGE_SIZE_OPTIONS.map(size => (
+                            <option key={size} value={size}>
+                                {size === 0 ? 'All' : size}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                <ColumnVisibilityDropdown
+                    visibleColumns={visibleColumns}
+                    onToggleColumn={handleToggleColumn}
+                    onResetAll={handleResetAll}
+                />
+            </div>
+
+            {/* AG-Grid */}
+            <div className="table-scroll-container border rounded">
+                <div style={{ minWidth: '1100px', height: 'calc(100vh - 280px)', minHeight: '400px' }}>
+                    <AgGridReact
+                        ref={gridRef}
+                        theme={compactTheme}
+                        rowData={fabricData?.items || []}
+                        columnDefs={orderedColumnDefs}
+                        loading={isLoading}
+                        defaultColDef={{
+                            sortable: true,
+                            resizable: true,
+                            suppressMovable: false,
+                        }}
+                        animateRows={false}
+                        suppressCellFocus={true}
+                        getRowId={(params) => params.data.fabricId}
+                        pagination={true}
+                        paginationPageSize={pageSize === 0 ? 999999 : pageSize}
+                        paginationPageSizeSelector={false}
+                        cacheQuickFilter={true}
+                        onColumnMoved={handleColumnMoved}
+                        maintainColumnOrder={true}
+                    />
+                </div>
             </div>
 
             {/* Add Fabric Type Modal */}
@@ -284,7 +801,7 @@ export default function Fabrics() {
                                     <label className="label">Standard Color</label>
                                     <select className="input" value={colorForm.standardColor} onChange={(e) => setColorForm(f => ({ ...f, standardColor: e.target.value }))}>
                                         <option value="">Select...</option>
-                                        {standardColors.map(c => <option key={c} value={c}>{c}</option>)}
+                                        {STANDARD_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
                                 <div>
@@ -334,13 +851,13 @@ export default function Fabrics() {
                             <div className="w-6 h-6 rounded-full" style={{ backgroundColor: showInward.colorHex || '#ccc' }} />
                             <div>
                                 <p className="font-medium">{showInward.colorName}</p>
-                                <p className="text-xs text-gray-500">{showInward.name}</p>
+                                <p className="text-xs text-gray-500">{showInward.fabricTypeName}</p>
                             </div>
                         </div>
                         <form onSubmit={handleSubmitInward} className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="label">Quantity ({showInward.unit === 'meter' ? 'meters' : 'kg'})</label>
+                                    <label className="label">Quantity ({showInward.unit === 'kg' ? 'kg' : 'meters'})</label>
                                     <input type="number" step="0.1" className="input" value={inwardForm.qty} onChange={(e) => setInwardForm(f => ({ ...f, qty: Number(e.target.value) }))} min={0.1} required />
                                 </div>
                                 <div>
@@ -417,7 +934,7 @@ export default function Fabrics() {
                                 <div className="w-8 h-8 rounded-full border-2 border-gray-300" style={{ backgroundColor: showDetail.colorHex || '#ccc' }} />
                                 <div>
                                     <h2 className="text-lg font-semibold">{showDetail.colorName}</h2>
-                                    <p className="text-sm text-gray-500">{showDetail.name}</p>
+                                    <p className="text-sm text-gray-500">{showDetail.fabricTypeName}</p>
                                 </div>
                             </div>
                             <button onClick={() => setShowDetail(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
@@ -427,24 +944,20 @@ export default function Fabrics() {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-4">
                             <div className="bg-gray-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-gray-500">Current Balance</p>
-                                <p className="text-base md:text-lg font-semibold">{showDetail.stock?.currentBalance || 0} {showDetail.unit === 'meter' ? 'm' : 'kg'}</p>
+                                <p className="text-base md:text-lg font-semibold">{showDetail.currentBalance?.toFixed(1) || 0} {showDetail.unit === 'kg' ? 'kg' : 'm'}</p>
                             </div>
                             <div className="bg-green-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-green-600">Total Inward</p>
-                                <p className="text-base md:text-lg font-semibold text-green-700">
-                                    {transactions?.filter((t: any) => t.txnType === 'inward').reduce((sum: number, t: any) => sum + Number(t.qty), 0).toFixed(1) || 0}
-                                </p>
+                                <p className="text-base md:text-lg font-semibold text-green-700">{showDetail.totalInward?.toFixed(1) || 0}</p>
                             </div>
                             <div className="bg-red-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-red-600">Total Outward</p>
-                                <p className="text-base md:text-lg font-semibold text-red-700">
-                                    {transactions?.filter((t: any) => t.txnType === 'outward').reduce((sum: number, t: any) => sum + Number(t.qty), 0).toFixed(1) || 0}
-                                </p>
+                                <p className="text-base md:text-lg font-semibold text-red-700">{showDetail.totalOutward?.toFixed(1) || 0}</p>
                             </div>
                             <div className="bg-blue-50 rounded-lg p-2 md:p-3 text-center">
                                 <p className="text-xs text-blue-600">Status</p>
-                                <p className={`text-sm font-semibold ${showDetail.stock?.status === 'OK' ? 'text-green-600' : showDetail.stock?.status === 'ORDER SOON' ? 'text-yellow-600' : 'text-red-600'}`}>
-                                    {showDetail.stock?.status || 'N/A'}
+                                <p className={`text-sm font-semibold ${showDetail.stockStatus === 'OK' ? 'text-green-600' : showDetail.stockStatus === 'ORDER SOON' ? 'text-yellow-600' : 'text-red-600'}`}>
+                                    {showDetail.stockStatus || 'N/A'}
                                 </p>
                             </div>
                         </div>

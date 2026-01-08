@@ -44,6 +44,138 @@ router.post('/types', authenticateToken, async (req, res) => {
 // FABRICS
 // ============================================
 
+// Get all fabrics in flat format (for AG-Grid table)
+router.get('/flat', authenticateToken, async (req, res) => {
+    try {
+        const { search, status, fabricTypeId } = req.query;
+
+        // Build where clause
+        const where = { isActive: true };
+        if (fabricTypeId) where.fabricTypeId = fabricTypeId;
+        if (search) {
+            where.OR = [
+                { name: { contains: search, mode: 'insensitive' } },
+                { colorName: { contains: search, mode: 'insensitive' } },
+                { fabricType: { name: { contains: search, mode: 'insensitive' } } },
+            ];
+        }
+
+        const fabrics = await req.prisma.fabric.findMany({
+            where,
+            include: {
+                fabricType: true,
+                supplier: true,
+            },
+            orderBy: [
+                { fabricType: { name: 'asc' } },
+                { colorName: 'asc' },
+            ],
+        });
+
+        // Calculate balances and analysis for all fabrics
+        const items = await Promise.all(
+            fabrics.map(async (fabric) => {
+                const balance = await calculateFabricBalance(req.prisma, fabric.id);
+                const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
+
+                const daysOfStock = avgDailyConsumption > 0
+                    ? balance.currentBalance / avgDailyConsumption
+                    : null;
+
+                const reorderPoint = avgDailyConsumption * (fabric.leadTimeDays + 7);
+
+                let stockStatus = 'OK';
+                if (balance.currentBalance <= reorderPoint) {
+                    stockStatus = 'ORDER NOW';
+                } else if (balance.currentBalance <= avgDailyConsumption * (fabric.leadTimeDays + 14)) {
+                    stockStatus = 'ORDER SOON';
+                }
+
+                const suggestedOrderQty = Math.max(
+                    Number(fabric.minOrderQty),
+                    Math.ceil((avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * fabric.leadTimeDays))
+                );
+
+                return {
+                    // Fabric identifiers
+                    fabricId: fabric.id,
+                    colorName: fabric.colorName,
+                    colorHex: fabric.colorHex,
+                    standardColor: fabric.standardColor,
+
+                    // Fabric Type info
+                    fabricTypeId: fabric.fabricType.id,
+                    fabricTypeName: fabric.fabricType.name,
+                    composition: fabric.fabricType.composition,
+                    unit: fabric.fabricType.unit,
+                    avgShrinkagePct: fabric.fabricType.avgShrinkagePct,
+
+                    // Supplier info
+                    supplierId: fabric.supplier?.id || null,
+                    supplierName: fabric.supplier?.name || null,
+
+                    // Pricing & Lead time
+                    costPerUnit: fabric.costPerUnit,
+                    leadTimeDays: fabric.leadTimeDays,
+                    minOrderQty: fabric.minOrderQty,
+
+                    // Stock info
+                    currentBalance: Number(balance.currentBalance.toFixed(2)),
+                    totalInward: Number(balance.totalInward.toFixed(2)),
+                    totalOutward: Number(balance.totalOutward.toFixed(2)),
+                    avgDailyConsumption: Number(avgDailyConsumption.toFixed(3)),
+                    daysOfStock: daysOfStock ? Math.floor(daysOfStock) : null,
+                    reorderPoint: Number(reorderPoint.toFixed(2)),
+                    stockStatus,
+                    suggestedOrderQty: suggestedOrderQty > 0 ? suggestedOrderQty : 0,
+                };
+            })
+        );
+
+        // Filter by status if provided
+        let filteredItems = items;
+        if (status === 'low') {
+            filteredItems = items.filter(item => item.stockStatus !== 'OK');
+        } else if (status === 'ok') {
+            filteredItems = items.filter(item => item.stockStatus === 'OK');
+        }
+
+        res.json({
+            items: filteredItems,
+            summary: {
+                total: filteredItems.length,
+                orderNow: items.filter(i => i.stockStatus === 'ORDER NOW').length,
+                orderSoon: items.filter(i => i.stockStatus === 'ORDER SOON').length,
+                ok: items.filter(i => i.stockStatus === 'OK').length,
+            },
+        });
+    } catch (error) {
+        console.error('Get flat fabrics error:', error);
+        res.status(500).json({ error: 'Failed to fetch fabrics' });
+    }
+});
+
+// Get filter options for fabrics
+router.get('/filters', authenticateToken, async (req, res) => {
+    try {
+        const fabricTypes = await req.prisma.fabricType.findMany({
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+        });
+
+        const suppliers = await req.prisma.supplier.findMany({
+            where: { isActive: true },
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+        });
+
+        res.json({ fabricTypes, suppliers });
+    } catch (error) {
+        console.error('Get fabric filters error:', error);
+        res.status(500).json({ error: 'Failed to fetch filter options' });
+    }
+});
+
 // Get all fabrics with balance
 router.get('/', authenticateToken, async (req, res) => {
     try {
