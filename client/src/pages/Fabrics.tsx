@@ -3,29 +3,23 @@
  * One row per fabric color showing type, supplier, stock, and analysis
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Search, Columns, RotateCcw, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import { compactThemeSmall } from '../utils/agGridHelpers';
+import { ColumnVisibilityDropdown, FabricStatusBadge } from '../components/common/grid';
+import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumns } from '../hooks/useGridState';
 
 // Page size options
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const;
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
-
-// Custom compact theme based on Quartz
-const compactTheme = themeQuartz.withParams({
-    spacing: 4,
-    fontSize: 12,
-    headerFontSize: 12,
-    rowHeight: 28,
-    headerHeight: 32,
-});
 
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
@@ -60,134 +54,30 @@ const DEFAULT_HEADERS: Record<string, string> = {
 // Standard colors for add color form
 const STANDARD_COLORS = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
 
-// Column visibility dropdown component
-const ColumnVisibilityDropdown = ({
-    visibleColumns,
-    onToggleColumn,
-    onResetAll,
-}: {
-    visibleColumns: Set<string>;
-    onToggleColumn: (colId: string) => void;
-    onResetAll: () => void;
-}) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen]);
-
-    return (
-        <div ref={dropdownRef} className="relative">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
-            >
-                <Columns size={12} />
-                Columns
-            </button>
-            {isOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-                    <div className="p-2 border-b">
-                        <button
-                            onClick={onResetAll}
-                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
-                        >
-                            <RotateCcw size={10} />
-                            Reset All
-                        </button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map((colId) => (
-                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                                <input
-                                    type="checkbox"
-                                    checked={visibleColumns.has(colId)}
-                                    onChange={() => onToggleColumn(colId)}
-                                    className="w-3 h-3"
-                                />
-                                {DEFAULT_HEADERS[colId] || colId}
-                            </label>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-
-// Status badge component
-const StatusBadge = ({ status }: { status: string }) => {
-    if (status === 'OK') {
-        return (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                OK
-            </span>
-        );
-    }
-    if (status === 'ORDER SOON') {
-        return (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
-                Soon
-            </span>
-        );
-    }
-    return (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
-            Order Now
-        </span>
-    );
-};
-
 export default function Fabrics() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
     const gridRef = useRef<AgGridReact>(null);
 
-    // Page size state
-    const [pageSize, setPageSize] = useState<number>(() => {
-        const saved = localStorage.getItem('fabricsGridPageSize');
-        return saved ? parseInt(saved, 10) : 100;
+    // Use shared grid state hook for column visibility, order, and page size
+    const {
+        visibleColumns,
+        columnOrder,
+        pageSize,
+        handleToggleColumn,
+        handleResetAll,
+        handleColumnMoved,
+        handlePageSizeChange,
+    } = useGridState({
+        gridId: 'fabricsGrid',
+        allColumnIds: ALL_COLUMN_IDS,
+        defaultPageSize: 100,
     });
 
     // Filter state
     const [filter, setFilter] = useState({ fabricTypeId: '', status: '' });
     const [searchInput, setSearchInput] = useState('');
-
-    // Column visibility state
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem('fabricsGridVisibleColumns');
-        if (saved) {
-            try {
-                return new Set(JSON.parse(saved));
-            } catch {
-                return new Set(ALL_COLUMN_IDS);
-            }
-        }
-        return new Set(ALL_COLUMN_IDS);
-    });
-
-    // Column order state
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem('fabricsGridColumnOrder');
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return ALL_COLUMN_IDS;
-            }
-        }
-        return ALL_COLUMN_IDS;
-    });
 
     // Modal states
     const [showAddType, setShowAddType] = useState(false);
@@ -201,19 +91,6 @@ export default function Fabrics() {
     const [colorForm, setColorForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
     const [inwardForm, setInwardForm] = useState({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
     const [supplierForm, setSupplierForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
-
-    // Save preferences to localStorage
-    useEffect(() => {
-        localStorage.setItem('fabricsGridVisibleColumns', JSON.stringify([...visibleColumns]));
-    }, [visibleColumns]);
-
-    useEffect(() => {
-        localStorage.setItem('fabricsGridColumnOrder', JSON.stringify(columnOrder));
-    }, [columnOrder]);
-
-    useEffect(() => {
-        localStorage.setItem('fabricsGridPageSize', String(pageSize));
-    }, [pageSize]);
 
     // Apply quick filter when search input changes
     useEffect(() => {
@@ -306,41 +183,13 @@ export default function Fabrics() {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction'),
     });
 
-    // Handlers
-    const handlePageSizeChange = useCallback((newSize: number) => {
-        setPageSize(newSize);
-        if (gridRef.current?.api) {
-            gridRef.current.api.setGridOption('paginationPageSize', newSize === 0 ? 999999 : newSize);
-        }
-    }, []);
-
-    const handleToggleColumn = useCallback((colId: string) => {
-        setVisibleColumns(prev => {
-            const next = new Set(prev);
-            if (next.has(colId)) {
-                next.delete(colId);
-            } else {
-                next.add(colId);
-            }
-            return next;
-        });
-    }, []);
-
-    const handleColumnMoved = useCallback(() => {
+    // Grid column moved handler
+    const onColumnMoved = () => {
         const api = gridRef.current?.api;
-        if (!api) return;
-        const newOrder = api.getAllDisplayedColumns()
-            .map(col => col.getColId())
-            .filter((id): id is string => id !== undefined);
-        if (newOrder.length > 0) {
-            setColumnOrder(newOrder);
+        if (api) {
+            handleColumnMoved(getColumnOrderFromApi(api));
         }
-    }, []);
-
-    const handleResetAll = useCallback(() => {
-        setVisibleColumns(new Set(ALL_COLUMN_IDS));
-        setColumnOrder([...ALL_COLUMN_IDS]);
-    }, []);
+    };
 
     const handleSubmitType = (e: React.FormEvent) => {
         e.preventDefault();
@@ -532,7 +381,7 @@ export default function Fabrics() {
             field: 'stockStatus',
             width: 80,
             cellRenderer: (params: ICellRendererParams) => (
-                <StatusBadge status={params.value || 'OK'} />
+                <FabricStatusBadge status={params.value || 'OK'} />
             ),
         },
         {
@@ -577,27 +426,13 @@ export default function Fabrics() {
                 );
             },
         },
-    ].map(col => ({
-        ...col,
-        hide: !visibleColumns.has(col.colId!),
-    })), [visibleColumns]);
+    ], []);
 
-    // Order columns based on saved order
+    // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
-        const colMap = new Map(columnDefs.map(col => [col.colId, col]));
-        const ordered: ColDef[] = [];
-        for (const colId of columnOrder) {
-            const col = colMap.get(colId);
-            if (col) {
-                ordered.push(col);
-                colMap.delete(colId);
-            }
-        }
-        for (const col of colMap.values()) {
-            ordered.push(col);
-        }
-        return ordered;
-    }, [columnDefs, columnOrder]);
+        const withVisibility = applyColumnVisibility(columnDefs, visibleColumns);
+        return orderColumns(withVisibility, columnOrder);
+    }, [columnDefs, visibleColumns, columnOrder]);
 
     // Summary stats
     const summary = fabricData?.summary || { total: 0, orderNow: 0, orderSoon: 0, ok: 0 };
@@ -714,6 +549,8 @@ export default function Fabrics() {
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
                     onResetAll={handleResetAll}
+                    columnIds={ALL_COLUMN_IDS}
+                    columnHeaders={DEFAULT_HEADERS}
                 />
             </div>
 
@@ -722,7 +559,7 @@ export default function Fabrics() {
                 <div style={{ minWidth: '1100px', height: 'calc(100vh - 280px)', minHeight: '400px' }}>
                     <AgGridReact
                         ref={gridRef}
-                        theme={compactTheme}
+                        theme={compactThemeSmall}
                         rowData={fabricData?.items || []}
                         columnDefs={orderedColumnDefs}
                         loading={isLoading}
@@ -738,7 +575,7 @@ export default function Fabrics() {
                         paginationPageSize={pageSize === 0 ? 999999 : pageSize}
                         paginationPageSizeSelector={false}
                         cacheQuickFilter={true}
-                        onColumnMoved={handleColumnMoved}
+                        onColumnMoved={onColumnMoved}
                         maintainColumnOrder={true}
                     />
                 </div>

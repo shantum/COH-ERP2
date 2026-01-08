@@ -3,28 +3,22 @@
  * Flat AG-Grid table with 1 row per SKU showing all product and inventory data
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Search, Columns, RotateCcw, Eye, Plus, AlertCircle, CheckCircle } from 'lucide-react';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import { Search, Eye, Plus } from 'lucide-react';
 import { catalogApi } from '../services/api';
+import { compactThemeSmall } from '../utils/agGridHelpers';
+import { ColumnVisibilityDropdown, InventoryStatusBadge } from '../components/common/grid';
+import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumns } from '../hooks/useGridState';
 
 // Page size options
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
-
-// Custom compact theme based on Quartz
-const compactTheme = themeQuartz.withParams({
-    spacing: 4,
-    fontSize: 12,
-    headerFontSize: 12,
-    rowHeight: 28,
-    headerHeight: 32,
-});
 
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
@@ -59,96 +53,23 @@ const DEFAULT_HEADERS: Record<string, string> = {
     actions: '',
 };
 
-// Column visibility dropdown component
-const ColumnVisibilityDropdown = ({
-    visibleColumns,
-    onToggleColumn,
-    onResetAll,
-}: {
-    visibleColumns: Set<string>;
-    onToggleColumn: (colId: string) => void;
-    onResetAll: () => void;
-}) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen]);
-
-    return (
-        <div ref={dropdownRef} className="relative">
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50"
-            >
-                <Columns size={12} />
-                Columns
-            </button>
-            {isOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-                    <div className="p-2 border-b">
-                        <button
-                            onClick={onResetAll}
-                            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
-                        >
-                            <RotateCcw size={10} />
-                            Reset All
-                        </button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map((colId) => (
-                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                                <input
-                                    type="checkbox"
-                                    checked={visibleColumns.has(colId)}
-                                    onChange={() => onToggleColumn(colId)}
-                                    className="w-3 h-3"
-                                />
-                                {DEFAULT_HEADERS[colId] || colId}
-                            </label>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-
-// Status badge renderer
-const StatusBadge = ({ status }: { status: string }) => {
-    if (status === 'ok') {
-        return (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                <CheckCircle size={10} />
-                OK
-            </span>
-        );
-    }
-    return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
-            <AlertCircle size={10} />
-            Low
-        </span>
-    );
-};
-
 export default function Catalog() {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
 
-    // Page size state (persisted to localStorage)
-    const [pageSize, setPageSize] = useState<number>(() => {
-        const saved = localStorage.getItem('catalogGridPageSize');
-        return saved ? parseInt(saved, 10) : 100;
+    // Use shared grid state hook for column visibility, order, and page size
+    const {
+        visibleColumns,
+        columnOrder,
+        pageSize,
+        handleToggleColumn,
+        handleResetAll,
+        handleColumnMoved,
+        handlePageSizeChange,
+    } = useGridState({
+        gridId: 'catalogGrid',
+        allColumnIds: ALL_COLUMN_IDS,
+        defaultPageSize: 100,
     });
 
     // Filter state
@@ -159,47 +80,6 @@ export default function Catalog() {
         status: '',
     });
     const [searchInput, setSearchInput] = useState('');
-
-    // Column visibility state (persisted to localStorage)
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem('catalogGridVisibleColumns');
-        if (saved) {
-            try {
-                return new Set(JSON.parse(saved));
-            } catch {
-                return new Set(ALL_COLUMN_IDS);
-            }
-        }
-        return new Set(ALL_COLUMN_IDS);
-    });
-
-    // Column order state (persisted to localStorage)
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem('catalogGridColumnOrder');
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return ALL_COLUMN_IDS;
-            }
-        }
-        return ALL_COLUMN_IDS;
-    });
-
-    // Save column visibility to localStorage
-    useEffect(() => {
-        localStorage.setItem('catalogGridVisibleColumns', JSON.stringify([...visibleColumns]));
-    }, [visibleColumns]);
-
-    // Save column order to localStorage
-    useEffect(() => {
-        localStorage.setItem('catalogGridColumnOrder', JSON.stringify(columnOrder));
-    }, [columnOrder]);
-
-    // Save page size to localStorage
-    useEffect(() => {
-        localStorage.setItem('catalogGridPageSize', String(pageSize));
-    }, [pageSize]);
 
     // Apply quick filter when search input changes (client-side, instant)
     useEffect(() => {
@@ -220,19 +100,6 @@ export default function Catalog() {
         }).then(r => r.data),
     });
 
-    // Handle page size change
-    const handlePageSizeChange = useCallback((newSize: number) => {
-        setPageSize(newSize);
-        if (gridRef.current?.api) {
-            if (newSize === 0) {
-                // Show all - set to a very large number
-                gridRef.current.api.setGridOption('paginationPageSize', 999999);
-            } else {
-                gridRef.current.api.setGridOption('paginationPageSize', newSize);
-            }
-        }
-    }, []);
-
     // Fetch filter options
     const { data: filterOptions } = useQuery({
         queryKey: ['catalogFilters'],
@@ -250,36 +117,13 @@ export default function Catalog() {
         });
     }, [filterOptions?.products, filter.gender, filter.category]);
 
-    // Column toggle handler
-    const handleToggleColumn = useCallback((colId: string) => {
-        setVisibleColumns(prev => {
-            const next = new Set(prev);
-            if (next.has(colId)) {
-                next.delete(colId);
-            } else {
-                next.add(colId);
-            }
-            return next;
-        });
-    }, []);
-
-    // Column moved handler - persist order
-    const handleColumnMoved = useCallback(() => {
+    // Grid column moved handler
+    const onColumnMoved = () => {
         const api = gridRef.current?.api;
-        if (!api) return;
-        const newOrder = api.getAllDisplayedColumns()
-            .map(col => col.getColId())
-            .filter((id): id is string => id !== undefined);
-        if (newOrder.length > 0) {
-            setColumnOrder(newOrder);
+        if (api) {
+            handleColumnMoved(getColumnOrderFromApi(api));
         }
-    }, []);
-
-    // Reset all columns (visibility and order)
-    const handleResetAll = useCallback(() => {
-        setVisibleColumns(new Set(ALL_COLUMN_IDS));
-        setColumnOrder([...ALL_COLUMN_IDS]);
-    }, []);
+    };
 
     // Column definitions
     const columnDefs: ColDef[] = useMemo(() => [
@@ -447,7 +291,7 @@ export default function Catalog() {
             field: 'status',
             width: 70,
             cellRenderer: (params: ICellRendererParams) => (
-                <StatusBadge status={params.value} />
+                <InventoryStatusBadge status={params.value} />
             ),
         },
         // Actions
@@ -486,29 +330,13 @@ export default function Catalog() {
                 );
             },
         },
-    ].map(col => ({
-        ...col,
-        hide: !visibleColumns.has(col.colId!),
-    })), [visibleColumns]);
+    ], []);
 
-    // Order columns based on saved order
+    // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
-        const colMap = new Map(columnDefs.map(col => [col.colId, col]));
-        const ordered: ColDef[] = [];
-        // Add columns in saved order
-        for (const colId of columnOrder) {
-            const col = colMap.get(colId);
-            if (col) {
-                ordered.push(col);
-                colMap.delete(colId);
-            }
-        }
-        // Add any remaining columns (new columns not in saved order)
-        for (const col of colMap.values()) {
-            ordered.push(col);
-        }
-        return ordered;
-    }, [columnDefs, columnOrder]);
+        const withVisibility = applyColumnVisibility(columnDefs, visibleColumns);
+        return orderColumns(withVisibility, columnOrder);
+    }, [columnDefs, visibleColumns, columnOrder]);
 
     // Summary stats
     const stats = useMemo(() => {
@@ -623,6 +451,8 @@ export default function Catalog() {
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
                     onResetAll={handleResetAll}
+                    columnIds={ALL_COLUMN_IDS}
+                    columnHeaders={DEFAULT_HEADERS}
                 />
             </div>
 
@@ -631,7 +461,7 @@ export default function Catalog() {
                 <div style={{ minWidth: '1100px', height: 'calc(100vh - 280px)', minHeight: '400px' }}>
                     <AgGridReact
                         ref={gridRef}
-                        theme={compactTheme}
+                        theme={compactThemeSmall}
                         rowData={catalogData?.items || []}
                         columnDefs={orderedColumnDefs}
                         loading={isLoading}
@@ -650,7 +480,7 @@ export default function Catalog() {
                         // Quick filter for fast search
                         cacheQuickFilter={true}
                         // Column order persistence
-                        onColumnMoved={handleColumnMoved}
+                        onColumnMoved={onColumnMoved}
                         maintainColumnOrder={true}
                     />
                 </div>
