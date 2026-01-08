@@ -121,14 +121,19 @@ router.get('/shipped', async (req, res) => {
             status: { in: ['shipped', 'delivered'] },
             shippedAt: { gte: sinceDate },
             isArchived: false,
-            NOT: [
-                { trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] } },
-                { AND: [
+            // Exclude RTO orders (use OR to handle null trackingStatus correctly)
+            OR: [
+                { trackingStatus: null },
+                { trackingStatus: { notIn: ['rto_in_transit', 'rto_delivered'] } }
+            ],
+            // Exclude delivered COD orders awaiting payment
+            NOT: {
+                AND: [
                     { paymentMethod: 'COD' },
                     { trackingStatus: 'delivered' },
                     { codRemittedAt: null }
-                ]}
-            ]
+                ]
+            }
         };
 
         const totalCount = await req.prisma.order.count({ where: whereClause });
@@ -372,14 +377,19 @@ router.get('/shipped/summary', async (req, res) => {
             status: { in: ['shipped', 'delivered'] },
             shippedAt: { gte: sinceDate },
             isArchived: false,
-            NOT: [
-                { trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] } },
-                { AND: [
+            // Exclude RTO orders (use OR to handle null trackingStatus correctly)
+            OR: [
+                { trackingStatus: null },
+                { trackingStatus: { notIn: ['rto_in_transit', 'rto_delivered'] } }
+            ],
+            // Exclude delivered COD orders awaiting payment
+            NOT: {
+                AND: [
                     { paymentMethod: 'COD' },
                     { trackingStatus: 'delivered' },
                     { codRemittedAt: null }
-                ]}
-            ]
+                ]
+            }
         };
 
         const orders = await req.prisma.order.findMany({

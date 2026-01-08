@@ -4,6 +4,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Search, Undo2, RefreshCw, Archive } from 'lucide-react';
 import { shopifyApi, trackingApi, ordersApi } from '../services/api';
@@ -12,6 +13,7 @@ import { shopifyApi, trackingApi, ordersApi } from '../services/api';
 import { useOrdersData } from '../hooks/useOrdersData';
 import type { OrderTab } from '../hooks/useOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
+import { useDebounce } from '../hooks/useDebounce';
 
 // Utilities
 import {
@@ -43,11 +45,22 @@ import {
 export default function Orders() {
     const queryClient = useQueryClient();
 
-    // Tab state
-    const [tab, setTab] = useState<OrderTab>('open');
+    // Tab state - persisted in URL for back/forward navigation and refresh
+    const [searchParams, setSearchParams] = useSearchParams();
+    const tab = (searchParams.get('tab') as OrderTab) || 'open';
+    const setTab = useCallback((newTab: OrderTab) => {
+        setSearchParams(prev => {
+            const newParams = new URLSearchParams(prev);
+            newParams.set('tab', newTab);
+            return newParams;
+        }, { replace: true }); // Use replace to avoid polluting browser history
+    }, [setSearchParams]);
 
     // Search and filter state
-    const [searchQuery, setSearchQuery] = useState('');
+    // searchInput: immediate value for responsive typing
+    // searchQuery: debounced value (300ms) for filtering
+    const [searchInput, setSearchInput] = useState('');
+    const searchQuery = useDebounce(searchInput, 300);
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
 
     // Shipped orders pagination state
@@ -85,6 +98,12 @@ export default function Orders() {
         colorName: string;
         size: string;
         qty: number;
+    } | null>(null);
+    const [isEditingCustomization, setIsEditingCustomization] = useState(false);
+    const [customizationInitialData, setCustomizationInitialData] = useState<{
+        type: string;
+        value: string;
+        notes?: string;
     } | null>(null);
 
     // Data hooks
@@ -311,6 +330,36 @@ export default function Orders() {
         [mutations.unpickLine]
     );
 
+    const handlePack = useCallback(
+        (lineId: string) => {
+            setAllocatingLines((p) => new Set(p).add(lineId));
+            mutations.packLine.mutate(lineId, {
+                onSettled: () =>
+                    setAllocatingLines((p) => {
+                        const n = new Set(p);
+                        n.delete(lineId);
+                        return n;
+                    }),
+            });
+        },
+        [mutations.packLine]
+    );
+
+    const handleUnpack = useCallback(
+        (lineId: string) => {
+            setAllocatingLines((p) => new Set(p).add(lineId));
+            mutations.unpackLine.mutate(lineId, {
+                onSettled: () =>
+                    setAllocatingLines((p) => {
+                        const n = new Set(p);
+                        n.delete(lineId);
+                        return n;
+                    }),
+            });
+        },
+        [mutations.unpackLine]
+    );
+
     const handleCustomize = useCallback(
         (_lineId: string, lineData: {
             lineId: string;
@@ -321,23 +370,103 @@ export default function Orders() {
             qty: number;
         }) => {
             setCustomizingLine(lineData);
+            setIsEditingCustomization(false);
+            setCustomizationInitialData(null);
         },
         []
+    );
+
+    const handleEditCustomization = useCallback(
+        (_lineId: string, lineData: {
+            lineId: string;
+            skuCode: string;
+            productName: string;
+            colorName: string;
+            size: string;
+            qty: number;
+            customizationType: string | null;
+            customizationValue: string | null;
+            customizationNotes: string | null;
+        }) => {
+            setCustomizingLine({
+                lineId: lineData.lineId,
+                skuCode: lineData.skuCode,
+                productName: lineData.productName,
+                colorName: lineData.colorName,
+                size: lineData.size,
+                qty: lineData.qty,
+            });
+            setIsEditingCustomization(true);
+            setCustomizationInitialData({
+                type: lineData.customizationType || 'length',
+                value: lineData.customizationValue || '',
+                notes: lineData.customizationNotes || undefined,
+            });
+        },
+        []
+    );
+
+    const handleRemoveCustomization = useCallback(
+        (lineId: string, skuCode: string) => {
+            if (confirm(`Remove customization from ${skuCode}?\n\nThis will revert the line to its original state.`)) {
+                mutations.removeCustomization.mutate(lineId);
+            }
+        },
+        [mutations.removeCustomization]
     );
 
     const handleConfirmCustomization = useCallback(
         (data: { type: string; value: string; notes?: string }) => {
             if (!customizingLine) return;
-            mutations.customizeLine.mutate(
-                { lineId: customizingLine.lineId, data },
-                {
+            console.log('[Customization] Submitting:', { lineId: customizingLine.lineId, data, isEdit: isEditingCustomization });
+
+            if (isEditingCustomization) {
+                // Edit mode: delete existing customization then create new one
+                // Using a chain of mutations for delete + create
+                mutations.removeCustomization.mutate(customizingLine.lineId, {
                     onSuccess: () => {
-                        setCustomizingLine(null);
+                        console.log('[Customization] Removed old customization, creating new one');
+                        mutations.customizeLine.mutate(
+                            { lineId: customizingLine.lineId, data },
+                            {
+                                onSuccess: () => {
+                                    console.log('[Customization] Edit Success - closing modal');
+                                    setCustomizingLine(null);
+                                    setIsEditingCustomization(false);
+                                    setCustomizationInitialData(null);
+                                },
+                                onError: () => {
+                                    console.log('[Customization] Edit Error (create phase) - keeping modal open');
+                                    // Keep modal open on error so user can see the error message
+                                },
+                            }
+                        );
                     },
-                }
-            );
+                    onError: () => {
+                        console.log('[Customization] Edit Error (delete phase) - keeping modal open');
+                        // Keep modal open on error
+                    },
+                });
+            } else {
+                // Create mode: just create new customization
+                mutations.customizeLine.mutate(
+                    { lineId: customizingLine.lineId, data },
+                    {
+                        onSuccess: () => {
+                            console.log('[Customization] Success - closing modal');
+                            setCustomizingLine(null);
+                            setIsEditingCustomization(false);
+                            setCustomizationInitialData(null);
+                        },
+                        onError: () => {
+                            console.log('[Customization] Error - keeping modal open');
+                            // Keep modal open on error so user can see the error message
+                        },
+                    }
+                );
+            }
         },
-        [customizingLine, mutations.customizeLine]
+        [customizingLine, isEditingCustomization, mutations.customizeLine, mutations.removeCustomization]
     );
 
     // Grid component
@@ -348,6 +477,8 @@ export default function Orders() {
         onUnallocate: handleUnallocate,
         onPick: handlePick,
         onUnpick: handleUnpick,
+        onPack: handlePack,
+        onUnpack: handleUnpack,
         onShippingCheck: handleShippingCheck,
         onCreateBatch: (data) => mutations.createBatch.mutate(data),
         onUpdateBatch: (id, data) => mutations.updateBatch.mutate({ id, data }),
@@ -362,6 +493,8 @@ export default function Orders() {
         onUncancelLine: (lineId) => mutations.uncancelLine.mutate(lineId),
         onSelectCustomer: setSelectedCustomerId,
         onCustomize: handleCustomize,
+        onEditCustomization: handleEditCustomization,
+        onRemoveCustomization: handleRemoveCustomization,
         allocatingLines,
         shippingChecked,
         isCancellingOrder: mutations.cancelOrder.isPending,
@@ -382,13 +515,13 @@ export default function Orders() {
                         <input
                             type="text"
                             placeholder="Search order #..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
                             className="pl-9 pr-3 py-1.5 text-sm border rounded-lg w-48 focus:outline-none focus:ring-2 focus:ring-gray-200"
                         />
-                        {searchQuery && (
+                        {searchInput && (
                             <button
-                                onClick={() => setSearchQuery('')}
+                                onClick={() => setSearchInput('')}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                             >
                                 <X size={14} />
@@ -838,10 +971,16 @@ export default function Orders() {
             {customizingLine && (
                 <CustomizationModal
                     isOpen={true}
-                    onClose={() => setCustomizingLine(null)}
+                    onClose={() => {
+                        setCustomizingLine(null);
+                        setIsEditingCustomization(false);
+                        setCustomizationInitialData(null);
+                    }}
                     onConfirm={handleConfirmCustomization}
                     lineData={customizingLine}
-                    isSubmitting={mutations.customizeLine.isPending}
+                    isSubmitting={mutations.customizeLine.isPending || mutations.removeCustomization.isPending}
+                    isEditMode={isEditingCustomization}
+                    initialData={customizationInitialData}
                 />
             )}
         </div>

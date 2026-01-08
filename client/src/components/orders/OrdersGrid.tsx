@@ -73,7 +73,7 @@ const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
-    'allocate', 'production', 'notes', 'pick', 'ship', 'shopifyStatus',
+    'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'shopifyStatus',
     'awb', 'courier', 'trackingStatus', 'actions'
 ];
 
@@ -214,6 +214,8 @@ interface OrdersGridProps {
     onUnallocate: (lineId: string) => void;
     onPick: (lineId: string) => void;
     onUnpick: (lineId: string) => void;
+    onPack: (lineId: string) => void;
+    onUnpack: (lineId: string) => void;
     onShippingCheck: (lineId: string, order: any) => void;
     onCreateBatch: (data: any) => void;
     onUpdateBatch: (id: string, data: any) => void;
@@ -235,6 +237,18 @@ interface OrdersGridProps {
         size: string;
         qty: number;
     }) => void;
+    onEditCustomization?: (lineId: string, lineData: {
+        lineId: string;
+        skuCode: string;
+        productName: string;
+        colorName: string;
+        size: string;
+        qty: number;
+        customizationType: string | null;
+        customizationValue: string | null;
+        customizationNotes: string | null;
+    }) => void;
+    onRemoveCustomization?: (lineId: string, skuCode: string) => void;
     allocatingLines: Set<string>;
     shippingChecked: Set<string>;
     isCancellingOrder: boolean;
@@ -251,6 +265,8 @@ export function OrdersGrid({
     onUnallocate,
     onPick,
     onUnpick,
+    onPack,
+    onUnpack,
     onShippingCheck,
     onCreateBatch,
     onUpdateBatch,
@@ -265,6 +281,8 @@ export function OrdersGrid({
     onUncancelLine,
     onSelectCustomer,
     onCustomize,
+    onEditCustomization,
+    onRemoveCustomization,
     allocatingLines,
     shippingChecked,
     isCancellingOrder,
@@ -273,6 +291,16 @@ export function OrdersGrid({
     isArchiving,
     isDeletingOrder,
 }: OrdersGridProps) {
+    // Grid ref for API access
+    const gridRef = useRef<AgGridReact>(null);
+
+    // Stable row ID function - prevents scroll reset on data updates
+    const getRowId = useCallback((params: any) => {
+        const row = params.data;
+        // Use lineId if available (for order line rows), otherwise create unique key from orderId
+        return row.lineId || `order-${row.orderId}-header`;
+    }, []);
+
     // Custom headers state
     const [customHeaders, setCustomHeaders] = useState<Record<string, string>>(() => {
         const saved = localStorage.getItem('ordersGridHeaders');
@@ -577,34 +605,37 @@ export function OrdersGrid({
             {
                 colId: 'customize',
                 headerName: getHeaderName('customize'),
-                width: 80,
+                width: 100,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
                     if (!row || !row.lineId) return null;
 
-                    // Only show customize button for pending lines
-                    if (row.lineStatus !== 'pending') {
-                        // If already customized, show the custom badge even after allocation
-                        if (row.isCustomized && row.customSkuCode) {
-                            return (
-                                <span
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700"
-                                    title={`${row.customizationType}: ${row.customizationValue}`}
-                                >
-                                    <Wrench size={10} />
-                                    {row.customSkuCode.split('-').pop()}
-                                </span>
-                            );
+                    // Build tooltip text with customization details
+                    const buildTooltip = () => {
+                        const lines: string[] = [];
+                        const typeLabels: Record<string, string> = {
+                            length: 'Length Adjustment',
+                            size: 'Size Modification',
+                            measurements: 'Custom Measurements',
+                            other: 'Other',
+                        };
+                        lines.push(`Type: ${typeLabels[row.customizationType] || row.customizationType || 'Unknown'}`);
+                        lines.push(`Value: ${row.customizationValue || '-'}`);
+                        if (row.customizationNotes) {
+                            lines.push(`Notes: ${row.customizationNotes}`);
                         }
-                        return null;
-                    }
+                        if (row.originalSkuCode) {
+                            lines.push(`Original SKU: ${row.originalSkuCode}`);
+                        }
+                        return lines.join('\n');
+                    };
 
-                    // If customized, show badge with option to view details
-                    if (row.isCustomized && row.customSkuCode) {
+                    // If customized and NOT pending (already allocated/picked/packed), show read-only badge
+                    if (row.isCustomized && row.customSkuCode && row.lineStatus !== 'pending') {
                         return (
                             <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 cursor-help"
-                                title={`${row.customizationType}: ${row.customizationValue}`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700"
+                                title={buildTooltip()}
                             >
                                 <Wrench size={10} />
                                 {row.customSkuCode.split('-').pop()}
@@ -612,28 +643,83 @@ export function OrdersGrid({
                         );
                     }
 
-                    // Show customize button
-                    return (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if (onCustomize) {
-                                    onCustomize(row.lineId, {
-                                        lineId: row.lineId,
-                                        skuCode: row.skuCode,
-                                        productName: row.productName,
-                                        colorName: row.colorName,
-                                        size: row.size,
-                                        qty: row.qty,
-                                    });
-                                }
-                            }}
-                            className="p-1 rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50"
-                            title="Add customization"
-                        >
-                            <Settings size={14} />
-                        </button>
-                    );
+                    // If customized and pending, show badge with edit/remove actions
+                    if (row.isCustomized && row.customSkuCode && row.lineStatus === 'pending') {
+                        return (
+                            <div className="flex items-center gap-1">
+                                <span
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 cursor-help"
+                                    title={buildTooltip()}
+                                >
+                                    <Wrench size={10} />
+                                    {row.customSkuCode.split('-').pop()}
+                                </span>
+                                {/* Edit button */}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onEditCustomization) {
+                                            onEditCustomization(row.lineId, {
+                                                lineId: row.lineId,
+                                                skuCode: row.skuCode,
+                                                productName: row.productName,
+                                                colorName: row.colorName,
+                                                size: row.size,
+                                                qty: row.qty,
+                                                customizationType: row.customizationType,
+                                                customizationValue: row.customizationValue,
+                                                customizationNotes: row.customizationNotes,
+                                            });
+                                        }
+                                    }}
+                                    className="p-0.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                                    title="Edit customization"
+                                >
+                                    <Pencil size={10} />
+                                </button>
+                                {/* Remove button */}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onRemoveCustomization) {
+                                            onRemoveCustomization(row.lineId, row.customSkuCode);
+                                        }
+                                    }}
+                                    className="p-0.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                    title="Remove customization"
+                                >
+                                    <Trash2 size={10} />
+                                </button>
+                            </div>
+                        );
+                    }
+
+                    // Not customized and pending: show customize button
+                    if (row.lineStatus === 'pending') {
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (onCustomize) {
+                                        onCustomize(row.lineId, {
+                                            lineId: row.lineId,
+                                            skuCode: row.skuCode,
+                                            productName: row.productName,
+                                            colorName: row.colorName,
+                                            size: row.size,
+                                            qty: row.qty,
+                                        });
+                                    }
+                                }}
+                                className="p-1 rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50"
+                                title="Add customization"
+                            >
+                                <Settings size={14} />
+                            </button>
+                        );
+                    }
+
+                    return null;
                 },
                 cellClass: 'text-center',
             },
@@ -685,25 +771,28 @@ export function OrdersGrid({
                     if (!row || row.lineStatus === 'cancelled') return null;
 
                     // For customized lines in pending state, show "Custom" indicator
-                    // (allocation happens automatically after production)
-                    if (row.isCustomized && row.lineStatus === 'pending') {
-                        return (
-                            <span
-                                className="text-xs text-orange-500 font-medium"
-                                title="Custom item - auto-allocates after production"
-                            >
-                                C
-                            </span>
-                        );
-                    }
-
                     const hasStock = row.skuStock >= row.qty;
                     const isAllocated =
                         row.lineStatus === 'allocated' ||
                         row.lineStatus === 'picked' ||
                         row.lineStatus === 'packed';
                     const isPending = row.lineStatus === 'pending';
-                    const canAllocate = isPending && hasStock && !row.isCustomized;
+
+                    // For customized items: show "C" badge only if pending AND no stock (production pending)
+                    // If stock exists, allow normal allocation flow
+                    if (row.isCustomized && isPending && !hasStock) {
+                        return (
+                            <span
+                                className="text-xs text-orange-500 font-medium"
+                                title="Custom item - waiting for production"
+                            >
+                                C
+                            </span>
+                        );
+                    }
+
+                    // Allow allocation for any pending line with stock (including customized)
+                    const canAllocate = isPending && hasStock;
                     const isToggling = allocatingLines.has(row.lineId);
 
                     if (isAllocated) {
@@ -921,6 +1010,54 @@ export function OrdersGrid({
                                     : 'border-gray-200 bg-gray-50 cursor-not-allowed'
                             }`}
                             title={canPick ? 'Pick' : 'Not allocated yet'}
+                        >
+                            {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+                        </button>
+                    );
+                },
+                cellClass: 'text-center',
+            },
+            {
+                colId: 'pack',
+                headerName: getHeaderName('pack'),
+                width: 35,
+                cellRenderer: (params: ICellRendererParams) => {
+                    const row = params.data;
+                    if (!row || row.lineStatus === 'cancelled') return null;
+                    const isToggling = allocatingLines.has(row.lineId);
+                    const canPack = row.lineStatus === 'picked';
+                    const isPacked = row.lineStatus === 'packed';
+
+                    if (isPacked) {
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUnpack(row.lineId);
+                                }}
+                                disabled={isToggling}
+                                className="w-4 h-4 rounded flex items-center justify-center mx-auto bg-blue-500 text-white hover:bg-blue-600"
+                                title="Unpack"
+                            >
+                                <Check size={10} />
+                            </button>
+                        );
+                    }
+
+                    // Show checkbox - active if picked, inactive otherwise
+                    return (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (canPack) onPack(row.lineId);
+                            }}
+                            disabled={isToggling || !canPack}
+                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${
+                                canPack
+                                    ? 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            }`}
+                            title={canPack ? 'Pack' : 'Not picked yet'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
                         </button>
@@ -1169,6 +1306,8 @@ export function OrdersGrid({
             isDeletingOrder,
             visibleColumns,
             onCustomize,
+            onEditCustomization,
+            onRemoveCustomization,
         ]
     );
 
@@ -1326,10 +1465,11 @@ export function OrdersGrid({
                 `}</style>
                 <div className="border rounded" style={{ height: '600px', width: '100%' }}>
                     <AgGridReact
-                        key={JSON.stringify(customHeaders) + JSON.stringify([...visibleColumns]) + JSON.stringify(columnOrder)}
+                        ref={gridRef}
                         rowData={rows}
                         columnDefs={orderedColumnDefs}
                         defaultColDef={defaultColDef}
+                        getRowId={getRowId}
                         getRowStyle={getRowStyle}
                         getRowClass={getRowClass}
                         theme={compactTheme}
@@ -1344,6 +1484,7 @@ export function OrdersGrid({
                         suppressRowClickSelection={false}
                         suppressRowHoverHighlight={true}
                         onColumnMoved={handleColumnMoved}
+                        maintainColumnOrder={true}
                     />
                 </div>
             </>

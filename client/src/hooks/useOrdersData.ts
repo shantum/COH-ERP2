@@ -8,6 +8,8 @@ import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi, adminA
 
 // Poll interval for data refresh (30 seconds)
 const POLL_INTERVAL = 30000;
+// Stale time prevents double-fetches when data is still fresh
+const STALE_TIME = 25000;
 
 export type OrderTab = 'open' | 'shipped' | 'rto' | 'cod-pending' | 'cancelled' | 'archived';
 
@@ -22,22 +24,35 @@ interface UseOrdersDataOptions {
 
 export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, archivedDays = 90, archivedSortBy = 'archivedAt' }: UseOrdersDataOptions) {
     // Order queries with conditional polling based on active tab
+    // Optimized settings:
+    // - staleTime: prevents double-fetches when data is still fresh
+    // - refetchOnWindowFocus: disabled since we have polling
+    // - refetchIntervalInBackground: pauses polling when tab is hidden
     const openOrdersQuery = useQuery({
         queryKey: ['openOrders'],
         queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data),
-        refetchInterval: activeTab === 'open' ? POLL_INTERVAL : false
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'open' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false
     });
 
     const shippedOrdersQuery = useQuery({
         queryKey: ['shippedOrders', shippedPage, shippedDays],
         queryFn: () => ordersApi.getShipped({ page: shippedPage, days: shippedDays }).then(r => r.data),
-        refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false
     });
 
     const cancelledOrdersQuery = useQuery({
         queryKey: ['cancelledOrders'],
         queryFn: () => ordersApi.getCancelled().then(r => r.data),
-        refetchInterval: activeTab === 'cancelled' ? POLL_INTERVAL : false
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'cancelled' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false
     });
 
     const archivedOrdersQuery = useQuery({
@@ -46,19 +61,28 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
             ...(archivedDays > 0 ? { days: archivedDays } : {}),
             sortBy: archivedSortBy
         }).then(r => r.data),
-        refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false
     });
 
     const rtoOrdersQuery = useQuery({
         queryKey: ['rtoOrders'],
         queryFn: () => ordersApi.getRto().then(r => r.data),
-        refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false
     });
 
     const codPendingOrdersQuery = useQuery({
         queryKey: ['codPendingOrders'],
         queryFn: () => ordersApi.getCodPending().then(r => r.data),
-        refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false
+        staleTime: STALE_TIME,
+        refetchOnWindowFocus: false,
+        refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false,
+        refetchIntervalInBackground: false
     });
 
     // Summary queries
@@ -82,7 +106,8 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
     const inventoryBalanceQuery = useQuery({
         queryKey: ['inventoryBalance'],
-        queryFn: () => inventoryApi.getBalance().then(r => r.data.items || r.data)
+        // Include custom SKUs so orders with customized lines show correct stock
+        queryFn: () => inventoryApi.getBalance({ includeCustomSkus: 'true' }).then(r => r.data.items || r.data)
     });
 
     const fabricStockQuery = useQuery({
