@@ -28,21 +28,19 @@ export default function Ledgers() {
         enabled: activeTab === 'fabric'
     });
 
-    // Fetch all fabric transactions by getting them for each fabric
+    // Fetch all fabric transactions (single batch query - no more N+1)
     const { data: fabricTxns, isLoading: fabLoading } = useQuery({
         queryKey: ['allFabricTransactions'],
         queryFn: async () => {
-            if (!fabricTypes) return [];
-            const allTxns: any[] = [];
-            for (const type of fabricTypes) {
-                for (const fabric of type.fabrics || []) {
-                    const txns = await fabricsApi.getTransactions(fabric.id).then(r => r.data);
-                    allTxns.push(...txns.map((t: any) => ({ ...t, fabric, fabricType: type })));
-                }
-            }
-            return allTxns.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            const txns = await fabricsApi.getAllTransactions({ limit: 500, days: 30 }).then(r => r.data);
+            // Transform to expected format
+            return txns.map((t: any) => ({
+                ...t,
+                fabric: t.fabric,
+                fabricType: t.fabric?.fabricType
+            }));
         },
-        enabled: activeTab === 'fabric' && !!fabricTypes
+        enabled: activeTab === 'fabric'
     });
 
     // Filter inventory transactions (exclude 'reserved' - temporary allocations)

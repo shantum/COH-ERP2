@@ -281,6 +281,7 @@ model InventoryTransaction {
   @@index([skuId])
   @@index([txnType])
   @@index([createdAt])
+  @@index([skuId, reason, createdAt])  // Compound: balance lookups by reason
 }
 
 // ============================================
@@ -309,6 +310,8 @@ model Customer {
   orders         Order[]
   returnRequests ReturnRequest[]
   feedback       Feedback[]
+
+  @@index([createdAt])  // Customer list sorting
 }
 
 // ============================================
@@ -484,6 +487,8 @@ model ReturnRequest {
   @@index([status])
   @@index([resolution])
   @@index([exchangeOrderId])
+  @@index([status, createdAt])       // Compound: pending returns dashboard
+  @@index([customerId, status])      // Compound: customer returns lookup
 }
 
 model ReturnRequestLine {
@@ -672,6 +677,7 @@ model ProductionBatch {
   @@index([batchDate])
   @@index([status])
   @@index([batchDate, batchCode])  // For efficient batch code generation query
+  @@index([skuId, status])         // Compound: inward-history batch lookups
 }
 
 // ============================================

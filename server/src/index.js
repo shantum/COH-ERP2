@@ -38,6 +38,7 @@ import trackingRoutes from './routes/tracking.js';
 import remittanceRoutes from './routes/remittance.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
+import { runAllCleanup } from './utils/cacheCleanup.js';
 
 const app = express();
 
@@ -160,12 +161,31 @@ app.listen(PORT, async () => {
 
   // Start tracking sync scheduler (every 4 hours)
   trackingSync.start();
+
+  // Start daily cache cleanup scheduler (runs at 2 AM)
+  const cacheCleanupInterval = setInterval(async () => {
+    const hour = new Date().getHours();
+    if (hour === 2) {
+      console.log('[CacheCleanup] Running scheduled daily cleanup...');
+      await runAllCleanup();
+    }
+  }, 60 * 60 * 1000); // Check every hour
+
+  // Run initial cleanup on startup (in background, don't block)
+  setTimeout(() => {
+    console.log('[CacheCleanup] Running startup cleanup...');
+    runAllCleanup().catch(err => console.error('[CacheCleanup] Startup cleanup error:', err));
+  }, 30000); // 30 seconds after startup
+
+  // Store reference for graceful shutdown
+  global.cacheCleanupInterval = cacheCleanupInterval;
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   scheduledSync.stop();
   trackingSync.stop();
+  if (global.cacheCleanupInterval) clearInterval(global.cacheCleanupInterval);
   await prisma.$disconnect();
   process.exit(0);
 });

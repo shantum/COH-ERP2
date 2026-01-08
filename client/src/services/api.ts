@@ -96,6 +96,7 @@ export const fabricsApi = {
     getStockAnalysis: () => api.get('/fabrics/dashboard/stock-analysis'),
     createTransaction: (id: string, data: CreateFabricTransactionData) => api.post(`/fabrics/${id}/transactions`, data),
     getTransactions: (id: string) => api.get(`/fabrics/${id}/transactions`),
+    getAllTransactions: (params?: { limit?: number; days?: number }) => api.get('/fabrics/transactions/all', { params }),
     deleteTransaction: (txnId: string) => api.delete(`/fabrics/transactions/${txnId}`),
     // Reconciliation
     getReconciliationHistory: (limit?: number) => api.get('/fabrics/reconciliation/history', { params: { limit } }),

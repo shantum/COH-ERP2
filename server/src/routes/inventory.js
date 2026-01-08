@@ -1386,25 +1386,33 @@ router.get('/inward-history', authenticateToken, async (req, res) => {
             take: Number(limit),
         });
 
-        // Get batch info for each transaction (if matched by reason)
-        const enrichedTransactions = await Promise.all(transactions.map(async (txn) => {
-            // Look for any production batch that might have been updated around the same time
-            const batch = await req.prisma.productionBatch.findFirst({
-                where: {
-                    skuId: txn.skuId,
-                    status: { in: ['in_progress', 'completed'] },
-                },
-                orderBy: { batchDate: 'desc' },
-            });
+        // Batch fetch production batches for all SKUs (avoid N+1)
+        const skuIds = [...new Set(transactions.map(t => t.skuId))];
+        const batches = await req.prisma.productionBatch.findMany({
+            where: {
+                skuId: { in: skuIds },
+                status: { in: ['in_progress', 'completed'] },
+            },
+            orderBy: { batchDate: 'desc' },
+            select: { skuId: true, batchCode: true },
+        });
 
-            return {
-                ...txn,
-                productName: txn.sku?.variation?.product?.name,
-                colorName: txn.sku?.variation?.colorName,
-                size: txn.sku?.size,
-                imageUrl: txn.sku?.variation?.imageUrl || txn.sku?.variation?.product?.imageUrl,
-                batchCode: batch?.batchCode || null,
-            };
+        // Create Map for O(1) batch lookups (use first match per SKU since ordered by date desc)
+        const batchMap = new Map();
+        for (const batch of batches) {
+            if (!batchMap.has(batch.skuId)) {
+                batchMap.set(batch.skuId, batch.batchCode);
+            }
+        }
+
+        // Enrich transactions with batch info (no more N+1)
+        const enrichedTransactions = transactions.map(txn => ({
+            ...txn,
+            productName: txn.sku?.variation?.product?.name,
+            colorName: txn.sku?.variation?.colorName,
+            size: txn.sku?.size,
+            imageUrl: txn.sku?.variation?.imageUrl || txn.sku?.variation?.product?.imageUrl,
+            batchCode: batchMap.get(txn.skuId) || null,
         }));
 
         res.json(enrichedTransactions);

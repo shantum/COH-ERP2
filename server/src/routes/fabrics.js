@@ -162,6 +162,40 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // FABRIC TRANSACTIONS
 // ============================================
 
+// Get all fabric transactions (batch endpoint for Ledgers page)
+router.get('/transactions/all', authenticateToken, async (req, res) => {
+    try {
+        const { limit = 500, days = 30 } = req.query;
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - Number(days));
+
+        const transactions = await req.prisma.fabricTransaction.findMany({
+            where: {
+                createdAt: { gte: startDate }
+            },
+            include: {
+                fabric: {
+                    select: {
+                        id: true,
+                        fabricCode: true,
+                        colorName: true,
+                        fabricType: { select: { id: true, name: true } }
+                    }
+                },
+                createdBy: { select: { id: true, name: true } },
+                supplier: { select: { id: true, name: true } }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: Number(limit),
+        });
+
+        res.json(transactions);
+    } catch (error) {
+        console.error('Get all fabric transactions error:', error);
+        res.status(500).json({ error: 'Failed to fetch transactions' });
+    }
+});
+
 // Get transactions for a fabric
 router.get('/:id/transactions', authenticateToken, async (req, res) => {
     try {
