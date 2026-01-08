@@ -646,13 +646,14 @@ export function ShippedOrdersGrid({
         },
 
         // ═══════════════════════════════════════════════════════════════════
-        // ACTIONS
+        // ACTIONS - Pinned to right so always visible
         // ═══════════════════════════════════════════════════════════════════
         {
             colId: 'actions',
             headerName: 'Actions',
-            width: 120,
+            width: 130,
             sortable: false,
+            pinned: 'right',
             cellRenderer: (params: ICellRendererParams) => {
                 const order = params.data;
                 if (!order) return null;

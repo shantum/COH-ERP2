@@ -79,6 +79,7 @@ Available = Balance - SUM(reserved)
 10. **RTO condition logic**: Only `good`/`unopened` create inventory; others write-off
 11. **Sequential loading**: Order tabs load progressively via `useOrdersData.ts`
 12. **Map caching**: Use `getInventoryMap()`/`getFabricMap()` for O(1) lookups in loops
+13. **API debugging**: Store `TOKEN` in env var, use `curl -s`, prefer exact jq matches over `contains()`
 
 ## Environment Variables
 
@@ -91,6 +92,18 @@ Available = Balance - SUM(reserved)
 ## Shell Tips
 
 ```bash
-curl -d '{"key":"value"}'           # Use single quotes
-TOKEN=$(curl ... | jq -r '.token')  # Store before piping
+# API debugging - store token once, reuse
+export TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@coh.com","password":"XOFiya@34"}' | jq -r '.token')
+
+# Reuse in subsequent calls (use -s for silent)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/orders/shipped | jq .
+
+# JSON payloads - use single quotes
+curl -s -d '{"key":"value"}' ...
+
+# jq - prefer exact matches over contains() to avoid null errors
+jq '.orders[] | select(.orderNumber == "64040")'   # exact match
+jq '.orders[] | select(.orderNumber? // "" | contains("640"))'  # safe contains
 ```
