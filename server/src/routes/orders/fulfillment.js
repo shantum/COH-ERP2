@@ -691,6 +691,7 @@ router.post('/:id/quick-ship', authenticateToken, async (req, res) => {
 
 // ============================================
 // BULK QUICK SHIP: Ship all eligible orders at once
+// Optimized with batched database operations
 // ============================================
 
 router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
@@ -710,71 +711,101 @@ router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
             return res.json({ shipped: [], failed: [], message: 'No eligible orders to quick ship' });
         }
 
-        const results = { shipped: [], failed: [] };
         const now = new Date();
 
+        // Collect all data for batch operations
+        const orderIds = [];
+        const lineIdsToShip = [];
+        const saleTransactions = [];
+
         for (const order of eligibleOrders) {
-            try {
-                // Process each line - auto allocate/pick/pack/ship
-                for (const line of order.orderLines) {
-                    if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
-
-                    // If pending, try to allocate
-                    if (line.lineStatus === 'pending') {
-                        const balance = await calculateInventoryBalance(req.prisma, line.skuId);
-                        if (balance.available >= line.qty) {
-                            await createReservedTransaction(req.prisma, {
-                                skuId: line.skuId,
-                                qty: line.qty,
-                                orderLineId: line.id,
-                                userId: req.user.id,
-                            });
-                        }
-                    }
-
-                    // Release reserved inventory and create sale
-                    await releaseReservedInventory(req.prisma, line.id);
-                    await createSaleTransaction(req.prisma, {
-                        skuId: line.skuId,
-                        qty: line.qty,
-                        orderLineId: line.id,
-                        userId: req.user.id,
-                    });
-
-                    // Update line to shipped
-                    await req.prisma.orderLine.update({
-                        where: { id: line.id },
-                        data: {
-                            lineStatus: 'shipped',
-                            allocatedAt: line.allocatedAt || now,
-                            pickedAt: line.pickedAt || now,
-                            packedAt: line.packedAt || now,
-                            shippedAt: now,
-                        },
-                    });
-                }
-
-                // Update order status
-                await req.prisma.order.update({
-                    where: { id: order.id },
-                    data: {
-                        status: 'shipped',
-                        shippedAt: now,
-                        trackingStatus: 'in_transit',
-                    },
+            orderIds.push(order.id);
+            for (const line of order.orderLines) {
+                if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
+                lineIdsToShip.push(line.id);
+                saleTransactions.push({
+                    skuId: line.skuId,
+                    txnType: TXN_TYPE.OUTWARD,
+                    qty: line.qty,
+                    reason: TXN_REASON.SALE,
+                    referenceId: line.id,
+                    createdById: req.user.id,
                 });
-
-                results.shipped.push({ id: order.id, orderNumber: order.orderNumber });
-                console.log(`[Bulk Quick Ship] Order ${order.orderNumber} shipped`);
-            } catch (orderError) {
-                console.error(`[Bulk Quick Ship] Failed to ship order ${order.orderNumber}:`, orderError.message);
-                results.failed.push({ id: order.id, orderNumber: order.orderNumber, error: orderError.message });
             }
         }
 
+        // Execute all operations in a transaction for atomicity and speed
+        await req.prisma.$transaction(async (tx) => {
+            // 1. Release all reserved inventory in one batch
+            if (lineIdsToShip.length > 0) {
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: { in: lineIdsToShip },
+                        txnType: TXN_TYPE.RESERVED,
+                        reason: TXN_REASON.ORDER_ALLOCATION,
+                    },
+                });
+            }
+
+            // 2. Create all sale transactions in one batch
+            if (saleTransactions.length > 0) {
+                await tx.inventoryTransaction.createMany({
+                    data: saleTransactions,
+                });
+            }
+
+            // 3. Update all order lines to shipped in one batch
+            if (lineIdsToShip.length > 0) {
+                await tx.orderLine.updateMany({
+                    where: { id: { in: lineIdsToShip } },
+                    data: {
+                        lineStatus: 'shipped',
+                        shippedAt: now,
+                    },
+                });
+
+                // Set timestamps for lines that don't have them (separate query needed for conditional update)
+                await tx.orderLine.updateMany({
+                    where: {
+                        id: { in: lineIdsToShip },
+                        allocatedAt: null,
+                    },
+                    data: { allocatedAt: now },
+                });
+                await tx.orderLine.updateMany({
+                    where: {
+                        id: { in: lineIdsToShip },
+                        pickedAt: null,
+                    },
+                    data: { pickedAt: now },
+                });
+                await tx.orderLine.updateMany({
+                    where: {
+                        id: { in: lineIdsToShip },
+                        packedAt: null,
+                    },
+                    data: { packedAt: now },
+                });
+            }
+
+            // 4. Update all orders to shipped in one batch
+            await tx.order.updateMany({
+                where: { id: { in: orderIds } },
+                data: {
+                    status: 'shipped',
+                    shippedAt: now,
+                    trackingStatus: 'in_transit',
+                },
+            });
+        });
+
+        const shippedOrders = eligibleOrders.map(o => ({ id: o.id, orderNumber: o.orderNumber }));
+        console.log(`[Bulk Quick Ship] Shipped ${shippedOrders.length} orders in batch`);
+
         res.json({
-            ...results,
-            message: `Shipped ${results.shipped.length} orders, ${results.failed.length} failed`,
+            shipped: shippedOrders,
+            failed: [],
+            message: `Shipped ${shippedOrders.length} orders`,
         });
     } catch (error) {
         console.error('Bulk quick ship error:', error);
