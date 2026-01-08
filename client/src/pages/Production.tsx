@@ -40,6 +40,7 @@ export default function Production() {
     const [itemSelection, setItemSelection] = useState({ productId: '', variationId: '' });
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
     const [copiedDate, setCopiedDate] = useState<string | null>(null);
+    const [requirementsLimit, setRequirementsLimit] = useState(20);
 
     const invalidateAll = () => {
         queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
@@ -442,7 +443,7 @@ export default function Production() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">
-                                            {requirements.requirements.map((item: any) => (
+                                            {requirements.requirements.slice(0, requirementsLimit).map((item: any) => (
                                                 <tr key={item.orderLineId} className="hover:bg-gray-50">
                                                     <td className="px-3 py-2">
                                                         <div className="font-medium text-gray-900 text-xs">{item.orderNumber}</div>
@@ -498,6 +499,40 @@ export default function Production() {
                                             ))}
                                         </tbody>
                                     </table>
+                                    {/* Pagination controls */}
+                                    {requirements.requirements.length > 20 && (
+                                        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t">
+                                            <span className="text-xs text-gray-500">
+                                                Showing {Math.min(requirementsLimit, requirements.requirements.length)} of {requirements.requirements.length} items
+                                            </span>
+                                            <div className="flex gap-2">
+                                                {requirementsLimit < requirements.requirements.length && (
+                                                    <button
+                                                        onClick={() => setRequirementsLimit(prev => Math.min(prev + 20, requirements.requirements.length))}
+                                                        className="text-xs px-3 py-1.5 text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded"
+                                                    >
+                                                        Show More (+20)
+                                                    </button>
+                                                )}
+                                                {requirementsLimit < requirements.requirements.length && (
+                                                    <button
+                                                        onClick={() => setRequirementsLimit(requirements.requirements.length)}
+                                                        className="text-xs px-3 py-1.5 text-gray-600 hover:text-gray-700 hover:bg-gray-100 rounded"
+                                                    >
+                                                        Show All
+                                                    </button>
+                                                )}
+                                                {requirementsLimit > 20 && (
+                                                    <button
+                                                        onClick={() => setRequirementsLimit(20)}
+                                                        className="text-xs px-3 py-1.5 text-gray-600 hover:text-gray-700 hover:bg-gray-100 rounded"
+                                                    >
+                                                        Show Less
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
