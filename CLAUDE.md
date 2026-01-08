@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Primary instructions for Claude Code. For detailed reference, see `ARCHITECTURE.md`.
+Primary instructions for Claude Code. See `ARCHITECTURE.md` for system overview, `docs/DOMAINS.md` for domain details.
 
 ## Quick Start
 
@@ -26,39 +26,18 @@ cd server && npm test
 
 | Layer | Technology |
 |-------|------------|
-| Backend | Express.js (JS ES modules), Prisma ORM, PostgreSQL |
+| Backend | Express.js (ES modules), Prisma ORM, PostgreSQL |
 | Frontend | React 19, TypeScript, TanStack Query, Tailwind, AG-Grid |
 | Auth | JWT (7-day), bcryptjs |
 | Integrations | Shopify (webhooks + sync), iThink Logistics |
-
-## Critical Files
-
-**Before making changes, read the relevant domain README:**
-
-| Domain | README Location |
-|--------|-----------------|
-| Orders | `server/src/routes/ORDERS_DOMAIN.md` |
-| Returns | `server/src/routes/RETURNS_DOMAIN.md` |
-| Shopify | `server/src/routes/SHOPIFY_DOMAIN.md` |
-| Inventory | `server/src/routes/INVENTORY_DOMAIN.md` |
-| Production | `server/src/routes/PRODUCTION_DOMAIN.md` |
-| Tracking | `server/src/routes/TRACKING_DOMAIN.md` |
-| Frontend | `client/src/FRONTEND_DOMAINS.md` |
-
-**Key source files:**
-- `server/src/routes/orders/` - Modular order routes (index, listOrders, fulfillment, mutations)
-- `server/src/utils/queryPatterns.js` - Shared Prisma patterns, ORDER_LIST_SELECT
-- `server/src/utils/validation.js` - Zod schemas (ShipOrderSchema, CreateOrderSchema)
-- `client/src/types/index.ts` - TypeScript type definitions
-- `client/src/services/api.ts` - Centralized API client
 
 ## Core Concepts
 
 ### Order Fulfillment
 ```
-pending → allocated → picked → packed → shipped
+pending -> allocated -> picked -> packed -> shipped
 ```
-- **Allocate**: Creates `reserved` inventory transaction
+- **Allocate**: Creates `reserved` inventory
 - **Ship**: Deletes `reserved`, creates `outward`
 
 ### Inventory Ledger
@@ -76,61 +55,42 @@ Available = Balance - SUM(reserved)
 | COD Pending | `/orders/cod-pending` | Delivered, awaiting payment |
 | Archived | `/orders/archived` | Historical |
 
-## API Routes
+## Key Files
 
-Base URL: `/api`
-
-| Route | Purpose |
-|-------|---------|
-| `/auth` | Login, register, users |
-| `/products` | Product/Variation/SKU CRUD |
-| `/inventory` | Stock balance, transactions |
-| `/orders` | Order management, fulfillment |
-| `/remittance` | COD payment tracking |
-| `/returns` | Return request workflow |
-| `/repacking` | QC and restocking queue |
-| `/production` | Batch scheduling |
-| `/tracking` | iThink shipment tracking |
-| `/shopify` | Sync endpoints |
-| `/webhooks` | Shopify webhooks |
-
-## Shopify Integration
-
-- Credentials in `SystemSetting` table (configure via Settings UI)
-- **Unified webhook**: `POST /api/webhooks/shopify/orders` (handles all order events)
-- Cache-first pattern: `ShopifyOrderCache` stores raw JSON
-- COD sync uses Transaction API (`markOrderAsPaid`)
+| Purpose | Location |
+|---------|----------|
+| Routes | `server/src/routes/` - orders/, returns.js, shopify.js, etc. |
+| Prisma patterns | `server/src/utils/queryPatterns.js` |
+| Zod schemas | `server/src/utils/validation.js` |
+| API client | `client/src/services/api.ts` |
+| Types | `client/src/types/index.ts` |
 
 ## Common Gotchas
 
 1. **Cache-first**: Shopify orders via `ShopifyOrderCache`, not direct API
 2. **Production completion**: Creates inventory inward AND fabric outward
-3. **Fabric consumption**: SKU value → Product value → default 1.5
-4. **Credentials in DB**: Shopify and iThink creds in `SystemSetting`, not env vars
+3. **Fabric consumption**: SKU value -> Product value -> default 1.5
+4. **Credentials in DB**: Shopify/iThink creds in `SystemSetting`, not env vars
 5. **Auto-archive**: Orders >90 days old archived on server startup
 6. **Shipped tab filters**: Excludes RTO and unpaid COD (separate tabs)
 7. **Zod validation**: Order endpoints use `validate()` middleware
 8. **Router order matters**: In `orders/index.js`, specific routes before parameterized
-9. **RTO per-line processing**: Use `/inventory/rto-inward-line` for per-line condition marking
-10. **RTO condition logic**: Only `good`/`unopened` create inventory; `damaged`/`wrong_product` write-off
+9. **RTO per-line processing**: Use `/inventory/rto-inward-line` for per-line condition
+10. **RTO condition logic**: Only `good`/`unopened` create inventory; others write-off
+11. **Sequential loading**: Order tabs load progressively via `useOrdersData.ts`
+12. **Map caching**: Use `getInventoryMap()`/`getFabricMap()` for O(1) lookups in loops
 
 ## Environment Variables
 
-`.env` requires:
-- `DATABASE_URL` - PostgreSQL connection
-- `JWT_SECRET` - JWT signing key
+`.env` requires: `DATABASE_URL`, `JWT_SECRET`
 
 ## Safe Auto-Run Commands
 
-- `npm run dev`
-- `npm test`
-- `curl` to localhost:3001
+`npm run dev`, `npm test`, `curl` to localhost:3001
 
 ## Shell Tips
 
 ```bash
-# JSON payloads with curl
 curl -d '{"key":"value"}'           # Use single quotes
-curl -d "{\"key\":\"value\"}"       # Or escape double quotes
 TOKEN=$(curl ... | jq -r '.token')  # Store before piping
 ```
