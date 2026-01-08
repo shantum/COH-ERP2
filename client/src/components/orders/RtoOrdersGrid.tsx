@@ -3,11 +3,11 @@
  * AG Grid implementation for RTO (Return to Origin) orders
  */
 
-import { useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Package, AlertTriangle, CheckCircle, ExternalLink, Radio, Eye } from 'lucide-react';
+import { Package, AlertTriangle, CheckCircle, ExternalLink, Radio, Eye, Columns, RotateCcw } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
@@ -21,6 +21,61 @@ const compactTheme = themeQuartz.withParams({
     rowHeight: 32,
     headerHeight: 36,
 });
+
+// All column IDs for persistence
+const ALL_COLUMN_IDS = [
+    'orderNumber', 'customerName', 'city', 'itemCount', 'totalAmount', 'paymentMethod',
+    'courier', 'awbNumber', 'trackingStatus', 'rtoInitiatedAt', 'daysInRto',
+    'lastScanLocation', 'lastScanAt', 'actions'
+];
+
+const DEFAULT_HEADERS: Record<string, string> = {
+    orderNumber: 'Order', customerName: 'Customer', city: 'City', itemCount: 'Items',
+    totalAmount: 'Total', paymentMethod: 'Payment', courier: 'Courier', awbNumber: 'AWB',
+    trackingStatus: 'RTO Status', rtoInitiatedAt: 'RTO Started', daysInRto: 'Days',
+    lastScanLocation: 'Last Location', lastScanAt: 'Last Scan', actions: 'Actions'
+};
+
+// Column visibility dropdown
+const ColumnVisibilityDropdown = ({
+    visibleColumns, onToggleColumn, onResetAll,
+}: { visibleColumns: Set<string>; onToggleColumn: (colId: string) => void; onResetAll: () => void; }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsOpen(false);
+        };
+        if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+
+    return (
+        <div ref={dropdownRef} className="relative">
+            <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50">
+                <Columns size={12} /> Columns
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                    <div className="p-2 border-b">
+                        <button onClick={onResetAll} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
+                            <RotateCcw size={10} /> Reset All
+                        </button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map(colId => (
+                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                                <input type="checkbox" checked={visibleColumns.has(colId)} onChange={() => onToggleColumn(colId)} className="w-3 h-3" />
+                                {DEFAULT_HEADERS[colId] || colId}
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 interface RtoOrdersGridProps {
     orders: any[];
@@ -109,6 +164,41 @@ export function RtoOrdersGrid({
     onTrack,
     shopDomain,
 }: RtoOrdersGridProps) {
+    const gridRef = useRef<AgGridReact>(null);
+
+    // Column visibility state
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+        const saved = localStorage.getItem('rtoGridVisibleColumns');
+        if (saved) { try { return new Set(JSON.parse(saved)); } catch { return new Set(ALL_COLUMN_IDS); } }
+        return new Set(ALL_COLUMN_IDS);
+    });
+
+    // Column order state
+    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+        const saved = localStorage.getItem('rtoGridColumnOrder');
+        if (saved) { try { return JSON.parse(saved); } catch { return ALL_COLUMN_IDS; } }
+        return ALL_COLUMN_IDS;
+    });
+
+    useEffect(() => { localStorage.setItem('rtoGridVisibleColumns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
+    useEffect(() => { localStorage.setItem('rtoGridColumnOrder', JSON.stringify(columnOrder)); }, [columnOrder]);
+
+    const handleToggleColumn = useCallback((colId: string) => {
+        setVisibleColumns(prev => { const next = new Set(prev); if (next.has(colId)) next.delete(colId); else next.add(colId); return next; });
+    }, []);
+
+    const handleColumnMoved = useCallback(() => {
+        const api = gridRef.current?.api;
+        if (!api) return;
+        const newOrder = api.getAllDisplayedColumns().map(col => col.getColId()).filter((id): id is string => id !== undefined);
+        if (newOrder.length > 0) setColumnOrder(newOrder);
+    }, []);
+
+    const handleResetAll = useCallback(() => {
+        setVisibleColumns(new Set(ALL_COLUMN_IDS));
+        setColumnOrder([...ALL_COLUMN_IDS]);
+    }, []);
+
     // Transform orders for grid
     const rowData = useMemo(() => {
         return orders.map((order) => ({
@@ -364,6 +454,24 @@ export function RtoOrdersGrid({
         },
     ], [onViewOrder, onSelectCustomer, onTrack, shopDomain]);
 
+    // Apply visibility and order to columns
+    const processedColumnDefs = useMemo(() => {
+        // First apply visibility
+        const visibleDefs = columnDefs.map(col => {
+            const colId = col.colId || (col as any).field;
+            return { ...col, hide: colId ? !visibleColumns.has(colId) : false };
+        });
+        // Then apply ordering
+        const colMap = new Map(visibleDefs.map(col => [col.colId || (col as any).field, col]));
+        const ordered: ColDef[] = [];
+        for (const colId of columnOrder) {
+            const col = colMap.get(colId);
+            if (col) { ordered.push(col); colMap.delete(colId); }
+        }
+        for (const col of colMap.values()) { ordered.push(col); }
+        return ordered;
+    }, [columnDefs, visibleColumns, columnOrder]);
+
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
         resizable: true,
@@ -386,14 +494,26 @@ export function RtoOrdersGrid({
 
     return (
         <div className="border rounded" style={{ height: '500px', width: '100%' }}>
-            <AgGridReact
-                rowData={rowData}
-                columnDefs={columnDefs}
-                defaultColDef={defaultColDef}
-                theme={compactTheme}
-                getRowStyle={getRowStyle}
-                animateRows={true}
-            />
+            <div className="flex justify-end p-2 border-b bg-gray-50">
+                <ColumnVisibilityDropdown
+                    visibleColumns={visibleColumns}
+                    onToggleColumn={handleToggleColumn}
+                    onResetAll={handleResetAll}
+                />
+            </div>
+            <div style={{ height: 'calc(100% - 40px)' }}>
+                <AgGridReact
+                    ref={gridRef}
+                    rowData={rowData}
+                    columnDefs={processedColumnDefs}
+                    defaultColDef={defaultColDef}
+                    theme={compactTheme}
+                    getRowStyle={getRowStyle}
+                    animateRows={true}
+                    onColumnMoved={handleColumnMoved}
+                    maintainColumnOrder={true}
+                />
+            </div>
         </div>
     );
 }

@@ -3,11 +3,11 @@
  * AG Grid implementation for archived orders with all shipped order columns
  */
 
-import { useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Undo2, ExternalLink, CheckCircle, AlertTriangle, Package } from 'lucide-react';
+import { Undo2, ExternalLink, CheckCircle, AlertTriangle, Package, Columns, RotateCcw } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
@@ -21,6 +21,65 @@ const compactTheme = themeQuartz.withParams({
     rowHeight: 32,
     headerHeight: 36,
 });
+
+// All column IDs for persistence
+const ALL_COLUMN_IDS = [
+    'orderNumber', 'customerName', 'city', 'itemCount', 'totalAmount',
+    'orderDate', 'shippedAt', 'deliveredAt', 'deliveryDays', 'archivedAt',
+    'shopifyPaymentMethod', 'shopifyFinancialStatus', 'codRemittedAt', 'shopifyLink',
+    'courier', 'awbNumber', 'trackingStatus', 'courierStatusCode',
+    'status', 'channel', 'actions'
+];
+
+const DEFAULT_HEADERS: Record<string, string> = {
+    orderNumber: 'Order', customerName: 'Customer', city: 'City', itemCount: 'Items',
+    totalAmount: 'Total', orderDate: 'Ordered', shippedAt: 'Shipped', deliveredAt: 'Delivered',
+    deliveryDays: 'Del Days', archivedAt: 'Archived', shopifyPaymentMethod: 'Payment',
+    shopifyFinancialStatus: 'Paid', codRemittedAt: 'COD Paid', shopifyLink: 'Link',
+    courier: 'Courier', awbNumber: 'AWB', trackingStatus: 'Status', courierStatusCode: 'Code',
+    status: 'Final Status', channel: 'Channel', actions: 'Actions'
+};
+
+// Column visibility dropdown
+const ColumnVisibilityDropdown = ({
+    visibleColumns, onToggleColumn, onResetAll,
+}: { visibleColumns: Set<string>; onToggleColumn: (colId: string) => void; onResetAll: () => void; }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsOpen(false);
+        };
+        if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+
+    return (
+        <div ref={dropdownRef} className="relative">
+            <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50">
+                <Columns size={12} /> Columns
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                    <div className="p-2 border-b">
+                        <button onClick={onResetAll} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
+                            <RotateCcw size={10} /> Reset All
+                        </button>
+                    </div>
+                    <div className="p-2 space-y-1">
+                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map(colId => (
+                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                                <input type="checkbox" checked={visibleColumns.has(colId)} onChange={() => onToggleColumn(colId)} className="w-3 h-3" />
+                                {DEFAULT_HEADERS[colId] || colId}
+                            </label>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 interface ArchivedOrdersGridProps {
     orders: any[];
@@ -95,6 +154,41 @@ export function ArchivedOrdersGrid({
     sortBy,
     onSortChange,
 }: ArchivedOrdersGridProps) {
+    const gridRef = useRef<AgGridReact>(null);
+
+    // Column visibility state
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+        const saved = localStorage.getItem('archivedGridVisibleColumns');
+        if (saved) { try { return new Set(JSON.parse(saved)); } catch { return new Set(ALL_COLUMN_IDS); } }
+        return new Set(ALL_COLUMN_IDS);
+    });
+
+    // Column order state
+    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+        const saved = localStorage.getItem('archivedGridColumnOrder');
+        if (saved) { try { return JSON.parse(saved); } catch { return ALL_COLUMN_IDS; } }
+        return ALL_COLUMN_IDS;
+    });
+
+    useEffect(() => { localStorage.setItem('archivedGridVisibleColumns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
+    useEffect(() => { localStorage.setItem('archivedGridColumnOrder', JSON.stringify(columnOrder)); }, [columnOrder]);
+
+    const handleToggleColumn = useCallback((colId: string) => {
+        setVisibleColumns(prev => { const next = new Set(prev); if (next.has(colId)) next.delete(colId); else next.add(colId); return next; });
+    }, []);
+
+    const handleColumnMoved = useCallback(() => {
+        const api = gridRef.current?.api;
+        if (!api) return;
+        const newOrder = api.getAllDisplayedColumns().map(col => col.getColId()).filter((id): id is string => id !== undefined);
+        if (newOrder.length > 0) setColumnOrder(newOrder);
+    }, []);
+
+    const handleResetAll = useCallback(() => {
+        setVisibleColumns(new Set(ALL_COLUMN_IDS));
+        setColumnOrder([...ALL_COLUMN_IDS]);
+    }, []);
+
     // Transform orders for grid with grouping field
     const rowData = useMemo(() => {
         return orders.map((order) => ({
@@ -476,6 +570,24 @@ export function ArchivedOrdersGrid({
         },
     ], [onRestore, onViewOrder, onSelectCustomer, isRestoring, shopDomain, sortBy]);
 
+    // Apply visibility to columns (including children in groups)
+    const processedColumnDefs = useMemo(() => {
+        return columnDefs.map(col => {
+            const colAny = col as any;
+            if (colAny.children && Array.isArray(colAny.children)) {
+                return {
+                    ...col,
+                    children: colAny.children.map((child: any) => ({
+                        ...child,
+                        hide: child.colId ? !visibleColumns.has(child.colId) : (child.field ? !visibleColumns.has(child.field) : false),
+                    })),
+                };
+            }
+            const colId = col.colId || colAny.field;
+            return { ...col, hide: colId ? !visibleColumns.has(colId) : false };
+        });
+    }, [columnDefs, visibleColumns]);
+
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
         resizable: true,
@@ -525,27 +637,35 @@ export function ArchivedOrdersGrid({
 
     return (
         <div className="space-y-4">
-            {/* Sort Controls */}
-            <div className="flex items-center gap-2 text-sm">
-                <span className="text-gray-600">Sort by:</span>
-                <button
-                    onClick={() => onSortChange('archivedAt')}
-                    className={`px-3 py-1 rounded ${sortBy === 'archivedAt' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
-                >
-                    Archive Date
-                </button>
-                <button
-                    onClick={() => onSortChange('orderDate')}
-                    className={`px-3 py-1 rounded ${sortBy === 'orderDate' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
-                >
-                    Order Date
-                </button>
+            {/* Sort Controls and Column Selector */}
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-600">Sort by:</span>
+                    <button
+                        onClick={() => onSortChange('archivedAt')}
+                        className={`px-3 py-1 rounded ${sortBy === 'archivedAt' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
+                    >
+                        Archive Date
+                    </button>
+                    <button
+                        onClick={() => onSortChange('orderDate')}
+                        className={`px-3 py-1 rounded ${sortBy === 'orderDate' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
+                    >
+                        Order Date
+                    </button>
+                </div>
+                <ColumnVisibilityDropdown
+                    visibleColumns={visibleColumns}
+                    onToggleColumn={handleToggleColumn}
+                    onResetAll={handleResetAll}
+                />
             </div>
 
             <div className="border rounded" style={{ height: '500px', width: '100%' }}>
                 <AgGridReact
+                    ref={gridRef}
                     rowData={rowData}
-                    columnDefs={columnDefs}
+                    columnDefs={processedColumnDefs}
                     defaultColDef={defaultColDef}
                     autoGroupColumnDef={autoGroupColumnDef}
                     groupDisplayType="groupRows"
@@ -553,6 +673,8 @@ export function ArchivedOrdersGrid({
                     getRowStyle={getRowStyle}
                     animateRows={true}
                     groupDefaultExpanded={0}
+                    onColumnMoved={handleColumnMoved}
+                    maintainColumnOrder={true}
                 />
             </div>
         </div>

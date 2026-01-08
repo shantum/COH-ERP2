@@ -864,6 +864,24 @@ export function ShippedOrdersGrid({
         },
     ], [onUnship, onMarkDelivered, onMarkRto, onArchive, onViewOrder, onSelectCustomer, onTrack, isUnshipping, isMarkingDelivered, isMarkingRto, isArchiving, shopDomain]);
 
+    // Apply visibility to columns (including children in groups)
+    const processedColumnDefs = useMemo(() => {
+        return columnDefs.map(col => {
+            const colAny = col as any;
+            if (colAny.children && Array.isArray(colAny.children)) {
+                return {
+                    ...col,
+                    children: colAny.children.map((child: any) => ({
+                        ...child,
+                        hide: child.colId ? !visibleColumns.has(child.colId) : (child.field ? !visibleColumns.has(child.field) : false),
+                    })),
+                };
+            }
+            const colId = col.colId || colAny.field;
+            return { ...col, hide: colId ? !visibleColumns.has(colId) : false };
+        });
+    }, [columnDefs, visibleColumns]);
+
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
         resizable: true,
@@ -886,15 +904,27 @@ export function ShippedOrdersGrid({
     }
 
     return (
-        <div className="border rounded" style={{ height: '500px', width: '100%' }}>
-            <AgGridReact
-                rowData={rowData}
-                columnDefs={columnDefs}
-                defaultColDef={defaultColDef}
-                theme={compactTheme}
-                getRowStyle={getRowStyle}
-                animateRows={true}
-            />
+        <div className="space-y-2">
+            <div className="flex justify-end">
+                <ColumnVisibilityDropdown
+                    visibleColumns={visibleColumns}
+                    onToggleColumn={handleToggleColumn}
+                    onResetAll={handleResetAll}
+                />
+            </div>
+            <div className="border rounded" style={{ height: '500px', width: '100%' }}>
+                <AgGridReact
+                    ref={gridRef}
+                    rowData={rowData}
+                    columnDefs={processedColumnDefs}
+                    defaultColDef={defaultColDef}
+                    theme={compactTheme}
+                    getRowStyle={getRowStyle}
+                    animateRows={true}
+                    onColumnMoved={handleColumnMoved}
+                    maintainColumnOrder={true}
+                />
+            </div>
         </div>
     );
 }
