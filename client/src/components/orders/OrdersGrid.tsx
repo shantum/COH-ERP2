@@ -1182,7 +1182,7 @@ export function OrdersGrid({
             {
                 colId: 'actions',
                 headerName: getHeaderName('actions'),
-                width: 100,
+                width: 140,
                 sortable: false,
                 resizable: false,
                 cellRenderer: (params: ICellRendererParams) => {

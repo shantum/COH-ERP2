@@ -518,6 +518,18 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to quick ship order')
     });
 
+    // Bulk quick ship - ship all eligible orders at once
+    const bulkQuickShip = useMutation({
+        mutationFn: () => ordersApi.bulkQuickShip(),
+        onSuccess: (response: any) => {
+            const { shipped, failed, message } = response.data;
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+            alert(message || `Shipped ${shipped?.length || 0} orders`);
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to bulk quick ship')
+    });
+
     // Delivery tracking mutations - affects shipped tab and potentially COD pending
     const markDelivered = useMutation({
         mutationFn: (id: string) => ordersApi.markDelivered(id),
@@ -648,6 +660,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         ship,
         unship,
         quickShip,
+        bulkQuickShip,
 
         // Delivery tracking
         markDelivered,

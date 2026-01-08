@@ -191,6 +191,7 @@ export const ordersApi = {
     ship: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/ship`, data),
     unship: (id: string) => api.post(`/orders/${id}/unship`),
     quickShip: (id: string) => api.post(`/orders/${id}/quick-ship`),
+    bulkQuickShip: () => api.post('/orders/bulk-quick-ship'),
     deliver: (id: string) => api.post(`/orders/${id}/deliver`),
     // Summary and analytics endpoints
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),

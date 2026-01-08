@@ -689,4 +689,97 @@ router.post('/:id/quick-ship', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
+// BULK QUICK SHIP: Ship all eligible orders at once
+// ============================================
+
+router.post('/bulk-quick-ship', authenticateToken, async (req, res) => {
+    try {
+        // Find all open orders with AWB and courier set
+        const eligibleOrders = await req.prisma.order.findMany({
+            where: {
+                status: 'open',
+                isArchived: false,
+                awbNumber: { not: null },
+                courier: { not: null },
+            },
+            include: { orderLines: true },
+        });
+
+        if (eligibleOrders.length === 0) {
+            return res.json({ shipped: [], failed: [], message: 'No eligible orders to quick ship' });
+        }
+
+        const results = { shipped: [], failed: [] };
+        const now = new Date();
+
+        for (const order of eligibleOrders) {
+            try {
+                // Process each line - auto allocate/pick/pack/ship
+                for (const line of order.orderLines) {
+                    if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
+
+                    // If pending, try to allocate
+                    if (line.lineStatus === 'pending') {
+                        const balance = await calculateInventoryBalance(req.prisma, line.skuId);
+                        if (balance.available >= line.qty) {
+                            await createReservedTransaction(req.prisma, {
+                                skuId: line.skuId,
+                                qty: line.qty,
+                                orderLineId: line.id,
+                                userId: req.user.id,
+                            });
+                        }
+                    }
+
+                    // Release reserved inventory and create sale
+                    await releaseReservedInventory(req.prisma, line.id);
+                    await createSaleTransaction(req.prisma, {
+                        skuId: line.skuId,
+                        qty: line.qty,
+                        orderLineId: line.id,
+                        userId: req.user.id,
+                    });
+
+                    // Update line to shipped
+                    await req.prisma.orderLine.update({
+                        where: { id: line.id },
+                        data: {
+                            lineStatus: 'shipped',
+                            allocatedAt: line.allocatedAt || now,
+                            pickedAt: line.pickedAt || now,
+                            packedAt: line.packedAt || now,
+                            shippedAt: now,
+                        },
+                    });
+                }
+
+                // Update order status
+                await req.prisma.order.update({
+                    where: { id: order.id },
+                    data: {
+                        status: 'shipped',
+                        shippedAt: now,
+                        trackingStatus: 'in_transit',
+                    },
+                });
+
+                results.shipped.push({ id: order.id, orderNumber: order.orderNumber });
+                console.log(`[Bulk Quick Ship] Order ${order.orderNumber} shipped`);
+            } catch (orderError) {
+                console.error(`[Bulk Quick Ship] Failed to ship order ${order.orderNumber}:`, orderError.message);
+                results.failed.push({ id: order.id, orderNumber: order.orderNumber, error: orderError.message });
+            }
+        }
+
+        res.json({
+            ...results,
+            message: `Shipped ${results.shipped.length} orders, ${results.failed.length} failed`,
+        });
+    } catch (error) {
+        console.error('Bulk quick ship error:', error);
+        res.status(500).json({ error: 'Failed to bulk quick ship orders' });
+    }
+});
+
 export default router;

@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Search, Undo2, RefreshCw, Archive } from 'lucide-react';
+import { Plus, X, Search, Undo2, RefreshCw, Archive, Truck } from 'lucide-react';
 import { shopifyApi, trackingApi, ordersApi } from '../services/api';
 
 // Custom hooks
@@ -250,6 +250,12 @@ export default function Orders() {
     }, [shippedOrders, searchQuery]);
 
     const uniqueOpenOrderCount = new Set(filteredOpenRows.map((r) => r.orderId)).size;
+
+    // Count orders eligible for quick ship (have AWB and courier)
+    const quickShipEligibleCount = useMemo(() => {
+        if (!openOrders) return 0;
+        return openOrders.filter((order: any) => order.awbNumber && order.courier).length;
+    }, [openOrders]);
 
     // Handlers
     const handleShippingCheck = useCallback(
@@ -567,6 +573,21 @@ export default function Orders() {
                                 'Sync iThink'
                             )}
                         </button>
+                        {quickShipEligibleCount > 0 && (
+                            <button
+                                onClick={() => {
+                                    if (confirm(`Quick ship ${quickShipEligibleCount} order(s) with AWB and courier?\n\nThis will bypass allocate/pick/pack and mark them as shipped.`)) {
+                                        mutations.bulkQuickShip.mutate();
+                                    }
+                                }}
+                                disabled={mutations.bulkQuickShip.isPending}
+                                className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-green-50 border-green-300 text-green-700 hover:bg-green-100 disabled:opacity-50"
+                                title="Quick ship all orders that have AWB and courier set"
+                            >
+                                <Truck size={12} />
+                                {mutations.bulkQuickShip.isPending ? 'Shipping...' : `Quick Ship All (${quickShipEligibleCount})`}
+                            </button>
+                        )}
                         {columnVisibilityDropdown}
                         {Object.keys(customHeaders).length > 0 && (
                             <button
