@@ -166,8 +166,16 @@ export function CodPendingGrid({
         return ALL_COLUMN_IDS;
     });
 
+    // Column widths state
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+        const saved = localStorage.getItem('codPendingGridColumnWidths');
+        if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
+        return {};
+    });
+
     useEffect(() => { localStorage.setItem('codPendingGridVisibleColumns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
     useEffect(() => { localStorage.setItem('codPendingGridColumnOrder', JSON.stringify(columnOrder)); }, [columnOrder]);
+    useEffect(() => { localStorage.setItem('codPendingGridColumnWidths', JSON.stringify(columnWidths)); }, [columnWidths]);
 
     const handleToggleColumn = useCallback((colId: string) => {
         setVisibleColumns(prev => { const next = new Set(prev); if (next.has(colId)) next.delete(colId); else next.add(colId); return next; });
@@ -180,9 +188,21 @@ export function CodPendingGrid({
         if (newOrder.length > 0) setColumnOrder(newOrder);
     }, []);
 
+    const handleColumnResized = useCallback((event: any) => {
+        if (event.finished && event.column) {
+            const colId = event.column.getColId();
+            const width = event.column.getActualWidth();
+            if (colId && width) {
+                setColumnWidths(prev => ({ ...prev, [colId]: width }));
+            }
+        }
+    }, []);
+
     const handleResetAll = useCallback(() => {
         setVisibleColumns(new Set(ALL_COLUMN_IDS));
         setColumnOrder([...ALL_COLUMN_IDS]);
+        setColumnWidths({});
+        localStorage.removeItem('codPendingGridColumnWidths');
     }, []);
 
     // Transform orders for grid
@@ -392,16 +412,24 @@ export function CodPendingGrid({
             const colId = col.colId || (col as any).field;
             return { ...col, hide: colId ? !visibleColumns.has(colId) : false };
         });
-        // Then apply ordering
+        // Then apply ordering and saved widths
         const colMap = new Map(visibleDefs.map(col => [col.colId || (col as any).field, col]));
         const ordered: ColDef[] = [];
         for (const colId of columnOrder) {
             const col = colMap.get(colId);
-            if (col) { ordered.push(col); colMap.delete(colId); }
+            if (col) {
+                const savedWidth = columnWidths[colId];
+                ordered.push(savedWidth ? { ...col, width: savedWidth } : col);
+                colMap.delete(colId);
+            }
         }
-        for (const col of colMap.values()) { ordered.push(col); }
+        for (const col of colMap.values()) {
+            const colId = col.colId || (col as any).field;
+            const savedWidth = colId ? columnWidths[colId] : undefined;
+            ordered.push(savedWidth ? { ...col, width: savedWidth } : col);
+        }
         return ordered;
-    }, [columnDefs, visibleColumns, columnOrder]);
+    }, [columnDefs, visibleColumns, columnOrder, columnWidths]);
 
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
@@ -442,6 +470,7 @@ export function CodPendingGrid({
                     getRowStyle={getRowStyle}
                     animateRows={true}
                     onColumnMoved={handleColumnMoved}
+                    onColumnResized={handleColumnResized}
                     maintainColumnOrder={true}
                 />
             </div>

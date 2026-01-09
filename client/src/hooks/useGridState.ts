@@ -1,9 +1,9 @@
 /**
  * Hook for managing AG-Grid state with localStorage persistence
- * Handles column visibility, column order, and page size
+ * Handles column visibility, column order, column widths, and page size
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 interface UseGridStateOptions {
     gridId: string;
@@ -14,10 +14,12 @@ interface UseGridStateOptions {
 interface UseGridStateReturn {
     visibleColumns: Set<string>;
     columnOrder: string[];
+    columnWidths: Record<string, number>;
     pageSize: number;
     handleToggleColumn: (colId: string) => void;
     handleResetAll: () => void;
     handleColumnMoved: (newOrder: string[]) => void;
+    handleColumnResized: (colId: string, width: number) => void;
     handlePageSizeChange: (newSize: number) => void;
 }
 
@@ -29,6 +31,7 @@ export function useGridState({
     // Keys for localStorage
     const visibilityKey = `${gridId}VisibleColumns`;
     const orderKey = `${gridId}ColumnOrder`;
+    const widthsKey = `${gridId}ColumnWidths`;
     const pageSizeKey = `${gridId}PageSize`;
 
     // Column visibility state
@@ -57,11 +60,27 @@ export function useGridState({
         return allColumnIds;
     });
 
+    // Column widths state
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+        const saved = localStorage.getItem(widthsKey);
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch {
+                return {};
+            }
+        }
+        return {};
+    });
+
     // Page size state
     const [pageSize, setPageSize] = useState<number>(() => {
         const saved = localStorage.getItem(pageSizeKey);
         return saved ? parseInt(saved, 10) : defaultPageSize;
     });
+
+    // Debounce timer for width changes (to avoid saving on every pixel)
+    const widthSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Persist to localStorage
     useEffect(() => {
@@ -71,6 +90,21 @@ export function useGridState({
     useEffect(() => {
         localStorage.setItem(orderKey, JSON.stringify(columnOrder));
     }, [columnOrder, orderKey]);
+
+    useEffect(() => {
+        // Debounce width saves to avoid excessive writes during drag
+        if (widthSaveTimer.current) {
+            clearTimeout(widthSaveTimer.current);
+        }
+        widthSaveTimer.current = setTimeout(() => {
+            localStorage.setItem(widthsKey, JSON.stringify(columnWidths));
+        }, 300);
+        return () => {
+            if (widthSaveTimer.current) {
+                clearTimeout(widthSaveTimer.current);
+            }
+        };
+    }, [columnWidths, widthsKey]);
 
     useEffect(() => {
         localStorage.setItem(pageSizeKey, String(pageSize));
@@ -92,11 +126,21 @@ export function useGridState({
     const handleResetAll = useCallback(() => {
         setVisibleColumns(new Set(allColumnIds));
         setColumnOrder([...allColumnIds]);
+        setColumnWidths({});
     }, [allColumnIds]);
 
     const handleColumnMoved = useCallback((newOrder: string[]) => {
         if (newOrder.length > 0) {
             setColumnOrder(newOrder);
+        }
+    }, []);
+
+    const handleColumnResized = useCallback((colId: string, width: number) => {
+        if (colId && width > 0) {
+            setColumnWidths(prev => ({
+                ...prev,
+                [colId]: width,
+            }));
         }
     }, []);
 
@@ -107,10 +151,12 @@ export function useGridState({
     return {
         visibleColumns,
         columnOrder,
+        columnWidths,
         pageSize,
         handleToggleColumn,
         handleResetAll,
         handleColumnMoved,
+        handleColumnResized,
         handlePageSizeChange,
     };
 }
@@ -165,4 +211,21 @@ export function orderColumns<T extends { colId?: string }>(
     }
 
     return ordered;
+}
+
+/**
+ * Helper to apply saved column widths to column definitions
+ */
+export function applyColumnWidths<T extends { colId?: string; field?: string; width?: number }>(
+    columnDefs: T[],
+    columnWidths: Record<string, number>
+): T[] {
+    return columnDefs.map(col => {
+        const colId = col.colId || col.field;
+        const savedWidth = colId ? columnWidths[colId] : undefined;
+        if (savedWidth) {
+            return { ...col, width: savedWidth };
+        }
+        return col;
+    });
 }

@@ -3,7 +3,7 @@
  * Shows sales metrics with charts and breakdowns by various dimensions
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
@@ -41,6 +41,27 @@ export default function Analytics() {
     const [dimension, setDimension] = useState<SalesDimension>('summary');
     const [activeMetric, setActiveMetric] = useState<'revenue' | 'units' | 'orders'>('revenue');
 
+    // Column widths state for grid
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+        const saved = localStorage.getItem('analyticsGridColumnWidths');
+        if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
+        return {};
+    });
+
+    const handleColumnResized = useCallback((event: any) => {
+        if (event.finished && event.column) {
+            const colId = event.column.getColId();
+            const width = event.column.getActualWidth();
+            if (colId && width) {
+                setColumnWidths(prev => {
+                    const updated = { ...prev, [colId]: width };
+                    localStorage.setItem('analyticsGridColumnWidths', JSON.stringify(updated));
+                    return updated;
+                });
+            }
+        }
+    }, []);
+
     // Calculate date range
     const { startDate, endDate } = useMemo(() => {
         return getDateRange(datePreset, customStart, customEnd);
@@ -67,46 +88,53 @@ export default function Analytics() {
     };
 
     // Column definitions for breakdown table
-    const columnDefs: ColDef<SalesBreakdownItem>[] = useMemo(() => [
-        {
-            field: 'key',
-            headerName: getDimensionColumnHeader(dimension),
-            flex: 2,
-            minWidth: 150,
-        },
-        {
-            field: 'revenue',
-            headerName: 'Revenue',
-            width: 120,
-            valueFormatter: (params: ValueFormatterParams) => formatCurrency(params.value || 0),
-            cellClass: 'text-right font-medium',
-            headerClass: 'ag-right-aligned-header',
-        },
-        {
-            field: 'units',
-            headerName: 'Units',
-            width: 100,
-            valueFormatter: (params: ValueFormatterParams) => formatNumber(params.value || 0),
-            cellClass: 'text-right',
-            headerClass: 'ag-right-aligned-header',
-        },
-        {
-            field: 'orders',
-            headerName: 'Orders',
-            width: 100,
-            valueFormatter: (params: ValueFormatterParams) => formatNumber(params.value || 0),
-            cellClass: 'text-right',
-            headerClass: 'ag-right-aligned-header',
-        },
-        {
-            field: 'percentOfTotal',
-            headerName: '% of Total',
-            width: 110,
-            valueFormatter: (params: ValueFormatterParams) => `${(params.value || 0).toFixed(1)}%`,
-            cellClass: 'text-right text-gray-500',
-            headerClass: 'ag-right-aligned-header',
-        },
-    ], [dimension]);
+    const columnDefs: ColDef<SalesBreakdownItem>[] = useMemo(() => {
+        const baseDefs = [
+            {
+                field: 'key',
+                headerName: getDimensionColumnHeader(dimension),
+                flex: 2,
+                minWidth: 150,
+            },
+            {
+                field: 'revenue',
+                headerName: 'Revenue',
+                width: 120,
+                valueFormatter: (params: ValueFormatterParams) => formatCurrency(params.value || 0),
+                cellClass: 'text-right font-medium',
+                headerClass: 'ag-right-aligned-header',
+            },
+            {
+                field: 'units',
+                headerName: 'Units',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => formatNumber(params.value || 0),
+                cellClass: 'text-right',
+                headerClass: 'ag-right-aligned-header',
+            },
+            {
+                field: 'orders',
+                headerName: 'Orders',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => formatNumber(params.value || 0),
+                cellClass: 'text-right',
+                headerClass: 'ag-right-aligned-header',
+            },
+            {
+                field: 'percentOfTotal',
+                headerName: '% of Total',
+                width: 110,
+                valueFormatter: (params: ValueFormatterParams) => `${(params.value || 0).toFixed(1)}%`,
+                cellClass: 'text-right text-gray-500',
+                headerClass: 'ag-right-aligned-header',
+            },
+        ];
+        // Apply saved column widths
+        return baseDefs.map(col => {
+            const savedWidth = col.field ? columnWidths[col.field] : undefined;
+            return savedWidth ? { ...col, width: savedWidth } : col;
+        });
+    }, [dimension, columnWidths]);
 
     // Get chart data based on dimension
     const chartData = useMemo(() => {
@@ -341,6 +369,7 @@ export default function Analytics() {
                                         animateRows={true}
                                         pagination={true}
                                         paginationPageSize={20}
+                                        onColumnResized={handleColumnResized}
                                     />
                                 </div>
                             </div>

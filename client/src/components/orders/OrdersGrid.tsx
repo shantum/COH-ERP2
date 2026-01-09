@@ -1467,6 +1467,19 @@ export function OrdersGrid({
         return ALL_COLUMN_IDS;
     });
 
+    // Column widths state
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+        const saved = localStorage.getItem('ordersGridColumnWidths');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch {
+                return {};
+            }
+        }
+        return {};
+    });
+
     const handleColumnMoved = useCallback((event: any) => {
         if (!event.finished || !event.api) return;
         const newOrder = event.api.getAllDisplayedColumns()
@@ -1476,12 +1489,27 @@ export function OrdersGrid({
         localStorage.setItem('ordersGridColumnOrder', JSON.stringify(newOrder));
     }, []);
 
-    const resetColumnOrder = useCallback(() => {
-        setColumnOrder(ALL_COLUMN_IDS);
-        localStorage.removeItem('ordersGridColumnOrder');
+    const handleColumnResized = useCallback((event: any) => {
+        if (!event.finished || !event.column) return;
+        const colId = event.column.getColId();
+        const width = event.column.getActualWidth();
+        if (colId && width) {
+            setColumnWidths(prev => {
+                const updated = { ...prev, [colId]: width };
+                localStorage.setItem('ordersGridColumnWidths', JSON.stringify(updated));
+                return updated;
+            });
+        }
     }, []);
 
-    // Sort column defs by saved order
+    const resetColumnOrder = useCallback(() => {
+        setColumnOrder(ALL_COLUMN_IDS);
+        setColumnWidths({});
+        localStorage.removeItem('ordersGridColumnOrder');
+        localStorage.removeItem('ordersGridColumnWidths');
+    }, []);
+
+    // Sort column defs by saved order and apply saved widths
     const orderedColumnDefs = useMemo(() => {
         const colDefMap = new Map(columnDefs.map(col => [col.colId, col]));
         const ordered: ColDef[] = [];
@@ -1490,16 +1518,21 @@ export function OrdersGrid({
         columnOrder.forEach(colId => {
             const col = colDefMap.get(colId);
             if (col) {
-                ordered.push(col);
+                // Apply saved width if available
+                const savedWidth = columnWidths[colId];
+                ordered.push(savedWidth ? { ...col, width: savedWidth } : col);
                 colDefMap.delete(colId);
             }
         });
 
         // Add any remaining columns (new columns not in saved order)
-        colDefMap.forEach(col => ordered.push(col));
+        colDefMap.forEach(col => {
+            const savedWidth = col.colId ? columnWidths[col.colId] : undefined;
+            ordered.push(savedWidth ? { ...col, width: savedWidth } : col);
+        });
 
         return ordered;
-    }, [columnDefs, columnOrder]);
+    }, [columnDefs, columnOrder, columnWidths]);
 
     const defaultColDef = useMemo<ColDef>(
         () => ({
@@ -1628,6 +1661,7 @@ export function OrdersGrid({
                             suppressRowClickSelection={false}
                             suppressRowHoverHighlight={false}
                             onColumnMoved={handleColumnMoved}
+                            onColumnResized={handleColumnResized}
                             maintainColumnOrder={true}
                         />
                     </div>

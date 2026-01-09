@@ -14,7 +14,7 @@ import { catalogApi, productsApi } from '../services/api';
 import { FormModal, ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { ColumnVisibilityDropdown, InventoryStatusBadge } from '../components/common/grid';
-import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumns } from '../hooks/useGridState';
+import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
 
 // Page size options
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
@@ -372,14 +372,16 @@ export default function Catalog() {
     const gridRef = useRef<AgGridReact>(null);
     const queryClient = useQueryClient();
 
-    // Use shared grid state hook for column visibility, order, and page size
+    // Use shared grid state hook for column visibility, order, widths, and page size
     const {
         visibleColumns,
         columnOrder,
+        columnWidths,
         pageSize,
         handleToggleColumn,
         handleResetAll,
         handleColumnMoved,
+        handleColumnResized,
         handlePageSizeChange,
     } = useGridState({
         gridId: 'catalogGrid',
@@ -665,6 +667,18 @@ export default function Catalog() {
         }
     };
 
+    // Handle column resize - save width when user finishes resizing
+    const onColumnResized = (event: any) => {
+        // Only save on drag end to avoid excessive updates
+        if (event.finished && event.column) {
+            const colId = event.column.getColId();
+            const width = event.column.getActualWidth();
+            if (colId && width) {
+                handleColumnResized(colId, width);
+            }
+        }
+    };
+
     // Column definitions
     const columnDefs: ColDef[] = useMemo(() => [
         // Product columns
@@ -936,8 +950,10 @@ export default function Catalog() {
             ...col,
             hide: col.hide || hiddenByView.includes(col.colId || ''),
         }));
-        return orderColumns(withViewVisibility, columnOrder);
-    }, [columnDefs, visibleColumns, columnOrder, viewLevel]);
+        // Apply saved column widths
+        const withWidths = applyColumnWidths(withViewVisibility, columnWidths);
+        return orderColumns(withWidths, columnOrder);
+    }, [columnDefs, visibleColumns, columnOrder, columnWidths, viewLevel]);
 
     // Summary stats based on view level
     const stats = useMemo(() => {
@@ -1167,8 +1183,9 @@ export default function Catalog() {
                         paginationPageSizeSelector={false}
                         // Quick filter for fast search
                         cacheQuickFilter={true}
-                        // Column order persistence
+                        // Column order and width persistence
                         onColumnMoved={onColumnMoved}
+                        onColumnResized={onColumnResized}
                         maintainColumnOrder={true}
                     />
                 </div>

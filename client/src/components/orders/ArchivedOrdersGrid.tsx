@@ -187,8 +187,16 @@ export function ArchivedOrdersGrid({
         return ALL_COLUMN_IDS;
     });
 
+    // Column widths state
+    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+        const saved = localStorage.getItem('archivedGridColumnWidths');
+        if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
+        return {};
+    });
+
     useEffect(() => { localStorage.setItem('archivedGridVisibleColumns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
     useEffect(() => { localStorage.setItem('archivedGridColumnOrder', JSON.stringify(columnOrder)); }, [columnOrder]);
+    useEffect(() => { localStorage.setItem('archivedGridColumnWidths', JSON.stringify(columnWidths)); }, [columnWidths]);
 
     const handleToggleColumn = useCallback((colId: string) => {
         setVisibleColumns(prev => { const next = new Set(prev); if (next.has(colId)) next.delete(colId); else next.add(colId); return next; });
@@ -201,9 +209,21 @@ export function ArchivedOrdersGrid({
         if (newOrder.length > 0) setColumnOrder(newOrder);
     }, []);
 
+    const handleColumnResized = useCallback((event: any) => {
+        if (event.finished && event.column) {
+            const colId = event.column.getColId();
+            const width = event.column.getActualWidth();
+            if (colId && width) {
+                setColumnWidths(prev => ({ ...prev, [colId]: width }));
+            }
+        }
+    }, []);
+
     const handleResetAll = useCallback(() => {
         setVisibleColumns(new Set(ALL_COLUMN_IDS));
         setColumnOrder([...ALL_COLUMN_IDS]);
+        setColumnWidths({});
+        localStorage.removeItem('archivedGridColumnWidths');
     }, []);
 
     // Transform orders for grid with grouping field
@@ -595,16 +615,26 @@ export function ArchivedOrdersGrid({
             if (colAny.children && Array.isArray(colAny.children)) {
                 return {
                     ...col,
-                    children: colAny.children.map((child: any) => ({
-                        ...child,
-                        hide: child.colId ? !visibleColumns.has(child.colId) : (child.field ? !visibleColumns.has(child.field) : false),
-                    })),
+                    children: colAny.children.map((child: any) => {
+                        const childColId = child.colId || child.field;
+                        const savedWidth = childColId ? columnWidths[childColId] : undefined;
+                        return {
+                            ...child,
+                            hide: child.colId ? !visibleColumns.has(child.colId) : (child.field ? !visibleColumns.has(child.field) : false),
+                            ...(savedWidth ? { width: savedWidth } : {}),
+                        };
+                    }),
                 };
             }
             const colId = col.colId || colAny.field;
-            return { ...col, hide: colId ? !visibleColumns.has(colId) : false };
+            const savedWidth = colId ? columnWidths[colId] : undefined;
+            return {
+                ...col,
+                hide: colId ? !visibleColumns.has(colId) : false,
+                ...(savedWidth ? { width: savedWidth } : {}),
+            };
         });
-    }, [columnDefs, visibleColumns]);
+    }, [columnDefs, visibleColumns, columnWidths]);
 
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
@@ -692,6 +722,7 @@ export function ArchivedOrdersGrid({
                     animateRows={true}
                     groupDefaultExpanded={0}
                     onColumnMoved={handleColumnMoved}
+                    onColumnResized={handleColumnResized}
                     maintainColumnOrder={true}
                     pagination={true}
                     paginationPageSize={pageSize}

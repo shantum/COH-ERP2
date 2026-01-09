@@ -13,7 +13,7 @@ import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { ColumnVisibilityDropdown, FabricStatusBadge } from '../components/common/grid';
-import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumns } from '../hooks/useGridState';
+import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
 
 // Page size options
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const;
@@ -76,14 +76,16 @@ export default function Fabrics() {
     const isAdmin = user?.role === 'admin';
     const gridRef = useRef<AgGridReact>(null);
 
-    // Use shared grid state hook for column visibility, order, and page size
+    // Use shared grid state hook for column visibility, order, widths, and page size
     const {
         visibleColumns,
         columnOrder,
+        columnWidths,
         pageSize,
         handleToggleColumn,
         handleResetAll,
         handleColumnMoved,
+        handleColumnResized,
         handlePageSizeChange,
     } = useGridState({
         gridId: 'fabricsGrid',
@@ -252,6 +254,17 @@ export default function Fabrics() {
         const api = gridRef.current?.api;
         if (api) {
             handleColumnMoved(getColumnOrderFromApi(api));
+        }
+    };
+
+    // Handle column resize - save width when user finishes resizing
+    const onColumnResized = (event: any) => {
+        if (event.finished && event.column) {
+            const colId = event.column.getColId();
+            const width = event.column.getActualWidth();
+            if (colId && width) {
+                handleColumnResized(colId, width);
+            }
         }
     };
 
@@ -704,8 +717,9 @@ export default function Fabrics() {
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
         const withVisibility = applyColumnVisibility(activeColumnDefs, visibleColumns);
-        return orderColumns(withVisibility, columnOrder);
-    }, [activeColumnDefs, visibleColumns, columnOrder]);
+        const withWidths = applyColumnWidths(withVisibility, columnWidths);
+        return orderColumns(withWidths, columnOrder);
+    }, [activeColumnDefs, visibleColumns, columnWidths, columnOrder]);
 
     // Summary stats
     const summary = fabricData?.summary || { total: 0, orderNow: 0, orderSoon: 0, ok: 0 };
@@ -874,6 +888,7 @@ export default function Fabrics() {
                         paginationPageSizeSelector={false}
                         cacheQuickFilter={true}
                         onColumnMoved={onColumnMoved}
+                        onColumnResized={onColumnResized}
                         maintainColumnOrder={true}
                     />
                 </div>

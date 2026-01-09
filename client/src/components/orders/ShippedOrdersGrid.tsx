@@ -10,7 +10,7 @@ import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Undo2, ExternalLink, Radio, Archive } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 import { compactTheme, formatDate, formatRelativeTime, getTrackingUrl } from '../../utils/agGridHelpers';
-import { useGridState, getColumnOrderFromApi } from '../../hooks/useGridState';
+import { useGridState, getColumnOrderFromApi, applyColumnWidths } from '../../hooks/useGridState';
 import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
 import { TrackingStatusBadge } from '../common/grid/TrackingStatusBadge';
 
@@ -86,9 +86,11 @@ export function ShippedOrdersGrid({
     // Use shared grid state hook
     const {
         visibleColumns,
+        columnWidths,
         handleToggleColumn,
         handleResetAll,
         handleColumnMoved,
+        handleColumnResized,
     } = useGridState({
         gridId: 'shippedGrid',
         allColumnIds: ALL_COLUMN_IDS,
@@ -101,6 +103,17 @@ export function ShippedOrdersGrid({
         const newOrder = getColumnOrderFromApi(api);
         handleColumnMoved(newOrder);
     }, [handleColumnMoved]);
+
+    // Handle column resize event from AG-Grid
+    const onColumnResized = useCallback((event: any) => {
+        if (event.finished && event.column) {
+            const colId = event.column.getColId();
+            const width = event.column.getActualWidth();
+            if (colId && width) {
+                handleColumnResized(colId, width);
+            }
+        }
+    }, [handleColumnResized]);
 
     // Transform orders for grid with grouping field and Shopify cache data
     const rowData = useMemo(() => {
@@ -685,9 +698,9 @@ export function ShippedOrdersGrid({
         },
     ], [onUnship, onMarkDelivered, onMarkRto, onArchive, onViewOrder, onSelectCustomer, onTrack, isUnshipping, isMarkingDelivered, isMarkingRto, isArchiving, shopDomain]);
 
-    // Apply visibility to columns (including children in groups)
+    // Apply visibility and saved widths to columns (including children in groups)
     const processedColumnDefs = useMemo(() => {
-        return columnDefs.map(col => {
+        const withVisibility = columnDefs.map(col => {
             const colAny = col as any;
             if (colAny.children && Array.isArray(colAny.children)) {
                 return {
@@ -701,7 +714,8 @@ export function ShippedOrdersGrid({
             const colId = col.colId || colAny.field;
             return { ...col, hide: colId ? !visibleColumns.has(colId) : false };
         });
-    }, [columnDefs, visibleColumns]);
+        return applyColumnWidths(withVisibility, columnWidths);
+    }, [columnDefs, visibleColumns, columnWidths]);
 
     const defaultColDef = useMemo<ColDef>(() => ({
         sortable: true,
@@ -745,6 +759,7 @@ export function ShippedOrdersGrid({
                     getRowStyle={getRowStyle}
                     animateRows={true}
                     onColumnMoved={onColumnMoved}
+                    onColumnResized={onColumnResized}
                     maintainColumnOrder={true}
                 />
             </div>
