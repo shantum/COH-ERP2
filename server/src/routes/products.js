@@ -133,30 +133,20 @@ router.put('/:id', authenticateToken, async (req, res) => {
             include: { fabricType: true },
         });
 
-        // If fabric type changed at product level, cascade to all variations
-        // Find matching colors in the new fabric type and update variations
+        // If fabric type changed at product level, reset all variation fabrics to Default
         if (fabricTypeChanged && currentProduct?.variations?.length > 0) {
-            // Get all fabrics in the new fabric type
-            const newFabrics = await req.prisma.fabric.findMany({
-                where: { fabricTypeId },
-                select: { id: true, colorName: true },
+            // Get the Default fabric
+            const defaultFabric = await req.prisma.fabric.findFirst({
+                where: { fabricType: { name: 'Default' } },
+                select: { id: true },
             });
 
-            // Create a map of colorName -> fabricId for quick lookup
-            const colorToFabricMap = new Map();
-            for (const fabric of newFabrics) {
-                colorToFabricMap.set(fabric.colorName.toLowerCase(), fabric.id);
-            }
-
-            // Update each variation if a matching color exists in the new fabric type
-            for (const variation of currentProduct.variations) {
-                const currentColorName = variation.fabric?.colorName?.toLowerCase();
-                if (currentColorName && colorToFabricMap.has(currentColorName)) {
-                    await req.prisma.variation.update({
-                        where: { id: variation.id },
-                        data: { fabricId: colorToFabricMap.get(currentColorName) },
-                    });
-                }
+            if (defaultFabric) {
+                // Reset all variations to Default fabric
+                await req.prisma.variation.updateMany({
+                    where: { productId: req.params.id },
+                    data: { fabricId: defaultFabric.id },
+                });
             }
         }
 
@@ -218,12 +208,23 @@ router.put('/variations/:id', authenticateToken, async (req, res) => {
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
             data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, isActive },
-            include: { fabric: { include: { fabricType: true } } },
+            include: {
+                fabric: { include: { fabricType: true } },
+                product: { select: { id: true, fabricTypeId: true } },
+            },
         });
 
-        // Note: We don't sync product's fabricTypeId with variation's fabric type
-        // because a single product can have variations with different fabric types
-        // (e.g., one color in Linen 40 Lea, another in Linen 60 Lea)
+        // Sync product's fabricType when variation's fabric changes
+        // If the new fabric has a non-Default type, update the product to match
+        if (fabricId && variation.fabric?.fabricTypeId) {
+            const isDefaultType = variation.fabric.fabricType?.name === 'Default';
+            if (!isDefaultType && variation.product.fabricTypeId !== variation.fabric.fabricTypeId) {
+                await req.prisma.product.update({
+                    where: { id: variation.product.id },
+                    data: { fabricTypeId: variation.fabric.fabricTypeId },
+                });
+            }
+        }
 
         res.json(variation);
     } catch (error) {
