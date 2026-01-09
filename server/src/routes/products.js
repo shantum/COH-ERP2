@@ -121,26 +121,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
             include: { fabricType: true },
         });
 
-        // If fabricTypeId changed, clear mismatched fabric colors from variations
-        if (fabricTypeId && fabricTypeId !== currentProduct?.fabricTypeId) {
-            // Find variations with fabrics that don't belong to the new fabric type
-            const mismatchedVariations = await req.prisma.variation.findMany({
-                where: {
-                    productId: req.params.id,
-                    fabricId: { not: null },
-                    fabric: { fabricTypeId: { not: fabricTypeId } },
-                },
-                select: { id: true },
-            });
-
-            // Clear fabricId for mismatched variations
-            if (mismatchedVariations.length > 0) {
-                await req.prisma.variation.updateMany({
-                    where: { id: { in: mismatchedVariations.map(v => v.id) } },
-                    data: { fabricId: null },
-                });
-            }
-        }
+        // Note: We don't clear mismatched fabric colors when fabric type changes
+        // because fabricId is required. Users need to manually reassign colors
+        // if they change the fabric type to a different one.
 
         res.json(product);
     } catch (error) {
