@@ -402,10 +402,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const updateBatch = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => {
+        mutationFn: async ({ id, data }: { id: string; data: any }) => {
             // Skip API call for temporary IDs (from optimistic creates that haven't finished)
             if (id.startsWith('temp-')) {
-                return Promise.resolve({ data: { success: true } });
+                return { data: { success: true } } as any;
             }
             return productionApi.updateBatch(id, data);
         },
@@ -431,7 +431,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
             return { previousOrders };
         },
-        onError: (err: any, _vars, context) => {
+        onError: (err: any, _vars, context: { previousOrders?: any } | undefined) => {
             // Rollback on error
             if (context?.previousOrders) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
@@ -442,10 +442,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const deleteBatch = useMutation({
-        mutationFn: (id: string) => {
+        mutationFn: async (id: string) => {
             // Skip API call for temporary IDs (from optimistic creates that haven't finished)
             if (id.startsWith('temp-')) {
-                return Promise.resolve({ data: { success: true } });
+                return { data: { success: true } } as any;
             }
             return productionApi.deleteBatch(id);
         },
@@ -468,7 +468,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
             return { previousOrders };
         },
-        onError: (err: any, _id, context) => {
+        onError: (err: any, _id, context: { previousOrders?: any } | undefined) => {
             if (context?.previousOrders) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
