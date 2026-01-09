@@ -8,6 +8,7 @@ export { ShippedOrdersGrid } from './ShippedOrdersGrid';
 export { ArchivedOrdersGrid } from './ArchivedOrdersGrid';
 export { RtoOrdersGrid } from './RtoOrdersGrid';
 export { CodPendingGrid } from './CodPendingGrid';
+export { CancelledOrdersGrid } from './CancelledOrdersGrid';
 export { OrderDetailModal } from './OrderDetailModal';
 export { OrderViewModal } from './OrderViewModal';
 export { CreateOrderModal } from './CreateOrderModal';

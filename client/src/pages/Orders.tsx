@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Search, Undo2, RefreshCw, Archive, Truck } from 'lucide-react';
+import { Plus, X, Search, RefreshCw, Archive, Truck } from 'lucide-react';
 import { shopifyApi, trackingApi, ordersApi } from '../services/api';
 
 // Custom hooks
@@ -20,7 +20,6 @@ import {
     computeCustomerStats,
     flattenOrders,
     filterRows,
-    parseCity,
 } from '../utils/orderHelpers';
 
 // Components
@@ -30,6 +29,7 @@ import {
     ArchivedOrdersGrid,
     RtoOrdersGrid,
     CodPendingGrid,
+    CancelledOrdersGrid,
     OrderDetailModal,
     OrderViewModal,
     CreateOrderModal,
@@ -841,11 +841,13 @@ export default function Orders() {
                 {/* Cancelled Orders */}
                 {!isLoading && tab === 'cancelled' && (
                 <div className="p-4">
-                    <OrderListSection
-                        orders={cancelledOrders}
-                        type="cancelled"
+                    <CancelledOrdersGrid
+                        orders={cancelledOrders || []}
+                        onViewOrder={(order) => setViewingOrder(order)}
+                        onSelectCustomer={(customer) => setSelectedCustomer(customer)}
                         onRestore={(id) => mutations.uncancelOrder.mutate(id)}
                         isRestoring={mutations.uncancelOrder.isPending}
+                        shopDomain={shopifyConfig?.shopDomain}
                     />
                 </div>
                 )}
@@ -1009,101 +1011,3 @@ export default function Orders() {
     );
 }
 
-// Order List Section (inline component for cancelled tab)
-function OrderListSection({
-    orders,
-    type,
-    onRestore,
-    isRestoring,
-}: {
-    orders: any[];
-    type: 'cancelled' | 'archived';
-    onRestore: (id: string) => void;
-    isRestoring: boolean;
-}) {
-    if (!orders?.length) {
-        return (
-            <p className="text-center py-8 text-gray-400">
-                No {type} orders
-            </p>
-        );
-    }
-
-    return (
-        <div className="card divide-y">
-            {orders.map((order: any) => (
-                <div key={order.id} className="p-4 hover:bg-gray-50">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-4">
-                            <span className="text-gray-600 font-mono text-xs">{order.orderNumber}</span>
-                            <span className="text-gray-900">{order.customerName}</span>
-                            <span className="text-gray-500 text-sm">{parseCity(order.shippingAddress)}</span>
-                            <span className="text-gray-400 text-xs">
-                                {new Date(order.orderDate).toLocaleDateString('en-IN', {
-                                    day: 'numeric',
-                                    month: 'short',
-                                })}
-                            </span>
-                            {type === 'cancelled' && (
-                                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
-                                    Cancelled
-                                </span>
-                            )}
-                            {type === 'archived' && (
-                                <>
-                                    <span
-                                        className={`text-xs px-2 py-0.5 rounded ${order.status === 'cancelled'
-                                                ? 'bg-red-100 text-red-700'
-                                                : order.status === 'shipped' || order.status === 'delivered'
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : 'bg-amber-100 text-amber-700'
-                                            }`}
-                                    >
-                                        {order.status === 'open'
-                                            ? 'Was Open'
-                                            : order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                                    </span>
-                                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                                        Archived{' '}
-                                        {order.archivedAt
-                                            ? new Date(order.archivedAt).toLocaleDateString('en-IN', {
-                                                day: 'numeric',
-                                                month: 'short',
-                                            })
-                                            : ''}
-                                    </span>
-                                </>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="text-gray-400 text-xs">
-                                ₹{Number(order.totalAmount).toLocaleString()}
-                            </span>
-                            <button
-                                onClick={() => {
-                                    if (confirm(`Restore order ${order.orderNumber}?`)) {
-                                        onRestore(order.id);
-                                    }
-                                }}
-                                disabled={isRestoring}
-                                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                            >
-                                <Undo2 size={12} /> Restore
-                            </button>
-                        </div>
-                    </div>
-                    {order.internalNotes && (
-                        <p className="text-xs text-gray-500 ml-4 mt-1">{order.internalNotes}</p>
-                    )}
-                    <div className="text-xs text-gray-500 mt-2">
-                        {order.orderLines?.map((line: any) => (
-                            <span key={line.id} className="mr-3">
-                                {line.sku?.variation?.product?.name} ({line.sku?.size}) x{line.qty}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-}
