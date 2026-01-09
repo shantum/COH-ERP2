@@ -363,6 +363,96 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // CUSTOMER ANALYTICS
 // ============================================
 
+// Customer base analytics with time filtering
+router.get('/analytics/overview', async (req, res) => {
+    try {
+        const { months } = req.query;
+
+        // Build date filter
+        let dateFilter = {};
+        if (months && months !== 'all') {
+            const sinceDate = new Date();
+            sinceDate.setMonth(sinceDate.getMonth() - Number(months));
+            dateFilter = { orderDate: { gte: sinceDate } };
+        }
+
+        // Get all customers with their orders (filtered by date if specified)
+        const customers = await req.prisma.customer.findMany({
+            include: {
+                orders: {
+                    where: dateFilter,
+                    select: { id: true, totalAmount: true, status: true, orderDate: true },
+                },
+            },
+        });
+
+        // Calculate metrics
+        let totalCustomers = 0;
+        let customersWithOrders = 0;
+        let repeatCustomers = 0;
+        let totalOrders = 0;
+        let totalRevenue = 0;
+        let orderFrequencySum = 0;
+        let customersWithMultipleOrders = 0;
+
+        const orderDatesAll = [];
+
+        customers.forEach((c) => {
+            const validOrders = c.orders.filter((o) => o.status !== 'cancelled');
+
+            if (validOrders.length > 0) {
+                customersWithOrders++;
+                totalOrders += validOrders.length;
+                totalRevenue += validOrders.reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
+
+                if (validOrders.length > 1) {
+                    repeatCustomers++;
+                    customersWithMultipleOrders++;
+                }
+
+                // Calculate order frequency for this customer
+                const orderDates = validOrders.map((o) => new Date(o.orderDate).getTime());
+                orderDatesAll.push(...orderDates);
+
+                if (orderDates.length > 0) {
+                    const firstOrder = Math.min(...orderDates);
+                    const monthsSinceFirst = Math.max(1, (Date.now() - firstOrder) / (1000 * 60 * 60 * 24 * 30));
+                    orderFrequencySum += validOrders.length / monthsSinceFirst;
+                }
+            }
+        });
+
+        totalCustomers = customers.length;
+
+        // Calculate aggregates
+        const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+        const avgOrdersPerCustomer = customersWithOrders > 0 ? totalOrders / customersWithOrders : 0;
+        const repeatRate = customersWithOrders > 0 ? (repeatCustomers / customersWithOrders) * 100 : 0;
+        const avgOrderFrequency = customersWithOrders > 0 ? orderFrequencySum / customersWithOrders : 0;
+        const avgLTV = customersWithOrders > 0 ? totalRevenue / customersWithOrders : 0;
+
+        // New vs returning breakdown
+        const newCustomers = customersWithOrders - repeatCustomers;
+
+        res.json({
+            totalCustomers,
+            customersWithOrders,
+            newCustomers,
+            repeatCustomers,
+            repeatRate: parseFloat(repeatRate.toFixed(1)),
+            totalOrders,
+            totalRevenue: Math.round(totalRevenue),
+            avgOrderValue: Math.round(avgOrderValue),
+            avgOrdersPerCustomer: parseFloat(avgOrdersPerCustomer.toFixed(1)),
+            avgOrderFrequency: parseFloat(avgOrderFrequency.toFixed(2)),
+            avgLTV: Math.round(avgLTV),
+        });
+    } catch (error) {
+        console.error('Get customer analytics error:', error);
+        res.status(500).json({ error: 'Failed to fetch customer analytics' });
+    }
+});
+
 // High-value customers (top N by LTV)
 router.get('/analytics/high-value', async (req, res) => {
     try {
