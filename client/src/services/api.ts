@@ -489,6 +489,10 @@ export const adminApi = {
         api.put(`/admin/users/${id}`, data),
     deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
     // Database inspector
+    getTables: () => api.get('/admin/inspect/tables'),
+    inspectTable: (tableName: string, limit?: number, offset?: number) =>
+        api.get(`/admin/inspect/table/${tableName}`, { params: { limit, offset } }),
+    // Legacy inspect endpoints (for backward compatibility)
     inspectOrders: (limit?: number, offset?: number) =>
         api.get('/admin/inspect/orders', { params: { limit, offset } }),
     inspectCustomers: (limit?: number, offset?: number) =>
@@ -505,6 +509,11 @@ export const adminApi = {
     getTierThresholds: () => api.get('/admin/tier-thresholds'),
     updateTierThresholds: (thresholds: { platinum: number; gold: number; silver: number }) =>
         api.put('/admin/tier-thresholds', thresholds),
+    // Server logs
+    getLogs: (params?: { level?: string; limit?: number; offset?: number; search?: string }) =>
+        api.get('/admin/logs', { params }),
+    getLogStats: () => api.get('/admin/logs/stats'),
+    clearLogs: () => api.delete('/admin/logs'),
 };
 
 // Tracking API (iThink Logistics integration)

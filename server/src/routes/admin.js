@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '../utils/validation.js';
 import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
+import logBuffer from '../utils/logBuffer.js';
 
 const router = Router();
 
@@ -617,6 +618,124 @@ router.get('/inspect/shopify-product-cache', authenticateToken, async (req, res)
     } catch (error) {
         console.error('Inspect Shopify Product Cache error:', error);
         res.status(500).json({ error: 'Failed to inspect Shopify product cache' });
+    }
+});
+
+// Get all table names from Prisma - for dynamic table selector
+router.get('/inspect/tables', authenticateToken, async (req, res) => {
+    try {
+        // Get all model names from Prisma client
+        // The _dmmf property contains the data model meta information
+        const modelNames = Object.keys(req.prisma).filter(key =>
+            !key.startsWith('_') &&
+            !key.startsWith('$') &&
+            typeof req.prisma[key] === 'object' &&
+            req.prisma[key]?.findMany
+        );
+
+        // Convert to display format with counts
+        const tablesWithCounts = await Promise.all(
+            modelNames.map(async (name) => {
+                try {
+                    const count = await req.prisma[name].count();
+                    return {
+                        name,
+                        displayName: name.replace(/([A-Z])/g, ' $1').trim(),
+                        count
+                    };
+                } catch {
+                    return { name, displayName: name.replace(/([A-Z])/g, ' $1').trim(), count: 0 };
+                }
+            })
+        );
+
+        // Sort by name
+        tablesWithCounts.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+        res.json({ tables: tablesWithCounts });
+    } catch (error) {
+        console.error('Get tables error:', error);
+        res.status(500).json({ error: 'Failed to get table list' });
+    }
+});
+
+// Generic table inspector - inspect any table
+router.get('/inspect/table/:tableName', authenticateToken, async (req, res) => {
+    try {
+        const { tableName } = req.params;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 5000);
+        const offset = parseInt(req.query.offset) || 0;
+
+        // Validate table exists in Prisma
+        if (!req.prisma[tableName] || typeof req.prisma[tableName].findMany !== 'function') {
+            return res.status(404).json({ error: `Table '${tableName}' not found` });
+        }
+
+        // Try to find a suitable orderBy field
+        let orderBy = { createdAt: 'desc' };
+
+        // Get the data
+        const [data, total] = await Promise.all([
+            req.prisma[tableName].findMany({
+                take: limit,
+                skip: offset,
+                orderBy
+            }).catch(() =>
+                // If createdAt doesn't exist, try without ordering
+                req.prisma[tableName].findMany({
+                    take: limit,
+                    skip: offset
+                })
+            ),
+            req.prisma[tableName].count()
+        ]);
+
+        res.json({ data, total, limit, offset, tableName });
+    } catch (error) {
+        console.error(`Inspect table ${req.params.tableName} error:`, error);
+        res.status(500).json({ error: `Failed to inspect table: ${error.message}` });
+    }
+});
+
+// ============================================
+// SERVER LOGS VIEWER
+// ============================================
+
+// Get server logs
+router.get('/logs', authenticateToken, (req, res) => {
+    try {
+        const level = req.query.level || 'all';
+        const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+        const offset = parseInt(req.query.offset) || 0;
+        const search = req.query.search || null;
+
+        const result = logBuffer.getLogs({ level, limit, offset, search });
+        res.json(result);
+    } catch (error) {
+        console.error('Get logs error:', error);
+        res.status(500).json({ error: 'Failed to get logs' });
+    }
+});
+
+// Get log statistics
+router.get('/logs/stats', authenticateToken, (req, res) => {
+    try {
+        const stats = logBuffer.getStats();
+        res.json(stats);
+    } catch (error) {
+        console.error('Get log stats error:', error);
+        res.status(500).json({ error: 'Failed to get log stats' });
+    }
+});
+
+// Clear logs (Admin only)
+router.delete('/logs', requireAdmin, (req, res) => {
+    try {
+        logBuffer.clearLogs();
+        res.json({ message: 'Logs cleared successfully' });
+    } catch (error) {
+        console.error('Clear logs error:', error);
+        res.status(500).json({ error: 'Failed to clear logs' });
     }
 });
 
