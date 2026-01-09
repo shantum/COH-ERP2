@@ -261,7 +261,7 @@ router.get('/filters', authenticateToken, async (req, res) => {
                 name: f.name,
                 colorName: f.colorName,
                 fabricTypeId: f.fabricTypeId,
-                displayName: `${f.name} - ${f.colorName}`,
+                displayName: f.name, // Fabric name already includes type + color
             })),
         });
     } catch (error) {
