@@ -2,6 +2,9 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Import logger EARLY to capture console.log/warn/error from all subsequent imports
+import logger from './utils/logger.js';
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -148,10 +151,66 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Error handling
+// Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  // Determine error type and status code
+  let statusCode = err.statusCode || err.status || 500;
+  let errorType = 'UnknownError';
+
+  // Categorize error types
+  if (err.name === 'PrismaClientKnownRequestError') {
+    errorType = 'DatabaseError';
+    // Map Prisma error codes to HTTP status codes
+    if (err.code === 'P2002') statusCode = 409; // Unique constraint violation
+    if (err.code === 'P2025') statusCode = 404; // Record not found
+  } else if (err.name === 'PrismaClientValidationError') {
+    errorType = 'ValidationError';
+    statusCode = 400;
+  } else if (err.name === 'ValidationError' || err.name === 'ZodError') {
+    errorType = 'ValidationError';
+    statusCode = 400;
+  } else if (err.name === 'UnauthorizedError' || err.name === 'JsonWebTokenError') {
+    errorType = 'AuthError';
+    statusCode = 401;
+  } else if (err.name === 'ForbiddenError') {
+    errorType = 'AuthError';
+    statusCode = 403;
+  }
+
+  // Build error context for logging
+  const errorContext = {
+    type: errorType,
+    name: err.name,
+    code: err.code,
+    method: req.method,
+    url: req.url,
+    statusCode,
+    userId: req.user?.id,
+    ip: req.ip || req.connection?.remoteAddress,
+  };
+
+  // Add Prisma-specific context
+  if (err.meta) {
+    errorContext.meta = err.meta;
+  }
+
+  // Log with stack trace
+  logger.error({
+    ...errorContext,
+    stack: err.stack,
+  }, `Request error: ${err.message}`);
+
+  // Send response (don't expose stack trace to client in production)
+  const response = {
+    error: err.message || 'Something went wrong!',
+    type: errorType,
+  };
+
+  if (process.env.NODE_ENV !== 'production') {
+    response.stack = err.stack;
+  }
+
+  res.status(statusCode).json(response);
 });
 
 const PORT = process.env.PORT || 3001;
@@ -187,11 +246,65 @@ app.listen(PORT, async () => {
   global.cacheCleanupInterval = cacheCleanupInterval;
 });
 
+// ============================================
+// GLOBAL ERROR HANDLERS
+// ============================================
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.fatal({
+    type: 'UncaughtException',
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+  }, `Uncaught exception: ${error.message}`);
+
+  // Give logger time to flush, then exit
+  setTimeout(() => {
+    process.exit(1);
+  }, 1000);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({
+    type: 'UnhandledRejection',
+    reason: reason instanceof Error ? {
+      name: reason.name,
+      message: reason.message,
+      stack: reason.stack,
+    } : reason,
+    promise: promise.toString(),
+  }, `Unhandled promise rejection: ${reason}`);
+});
+
+// Handle process warnings
+process.on('warning', (warning) => {
+  logger.warn({
+    type: 'ProcessWarning',
+    name: warning.name,
+    message: warning.message,
+    stack: warning.stack,
+  }, `Process warning: ${warning.message}`);
+});
+
 // Graceful shutdown
 process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down gracefully...');
   scheduledSync.stop();
   trackingSync.stop();
   if (global.cacheCleanupInterval) clearInterval(global.cacheCleanupInterval);
   await prisma.$disconnect();
+  logger.info('Server shut down complete');
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down gracefully...');
+  scheduledSync.stop();
+  trackingSync.stop();
+  if (global.cacheCleanupInterval) clearInterval(global.cacheCleanupInterval);
+  await prisma.$disconnect();
+  logger.info('Server shut down complete');
   process.exit(0);
 });

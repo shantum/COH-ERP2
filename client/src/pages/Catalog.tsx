@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Plus, Pencil } from 'lucide-react';
+import { Search, Plus, Pencil, ChevronDown, Package, AlertTriangle, XCircle, Layers } from 'lucide-react';
 import { catalogApi, productsApi } from '../services/api';
 import { FormModal, ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';

@@ -9,3 +9,4 @@ export { ImportExportTab } from './ImportExportTab';
 export { DatabaseTab } from './DatabaseTab';
 export { InspectorTab } from './InspectorTab';
 export { RemittanceTab } from './RemittanceTab';
+export { ServerLogsTab } from './ServerLogsTab';
