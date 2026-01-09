@@ -99,11 +99,23 @@ router.put('/:id', authenticateToken, async (req, res) => {
     try {
         const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, isActive } = req.body;
 
-        // Get current product to check if fabricTypeId is changing
+        // Get current product with variations to check if fabricTypeId is changing
         const currentProduct = await req.prisma.product.findUnique({
             where: { id: req.params.id },
-            select: { fabricTypeId: true },
+            select: {
+                fabricTypeId: true,
+                variations: {
+                    select: {
+                        id: true,
+                        fabric: {
+                            select: { colorName: true },
+                        },
+                    },
+                },
+            },
         });
+
+        const fabricTypeChanged = fabricTypeId && currentProduct?.fabricTypeId !== fabricTypeId;
 
         const product = await req.prisma.product.update({
             where: { id: req.params.id },
@@ -121,9 +133,32 @@ router.put('/:id', authenticateToken, async (req, res) => {
             include: { fabricType: true },
         });
 
-        // Note: We don't clear mismatched fabric colors when fabric type changes
-        // because fabricId is required. Users need to manually reassign colors
-        // if they change the fabric type to a different one.
+        // If fabric type changed at product level, cascade to all variations
+        // Find matching colors in the new fabric type and update variations
+        if (fabricTypeChanged && currentProduct?.variations?.length > 0) {
+            // Get all fabrics in the new fabric type
+            const newFabrics = await req.prisma.fabric.findMany({
+                where: { fabricTypeId },
+                select: { id: true, colorName: true },
+            });
+
+            // Create a map of colorName -> fabricId for quick lookup
+            const colorToFabricMap = new Map();
+            for (const fabric of newFabrics) {
+                colorToFabricMap.set(fabric.colorName.toLowerCase(), fabric.id);
+            }
+
+            // Update each variation if a matching color exists in the new fabric type
+            for (const variation of currentProduct.variations) {
+                const currentColorName = variation.fabric?.colorName?.toLowerCase();
+                if (currentColorName && colorToFabricMap.has(currentColorName)) {
+                    await req.prisma.variation.update({
+                        where: { id: variation.id },
+                        data: { fabricId: colorToFabricMap.get(currentColorName) },
+                    });
+                }
+            }
+        }
 
         res.json(product);
     } catch (error) {
@@ -183,23 +218,12 @@ router.put('/variations/:id', authenticateToken, async (req, res) => {
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
             data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, isActive },
-            include: { fabric: { include: { fabricType: true } }, product: true },
+            include: { fabric: { include: { fabricType: true } } },
         });
 
-        // If fabric was set, ensure product's fabricTypeId matches the fabric's fabricTypeId
-        // This keeps fabric type and fabric color in sync
-        if (fabricId && variation.fabric?.fabricTypeId) {
-            const productFabricTypeId = variation.product?.fabricTypeId;
-            const fabricFabricTypeId = variation.fabric.fabricTypeId;
-
-            // Update product's fabricTypeId if it's different or not set
-            if (productFabricTypeId !== fabricFabricTypeId) {
-                await req.prisma.product.update({
-                    where: { id: variation.productId },
-                    data: { fabricTypeId: fabricFabricTypeId },
-                });
-            }
-        }
+        // Note: We don't sync product's fabricTypeId with variation's fabric type
+        // because a single product can have variations with different fabric types
+        // (e.g., one color in Linen 40 Lea, another in Linen 60 Lea)
 
         res.json(variation);
     } catch (error) {
