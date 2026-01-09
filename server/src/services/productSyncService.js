@@ -425,7 +425,34 @@ export async function syncAllProducts(prisma, options = {}) {
     for (let i = 0; i < shopifyProducts.length; i++) {
         const shopifyProduct = shopifyProducts[i];
         try {
+            // Cache the product data first (for status lookup in catalog)
+            const shopifyProductId = String(shopifyProduct.id);
+            await prisma.shopifyProductCache.upsert({
+                where: { id: shopifyProductId },
+                update: {
+                    rawData: JSON.stringify(shopifyProduct),
+                    title: shopifyProduct.title,
+                    handle: shopifyProduct.handle,
+                    lastWebhookAt: new Date(),
+                    webhookTopic: 'manual_sync',
+                    processingError: null,
+                },
+                create: {
+                    id: shopifyProductId,
+                    rawData: JSON.stringify(shopifyProduct),
+                    title: shopifyProduct.title,
+                    handle: shopifyProduct.handle,
+                    webhookTopic: 'manual_sync',
+                },
+            });
+
             const productResult = await syncSingleProduct(prisma, shopifyProduct, defaultFabric.id);
+
+            // Mark as processed
+            await prisma.shopifyProductCache.update({
+                where: { id: shopifyProductId },
+                data: { processedAt: new Date() },
+            });
 
             // Aggregate results (simplified - counts all as products/variations/skus)
             if (productResult.created > 0) results.created.products++;

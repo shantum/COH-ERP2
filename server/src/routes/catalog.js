@@ -105,6 +105,26 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             excludeCustomSkus: true,
         });
 
+        // Batch fetch Shopify product cache for status lookup
+        const shopifyProductIds = [...new Set(
+            skus.map(sku => sku.variation.product.shopifyProductId).filter(Boolean)
+        )];
+        const shopifyStatusMap = new Map();
+        if (shopifyProductIds.length > 0) {
+            const shopifyCache = await req.prisma.shopifyProductCache.findMany({
+                where: { id: { in: shopifyProductIds } },
+                select: { id: true, rawData: true },
+            });
+            shopifyCache.forEach(cache => {
+                try {
+                    const data = JSON.parse(cache.rawData);
+                    shopifyStatusMap.set(cache.id, data.status || 'unknown');
+                } catch {
+                    shopifyStatusMap.set(cache.id, 'unknown');
+                }
+            });
+        }
+
         // Map to flat response structure
         let items = skus.map((sku) => {
             const balance = balanceMap.get(sku.id) || {
@@ -149,6 +169,12 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 fabricId: variation.fabricId || null,
                 // Fabric's fabric type (may differ from product's fabricType)
                 variationFabricTypeName: variation.fabric?.fabricType?.name || null,
+
+                // Shopify status
+                shopifyProductId: product.shopifyProductId || null,
+                shopifyStatus: product.shopifyProductId
+                    ? (shopifyStatusMap.get(product.shopifyProductId) || 'not_cached')
+                    : 'not_linked',
 
                 // Inventory
                 currentBalance: balance.currentBalance,

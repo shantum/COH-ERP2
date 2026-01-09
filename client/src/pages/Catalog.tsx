@@ -20,11 +20,12 @@ import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumn
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
 
 // View options for data grouping
-type ViewLevel = 'sku' | 'variation' | 'product';
+type ViewLevel = 'sku' | 'variation' | 'product' | 'consumption';
 const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
     { value: 'sku', label: 'By SKU' },
     { value: 'variation', label: 'By Color' },
     { value: 'product', label: 'By Product' },
+    { value: 'consumption', label: 'Fabric Consumption' },
 ];
 
 // Columns to hide for each view level
@@ -32,7 +33,11 @@ const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
     sku: [],
     variation: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'shopifyQty', 'targetStockQty'],
     product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'hasLining', 'fabricName', 'image', 'shopifyQty', 'targetStockQty'],
+    consumption: [], // Uses completely different columns
 };
+
+// Standard sizes for consumption matrix
+const CONSUMPTION_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
 // Aggregate SKU data by variation (product + color)
 function aggregateByVariation(items: any[]): any[] {
@@ -122,6 +127,46 @@ function aggregateByProduct(items: any[]): any[] {
         group.variationCount = variationCounts.get(productId)?.size || 0;
         group.status = group.availableBalance === 0 ? 'out_of_stock' :
                        group.availableBalance < 20 ? 'below_target' : 'ok';
+    }
+
+    return Array.from(groups.values());
+}
+
+// Aggregate SKU data by product for consumption matrix view
+// Creates one row per product with size columns showing fabric consumption
+function aggregateByConsumption(items: any[]): any[] {
+    const groups = new Map<string, any>();
+
+    for (const item of items) {
+        const key = item.productId;
+        if (!key) continue;
+
+        if (!groups.has(key)) {
+            groups.set(key, {
+                productId: item.productId,
+                productName: item.productName,
+                styleCode: item.styleCode,
+                category: item.category,
+                gender: item.gender,
+                // Initialize size columns
+                ...Object.fromEntries(CONSUMPTION_SIZES.map(size => [`consumption_${size}`, null])),
+                // Track SKU IDs for each size (for updates)
+                ...Object.fromEntries(CONSUMPTION_SIZES.map(size => [`skuIds_${size}`, []])),
+            });
+        }
+
+        const group = groups.get(key)!;
+        const sizeKey = `consumption_${item.size}`;
+        const skuIdsKey = `skuIds_${item.size}`;
+
+        // Set consumption value (should be same for all colors of same product+size)
+        if (group[sizeKey] === null && item.fabricConsumption != null) {
+            group[sizeKey] = item.fabricConsumption;
+        }
+        // Collect SKU IDs for this size
+        if (group[skuIdsKey]) {
+            group[skuIdsKey].push(item.skuId);
+        }
     }
 
     return Array.from(groups.values());
@@ -374,7 +419,7 @@ const ALL_COLUMN_IDS = [
     'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName', 'image',
     'skuCode', 'size', 'mrp', 'fabricConsumption',
-    'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'status',
+    'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
 ];
 
@@ -399,6 +444,7 @@ const DEFAULT_HEADERS: Record<string, string> = {
     availableBalance: 'Available',
     shopifyQty: 'Shopify',
     targetStockQty: 'Target',
+    shopifyStatus: 'Shop Status',
     status: 'Status',
     actions: '',
 };
@@ -690,6 +736,8 @@ export default function Catalog() {
                 return aggregateByVariation(items);
             case 'product':
                 return aggregateByProduct(items);
+            case 'consumption':
+                return aggregateByConsumption(items);
             default:
                 return items;
         }
@@ -933,6 +981,28 @@ export default function Catalog() {
             cellClass: 'text-right text-xs text-gray-500',
         },
         {
+            colId: 'shopifyStatus',
+            headerName: DEFAULT_HEADERS.shopifyStatus,
+            field: 'shopifyStatus',
+            width: 85,
+            cellRenderer: (params: ICellRendererParams) => {
+                const status = params.value;
+                if (!status || status === 'not_linked') return <span className="text-xs text-gray-300">-</span>;
+                const statusStyles: Record<string, string> = {
+                    active: 'bg-green-100 text-green-700',
+                    draft: 'bg-yellow-100 text-yellow-700',
+                    archived: 'bg-gray-200 text-gray-600',
+                    not_cached: 'bg-gray-100 text-gray-400',
+                    unknown: 'bg-gray-100 text-gray-400',
+                };
+                return (
+                    <span className={`text-xs px-1.5 py-0.5 rounded capitalize ${statusStyles[status] || statusStyles.unknown}`}>
+                        {status.replace('_', ' ')}
+                    </span>
+                );
+            },
+        },
+        {
             colId: 'status',
             headerName: DEFAULT_HEADERS.status,
             field: 'status',
@@ -978,8 +1048,103 @@ export default function Catalog() {
         },
     ], [viewLevel, filterOptions?.fabricTypes, filterOptions?.fabrics, catalogData?.items, handleUpdateFabricType, handleUpdateFabric]);
 
+    // Mutation for updating fabric consumption by SKU IDs
+    const updateConsumption = useMutation({
+        mutationFn: async ({ skuIds, fabricConsumption }: { skuIds: string[]; fabricConsumption: number }) => {
+            // Update each SKU's fabric consumption
+            const results = await Promise.all(
+                skuIds.map(skuId =>
+                    productsApi.updateSku(skuId, { fabricConsumption })
+                )
+            );
+            return results;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalogSkuInventory'] });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update fabric consumption');
+        },
+    });
+
+    // Handle consumption cell value change (called by AG-Grid)
+    const handleConsumptionChange = useCallback((params: any) => {
+        const { data, colDef, newValue } = params;
+        const size = colDef.field?.replace('consumption_', '');
+        if (!size) return;
+
+        const skuIds = data[`skuIds_${size}`] || [];
+        const newConsumption = parseFloat(newValue);
+
+        if (!isNaN(newConsumption) && newConsumption > 0 && skuIds.length > 0) {
+            updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
+        }
+    }, [updateConsumption]);
+
+    // Column definitions for consumption matrix view
+    const consumptionColumnDefs: ColDef[] = useMemo(() => [
+        {
+            colId: 'productName',
+            headerName: 'Product',
+            field: 'productName',
+            width: 200,
+            pinned: 'left' as const,
+            cellClass: 'font-medium',
+        },
+        {
+            colId: 'styleCode',
+            headerName: 'Style',
+            field: 'styleCode',
+            width: 80,
+            cellClass: 'text-xs text-gray-500 font-mono',
+        },
+        {
+            colId: 'category',
+            headerName: 'Category',
+            field: 'category',
+            width: 90,
+            cellClass: 'capitalize',
+        },
+        // Size columns with editable consumption values
+        ...CONSUMPTION_SIZES.map(size => ({
+            colId: `consumption_${size}`,
+            headerName: size,
+            field: `consumption_${size}`,
+            width: 65,
+            editable: (params: any) => {
+                // Only editable if there are SKUs for this size
+                const skuIds = params.data?.[`skuIds_${size}`] || [];
+                return skuIds.length > 0;
+            },
+            cellClass: (params: any) => {
+                const skuIds = params.data?.[`skuIds_${size}`] || [];
+                if (skuIds.length === 0) return 'text-center text-gray-300';
+                return 'text-right text-xs cursor-pointer hover:bg-blue-50';
+            },
+            valueFormatter: (params: ValueFormatterParams) => {
+                const skuIds = params.data?.[`skuIds_${params.colDef.field?.replace('consumption_', '')}`] || [];
+                if (skuIds.length === 0) return '-';
+                return params.value != null ? Number(params.value).toFixed(2) : '1.50';
+            },
+            valueParser: (params: any) => {
+                const val = parseFloat(params.newValue);
+                return isNaN(val) ? params.oldValue : val;
+            },
+            cellStyle: (params: any) => {
+                const skuIds = params.data?.[`skuIds_${size}`] || [];
+                if (skuIds.length === 0) return { backgroundColor: '#f9fafb' };
+                return { backgroundColor: '#f0f9ff' }; // Light blue for editable
+            },
+        })),
+    ], []);
+
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
+        // Use consumption-specific columns for consumption view
+        if (viewLevel === 'consumption') {
+            return consumptionColumnDefs;
+        }
+
         // First apply user's column visibility preferences
         const withVisibility = applyColumnVisibility(columnDefs, visibleColumns);
         // Then hide columns based on view level
@@ -991,12 +1156,14 @@ export default function Catalog() {
         // Apply saved column widths
         const withWidths = applyColumnWidths(withViewVisibility, columnWidths);
         return orderColumns(withWidths, columnOrder);
-    }, [columnDefs, visibleColumns, columnOrder, columnWidths, viewLevel]);
+    }, [columnDefs, consumptionColumnDefs, visibleColumns, columnOrder, columnWidths, viewLevel]);
 
     // Summary stats based on view level
     const stats = useMemo(() => {
         const items = displayData;
-        const label = viewLevel === 'product' ? 'Products' : viewLevel === 'variation' ? 'Colors' : 'SKUs';
+        const label = viewLevel === 'product' ? 'Products' :
+                      viewLevel === 'variation' ? 'Colors' :
+                      viewLevel === 'consumption' ? 'Products' : 'SKUs';
         return {
             total: items.length,
             label,
@@ -1208,13 +1375,17 @@ export default function Catalog() {
                             suppressMovable: false,
                         }}
                         animateRows={false}
-                        suppressCellFocus={true}
+                        suppressCellFocus={viewLevel !== 'consumption'}
+                        singleClickEdit={true}
+                        stopEditingWhenCellsLoseFocus={true}
                         getRowId={(params) => {
                             // Use appropriate ID based on view level
-                            if (viewLevel === 'product') return params.data.productId;
+                            if (viewLevel === 'product' || viewLevel === 'consumption') return params.data.productId;
                             if (viewLevel === 'variation') return params.data.variationId;
                             return params.data.skuId;
                         }}
+                        // Handle consumption cell edits
+                        onCellValueChanged={viewLevel === 'consumption' ? handleConsumptionChange : undefined}
                         // Pagination
                         pagination={true}
                         paginationPageSize={pageSize === 0 ? 999999 : pageSize}
