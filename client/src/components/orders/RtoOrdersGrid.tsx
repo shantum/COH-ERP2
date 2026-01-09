@@ -205,12 +205,14 @@ export function RtoOrdersGrid({
     }, []);
 
     const handleColumnResized = useCallback((event: any) => {
-        if (event.finished && event.column) {
-            const colId = event.column.getColId();
-            const width = event.column.getActualWidth();
-            if (colId && width) {
-                setColumnWidths(prev => ({ ...prev, [colId]: width }));
-            }
+        if (event.finished && event.columns?.length) {
+            event.columns.forEach((col: any) => {
+                const colId = col.getColId();
+                const width = col.getActualWidth();
+                if (colId && width) {
+                    setColumnWidths(prev => ({ ...prev, [colId]: width }));
+                }
+            });
         }
     }, []);
 

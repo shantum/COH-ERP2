@@ -669,13 +669,15 @@ export default function Catalog() {
 
     // Handle column resize - save width when user finishes resizing
     const onColumnResized = (event: any) => {
-        // Only save on drag end to avoid excessive updates
-        if (event.finished && event.column) {
-            const colId = event.column.getColId();
-            const width = event.column.getActualWidth();
-            if (colId && width) {
-                handleColumnResized(colId, width);
-            }
+        // Only save when resize is complete (finished=true) and it's a user resize
+        if (event.finished && event.columns?.length) {
+            event.columns.forEach((col: any) => {
+                const colId = col.getColId();
+                const width = col.getActualWidth();
+                if (colId && width) {
+                    handleColumnResized(colId, width);
+                }
+            });
         }
     };
 

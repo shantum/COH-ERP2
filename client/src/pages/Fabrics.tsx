@@ -259,12 +259,14 @@ export default function Fabrics() {
 
     // Handle column resize - save width when user finishes resizing
     const onColumnResized = (event: any) => {
-        if (event.finished && event.column) {
-            const colId = event.column.getColId();
-            const width = event.column.getActualWidth();
-            if (colId && width) {
-                handleColumnResized(colId, width);
-            }
+        if (event.finished && event.columns?.length) {
+            event.columns.forEach((col: any) => {
+                const colId = col.getColId();
+                const width = col.getActualWidth();
+                if (colId && width) {
+                    handleColumnResized(colId, width);
+                }
+            });
         }
     };
 

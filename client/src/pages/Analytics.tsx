@@ -49,16 +49,18 @@ export default function Analytics() {
     });
 
     const handleColumnResized = useCallback((event: any) => {
-        if (event.finished && event.column) {
-            const colId = event.column.getColId();
-            const width = event.column.getActualWidth();
-            if (colId && width) {
-                setColumnWidths(prev => {
-                    const updated = { ...prev, [colId]: width };
-                    localStorage.setItem('analyticsGridColumnWidths', JSON.stringify(updated));
-                    return updated;
-                });
-            }
+        if (event.finished && event.columns?.length) {
+            event.columns.forEach((col: any) => {
+                const colId = col.getColId();
+                const width = col.getActualWidth();
+                if (colId && width) {
+                    setColumnWidths(prev => {
+                        const updated = { ...prev, [colId]: width };
+                        localStorage.setItem('analyticsGridColumnWidths', JSON.stringify(updated));
+                        return updated;
+                    });
+                }
+            });
         }
     }, []);
 
