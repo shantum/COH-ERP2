@@ -132,9 +132,8 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 colorName: variation.colorName,
                 hasLining: variation.hasLining || false,
                 // Full fabric name: "Fabric Type - Color" (e.g., "Linen 60 Lea - Blue")
-                // Skip "Default" fabric type and use fabric name instead
                 fabricName: variation.fabric
-                    ? `${(variation.fabric.fabricType?.name && variation.fabric.fabricType.name !== 'Default') ? variation.fabric.fabricType.name : variation.fabric.name} - ${variation.fabric.colorName}`
+                    ? `${variation.fabric.fabricType?.name || 'Unknown'} - ${variation.fabric.colorName}`
                     : null,
                 imageUrl: variation.imageUrl || product.imageUrl || null,
 
@@ -148,10 +147,8 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 fabricTypeId: product.fabricTypeId || null,
                 fabricTypeName: product.fabricType?.name || null,
                 fabricId: variation.fabricId || null,
-                // Fabric's fabric type - use fabricType name, fallback to fabric name (which contains type)
-                variationFabricTypeName: variation.fabric?.fabricType?.name && variation.fabric.fabricType.name !== 'Default'
-                    ? variation.fabric.fabricType.name
-                    : (variation.fabric?.name || null),
+                // Fabric's fabric type (may differ from product's fabricType)
+                variationFabricTypeName: variation.fabric?.fabricType?.name || null,
 
                 // Inventory
                 currentBalance: balance.currentBalance,
