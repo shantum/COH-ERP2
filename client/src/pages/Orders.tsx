@@ -853,7 +853,7 @@ export default function Orders() {
                 {/* Archived Orders Grid */}
                 {!isLoading && tab === 'archived' && (
                 <div className="p-4 space-y-4">
-                    {/* Period and limit selectors */}
+                    {/* Period selector */}
                     <div className="flex items-center gap-4">
                         <label className="text-sm text-gray-600">Period:</label>
                         <select
@@ -867,7 +867,7 @@ export default function Orders() {
                             <option value={365}>Last year</option>
                             <option value={0}>All time</option>
                         </select>
-                        <label className="text-sm text-gray-600">Show:</label>
+                        <label className="text-sm text-gray-600">Load:</label>
                         <select
                             value={archivedLimit}
                             onChange={(e) => setArchivedLimit(Number(e.target.value))}
@@ -878,12 +878,10 @@ export default function Orders() {
                             <option value={1000}>1,000 orders</option>
                             <option value={2500}>2,500 orders</option>
                         </select>
-                        <span className="text-sm text-gray-500">
-                            Showing {archivedOrders.length.toLocaleString()} of {archivedTotalCount.toLocaleString()} orders
-                        </span>
                     </div>
                     <ArchivedOrdersGrid
                         orders={archivedOrders}
+                        totalCount={archivedTotalCount}
                         onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
                         onViewOrder={(order) => setViewingOrderId(order.id)}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
@@ -891,6 +889,8 @@ export default function Orders() {
                         shopDomain={shopifyConfig?.shopDomain}
                         sortBy={archivedSortBy}
                         onSortChange={setArchivedSortBy}
+                        pageSize={archivedLimit}
+                        onPageSizeChange={setArchivedLimit}
                     />
                 </div>
                 )}

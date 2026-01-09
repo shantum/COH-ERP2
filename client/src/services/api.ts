@@ -87,14 +87,15 @@ export const productsApi = {
 // Fabrics
 export const fabricsApi = {
     getAll: (params?: Record<string, string>) => api.get('/fabrics', { params }),
-    getFlat: (params?: { search?: string; status?: string; fabricTypeId?: string }) => api.get('/fabrics/flat', { params }),
+    getFlat: (params?: { search?: string; status?: string; fabricTypeId?: string; view?: string }) => api.get('/fabrics/flat', { params }),
     getFilters: () => api.get('/fabrics/filters'),
     getById: (id: string) => api.get(`/fabrics/${id}`),
     create: (data: CreateFabricData) => api.post('/fabrics', data),
-    update: (id: string, data: Partial<CreateFabricData>) => api.put(`/fabrics/${id}`, data),
+    update: (id: string, data: Partial<CreateFabricData> & { inheritCost?: boolean; inheritLeadTime?: boolean; inheritMinOrder?: boolean }) => api.put(`/fabrics/${id}`, data),
     delete: (id: string) => api.delete(`/fabrics/${id}`),
     getTypes: () => api.get('/fabrics/types'),
     createType: (data: CreateFabricTypeData) => api.post('/fabrics/types', data),
+    updateType: (id: string, data: Partial<CreateFabricTypeData> & { defaultCostPerUnit?: number | null; defaultLeadTimeDays?: number | null; defaultMinOrderQty?: number | null }) => api.put(`/fabrics/types/${id}`, data),
     getSuppliers: () => api.get('/fabrics/suppliers/all'),
     createSupplier: (data: CreateSupplierData) => api.post('/fabrics/suppliers', data),
     getStockAnalysis: () => api.get('/fabrics/dashboard/stock-analysis'),

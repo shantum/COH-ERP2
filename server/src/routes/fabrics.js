@@ -32,16 +32,55 @@ router.get('/types', authenticateToken, async (req, res) => {
 // Create fabric type
 router.post('/types', authenticateToken, async (req, res) => {
     try {
-        const { name, composition, unit, avgShrinkagePct } = req.body;
+        const { name, composition, unit, avgShrinkagePct, defaultCostPerUnit, defaultLeadTimeDays, defaultMinOrderQty } = req.body;
 
         const fabricType = await req.prisma.fabricType.create({
-            data: { name, composition, unit, avgShrinkagePct: avgShrinkagePct || 0 },
+            data: {
+                name,
+                composition,
+                unit,
+                avgShrinkagePct: avgShrinkagePct || 0,
+                defaultCostPerUnit: defaultCostPerUnit || null,
+                defaultLeadTimeDays: defaultLeadTimeDays || null,
+                defaultMinOrderQty: defaultMinOrderQty || null,
+            },
         });
 
         res.status(201).json(fabricType);
     } catch (error) {
         console.error('Create fabric type error:', error);
         res.status(500).json({ error: 'Failed to create fabric type' });
+    }
+});
+
+// Update fabric type
+router.put('/types/:id', authenticateToken, async (req, res) => {
+    try {
+        const { name, composition, unit, avgShrinkagePct, defaultCostPerUnit, defaultLeadTimeDays, defaultMinOrderQty } = req.body;
+
+        // Don't allow renaming the Default fabric type
+        const existing = await req.prisma.fabricType.findUnique({ where: { id: req.params.id } });
+        if (existing?.name === 'Default' && name && name !== 'Default') {
+            return res.status(400).json({ error: 'Cannot rename the Default fabric type' });
+        }
+
+        const fabricType = await req.prisma.fabricType.update({
+            where: { id: req.params.id },
+            data: {
+                name,
+                composition,
+                unit,
+                avgShrinkagePct,
+                defaultCostPerUnit,
+                defaultLeadTimeDays,
+                defaultMinOrderQty,
+            },
+        });
+
+        res.json(fabricType);
+    } catch (error) {
+        console.error('Update fabric type error:', error);
+        res.status(500).json({ error: 'Failed to update fabric type' });
     }
 });
 
@@ -52,9 +91,44 @@ router.post('/types', authenticateToken, async (req, res) => {
 // Get all fabrics in flat format (for AG-Grid table)
 router.get('/flat', authenticateToken, async (req, res) => {
     try {
-        const { search, status, fabricTypeId } = req.query;
+        const { search, status, fabricTypeId, view } = req.query;
 
-        // Build where clause
+        // If viewing by type, return fabric types with aggregated data
+        if (view === 'type') {
+            const types = await req.prisma.fabricType.findMany({
+                where: search ? { name: { contains: search, mode: 'insensitive' } } : {},
+                include: {
+                    fabrics: { where: { isActive: true } },
+                },
+                orderBy: { name: 'asc' },
+            });
+
+            const items = types
+                .filter(t => t.name !== 'Default')
+                .map(type => ({
+                    // Type identifiers
+                    fabricTypeId: type.id,
+                    fabricTypeName: type.name,
+                    composition: type.composition,
+                    unit: type.unit,
+                    avgShrinkagePct: type.avgShrinkagePct,
+
+                    // Default values (editable at type level)
+                    defaultCostPerUnit: type.defaultCostPerUnit,
+                    defaultLeadTimeDays: type.defaultLeadTimeDays,
+                    defaultMinOrderQty: type.defaultMinOrderQty,
+
+                    // Aggregated info
+                    colorCount: type.fabrics.length,
+
+                    // Flag to identify type-level rows
+                    isTypeRow: true,
+                }));
+
+            return res.json({ items, summary: { total: items.length } });
+        }
+
+        // Build where clause for color view
         const where = { isActive: true };
         if (fabricTypeId) where.fabricTypeId = fabricTypeId;
         if (search) {
@@ -83,22 +157,27 @@ router.get('/flat', authenticateToken, async (req, res) => {
                 const balance = await calculateFabricBalance(req.prisma, fabric.id);
                 const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
 
+                // Calculate effective values (inherit from type if null)
+                const effectiveCost = fabric.costPerUnit ?? fabric.fabricType.defaultCostPerUnit ?? 0;
+                const effectiveLeadTime = fabric.leadTimeDays ?? fabric.fabricType.defaultLeadTimeDays ?? 14;
+                const effectiveMinOrder = fabric.minOrderQty ?? fabric.fabricType.defaultMinOrderQty ?? 10;
+
                 const daysOfStock = avgDailyConsumption > 0
                     ? balance.currentBalance / avgDailyConsumption
                     : null;
 
-                const reorderPoint = avgDailyConsumption * (fabric.leadTimeDays + 7);
+                const reorderPoint = avgDailyConsumption * (effectiveLeadTime + 7);
 
                 let stockStatus = 'OK';
                 if (balance.currentBalance <= reorderPoint) {
                     stockStatus = 'ORDER NOW';
-                } else if (balance.currentBalance <= avgDailyConsumption * (fabric.leadTimeDays + 14)) {
+                } else if (balance.currentBalance <= avgDailyConsumption * (effectiveLeadTime + 14)) {
                     stockStatus = 'ORDER SOON';
                 }
 
                 const suggestedOrderQty = Math.max(
-                    Number(fabric.minOrderQty),
-                    Math.ceil((avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * fabric.leadTimeDays))
+                    Number(effectiveMinOrder),
+                    Math.ceil((avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * effectiveLeadTime))
                 );
 
                 return {
@@ -119,10 +198,25 @@ router.get('/flat', authenticateToken, async (req, res) => {
                     supplierId: fabric.supplier?.id || null,
                     supplierName: fabric.supplier?.name || null,
 
-                    // Pricing & Lead time
+                    // Pricing & Lead time - raw values (null = inherited)
                     costPerUnit: fabric.costPerUnit,
                     leadTimeDays: fabric.leadTimeDays,
                     minOrderQty: fabric.minOrderQty,
+
+                    // Effective values (with inheritance applied)
+                    effectiveCostPerUnit: effectiveCost,
+                    effectiveLeadTimeDays: effectiveLeadTime,
+                    effectiveMinOrderQty: effectiveMinOrder,
+
+                    // Inheritance flags
+                    costInherited: fabric.costPerUnit === null,
+                    leadTimeInherited: fabric.leadTimeDays === null,
+                    minOrderInherited: fabric.minOrderQty === null,
+
+                    // Type defaults (for UI reference)
+                    typeCostPerUnit: fabric.fabricType.defaultCostPerUnit,
+                    typeLeadTimeDays: fabric.fabricType.defaultLeadTimeDays,
+                    typeMinOrderQty: fabric.fabricType.defaultMinOrderQty,
 
                     // Stock info
                     currentBalance: Number(balance.currentBalance.toFixed(2)),
@@ -133,6 +227,9 @@ router.get('/flat', authenticateToken, async (req, res) => {
                     reorderPoint: Number(reorderPoint.toFixed(2)),
                     stockStatus,
                     suggestedOrderQty: suggestedOrderQty > 0 ? suggestedOrderQty : 0,
+
+                    // Flag to identify color-level rows
+                    isTypeRow: false,
                 };
             })
         );
@@ -258,6 +355,8 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Cannot add colors to the Default fabric type' });
         }
 
+        // Create fabric with null for inherited values (will inherit from fabric type)
+        // If values are explicitly provided, use them; otherwise use null for inheritance
         const fabric = await req.prisma.fabric.create({
             data: {
                 fabricTypeId,
@@ -265,10 +364,11 @@ router.post('/', authenticateToken, async (req, res) => {
                 colorName,
                 standardColor: standardColor || null,
                 colorHex,
-                costPerUnit,
-                supplierId,
-                leadTimeDays: leadTimeDays || 14,
-                minOrderQty: minOrderQty || 10,
+                // Use null for inheritance if not explicitly provided
+                costPerUnit: costPerUnit !== undefined && costPerUnit !== '' ? costPerUnit : null,
+                supplierId: supplierId || null,
+                leadTimeDays: leadTimeDays !== undefined && leadTimeDays !== '' ? leadTimeDays : null,
+                minOrderQty: minOrderQty !== undefined && minOrderQty !== '' ? minOrderQty : null,
             },
             include: {
                 fabricType: true,
@@ -286,11 +386,42 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update fabric
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive } = req.body;
+        const { name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive, inheritCost, inheritLeadTime, inheritMinOrder } = req.body;
+
+        // Build update data - allow setting to null for inheritance
+        const updateData = {
+            name,
+            colorName,
+            standardColor: standardColor || null,
+            colorHex,
+            supplierId: supplierId || null,
+            isActive,
+        };
+
+        // Handle cost inheritance: if inheritCost is true or costPerUnit is empty string, set to null
+        if (inheritCost === true || costPerUnit === '' || costPerUnit === null) {
+            updateData.costPerUnit = null;
+        } else if (costPerUnit !== undefined) {
+            updateData.costPerUnit = costPerUnit;
+        }
+
+        // Handle lead time inheritance
+        if (inheritLeadTime === true || leadTimeDays === '' || leadTimeDays === null) {
+            updateData.leadTimeDays = null;
+        } else if (leadTimeDays !== undefined) {
+            updateData.leadTimeDays = leadTimeDays;
+        }
+
+        // Handle min order inheritance
+        if (inheritMinOrder === true || minOrderQty === '' || minOrderQty === null) {
+            updateData.minOrderQty = null;
+        } else if (minOrderQty !== undefined) {
+            updateData.minOrderQty = minOrderQty;
+        }
 
         const fabric = await req.prisma.fabric.update({
             where: { id: req.params.id },
-            data: { name, colorName, standardColor: standardColor || null, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive },
+            data: updateData,
             include: {
                 fabricType: true,
                 supplier: true,

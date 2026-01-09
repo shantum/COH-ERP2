@@ -95,6 +95,10 @@ export default function Fabrics() {
     const [filter, setFilter] = useState({ fabricTypeId: '', status: '' });
     const [searchInput, setSearchInput] = useState('');
 
+    // View level state (color = individual fabric colors, type = fabric types aggregated)
+    type ViewLevel = 'color' | 'type';
+    const [viewLevel, setViewLevel] = useState<ViewLevel>('color');
+
     // Modal states
     const [showAddType, setShowAddType] = useState(false);
     const [showAddColor, setShowAddColor] = useState<string | null>(null);
@@ -102,13 +106,15 @@ export default function Fabrics() {
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [showDetail, setShowDetail] = useState<any>(null);
     const [showEditFabric, setShowEditFabric] = useState<any>(null);
+    const [showEditType, setShowEditType] = useState<any>(null);
 
     // Form states
-    const [typeForm, setTypeForm] = useState({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0 });
-    const [colorForm, setColorForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
+    const [typeForm, setTypeForm] = useState({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0, defaultCostPerUnit: '' as string | number, defaultLeadTimeDays: '' as string | number, defaultMinOrderQty: '' as string | number });
+    const [colorForm, setColorForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: '' as string | number, supplierId: '', leadTimeDays: '' as string | number, minOrderQty: '' as string | number });
     const [inwardForm, setInwardForm] = useState({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
     const [supplierForm, setSupplierForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
-    const [editForm, setEditForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 0, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
+    const [editForm, setEditForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: '' as string | number, supplierId: '', leadTimeDays: '' as string | number, minOrderQty: '' as string | number });
+    const [editTypeForm, setEditTypeForm] = useState({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0, defaultCostPerUnit: '' as string | number, defaultLeadTimeDays: '' as string | number, defaultMinOrderQty: '' as string | number });
 
     // Apply quick filter when search input changes
     useEffect(() => {
@@ -118,12 +124,13 @@ export default function Fabrics() {
         return () => clearTimeout(timer);
     }, [searchInput]);
 
-    // Fetch flat fabric data
+    // Fetch flat fabric data (switches between color and type views)
     const { data: fabricData, isLoading } = useQuery({
-        queryKey: ['fabricsFlat', filter.fabricTypeId, filter.status],
+        queryKey: ['fabricsFlat', filter.fabricTypeId, filter.status, viewLevel],
         queryFn: () => fabricsApi.getFlat({
             fabricTypeId: filter.fabricTypeId || undefined,
             status: filter.status || undefined,
+            view: viewLevel,
         }).then(r => r.data),
     });
 
@@ -155,9 +162,19 @@ export default function Fabrics() {
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddType(false);
-            setTypeForm({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0 });
+            setTypeForm({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0, defaultCostPerUnit: '', defaultLeadTimeDays: '', defaultMinOrderQty: '' });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric type'),
+    });
+
+    const updateType = useMutation({
+        mutationFn: ({ id, data }: { id: string; data: any }) => fabricsApi.updateType(id, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
+            setShowEditType(null);
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update fabric type'),
     });
 
     const createFabric = useMutation({
@@ -166,7 +183,7 @@ export default function Fabrics() {
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddColor(null);
-            setColorForm({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
+            setColorForm({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: '', supplierId: '', leadTimeDays: '', minOrderQty: '' });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric'),
     });
@@ -240,7 +257,45 @@ export default function Fabrics() {
 
     const handleSubmitType = (e: React.FormEvent) => {
         e.preventDefault();
-        createType.mutate(typeForm);
+        createType.mutate({
+            name: typeForm.name,
+            composition: typeForm.composition,
+            unit: typeForm.unit,
+            avgShrinkagePct: typeForm.avgShrinkagePct,
+            defaultCostPerUnit: typeForm.defaultCostPerUnit !== '' ? Number(typeForm.defaultCostPerUnit) : null,
+            defaultLeadTimeDays: typeForm.defaultLeadTimeDays !== '' ? Number(typeForm.defaultLeadTimeDays) : null,
+            defaultMinOrderQty: typeForm.defaultMinOrderQty !== '' ? Number(typeForm.defaultMinOrderQty) : null,
+        });
+    };
+
+    const handleOpenEditType = (row: any) => {
+        setEditTypeForm({
+            name: row.fabricTypeName || '',
+            composition: row.composition || '',
+            unit: row.unit || 'meter',
+            avgShrinkagePct: row.avgShrinkagePct || 0,
+            defaultCostPerUnit: row.defaultCostPerUnit ?? '',
+            defaultLeadTimeDays: row.defaultLeadTimeDays ?? '',
+            defaultMinOrderQty: row.defaultMinOrderQty ?? '',
+        });
+        setShowEditType(row);
+    };
+
+    const handleSubmitEditType = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!showEditType) return;
+        updateType.mutate({
+            id: showEditType.fabricTypeId,
+            data: {
+                name: editTypeForm.name,
+                composition: editTypeForm.composition,
+                unit: editTypeForm.unit,
+                avgShrinkagePct: editTypeForm.avgShrinkagePct,
+                defaultCostPerUnit: editTypeForm.defaultCostPerUnit !== '' ? Number(editTypeForm.defaultCostPerUnit) : null,
+                defaultLeadTimeDays: editTypeForm.defaultLeadTimeDays !== '' ? Number(editTypeForm.defaultLeadTimeDays) : null,
+                defaultMinOrderQty: editTypeForm.defaultMinOrderQty !== '' ? Number(editTypeForm.defaultMinOrderQty) : null,
+            },
+        });
     };
 
     const handleSubmitColor = (e: React.FormEvent) => {
@@ -283,14 +338,15 @@ export default function Fabrics() {
     };
 
     const handleOpenEdit = (row: any) => {
+        // Use raw values from row - null/undefined means inherit from type
         setEditForm({
             colorName: row.colorName || '',
             standardColor: row.standardColor || '',
             colorHex: row.colorHex || '#6B8E9F',
-            costPerUnit: row.costPerUnit || 0,
+            costPerUnit: row.costPerUnit ?? '',  // Empty string = inherit
             supplierId: row.supplierId || '',
-            leadTimeDays: row.leadTimeDays || 14,
-            minOrderQty: row.minOrderQty || 20,
+            leadTimeDays: row.leadTimeDays ?? '',  // Empty string = inherit
+            minOrderQty: row.minOrderQty ?? '',  // Empty string = inherit
         });
         setShowEditFabric(row);
     };
@@ -304,10 +360,11 @@ export default function Fabrics() {
                 colorName: editForm.colorName,
                 standardColor: editForm.standardColor || null,
                 colorHex: editForm.colorHex,
-                costPerUnit: editForm.costPerUnit,
+                // Empty string = inherit from type (sends null to backend)
+                costPerUnit: editForm.costPerUnit === '' ? null : editForm.costPerUnit,
                 supplierId: editForm.supplierId || null,
-                leadTimeDays: editForm.leadTimeDays,
-                minOrderQty: editForm.minOrderQty,
+                leadTimeDays: editForm.leadTimeDays === '' ? null : editForm.leadTimeDays,
+                minOrderQty: editForm.minOrderQty === '' ? null : editForm.minOrderQty,
             },
         });
     };
@@ -365,25 +422,50 @@ export default function Fabrics() {
         {
             colId: 'costPerUnit',
             headerName: DEFAULT_HEADERS.costPerUnit,
-            field: 'costPerUnit',
-            width: 80,
-            valueFormatter: (params: ValueFormatterParams) =>
-                params.value != null ? `₹${params.value}` : '-',
-            cellClass: 'text-right',
+            field: 'effectiveCostPerUnit',
+            width: 95,
+            cellRenderer: (params: ICellRendererParams) => {
+                const { effectiveCostPerUnit, costInherited } = params.data || {};
+                if (effectiveCostPerUnit == null) return '-';
+                return (
+                    <div className="flex items-center justify-end gap-1">
+                        <span>₹{effectiveCostPerUnit}</span>
+                        {costInherited && <span className="text-gray-400 text-[10px]" title="Inherited from type">↑</span>}
+                    </div>
+                );
+            },
         },
         {
             colId: 'leadTimeDays',
             headerName: DEFAULT_HEADERS.leadTimeDays,
-            field: 'leadTimeDays',
-            width: 80,
-            cellClass: 'text-right text-xs',
+            field: 'effectiveLeadTimeDays',
+            width: 95,
+            cellRenderer: (params: ICellRendererParams) => {
+                const { effectiveLeadTimeDays, leadTimeInherited } = params.data || {};
+                if (effectiveLeadTimeDays == null) return '-';
+                return (
+                    <div className="flex items-center justify-end gap-1 text-xs">
+                        <span>{effectiveLeadTimeDays}</span>
+                        {leadTimeInherited && <span className="text-gray-400 text-[10px]" title="Inherited from type">↑</span>}
+                    </div>
+                );
+            },
         },
         {
             colId: 'minOrderQty',
             headerName: DEFAULT_HEADERS.minOrderQty,
-            field: 'minOrderQty',
-            width: 80,
-            cellClass: 'text-right text-xs',
+            field: 'effectiveMinOrderQty',
+            width: 95,
+            cellRenderer: (params: ICellRendererParams) => {
+                const { effectiveMinOrderQty, minOrderInherited } = params.data || {};
+                if (effectiveMinOrderQty == null) return '-';
+                return (
+                    <div className="flex items-center justify-end gap-1 text-xs">
+                        <span>{effectiveMinOrderQty}</span>
+                        {minOrderInherited && <span className="text-gray-400 text-[10px]" title="Inherited from type">↑</span>}
+                    </div>
+                );
+            },
         },
         {
             colId: 'currentBalance',
@@ -526,11 +608,104 @@ export default function Fabrics() {
         },
     ], [isAdmin, deleteFabric, handleOpenEdit]);
 
+    // Type view columns (for viewing/editing fabric types)
+    const typeColumnDefs: ColDef[] = useMemo(() => [
+        {
+            colId: 'fabricTypeName',
+            headerName: 'Fabric Type',
+            field: 'fabricTypeName',
+            width: 150,
+            pinned: 'left' as const,
+            cellClass: 'font-medium',
+        },
+        {
+            colId: 'composition',
+            headerName: 'Composition',
+            field: 'composition',
+            width: 150,
+            cellClass: 'text-xs text-gray-600',
+        },
+        {
+            colId: 'unit',
+            headerName: 'Unit',
+            field: 'unit',
+            width: 80,
+            cellClass: 'text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value === 'kg' ? 'Kilogram' : 'Meter',
+        },
+        {
+            colId: 'avgShrinkagePct',
+            headerName: 'Shrinkage %',
+            field: 'avgShrinkagePct',
+            width: 100,
+            cellClass: 'text-right text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `${params.value}%` : '-',
+        },
+        {
+            colId: 'defaultCostPerUnit',
+            headerName: 'Default Cost',
+            field: 'defaultCostPerUnit',
+            width: 100,
+            cellClass: 'text-right',
+            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `₹${params.value}` : '-',
+        },
+        {
+            colId: 'defaultLeadTimeDays',
+            headerName: 'Default Lead',
+            field: 'defaultLeadTimeDays',
+            width: 100,
+            cellClass: 'text-right text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `${params.value} days` : '-',
+        },
+        {
+            colId: 'defaultMinOrderQty',
+            headerName: 'Default Min',
+            field: 'defaultMinOrderQty',
+            width: 100,
+            cellClass: 'text-right text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value != null ? params.value.toString() : '-',
+        },
+        {
+            colId: 'colorCount',
+            headerName: 'Colors',
+            field: 'colorCount',
+            width: 80,
+            cellClass: 'text-right text-xs',
+        },
+        {
+            colId: 'actions',
+            headerName: '',
+            width: 80,
+            pinned: 'right' as const,
+            sortable: false,
+            cellRenderer: (params: ICellRendererParams) => {
+                const row = params.data;
+                if (!row) return null;
+                const isDefault = row.fabricTypeName === 'Default';
+                return (
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => handleOpenEditType(row)}
+                            className={`p-1 rounded hover:bg-blue-100 text-gray-500 hover:text-blue-600 ${isDefault ? 'opacity-30 cursor-not-allowed' : ''}`}
+                            title="Edit type defaults"
+                            disabled={isDefault}
+                        >
+                            <Pencil size={14} />
+                        </button>
+                    </div>
+                );
+            },
+        },
+    ], [handleOpenEditType]);
+
+    // Select columns based on view level
+    const activeColumnDefs = viewLevel === 'type' ? typeColumnDefs : columnDefs;
+
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
-        const withVisibility = applyColumnVisibility(columnDefs, visibleColumns);
+        const withVisibility = applyColumnVisibility(activeColumnDefs, visibleColumns);
         return orderColumns(withVisibility, columnOrder);
-    }, [columnDefs, visibleColumns, columnOrder]);
+    }, [activeColumnDefs, visibleColumns, columnOrder]);
 
     // Summary stats
     const summary = fabricData?.summary || { total: 0, orderNow: 0, orderSoon: 0, ok: 0 };
@@ -553,26 +728,51 @@ export default function Fabrics() {
                 </div>
             </div>
 
+            {/* View Level Toggle */}
+            <div className="flex items-center gap-4">
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                    <button
+                        onClick={() => setViewLevel('color')}
+                        className={`px-3 py-1.5 text-sm rounded-md transition-all ${viewLevel === 'color' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
+                    >
+                        By Color
+                    </button>
+                    <button
+                        onClick={() => setViewLevel('type')}
+                        className={`px-3 py-1.5 text-sm rounded-md transition-all ${viewLevel === 'type' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
+                    >
+                        By Type
+                    </button>
+                </div>
+                <span className="text-xs text-gray-400">
+                    {viewLevel === 'color' ? 'Individual fabric colors with stock levels' : 'Fabric types with default settings'}
+                </span>
+            </div>
+
             {/* Stats bar */}
             <div className="flex items-center gap-3 md:gap-4 text-sm">
                 <div className="text-gray-500">
-                    <span className="font-medium text-gray-900">{summary.total}</span> fabrics
+                    <span className="font-medium text-gray-900">{summary.total}</span> {viewLevel === 'color' ? 'fabrics' : 'types'}
                 </div>
-                {summary.orderNow > 0 && (
-                    <div className="flex items-center gap-1 text-red-600">
-                        <AlertTriangle size={14} />
-                        <span className="font-medium">{summary.orderNow}</span> order now
-                    </div>
-                )}
-                {summary.orderSoon > 0 && (
-                    <div className="text-yellow-600">
-                        <span className="font-medium">{summary.orderSoon}</span> order soon
-                    </div>
-                )}
-                {summary.ok > 0 && (
-                    <div className="text-green-600">
-                        <span className="font-medium">{summary.ok}</span> OK
-                    </div>
+                {viewLevel === 'color' && (
+                    <>
+                        {summary.orderNow > 0 && (
+                            <div className="flex items-center gap-1 text-red-600">
+                                <AlertTriangle size={14} />
+                                <span className="font-medium">{summary.orderNow}</span> order now
+                            </div>
+                        )}
+                        {summary.orderSoon > 0 && (
+                            <div className="text-yellow-600">
+                                <span className="font-medium">{summary.orderSoon}</span> order soon
+                            </div>
+                        )}
+                        {summary.ok > 0 && (
+                            <div className="text-green-600">
+                                <span className="font-medium">{summary.ok}</span> OK
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -668,7 +868,7 @@ export default function Fabrics() {
                         }}
                         animateRows={false}
                         suppressCellFocus={true}
-                        getRowId={(params) => params.data.fabricId}
+                        getRowId={(params) => params.data.fabricId || params.data.fabricTypeId}
                         pagination={true}
                         paginationPageSize={pageSize === 0 ? 999999 : pageSize}
                         paginationPageSizeSelector={false}
@@ -709,9 +909,82 @@ export default function Fabrics() {
                                     <input type="number" step="0.1" className="input" value={typeForm.avgShrinkagePct} onChange={(e) => setTypeForm(f => ({ ...f, avgShrinkagePct: Number(e.target.value) }))} min={0} max={100} />
                                 </div>
                             </div>
+                            <div className="border-t pt-4">
+                                <p className="text-sm text-gray-600 mb-3">Default values (inherited by colors unless overridden):</p>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="label">Cost/Unit (₹)</label>
+                                        <input type="number" step="0.01" className="input" value={typeForm.defaultCostPerUnit} onChange={(e) => setTypeForm(f => ({ ...f, defaultCostPerUnit: e.target.value }))} placeholder="0" min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Lead (days)</label>
+                                        <input type="number" className="input" value={typeForm.defaultLeadTimeDays} onChange={(e) => setTypeForm(f => ({ ...f, defaultLeadTimeDays: e.target.value }))} placeholder="14" min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Min Order</label>
+                                        <input type="number" step="0.1" className="input" value={typeForm.defaultMinOrderQty} onChange={(e) => setTypeForm(f => ({ ...f, defaultMinOrderQty: e.target.value }))} placeholder="10" min={0} />
+                                    </div>
+                                </div>
+                            </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddType(false)} className="btn-secondary flex-1">Cancel</button>
                                 <button type="submit" className="btn-primary flex-1" disabled={createType.isPending}>{createType.isPending ? 'Creating...' : 'Add Type'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Fabric Type Modal */}
+            {showEditType && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-semibold">Edit Fabric Type</h2>
+                            <button onClick={() => setShowEditType(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <form onSubmit={handleSubmitEditType} className="space-y-4">
+                            <div>
+                                <label className="label">Type Name</label>
+                                <input className="input" value={editTypeForm.name} onChange={(e) => setEditTypeForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Linen 60 Lea" required />
+                            </div>
+                            <div>
+                                <label className="label">Composition</label>
+                                <input className="input" value={editTypeForm.composition} onChange={(e) => setEditTypeForm(f => ({ ...f, composition: e.target.value }))} placeholder="e.g., 100% Linen" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="label">Unit</label>
+                                    <select className="input" value={editTypeForm.unit} onChange={(e) => setEditTypeForm(f => ({ ...f, unit: e.target.value }))}>
+                                        <option value="meter">Meter</option>
+                                        <option value="kg">Kilogram</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="label">Avg Shrinkage %</label>
+                                    <input type="number" step="0.1" className="input" value={editTypeForm.avgShrinkagePct} onChange={(e) => setEditTypeForm(f => ({ ...f, avgShrinkagePct: Number(e.target.value) }))} min={0} max={100} />
+                                </div>
+                            </div>
+                            <div className="border-t pt-4">
+                                <p className="text-sm text-gray-600 mb-3">Default values (inherited by colors unless overridden):</p>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="label">Cost/Unit (₹)</label>
+                                        <input type="number" step="0.01" className="input" value={editTypeForm.defaultCostPerUnit} onChange={(e) => setEditTypeForm(f => ({ ...f, defaultCostPerUnit: e.target.value }))} placeholder="Not set" min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Lead (days)</label>
+                                        <input type="number" className="input" value={editTypeForm.defaultLeadTimeDays} onChange={(e) => setEditTypeForm(f => ({ ...f, defaultLeadTimeDays: e.target.value }))} placeholder="Not set" min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Min Order</label>
+                                        <input type="number" step="0.1" className="input" value={editTypeForm.defaultMinOrderQty} onChange={(e) => setEditTypeForm(f => ({ ...f, defaultMinOrderQty: e.target.value }))} placeholder="Not set" min={0} />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={() => setShowEditType(null)} className="btn-secondary flex-1">Cancel</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={updateType.isPending}>{updateType.isPending ? 'Saving...' : 'Save Changes'}</button>
                             </div>
                         </form>
                     </div>
@@ -762,18 +1035,21 @@ export default function Fabrics() {
                                     {suppliers?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>
                             </div>
-                            <div className="grid grid-cols-3 gap-4">
-                                <div>
-                                    <label className="label">Cost/Unit (₹)</label>
-                                    <input type="number" className="input" value={colorForm.costPerUnit} onChange={(e) => setColorForm(f => ({ ...f, costPerUnit: Number(e.target.value) }))} min={0} />
-                                </div>
-                                <div>
-                                    <label className="label">Lead (days)</label>
-                                    <input type="number" className="input" value={colorForm.leadTimeDays} onChange={(e) => setColorForm(f => ({ ...f, leadTimeDays: Number(e.target.value) }))} min={0} />
-                                </div>
-                                <div>
-                                    <label className="label">Min Order</label>
-                                    <input type="number" className="input" value={colorForm.minOrderQty} onChange={(e) => setColorForm(f => ({ ...f, minOrderQty: Number(e.target.value) }))} min={0} />
+                            <div className="border-t pt-4">
+                                <p className="text-sm text-gray-600 mb-3">Leave blank to inherit from fabric type defaults:</p>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="label">Cost/Unit (₹)</label>
+                                        <input type="number" className="input" value={colorForm.costPerUnit} onChange={(e) => setColorForm(f => ({ ...f, costPerUnit: e.target.value }))} placeholder="Inherit" min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Lead (days)</label>
+                                        <input type="number" className="input" value={colorForm.leadTimeDays} onChange={(e) => setColorForm(f => ({ ...f, leadTimeDays: e.target.value }))} placeholder="Inherit" min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Min Order</label>
+                                        <input type="number" className="input" value={colorForm.minOrderQty} onChange={(e) => setColorForm(f => ({ ...f, minOrderQty: e.target.value }))} placeholder="Inherit" min={0} />
+                                    </div>
                                 </div>
                             </div>
                             <div className="flex gap-3 pt-2">
@@ -832,18 +1108,21 @@ export default function Fabrics() {
                                     {suppliers?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>
                             </div>
-                            <div className="grid grid-cols-3 gap-4">
-                                <div>
-                                    <label className="label">Cost/Unit (₹)</label>
-                                    <input type="number" className="input" value={editForm.costPerUnit} onChange={(e) => setEditForm(f => ({ ...f, costPerUnit: Number(e.target.value) }))} min={0} />
-                                </div>
-                                <div>
-                                    <label className="label">Lead (days)</label>
-                                    <input type="number" className="input" value={editForm.leadTimeDays} onChange={(e) => setEditForm(f => ({ ...f, leadTimeDays: Number(e.target.value) }))} min={0} />
-                                </div>
-                                <div>
-                                    <label className="label">Min Order</label>
-                                    <input type="number" className="input" value={editForm.minOrderQty} onChange={(e) => setEditForm(f => ({ ...f, minOrderQty: Number(e.target.value) }))} min={0} />
+                            <div className="border-t pt-4">
+                                <p className="text-sm text-gray-600 mb-3">Leave blank to inherit from fabric type defaults:</p>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="label">Cost/Unit (₹)</label>
+                                        <input type="number" className="input" value={editForm.costPerUnit} onChange={(e) => setEditForm(f => ({ ...f, costPerUnit: e.target.value }))} placeholder={`Inherit (₹${showEditFabric?.typeCostPerUnit ?? '?'})`} min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Lead (days)</label>
+                                        <input type="number" className="input" value={editForm.leadTimeDays} onChange={(e) => setEditForm(f => ({ ...f, leadTimeDays: e.target.value }))} placeholder={`Inherit (${showEditFabric?.typeLeadTimeDays ?? '?'})`} min={0} />
+                                    </div>
+                                    <div>
+                                        <label className="label">Min Order</label>
+                                        <input type="number" className="input" value={editForm.minOrderQty} onChange={(e) => setEditForm(f => ({ ...f, minOrderQty: e.target.value }))} placeholder={`Inherit (${showEditFabric?.typeMinOrderQty ?? '?'})`} min={0} />
+                                    </div>
                                 </div>
                             </div>
                             <div className="flex gap-3 pt-2">

@@ -83,6 +83,7 @@ const ColumnVisibilityDropdown = ({
 
 interface ArchivedOrdersGridProps {
     orders: any[];
+    totalCount: number;
     onRestore: (orderId: string) => void;
     onViewOrder?: (order: any) => void;
     onSelectCustomer?: (customer: any) => void;
@@ -90,6 +91,8 @@ interface ArchivedOrdersGridProps {
     shopDomain?: string;
     sortBy: 'orderDate' | 'archivedAt';
     onSortChange: (sortBy: 'orderDate' | 'archivedAt') => void;
+    pageSize: number;
+    onPageSizeChange: (size: number) => void;
 }
 
 // Helper to format dates (short format)
@@ -157,6 +160,7 @@ function TrackingStatusBadge({ status }: { status: string }) {
 
 export function ArchivedOrdersGrid({
     orders,
+    totalCount,
     onRestore,
     onViewOrder,
     onSelectCustomer,
@@ -164,6 +168,8 @@ export function ArchivedOrdersGrid({
     shopDomain,
     sortBy,
     onSortChange,
+    pageSize,
+    onPageSizeChange,
 }: ArchivedOrdersGridProps) {
     const gridRef = useRef<AgGridReact>(null);
 
@@ -673,7 +679,7 @@ export function ArchivedOrdersGrid({
                 />
             </div>
 
-            <div className="border rounded" style={{ height: '500px', width: '100%' }}>
+            <div className="border rounded" style={{ height: '550px', width: '100%' }}>
                 <AgGridReact
                     ref={gridRef}
                     rowData={rowData}
@@ -687,7 +693,20 @@ export function ArchivedOrdersGrid({
                     groupDefaultExpanded={0}
                     onColumnMoved={handleColumnMoved}
                     maintainColumnOrder={true}
+                    pagination={true}
+                    paginationPageSize={pageSize}
+                    paginationPageSizeSelector={[100, 500, 1000, 2500]}
+                    onPaginationChanged={(event) => {
+                        const newPageSize = event.api.paginationGetPageSize();
+                        if (newPageSize !== pageSize) {
+                            onPageSizeChange(newPageSize);
+                        }
+                    }}
                 />
+            </div>
+            {/* Total count indicator */}
+            <div className="text-sm text-gray-500 text-right">
+                Loaded {orders.length.toLocaleString()} of {totalCount.toLocaleString()} total archived orders
             </div>
         </div>
     );

@@ -171,6 +171,11 @@ model FabricType {
   unit            String  // meter, kg
   avgShrinkagePct Float   @default(0)
 
+  // Default values inherited by all colors of this fabric type
+  defaultCostPerUnit  Float? // Cost per unit (₹) - inherited by colors
+  defaultLeadTimeDays Int?   // Lead time in days - inherited by colors
+  defaultMinOrderQty  Float? // Minimum order quantity - inherited by colors
+
   fabrics  Fabric[]
   products Product[]
 }
@@ -182,11 +187,12 @@ model Fabric {
   colorName     String  // e.g., "Mustard", "Ocean Blue"
   standardColor String? // e.g., "Yellow", "Blue" - for analytics/grouping
   colorHex      String?
-  costPerUnit   Float
-  supplierId   String?
-  leadTimeDays Int     @default(14)
-  minOrderQty  Float   @default(10)
-  isActive     Boolean @default(true)
+  // Cost/lead time fields: null = inherit from FabricType, value = override
+  costPerUnit   Float?  // null = inherit from fabricType.defaultCostPerUnit
+  supplierId    String?
+  leadTimeDays  Int?    // null = inherit from fabricType.defaultLeadTimeDays
+  minOrderQty   Float?  // null = inherit from fabricType.defaultMinOrderQty
+  isActive      Boolean @default(true)
 
   fabricType   FabricType          @relation(fields: [fabricTypeId], references: [id])
   supplier     Supplier?           @relation(fields: [supplierId], references: [id])
