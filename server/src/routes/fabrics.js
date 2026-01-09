@@ -290,6 +290,77 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Delete fabric (soft delete - sets isActive to false)
+// Automatically reassigns any product variations to the default fabric
+router.delete('/:id', authenticateToken, async (req, res) => {
+    try {
+        // Check if user is admin
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only admin can delete fabrics' });
+        }
+
+        const fabric = await req.prisma.fabric.findUnique({
+            where: { id: req.params.id },
+            include: {
+                _count: {
+                    select: {
+                        transactions: true,
+                        variations: true,
+                    },
+                },
+            },
+        });
+
+        if (!fabric) {
+            return res.status(404).json({ error: 'Fabric not found' });
+        }
+
+        // Find the default fabric to reassign variations
+        const defaultFabric = await req.prisma.fabric.findFirst({
+            where: {
+                fabricType: { name: 'Default' },
+                isActive: true,
+            },
+        });
+
+        if (!defaultFabric) {
+            return res.status(500).json({ error: 'Default fabric not found. Cannot delete.' });
+        }
+
+        // Prevent deleting the default fabric itself
+        if (fabric.id === defaultFabric.id) {
+            return res.status(400).json({ error: 'Cannot delete the default fabric' });
+        }
+
+        let variationsReassigned = 0;
+
+        // Reassign any variations using this fabric to the default fabric
+        if (fabric._count.variations > 0) {
+            const result = await req.prisma.variation.updateMany({
+                where: { fabricId: req.params.id },
+                data: { fabricId: defaultFabric.id },
+            });
+            variationsReassigned = result.count;
+        }
+
+        // Soft delete - set isActive to false
+        await req.prisma.fabric.update({
+            where: { id: req.params.id },
+            data: { isActive: false },
+        });
+
+        res.json({
+            message: 'Fabric deleted',
+            id: req.params.id,
+            hadTransactions: fabric._count.transactions > 0,
+            variationsReassigned,
+        });
+    } catch (error) {
+        console.error('Delete fabric error:', error);
+        res.status(500).json({ error: 'Failed to delete fabric' });
+    }
+});
+
 // ============================================
 // FABRIC TRANSACTIONS
 // ============================================

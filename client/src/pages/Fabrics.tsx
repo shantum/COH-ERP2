@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
 import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -51,8 +51,24 @@ const DEFAULT_HEADERS: Record<string, string> = {
     actions: '',
 };
 
-// Standard colors for add color form
-const STANDARD_COLORS = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Pink', 'Brown', 'Black', 'White', 'Grey', 'Beige', 'Navy', 'Teal'];
+// Standard colors with predefined hex shades
+const STANDARD_COLOR_HEX: Record<string, string> = {
+    Red: '#DC2626',
+    Orange: '#EA580C',
+    Yellow: '#CA8A04',
+    Green: '#16A34A',
+    Blue: '#2563EB',
+    Purple: '#9333EA',
+    Pink: '#DB2777',
+    Brown: '#92400E',
+    Black: '#171717',
+    White: '#FAFAFA',
+    Grey: '#6B7280',
+    Beige: '#D4B896',
+    Navy: '#1E3A5F',
+    Teal: '#0D9488',
+};
+const STANDARD_COLORS = Object.keys(STANDARD_COLOR_HEX);
 
 export default function Fabrics() {
     const queryClient = useQueryClient();
@@ -85,12 +101,14 @@ export default function Fabrics() {
     const [showInward, setShowInward] = useState<any>(null);
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [showDetail, setShowDetail] = useState<any>(null);
+    const [showEditFabric, setShowEditFabric] = useState<any>(null);
 
     // Form states
     const [typeForm, setTypeForm] = useState({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0 });
     const [colorForm, setColorForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 400, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
     const [inwardForm, setInwardForm] = useState({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
     const [supplierForm, setSupplierForm] = useState({ name: '', contactName: '', email: '', phone: '', address: '' });
+    const [editForm, setEditForm] = useState({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: 0, supplierId: '', leadTimeDays: 14, minOrderQty: 20 });
 
     // Apply quick filter when search input changes
     useEffect(() => {
@@ -183,6 +201,27 @@ export default function Fabrics() {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction'),
     });
 
+    const deleteFabric = useMutation({
+        mutationFn: (fabricId: string) => fabricsApi.delete(fabricId),
+        onSuccess: (response: any) => {
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
+            if (response.data.variationsReassigned > 0) {
+                alert(`Fabric deleted. ${response.data.variationsReassigned} product variation(s) were reassigned to the default fabric.`);
+            }
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete fabric'),
+    });
+
+    const updateFabric = useMutation({
+        mutationFn: ({ fabricId, data }: { fabricId: string; data: any }) => fabricsApi.update(fabricId, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
+            setShowEditFabric(null);
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update fabric'),
+    });
+
     // Grid column moved handler
     const onColumnMoved = () => {
         const api = gridRef.current?.api;
@@ -233,6 +272,36 @@ export default function Fabrics() {
     const handleSubmitSupplier = (e: React.FormEvent) => {
         e.preventDefault();
         createSupplier.mutate(supplierForm);
+    };
+
+    const handleOpenEdit = (row: any) => {
+        setEditForm({
+            colorName: row.colorName || '',
+            standardColor: row.standardColor || '',
+            colorHex: row.colorHex || '#6B8E9F',
+            costPerUnit: row.costPerUnit || 0,
+            supplierId: row.supplierId || '',
+            leadTimeDays: row.leadTimeDays || 14,
+            minOrderQty: row.minOrderQty || 20,
+        });
+        setShowEditFabric(row);
+    };
+
+    const handleSubmitEdit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!showEditFabric) return;
+        updateFabric.mutate({
+            fabricId: showEditFabric.fabricId,
+            data: {
+                colorName: editForm.colorName,
+                standardColor: editForm.standardColor || null,
+                colorHex: editForm.colorHex,
+                costPerUnit: editForm.costPerUnit,
+                supplierId: editForm.supplierId || null,
+                leadTimeDays: editForm.leadTimeDays,
+                minOrderQty: editForm.minOrderQty,
+            },
+        });
     };
 
     // Column definitions
@@ -400,12 +469,13 @@ export default function Fabrics() {
         {
             colId: 'actions',
             headerName: '',
-            width: 80,
+            width: 140,
             pinned: 'right' as const,
             sortable: false,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
+                const isDefaultFabric = row.fabricTypeName === 'Default';
                 return (
                     <div className="flex items-center gap-1">
                         <button
@@ -416,17 +486,37 @@ export default function Fabrics() {
                             <Eye size={14} />
                         </button>
                         <button
+                            onClick={() => handleOpenEdit(row)}
+                            className="p-1 rounded hover:bg-blue-100 text-gray-500 hover:text-blue-600"
+                            title="Edit fabric"
+                        >
+                            <Pencil size={14} />
+                        </button>
+                        <button
                             onClick={() => setShowInward(row)}
                             className="p-1 rounded hover:bg-green-100 text-green-500 hover:text-green-700"
                             title="Add inward"
                         >
                             <Package size={14} />
                         </button>
+                        {isAdmin && !isDefaultFabric && (
+                            <button
+                                onClick={() => {
+                                    if (confirm(`Delete "${row.colorName}" (${row.fabricTypeName})?\n\nAny products using this fabric will be reassigned to the default fabric.`)) {
+                                        deleteFabric.mutate(row.fabricId);
+                                    }
+                                }}
+                                className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600"
+                                title="Delete fabric"
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                        )}
                     </div>
                 );
             },
         },
-    ], []);
+    ], [isAdmin, deleteFabric, handleOpenEdit]);
 
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
@@ -636,7 +726,18 @@ export default function Fabrics() {
                                 </div>
                                 <div>
                                     <label className="label">Standard Color</label>
-                                    <select className="input" value={colorForm.standardColor} onChange={(e) => setColorForm(f => ({ ...f, standardColor: e.target.value }))}>
+                                    <select
+                                        className="input"
+                                        value={colorForm.standardColor}
+                                        onChange={(e) => {
+                                            const color = e.target.value;
+                                            setColorForm(f => ({
+                                                ...f,
+                                                standardColor: color,
+                                                colorHex: color ? STANDARD_COLOR_HEX[color] : f.colorHex,
+                                            }));
+                                        }}
+                                    >
                                         <option value="">Select...</option>
                                         {STANDARD_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
@@ -670,6 +771,76 @@ export default function Fabrics() {
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddColor(null)} className="btn-secondary flex-1">Cancel</button>
                                 <button type="submit" className="btn-primary flex-1" disabled={createFabric.isPending}>{createFabric.isPending ? 'Creating...' : 'Add Color'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Fabric Modal */}
+            {showEditFabric && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-semibold">Edit Fabric</h2>
+                            <button onClick={() => setShowEditFabric(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                        </div>
+                        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                            <p className="text-sm text-gray-500">{showEditFabric.fabricTypeName}</p>
+                        </div>
+                        <form onSubmit={handleSubmitEdit} className="space-y-4">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label className="label">Color Name</label>
+                                    <input className="input" value={editForm.colorName} onChange={(e) => setEditForm(f => ({ ...f, colorName: e.target.value }))} placeholder="e.g., Wildflower Blue" required />
+                                </div>
+                                <div>
+                                    <label className="label">Standard Color</label>
+                                    <select
+                                        className="input"
+                                        value={editForm.standardColor}
+                                        onChange={(e) => {
+                                            const color = e.target.value;
+                                            setEditForm(f => ({
+                                                ...f,
+                                                standardColor: color,
+                                                colorHex: color ? STANDARD_COLOR_HEX[color] : f.colorHex,
+                                            }));
+                                        }}
+                                    >
+                                        <option value="">Select...</option>
+                                        {STANDARD_COLORS.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="label">Color</label>
+                                    <input type="color" className="input h-10" value={editForm.colorHex} onChange={(e) => setEditForm(f => ({ ...f, colorHex: e.target.value }))} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="label">Supplier (optional)</label>
+                                <select className="input" value={editForm.supplierId} onChange={(e) => setEditForm(f => ({ ...f, supplierId: e.target.value }))}>
+                                    <option value="">No supplier</option>
+                                    {suppliers?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label className="label">Cost/Unit (₹)</label>
+                                    <input type="number" className="input" value={editForm.costPerUnit} onChange={(e) => setEditForm(f => ({ ...f, costPerUnit: Number(e.target.value) }))} min={0} />
+                                </div>
+                                <div>
+                                    <label className="label">Lead (days)</label>
+                                    <input type="number" className="input" value={editForm.leadTimeDays} onChange={(e) => setEditForm(f => ({ ...f, leadTimeDays: Number(e.target.value) }))} min={0} />
+                                </div>
+                                <div>
+                                    <label className="label">Min Order</label>
+                                    <input type="number" className="input" value={editForm.minOrderQty} onChange={(e) => setEditForm(f => ({ ...f, minOrderQty: Number(e.target.value) }))} min={0} />
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button type="button" onClick={() => setShowEditFabric(null)} className="btn-secondary flex-1">Cancel</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={updateFabric.isPending}>{updateFabric.isPending ? 'Saving...' : 'Save Changes'}</button>
                             </div>
                         </form>
                     </div>
