@@ -4,6 +4,7 @@
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AgGridReact } from 'ag-grid-react';
 import type {
     ColDef,
@@ -16,7 +17,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench } from 'lucide-react';
+import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
@@ -63,6 +64,176 @@ function TrackingStatusBadge({ status, daysInTransit, ofdCount }: { status: stri
             )}
             {hasMultipleOfd && (
                 <span className="text-red-500 text-xs" title={`${ofdCount} delivery attempts`}>({ofdCount})</span>
+            )}
+        </div>
+    );
+}
+
+// Production date popover component
+function ProductionDatePopover({
+    currentDate,
+    isLocked,
+    onSelectDate,
+    onClear,
+    hasExistingBatch,
+}: {
+    currentDate: string | null;
+    isLocked: (date: string) => boolean;
+    onSelectDate: (date: string) => void;
+    onClear: () => void;
+    hasExistingBatch: boolean;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+    const popoverRef = useRef<HTMLDivElement>(null);
+    const buttonRef = useRef<HTMLButtonElement>(null);
+
+    // Close on click outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (
+                popoverRef.current &&
+                !popoverRef.current.contains(e.target as Node) &&
+                buttonRef.current &&
+                !buttonRef.current.contains(e.target as Node)
+            ) {
+                setIsOpen(false);
+            }
+        };
+
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen]);
+
+    // Calculate position when opening
+    const handleOpen = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setPopoverPosition({
+                top: rect.bottom + window.scrollY + 4,
+                left: rect.left + window.scrollX,
+            });
+        }
+        setIsOpen(!isOpen);
+    };
+
+    // Quick date helpers
+    const getDateString = (daysFromNow: number) => {
+        const date = new Date();
+        date.setDate(date.getDate() + daysFromNow);
+        return date.toISOString().split('T')[0];
+    };
+
+    const formatDisplayDate = (dateStr: string) => {
+        const date = new Date(dateStr + 'T00:00:00');
+        return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    };
+
+    const handleDateSelect = (date: string) => {
+        if (isLocked(date)) {
+            alert(`Production date ${date} is locked.`);
+            return;
+        }
+        onSelectDate(date);
+        setIsOpen(false);
+    };
+
+    const quickDates = [
+        { label: 'Today', days: 0 },
+        { label: '+1', days: 1 },
+        { label: '+2', days: 2 },
+        { label: '+3', days: 3 },
+        { label: '+5', days: 5 },
+        { label: '+7', days: 7 },
+    ];
+
+    return (
+        <div className="inline-block">
+            <button
+                ref={buttonRef}
+                onClick={handleOpen}
+                className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors ${
+                    currentDate
+                        ? isLocked(currentDate)
+                            ? 'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200'
+                            : 'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200'
+                        : 'text-gray-400 hover:text-orange-600 hover:bg-orange-50 border border-transparent hover:border-orange-200'
+                }`}
+                title={currentDate ? `Production: ${formatDisplayDate(currentDate)}` : 'Set production date'}
+            >
+                <Calendar size={10} />
+                {currentDate ? formatDisplayDate(currentDate) : 'Set'}
+            </button>
+
+            {isOpen && createPortal(
+                <div
+                    ref={popoverRef}
+                    className="fixed z-[9999] bg-white rounded-lg shadow-lg border border-gray-200 p-2 min-w-[180px]"
+                    style={{ top: popoverPosition.top, left: popoverPosition.left }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {/* Quick date buttons */}
+                    <div className="flex flex-wrap gap-1 mb-2">
+                        {quickDates.map(({ label, days }) => {
+                            const dateStr = getDateString(days);
+                            const locked = isLocked(dateStr);
+                            const isSelected = currentDate === dateStr;
+                            return (
+                                <button
+                                    key={days}
+                                    onClick={() => handleDateSelect(dateStr)}
+                                    disabled={locked}
+                                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                                        isSelected
+                                            ? 'bg-orange-500 text-white'
+                                            : locked
+                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-orange-100 hover:text-orange-700'
+                                    }`}
+                                    title={locked ? 'Date is locked' : formatDisplayDate(dateStr)}
+                                >
+                                    {label}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Calendar input for custom date */}
+                    <div className="border-t border-gray-100 pt-2">
+                        <input
+                            type="date"
+                            className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-300 focus:border-orange-300"
+                            min={new Date().toISOString().split('T')[0]}
+                            value={currentDate || ''}
+                            onChange={(e) => {
+                                if (e.target.value) {
+                                    handleDateSelect(e.target.value);
+                                }
+                            }}
+                        />
+                    </div>
+
+                    {/* Clear button */}
+                    {hasExistingBatch && currentDate && (
+                        <div className="border-t border-gray-100 pt-2 mt-2">
+                            <button
+                                onClick={() => {
+                                    onClear();
+                                    setIsOpen(false);
+                                }}
+                                className="w-full text-xs px-2 py-1 rounded text-red-600 hover:bg-red-50 flex items-center justify-center gap-1"
+                            >
+                                <X size={10} />
+                                Remove from production
+                            </button>
+                        </div>
+                    )}
+                </div>,
+                document.body
             )}
         </div>
     );
@@ -838,7 +1009,7 @@ export function OrdersGrid({
             {
                 colId: 'production',
                 headerName: getHeaderName('production'),
-                width: 120,
+                width: 90,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
                     if (!row) return null;
@@ -857,66 +1028,30 @@ export function OrdersGrid({
                     // For customized lines, always show production (must produce custom items)
                     // The condition is: pending + (has batch OR no stock OR is customized)
                     if (row.lineStatus === 'pending' && (row.productionBatchId || !hasStock || row.isCustomized)) {
-                        if (row.productionBatchId) {
-                            return (
-                                <div className="flex items-center gap-0.5">
-                                    <input
-                                        type="date"
-                                        className={`text-xs border rounded px-0.5 py-0 w-24 ${isDateLocked(row.productionDate || '')
-                                            ? 'border-red-200 bg-red-50'
-                                            : 'border-orange-200 bg-orange-50'
-                                            }`}
-                                        value={row.productionDate || ''}
-                                        min={new Date().toISOString().split('T')[0]}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onChange={(e) => {
-                                            if (!e.target.value) {
-                                                // Clear date - delete the batch
-                                                onDeleteBatch(row.productionBatchId);
-                                                return;
-                                            }
-                                            if (isDateLocked(e.target.value)) {
-                                                alert(`Production date ${e.target.value} is locked.`);
-                                                return;
-                                            }
-                                            onUpdateBatch(row.productionBatchId, {
-                                                batchDate: e.target.value,
-                                            });
-                                        }}
-                                    />
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onDeleteBatch(row.productionBatchId);
-                                        }}
-                                        className="text-gray-400 hover:text-red-500"
-                                    >
-                                        <X size={10} />
-                                    </button>
-                                </div>
-                            );
-                        }
                         return (
-                            <input
-                                type="date"
-                                className="text-xs border border-gray-200 rounded px-0.5 py-0 w-24 text-gray-400 hover:border-orange-300"
-                                min={new Date().toISOString().split('T')[0]}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => {
-                                    if (e.target.value) {
-                                        if (isDateLocked(e.target.value)) {
-                                            alert(`Date ${e.target.value} is locked.`);
-                                            e.target.value = '';
-                                            return;
-                                        }
+                            <ProductionDatePopover
+                                currentDate={row.productionDate}
+                                isLocked={isDateLocked}
+                                hasExistingBatch={!!row.productionBatchId}
+                                onSelectDate={(date) => {
+                                    if (row.productionBatchId) {
+                                        // Update existing batch
+                                        onUpdateBatch(row.productionBatchId, { batchDate: date });
+                                    } else {
+                                        // Create new batch
                                         onCreateBatch({
                                             skuId: row.skuId,
                                             qtyPlanned: row.qty,
                                             priority: 'order_fulfillment',
                                             sourceOrderLineId: row.lineId,
-                                            batchDate: e.target.value,
+                                            batchDate: date,
                                             notes: `For ${row.orderNumber}`,
                                         });
+                                    }
+                                }}
+                                onClear={() => {
+                                    if (row.productionBatchId) {
+                                        onDeleteBatch(row.productionBatchId);
                                     }
                                 }}
                             />

@@ -359,12 +359,56 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Production batch mutations - only affects open orders (with optimistic updates)
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to add to production')
+        onMutate: async (data) => {
+            // Cancel outgoing refetches to avoid overwriting optimistic update
+            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+
+            // Snapshot previous value for rollback
+            const previousOrders = queryClient.getQueryData(['openOrders']);
+
+            // Create a temporary batch object for optimistic update
+            const tempBatch = {
+                id: `temp-${Date.now()}`,
+                skuId: data.skuId,
+                qtyPlanned: data.qtyPlanned,
+                batchDate: data.batchDate,
+                notes: data.notes,
+                status: 'planned',
+            };
+
+            // Optimistically add the batch to the order line
+            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map(order => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.id === data.sourceOrderLineId
+                            ? { ...line, productionBatch: tempBatch, productionBatchId: tempBatch.id }
+                            : line
+                    )
+                }));
+            });
+
+            return { previousOrders };
+        },
+        onError: (err: any, _data, context) => {
+            // Rollback on error
+            if (context?.previousOrders) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to add to production');
+        },
+        onSettled: () => invalidateOpenOrders()
     });
 
     const updateBatch = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => productionApi.updateBatch(id, data),
+        mutationFn: ({ id, data }: { id: string; data: any }) => {
+            // Skip API call for temporary IDs (from optimistic creates that haven't finished)
+            if (id.startsWith('temp-')) {
+                return Promise.resolve({ data: { success: true } });
+            }
+            return productionApi.updateBatch(id, data);
+        },
         onMutate: async ({ id, data }) => {
             // Cancel outgoing refetches to avoid overwriting optimistic update
             await queryClient.cancelQueries({ queryKey: ['openOrders'] });
@@ -398,7 +442,13 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const deleteBatch = useMutation({
-        mutationFn: (id: string) => productionApi.deleteBatch(id),
+        mutationFn: (id: string) => {
+            // Skip API call for temporary IDs (from optimistic creates that haven't finished)
+            if (id.startsWith('temp-')) {
+                return Promise.resolve({ data: { success: true } });
+            }
+            return productionApi.deleteBatch(id);
+        },
         onMutate: async (id) => {
             await queryClient.cancelQueries({ queryKey: ['openOrders'] });
             const previousOrders = queryClient.getQueryData(['openOrders']);

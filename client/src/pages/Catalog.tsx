@@ -17,6 +17,114 @@ import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumn
 // Page size options
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
 
+// View options for data grouping
+type ViewLevel = 'sku' | 'variation' | 'product';
+const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
+    { value: 'sku', label: 'By SKU' },
+    { value: 'variation', label: 'By Color' },
+    { value: 'product', label: 'By Product' },
+];
+
+// Columns to hide for each view level
+const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
+    sku: [],
+    variation: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'shopifyQty', 'targetStockQty'],
+    product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'fabricName', 'image', 'shopifyQty', 'targetStockQty'],
+};
+
+// Aggregate SKU data by variation (product + color)
+function aggregateByVariation(items: any[]): any[] {
+    const groups = new Map<string, any>();
+
+    for (const item of items) {
+        const key = item.variationId;
+        if (!key) continue;
+
+        if (!groups.has(key)) {
+            groups.set(key, {
+                ...item,
+                skuCode: `${item.styleCode}-${item.colorName}`,
+                size: '-',
+                mrp: null,
+                fabricConsumption: null,
+                currentBalance: 0,
+                reservedBalance: 0,
+                availableBalance: 0,
+                shopifyQty: null,
+                targetStockQty: null,
+                skuCount: 0,
+            });
+        }
+
+        const group = groups.get(key)!;
+        group.currentBalance += item.currentBalance || 0;
+        group.reservedBalance += item.reservedBalance || 0;
+        group.availableBalance += item.availableBalance || 0;
+        group.skuCount += 1;
+    }
+
+    // Calculate status based on aggregated values
+    for (const group of groups.values()) {
+        group.status = group.availableBalance === 0 ? 'out_of_stock' :
+                       group.availableBalance < 10 ? 'below_target' : 'ok';
+    }
+
+    return Array.from(groups.values());
+}
+
+// Aggregate SKU data by product
+function aggregateByProduct(items: any[]): any[] {
+    const groups = new Map<string, any>();
+
+    for (const item of items) {
+        const key = item.productId;
+        if (!key) continue;
+
+        if (!groups.has(key)) {
+            groups.set(key, {
+                ...item,
+                skuCode: item.styleCode,
+                colorName: '-',
+                fabricName: '-',
+                imageUrl: null,
+                size: '-',
+                mrp: null,
+                fabricConsumption: null,
+                currentBalance: 0,
+                reservedBalance: 0,
+                availableBalance: 0,
+                shopifyQty: null,
+                targetStockQty: null,
+                variationCount: 0,
+                skuCount: 0,
+            });
+        }
+
+        const group = groups.get(key)!;
+        group.currentBalance += item.currentBalance || 0;
+        group.reservedBalance += item.reservedBalance || 0;
+        group.availableBalance += item.availableBalance || 0;
+        group.skuCount += 1;
+    }
+
+    // Count unique variations per product and calculate status
+    const variationCounts = new Map<string, Set<string>>();
+    for (const item of items) {
+        if (!variationCounts.has(item.productId)) {
+            variationCounts.set(item.productId, new Set());
+        }
+        variationCounts.get(item.productId)!.add(item.variationId);
+    }
+
+    for (const [productId, group] of groups.entries()) {
+        group.variationCount = variationCounts.get(productId)?.size || 0;
+        group.status = group.availableBalance === 0 ? 'out_of_stock' :
+                       group.availableBalance < 20 ? 'below_target' : 'ok';
+    }
+
+    return Array.from(groups.values());
+}
+
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -72,6 +180,9 @@ export default function Catalog() {
         defaultPageSize: 100,
     });
 
+    // View level state
+    const [viewLevel, setViewLevel] = useState<ViewLevel>('sku');
+
     // Filter state
     const [filter, setFilter] = useState({
         gender: '',
@@ -116,6 +227,19 @@ export default function Catalog() {
             return true;
         });
     }, [filterOptions?.products, filter.gender, filter.category]);
+
+    // Aggregate data based on view level
+    const displayData = useMemo(() => {
+        const items = catalogData?.items || [];
+        switch (viewLevel) {
+            case 'variation':
+                return aggregateByVariation(items);
+            case 'product':
+                return aggregateByProduct(items);
+            default:
+                return items;
+        }
+    }, [catalogData?.items, viewLevel]);
 
     // Grid column moved handler
     const onColumnMoved = () => {
@@ -334,18 +458,55 @@ export default function Catalog() {
 
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
+        // First apply user's column visibility preferences
         const withVisibility = applyColumnVisibility(columnDefs, visibleColumns);
-        return orderColumns(withVisibility, columnOrder);
-    }, [columnDefs, visibleColumns, columnOrder]);
+        // Then hide columns based on view level
+        const hiddenByView = HIDDEN_COLUMNS_BY_VIEW[viewLevel];
+        const withViewVisibility = withVisibility.map(col => ({
+            ...col,
+            hide: col.hide || hiddenByView.includes(col.colId || ''),
+        }));
+        return orderColumns(withViewVisibility, columnOrder);
+    }, [columnDefs, visibleColumns, columnOrder, viewLevel]);
 
-    // Summary stats
+    // Summary stats based on view level
     const stats = useMemo(() => {
-        const items = catalogData?.items || [];
+        const items = displayData;
+        const label = viewLevel === 'product' ? 'Products' : viewLevel === 'variation' ? 'Colors' : 'SKUs';
         return {
-            totalSkus: items.length,
-            belowTarget: items.filter((i: any) => i.status === 'below_target').length,
+            total: items.length,
+            label,
+            belowTarget: items.filter((i: any) => i.status === 'below_target' || i.status === 'out_of_stock').length,
             outOfStock: items.filter((i: any) => i.availableBalance === 0).length,
         };
+    }, [displayData, viewLevel]);
+
+    // Analytics: total units in stock by gender and fabric type
+    const analytics = useMemo(() => {
+        const items = catalogData?.items || [];
+
+        let totalUnits = 0;
+        const byGender: Record<string, number> = {};
+        const byFabricType: Record<string, number> = {};
+
+        for (const item of items) {
+            const balance = item.currentBalance || 0;
+            totalUnits += balance;
+
+            // By gender
+            const gender = item.gender || 'Unknown';
+            byGender[gender] = (byGender[gender] || 0) + balance;
+
+            // By fabric type
+            const fabricType = item.fabricTypeName || 'Unknown';
+            byFabricType[fabricType] = (byFabricType[fabricType] || 0) + balance;
+        }
+
+        // Sort by value descending
+        const genderEntries = Object.entries(byGender).sort((a, b) => b[1] - a[1]);
+        const fabricTypeEntries = Object.entries(byFabricType).sort((a, b) => b[1] - a[1]);
+
+        return { totalUnits, byGender: genderEntries, byFabricType: fabricTypeEntries };
     }, [catalogData?.items]);
 
     return (
@@ -358,11 +519,11 @@ export default function Catalog() {
                 </div>
                 <div className="flex items-center gap-3 md:gap-4 text-sm">
                     <div className="text-gray-500">
-                        <span className="font-medium text-gray-900">{stats.totalSkus}</span> SKUs
+                        <span className="font-medium text-gray-900">{stats.total}</span> {stats.label}
                     </div>
                     {stats.belowTarget > 0 && (
                         <div className="text-amber-600">
-                            <span className="font-medium">{stats.belowTarget}</span> below target
+                            <span className="font-medium">{stats.belowTarget}</span> low stock
                         </div>
                     )}
                     {stats.outOfStock > 0 && (
@@ -373,8 +534,60 @@ export default function Catalog() {
                 </div>
             </div>
 
+            {/* Analytics Bar */}
+            <div className="bg-gray-50 border rounded-lg p-3 flex flex-wrap gap-6 items-center">
+                {/* Total */}
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 uppercase tracking-wide">Total Stock</span>
+                    <span className="text-lg font-bold text-gray-900">{analytics.totalUnits.toLocaleString()}</span>
+                </div>
+
+                <div className="w-px h-8 bg-gray-200 hidden sm:block" />
+
+                {/* By Gender */}
+                <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500 uppercase tracking-wide">By Gender</span>
+                    <div className="flex gap-2">
+                        {analytics.byGender.map(([gender, count]) => (
+                            <div key={gender} className="flex items-center gap-1 bg-white px-2 py-1 rounded border text-sm">
+                                <span className="text-gray-600 capitalize">{gender}</span>
+                                <span className="font-semibold text-gray-900">{count.toLocaleString()}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                <div className="w-px h-8 bg-gray-200 hidden sm:block" />
+
+                {/* By Fabric Type */}
+                <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500 uppercase tracking-wide">By Fabric</span>
+                    <div className="flex flex-wrap gap-2">
+                        {analytics.byFabricType.map(([fabricType, count]) => (
+                            <div key={fabricType} className="flex items-center gap-1 bg-white px-2 py-1 rounded border text-sm">
+                                <span className="text-gray-600">{fabricType}</span>
+                                <span className="font-semibold text-gray-900">{count.toLocaleString()}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
             {/* Filters */}
             <div className="flex flex-wrap gap-2 md:gap-3">
+                {/* View level selector */}
+                <select
+                    value={viewLevel}
+                    onChange={(e) => setViewLevel(e.target.value as ViewLevel)}
+                    className="text-sm border rounded px-2 py-1.5 bg-white font-medium"
+                >
+                    {VIEW_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                </select>
+
+                <div className="w-px h-6 bg-gray-200 self-center hidden sm:block" />
+
                 <div className="relative w-full sm:w-auto">
                     <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                     <input
@@ -462,7 +675,7 @@ export default function Catalog() {
                     <AgGridReact
                         ref={gridRef}
                         theme={compactThemeSmall}
-                        rowData={catalogData?.items || []}
+                        rowData={displayData}
                         columnDefs={orderedColumnDefs}
                         loading={isLoading}
                         defaultColDef={{
@@ -472,7 +685,12 @@ export default function Catalog() {
                         }}
                         animateRows={false}
                         suppressCellFocus={true}
-                        getRowId={(params) => params.data.skuId}
+                        getRowId={(params) => {
+                            // Use appropriate ID based on view level
+                            if (viewLevel === 'product') return params.data.productId;
+                            if (viewLevel === 'variation') return params.data.variationId;
+                            return params.data.skuId;
+                        }}
                         // Pagination
                         pagination={true}
                         paginationPageSize={pageSize === 0 ? 999999 : pageSize}

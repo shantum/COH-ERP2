@@ -62,6 +62,8 @@ export default function Orders() {
     const [searchInput, setSearchInput] = useState('');
     const searchQuery = useDebounce(searchInput, 300);
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
+    const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
+    const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
 
     // Shipped orders pagination state
     const [shippedPage, setShippedPage] = useState(1);
@@ -237,10 +239,46 @@ export default function Orders() {
         [openOrders, customerStats, inventoryBalance, fabricStock]
     );
 
-    const filteredOpenRows = useMemo(
-        () => filterRows(openRows, searchQuery, dateRange, tab === 'open'),
-        [openRows, searchQuery, dateRange, tab]
-    );
+    const filteredOpenRows = useMemo(() => {
+        let rows = filterRows(openRows, searchQuery, dateRange, tab === 'open');
+
+        // Apply allocated filter
+        if (allocatedFilter === 'yes') {
+            rows = rows.filter(row =>
+                row.lineStatus === 'allocated' ||
+                row.lineStatus === 'picked' ||
+                row.lineStatus === 'packed'
+            );
+        } else if (allocatedFilter === 'no') {
+            rows = rows.filter(row => row.lineStatus === 'pending');
+        }
+
+        // Apply production filter
+        if (productionFilter === 'scheduled') {
+            rows = rows.filter(row => row.productionBatchId);
+        } else if (productionFilter === 'needs') {
+            rows = rows.filter(row =>
+                row.lineStatus === 'pending' &&
+                !row.productionBatchId &&
+                (row.skuStock < row.qty || row.isCustomized)
+            );
+        } else if (productionFilter === 'ready') {
+            // Ready = all lines of the order are allocated/picked/packed
+            rows = rows.filter(row => {
+                const activeLines = row.order?.orderLines?.filter(
+                    (line: any) => line.lineStatus !== 'cancelled'
+                ) || [];
+                return activeLines.length > 0 && activeLines.every(
+                    (line: any) =>
+                        line.lineStatus === 'allocated' ||
+                        line.lineStatus === 'picked' ||
+                        line.lineStatus === 'packed'
+                );
+            });
+        }
+
+        return rows;
+    }, [openRows, searchQuery, dateRange, tab, allocatedFilter, productionFilter]);
 
     const filteredShippedOrders = useMemo(() => {
         if (!searchQuery.trim()) return shippedOrders;
@@ -536,6 +574,25 @@ export default function Orders() {
                                     <option value="90">Last 90 days</option>
                                     <option value="180">Last 180 days</option>
                                     <option value="365">Last 365 days</option>
+                                </select>
+                                <select
+                                    value={allocatedFilter}
+                                    onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
+                                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
+                                >
+                                    <option value="">All (Allocated)</option>
+                                    <option value="yes">Allocated</option>
+                                    <option value="no">Not Allocated</option>
+                                </select>
+                                <select
+                                    value={productionFilter}
+                                    onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
+                                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
+                                >
+                                    <option value="">All (Production)</option>
+                                    <option value="scheduled">Scheduled</option>
+                                    <option value="needs">Needs Production</option>
+                                    <option value="ready">Ready to Ship</option>
                                 </select>
                                 <div className="w-px h-5 bg-gray-200" />
                                 <button

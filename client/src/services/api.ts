@@ -177,7 +177,7 @@ export const ordersApi = {
     getCodPending: (params?: { limit?: number; offset?: number; search?: string }) =>
         api.get('/orders', { params: { view: 'cod_pending', ...params } }),
 
-    getArchived: (params?: { limit?: number; offset?: number; days?: number; search?: string }) =>
+    getArchived: (params?: { limit?: number; offset?: number; days?: number; search?: string; sortBy?: string }) =>
         api.get('/orders', { params: { view: 'archived', ...params } }),
 
     getCancelled: () => api.get('/orders/status/cancelled'),
