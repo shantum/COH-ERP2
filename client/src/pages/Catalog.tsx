@@ -32,7 +32,7 @@ const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
 const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
     sku: [],
     variation: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'shopifyQty', 'targetStockQty'],
-    product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'hasLining', 'fabricName', 'image', 'shopifyQty', 'targetStockQty'],
+    product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'hasLining', 'fabricName', 'shopifyQty', 'targetStockQty'],
     consumption: [], // Uses completely different columns
 };
 
@@ -93,7 +93,8 @@ function aggregateByProduct(items: any[]): any[] {
                 skuCode: item.styleCode,
                 colorName: '-',
                 fabricName: '-',
-                imageUrl: null,
+                // Keep first image URL for product thumbnail
+                imageUrl: item.imageUrl || null,
                 size: '-',
                 mrp: null,
                 fabricConsumption: null,
@@ -416,8 +417,8 @@ function FabricEditPopover({
 
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
-    'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
-    'colorName', 'hasLining', 'fabricName', 'image',
+    'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
+    'colorName', 'hasLining', 'fabricName',
     'skuCode', 'size', 'mrp', 'fabricConsumption',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
@@ -781,6 +782,24 @@ export default function Catalog() {
 
     // Column definitions
     const columnDefs: ColDef[] = useMemo(() => [
+        // Image column - first for visual identification
+        {
+            colId: 'image',
+            headerName: DEFAULT_HEADERS.image,
+            field: 'imageUrl',
+            width: 50,
+            pinned: 'left' as const,
+            cellRenderer: (params: ICellRendererParams) => {
+                if (!params.value) return <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-gray-300 text-xs">-</div>;
+                return (
+                    <img
+                        src={params.value}
+                        alt=""
+                        className="w-8 h-8 object-cover rounded"
+                    />
+                );
+            },
+        },
         // Product columns
         {
             colId: 'productName',
@@ -906,22 +925,6 @@ export default function Catalog() {
                         onUpdateFabricType={handleUpdateFabricType}
                         onUpdateFabric={handleUpdateFabric}
                         rawItems={catalogData?.items || []}
-                    />
-                );
-            },
-        },
-        {
-            colId: 'image',
-            headerName: DEFAULT_HEADERS.image,
-            field: 'imageUrl',
-            width: 50,
-            cellRenderer: (params: ICellRendererParams) => {
-                if (!params.value) return null;
-                return (
-                    <img
-                        src={params.value}
-                        alt=""
-                        className="w-6 h-6 object-cover rounded"
                     />
                 );
             },
