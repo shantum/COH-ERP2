@@ -173,8 +173,16 @@ router.put('/variations/:id', authenticateToken, async (req, res) => {
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
             data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, isActive },
-            include: { fabric: true },
+            include: { fabric: { include: { fabricType: true } }, product: true },
         });
+
+        // If fabric was set and product doesn't have a fabricTypeId, inherit it from the fabric
+        if (fabricId && variation.fabric?.fabricTypeId && !variation.product?.fabricTypeId) {
+            await req.prisma.product.update({
+                where: { id: variation.productId },
+                data: { fabricTypeId: variation.fabric.fabricTypeId },
+            });
+        }
 
         res.json(variation);
     } catch (error) {
