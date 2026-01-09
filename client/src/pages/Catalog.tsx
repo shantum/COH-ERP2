@@ -261,8 +261,10 @@ function FabricEditPopover({
     };
 
     // Display text - based on column type, not view level
+    // For fabric type: prefer the fabric's type (variationFabricTypeName) over product's type (fabricTypeName)
+    // This ensures the column shows the actual fabric type when a fabric is selected
     const displayText = columnType === 'fabricType'
-        ? (hasMixedFabricTypes ? 'Multiple' : row.fabricTypeName || row.variationFabricTypeName || 'Not set')
+        ? (hasMixedFabricTypes ? 'Multiple' : row.variationFabricTypeName || row.fabricTypeName || 'Not set')
         : (hasMixedFabrics ? 'Multiple' : row.fabricName || 'Not set');
 
     return (
