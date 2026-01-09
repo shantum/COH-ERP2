@@ -213,11 +213,11 @@ export default function Customers() {
                                 <div className="h-3 rounded-full bg-gray-100 overflow-hidden flex mb-4">
                                     <div
                                         className="bg-emerald-500 transition-all"
-                                        style={{ width: `${(overviewStats.newCustomers / overviewStats.customersWithOrders) * 100}%` }}
+                                        style={{ width: `${(overviewStats.newCustomers / overviewStats.totalCustomers) * 100}%` }}
                                     />
                                     <div
                                         className="bg-violet-500 transition-all"
-                                        style={{ width: `${(overviewStats.repeatCustomers / overviewStats.customersWithOrders) * 100}%` }}
+                                        style={{ width: `${(overviewStats.repeatCustomers / overviewStats.totalCustomers) * 100}%` }}
                                     />
                                 </div>
 
@@ -235,13 +235,6 @@ export default function Customers() {
                                             <span className="text-sm text-gray-600">Repeat Customers</span>
                                         </div>
                                         <span className="text-sm font-semibold text-gray-900">{overviewStats.repeatCustomers.toLocaleString()}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-2.5 h-2.5 rounded-full bg-gray-300" />
-                                            <span className="text-sm text-gray-600">With Orders</span>
-                                        </div>
-                                        <span className="text-sm font-semibold text-gray-900">{overviewStats.customersWithOrders.toLocaleString()}</span>
                                     </div>
                                 </div>
                             </div>

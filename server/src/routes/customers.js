@@ -422,7 +422,8 @@ router.get('/analytics/overview', async (req, res) => {
             }
         });
 
-        totalCustomers = customers.length;
+        // Only count customers with orders in analytics
+        totalCustomers = customersWithOrders;
 
         // Calculate aggregates
         const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
