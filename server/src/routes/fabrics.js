@@ -8,10 +8,15 @@ const router = Router();
 // FABRIC TYPES
 // ============================================
 
-// Get all fabric types
+// Get all fabric types (only those with active fabrics)
 router.get('/types', authenticateToken, async (req, res) => {
     try {
         const types = await req.prisma.fabricType.findMany({
+            where: {
+                fabrics: {
+                    some: { isActive: true },
+                },
+            },
             include: {
                 fabrics: { where: { isActive: true } },
             },
@@ -158,7 +163,13 @@ router.get('/flat', authenticateToken, async (req, res) => {
 // Get filter options for fabrics
 router.get('/filters', authenticateToken, async (req, res) => {
     try {
+        // Only return fabric types that have at least one active fabric
         const fabricTypes = await req.prisma.fabricType.findMany({
+            where: {
+                fabrics: {
+                    some: { isActive: true },
+                },
+            },
             select: { id: true, name: true },
             orderBy: { name: 'asc' },
         });
@@ -243,6 +254,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
     try {
         const { fabricTypeId, name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty } = req.body;
+
+        // Prevent adding colors to the Default fabric type
+        const fabricType = await req.prisma.fabricType.findUnique({
+            where: { id: fabricTypeId },
+        });
+        if (fabricType?.name === 'Default') {
+            return res.status(400).json({ error: 'Cannot add colors to the Default fabric type' });
+        }
 
         const fabric = await req.prisma.fabric.create({
             data: {
@@ -349,11 +368,33 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             data: { isActive: false },
         });
 
+        // Check if fabric type has any remaining active fabrics
+        // If not, delete the fabric type (except Default)
+        let fabricTypeDeleted = false;
+        const fabricType = await req.prisma.fabricType.findUnique({
+            where: { id: fabric.fabricTypeId },
+            include: {
+                _count: {
+                    select: {
+                        fabrics: { where: { isActive: true } },
+                    },
+                },
+            },
+        });
+
+        if (fabricType && fabricType.name !== 'Default' && fabricType._count.fabrics === 0) {
+            await req.prisma.fabricType.delete({
+                where: { id: fabric.fabricTypeId },
+            });
+            fabricTypeDeleted = true;
+        }
+
         res.json({
             message: 'Fabric deleted',
             id: req.params.id,
             hadTransactions: fabric._count.transactions > 0,
             variationsReassigned,
+            fabricTypeDeleted,
         });
     } catch (error) {
         console.error('Delete fabric error:', error);

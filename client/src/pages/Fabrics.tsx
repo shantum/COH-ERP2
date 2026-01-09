@@ -206,8 +206,16 @@ export default function Fabrics() {
         onSuccess: (response: any) => {
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
+            const messages: string[] = [];
             if (response.data.variationsReassigned > 0) {
-                alert(`Fabric deleted. ${response.data.variationsReassigned} product variation(s) were reassigned to the default fabric.`);
+                messages.push(`${response.data.variationsReassigned} product variation(s) reassigned to default fabric`);
+            }
+            if (response.data.fabricTypeDeleted) {
+                messages.push('Fabric type also deleted (no remaining colors)');
+            }
+            if (messages.length > 0) {
+                alert(`Fabric deleted.\n\n${messages.join('\n')}`);
             }
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete fabric'),
@@ -605,15 +613,15 @@ export default function Fabrics() {
 
                 <div className="hidden sm:block sm:flex-1" />
 
-                {/* Add Color button */}
-                {filterOptions?.fabricTypes?.length > 0 && (
+                {/* Add Color button - exclude Default fabric type */}
+                {filterOptions?.fabricTypes?.filter((t: any) => t.name !== 'Default').length > 0 && (
                     <select
                         value=""
                         onChange={(e) => e.target.value && setShowAddColor(e.target.value)}
                         className="text-sm border rounded px-2 py-1.5 bg-white text-primary-600 w-full sm:w-auto"
                     >
                         <option value="">+ Add Color...</option>
-                        {filterOptions?.fabricTypes?.map((t: any) => (
+                        {filterOptions?.fabricTypes?.filter((t: any) => t.name !== 'Default').map((t: any) => (
                             <option key={t.id} value={t.id}>{t.name}</option>
                         ))}
                     </select>
