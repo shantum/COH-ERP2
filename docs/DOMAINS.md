@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 8, 2026** (Unified Order Views, Auto-ship toggle)
+> All backend and frontend domains consolidated. **Last updated: January 9, 2026** (Exchange order tracking WIP)
 
 ---
 

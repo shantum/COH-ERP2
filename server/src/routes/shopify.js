@@ -821,6 +821,68 @@ router.get('/sync/cache-status', authenticateToken, async (req, res) => {
     }
 });
 
+// Get product cache status
+router.get('/sync/product-cache-status', authenticateToken, async (req, res) => {
+    try {
+        const totalCached = await req.prisma.shopifyProductCache.count();
+        const processed = await req.prisma.shopifyProductCache.count({
+            where: { processedAt: { not: null } }
+        });
+        const failed = await req.prisma.shopifyProductCache.count({
+            where: { processingError: { not: null } }
+        });
+        const pending = await req.prisma.shopifyProductCache.count({
+            where: { processedAt: null, processingError: null }
+        });
+
+        // Get Shopify status distribution from cached rawData
+        const allCache = await req.prisma.shopifyProductCache.findMany({
+            select: { rawData: true }
+        });
+
+        const statusCounts = { active: 0, draft: 0, archived: 0, unknown: 0 };
+        for (const cache of allCache) {
+            try {
+                const data = JSON.parse(cache.rawData);
+                const status = data.status || 'unknown';
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+            } catch {
+                statusCounts.unknown++;
+            }
+        }
+
+        // Get product link stats
+        const totalProducts = await req.prisma.product.count();
+        const linkedProducts = await req.prisma.product.count({
+            where: { shopifyProductId: { not: null } }
+        });
+
+        // Get last sync time
+        const lastSync = await req.prisma.shopifyProductCache.findFirst({
+            where: { webhookTopic: 'manual_sync' },
+            orderBy: { lastWebhookAt: 'desc' },
+            select: { lastWebhookAt: true }
+        });
+
+        res.json({
+            totalCached,
+            processed,
+            failed,
+            pending,
+            shopifyStatus: statusCounts,
+            erpProducts: {
+                total: totalProducts,
+                linked: linkedProducts,
+                notLinked: totalProducts - linkedProducts
+            },
+            lastSyncAt: lastSync?.lastWebhookAt || null
+        });
+    } catch (error) {
+        console.error('Product cache status error:', error);
+        res.status(500).json({ error: 'Failed to get product cache status' });
+    }
+});
+
 // ============================================
 // SIMPLE SYNC OPERATIONS
 // ============================================

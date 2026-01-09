@@ -1,6 +1,6 @@
 # COH-ERP Architecture
 
-> System overview for COH-ERP manufacturing ERP. **Last updated: January 8, 2026**
+> System overview for COH-ERP manufacturing ERP. **Last updated: January 9, 2026**
 > For commands see `CLAUDE.md`, for domain details see `docs/DOMAINS.md`
 
 ---
@@ -50,10 +50,10 @@ ReturnRequest -> ReturnRequestLine -> RepackingQueueItem -> WriteOffLog
 | `Product` | name, styleCode, category, shopifyProductId |
 | `Variation` | productId, colorName, fabricId, imageUrl |
 | `Sku` | skuCode, size, mrp, isCustomSku, parentSkuId |
-| `Order` | orderNumber, status, isArchived, COD remittance fields |
+| `Order` | orderNumber, status, isArchived, isExchange (new), originalOrderId (new) |
 | `OrderLine` | skuId, qty, lineStatus, isCustomized, isNonReturnable |
 | `InventoryTransaction` | txnType (inward/outward/reserved), qty, reason |
-| `ReturnRequest` | requestNumber, status, resolution, valueDifference |
+| `ReturnRequest` | requestNumber, status, resolution, valueDifference, exchangeOrderId |
 | `ProductionBatch` | batchDate, skuId, qtyPlanned, qtyCompleted, status |
 
 ---
@@ -146,6 +146,10 @@ Single endpoint `GET /orders?view=<name>` with config-driven architecture:
 ---
 
 ## Changelog
+
+### January 9, 2026 (WIP)
+- **Exchange Order Tracking**: Schema changes for `isExchange`, `originalOrderId` (⚠️ migration pending)
+- Order creation supports exchange orders with EXC- prefix
 
 ### January 8, 2026
 - **Unified Order Views**: Single endpoint `GET /orders?view=` replaces 5 endpoints

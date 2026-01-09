@@ -52,10 +52,17 @@ export function ShopifyTab() {
         queryFn: () => shopifyApi.getSyncHistory().then(r => r.data),
     });
 
-    // Cache status
+    // Cache status (orders)
     const { data: cacheStatus } = useQuery({
         queryKey: ['cacheStatus'],
         queryFn: () => shopifyApi.getCacheStatus().then(r => r.data),
+        refetchInterval: 10000,
+    });
+
+    // Product cache status
+    const { data: productCacheStatus } = useQuery({
+        queryKey: ['productCacheStatus'],
+        queryFn: () => shopifyApi.getProductCacheStatus().then(r => r.data),
         refetchInterval: 10000,
     });
 
@@ -134,6 +141,7 @@ export function ShopifyTab() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['shopifySyncHistory'] });
             queryClient.invalidateQueries({ queryKey: ['products'] });
+            queryClient.invalidateQueries({ queryKey: ['productCacheStatus'] });
         },
     });
 
@@ -420,10 +428,76 @@ export function ShopifyTab() {
             {/* Products Sync */}
             {config?.hasAccessToken && (
                 <div className="card border-2 border-primary-200 bg-primary-50/30">
-                    <h3 className="font-semibold mb-2 flex items-center gap-2">
-                        <Package size={18} /> Products & SKUs
-                        <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">Sync First</span>
-                    </h3>
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-semibold flex items-center gap-2">
+                            <Package size={18} /> Products & SKUs
+                            <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">Sync First</span>
+                        </h3>
+                        {productCacheStatus?.lastSyncAt && (
+                            <span className="text-xs text-gray-500">
+                                Last sync: {new Date(productCacheStatus.lastSyncAt).toLocaleString()}
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Product Sync Status */}
+                    {productCacheStatus && (
+                        <div className="mb-4 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                                <div className="bg-white rounded-lg p-2 text-center shadow-sm">
+                                    <p className="text-xl font-bold text-gray-900">{productCacheStatus.totalCached}</p>
+                                    <p className="text-xs text-gray-500">Cached</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-2 text-center shadow-sm">
+                                    <p className="text-xl font-bold text-green-600">{productCacheStatus.processed}</p>
+                                    <p className="text-xs text-gray-500">Processed</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-2 text-center shadow-sm">
+                                    <p className="text-xl font-bold text-yellow-600">{productCacheStatus.pending}</p>
+                                    <p className="text-xs text-gray-500">Pending</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-2 text-center shadow-sm">
+                                    <p className="text-xl font-bold text-red-600">{productCacheStatus.failed}</p>
+                                    <p className="text-xs text-gray-500">Failed</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                {/* Shopify Status */}
+                                <div className="bg-white rounded-lg p-2 shadow-sm">
+                                    <p className="text-xs font-medium text-gray-600 mb-1">Shopify Status</p>
+                                    <div className="flex flex-wrap gap-1">
+                                        <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                            Active: {productCacheStatus.shopifyStatus?.active || 0}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">
+                                            Draft: {productCacheStatus.shopifyStatus?.draft || 0}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded text-xs">
+                                            Archived: {productCacheStatus.shopifyStatus?.archived || 0}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* ERP Products */}
+                                <div className="bg-white rounded-lg p-2 shadow-sm">
+                                    <p className="text-xs font-medium text-gray-600 mb-1">ERP Products</p>
+                                    <div className="flex flex-wrap gap-1">
+                                        <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                                            Total: {productCacheStatus.erpProducts?.total || 0}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                            Linked: {productCacheStatus.erpProducts?.linked || 0}
+                                        </span>
+                                        <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-xs">
+                                            Not Linked: {productCacheStatus.erpProducts?.notLinked || 0}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <p className="text-sm text-gray-600 mb-3">
                         Sync products first to create SKUs in the ERP. This enables order line items to link properly.
                     </p>
@@ -442,7 +516,11 @@ export function ShopifyTab() {
                             onClick={() => syncProductsMutation.mutate({ limit: syncLimit })}
                             disabled={syncProductsMutation.isPending}
                         >
-                            <Play size={16} />
+                            {syncProductsMutation.isPending ? (
+                                <RefreshCw size={16} className="animate-spin" />
+                            ) : (
+                                <Play size={16} />
+                            )}
                             {syncProductsMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} Products`}
                         </button>
                         <button
@@ -454,10 +532,27 @@ export function ShopifyTab() {
                             }}
                             disabled={syncProductsMutation.isPending}
                         >
-                            <RefreshCw size={16} />
+                            {syncProductsMutation.isPending ? (
+                                <RefreshCw size={16} className="animate-spin" />
+                            ) : (
+                                <RefreshCw size={16} />
+                            )}
                             {syncProductsMutation.isPending ? 'Syncing...' : 'Sync All Products'}
                         </button>
                     </div>
+
+                    {/* Sync in progress indicator */}
+                    {syncProductsMutation.isPending && (
+                        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <div className="flex items-center gap-3">
+                                <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+                                <div>
+                                    <p className="text-sm font-medium text-blue-800">Syncing products from Shopify...</p>
+                                    <p className="text-xs text-blue-600">This may take a few minutes for large catalogs</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {productPreview && (
                         <div className="border rounded-lg overflow-hidden bg-white">

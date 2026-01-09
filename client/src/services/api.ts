@@ -421,6 +421,7 @@ export const shopifyApi = {
     backfillCacheFields: () => api.post('/shopify/sync/backfill-cache-fields'),
     reprocessCache: () => api.post('/shopify/sync/reprocess-cache'),
     getCacheStatus: () => api.get('/shopify/sync/cache-status'),
+    getProductCacheStatus: () => api.get('/shopify/sync/product-cache-status'),
     // Simple sync operations (recommended)
     fullDump: (daysBack?: number) => api.post('/shopify/sync/full-dump', { daysBack }),
     lookupOrder: (orderNumber: string) => api.get(`/shopify/orders/${orderNumber}`),
