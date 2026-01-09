@@ -119,19 +119,21 @@ export function ServerLogsTab() {
 
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                         <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3 border border-gray-200">
-                            <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-                            <p className="text-xs text-gray-600">Total Logs</p>
+                            <p className="text-2xl font-bold text-gray-900">
+                                {stats.total.toLocaleString()} / {stats.maxSize.toLocaleString()}
+                            </p>
+                            <p className="text-xs text-gray-600">Logs (Current / Max)</p>
                         </div>
                         <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3 border border-red-200">
-                            <p className="text-2xl font-bold text-red-700">{stats.byLevel.error}</p>
+                            <p className="text-2xl font-bold text-red-700">{stats.byLevel.error.toLocaleString()}</p>
                             <p className="text-xs text-red-600">Errors</p>
                         </div>
                         <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-3 border border-yellow-200">
-                            <p className="text-2xl font-bold text-yellow-700">{stats.byLevel.warn}</p>
+                            <p className="text-2xl font-bold text-yellow-700">{stats.byLevel.warn.toLocaleString()}</p>
                             <p className="text-xs text-yellow-600">Warnings</p>
                         </div>
                         <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 border border-blue-200">
-                            <p className="text-2xl font-bold text-blue-700">{stats.byLevel.info}</p>
+                            <p className="text-2xl font-bold text-blue-700">{stats.byLevel.info.toLocaleString()}</p>
                             <p className="text-xs text-blue-600">Info</p>
                         </div>
                     </div>
@@ -161,9 +163,49 @@ export function ServerLogsTab() {
                         </div>
                     </div>
 
-                    <div className="mt-3 text-xs text-gray-500">
-                        Buffer: {stats.total} / {stats.maxSize} logs |
-                        Oldest: {stats.oldestLog ? new Date(stats.oldestLog).toLocaleString() : 'N/A'}
+                    {/* Storage Information */}
+                    <div className="mt-4 grid md:grid-cols-3 gap-3 text-xs">
+                        <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <p className="font-semibold text-gray-700 mb-1">Storage Type</p>
+                            <p className="text-gray-600">
+                                {stats.isPersistent ? 'Persistent (file-based)' : 'In-memory only'}
+                            </p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <p className="font-semibold text-gray-700 mb-1">Retention Period</p>
+                            <p className="text-gray-600">{stats.retentionHours} hours</p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <p className="font-semibold text-gray-700 mb-1">File Size</p>
+                            <p className="text-gray-600">
+                                {stats.fileSizeKB !== undefined
+                                    ? stats.fileSizeKB < 1024
+                                        ? `${stats.fileSizeKB} KB`
+                                        : `${stats.fileSizeMB} MB`
+                                    : 'N/A'}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="mt-3 grid md:grid-cols-3 gap-3 text-xs">
+                        <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <p className="font-semibold text-gray-700 mb-1">Oldest Log</p>
+                            <p className="text-gray-600">
+                                {stats.oldestLog ? new Date(stats.oldestLog).toLocaleString() : 'N/A'}
+                            </p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <p className="font-semibold text-gray-700 mb-1">Newest Log</p>
+                            <p className="text-gray-600">
+                                {stats.newestLog ? new Date(stats.newestLog).toLocaleString() : 'N/A'}
+                            </p>
+                        </div>
+                        <div className="bg-white rounded-lg p-3 border border-gray-200">
+                            <p className="font-semibold text-gray-700 mb-1">Next Cleanup</p>
+                            <p className="text-gray-600">
+                                {stats.nextCleanup ? new Date(stats.nextCleanup).toLocaleString() : 'N/A'}
+                            </p>
+                        </div>
                     </div>
                 </div>
             )}
@@ -316,10 +358,11 @@ export function ServerLogsTab() {
                     <div className="text-sm text-blue-800">
                         <p className="font-medium mb-1">About Server Logs</p>
                         <ul className="list-disc list-inside space-y-1 text-xs">
-                            <li>Logs are stored in memory (last 1000 entries)</li>
+                            <li>Logs persist across server restarts (file-based storage)</li>
+                            <li>24-hour retention with automatic cleanup every hour</li>
+                            <li>Maximum capacity: 50,000 log entries (circular buffer)</li>
                             <li>Auto-refresh updates every 3 seconds when enabled</li>
                             <li>Use search to filter by message content or context data</li>
-                            <li>Logs are cleared on server restart</li>
                         </ul>
                     </div>
                 </div>

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '../utils/validation.js';
 import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
@@ -721,6 +722,24 @@ router.get('/logs', authenticateToken, (req, res) => {
 router.get('/logs/stats', authenticateToken, (req, res) => {
     try {
         const stats = logBuffer.getStats();
+
+        // Add storage metadata
+        stats.isPersistent = true;
+        stats.storageType = 'file';
+        stats.logFilePath = logBuffer.logFilePath;
+
+        // Get file size if available
+        try {
+            if (fs.existsSync(logBuffer.logFilePath)) {
+                const fileStats = fs.statSync(logBuffer.logFilePath);
+                stats.fileSizeBytes = fileStats.size;
+                stats.fileSizeKB = Math.round(fileStats.size / 1024);
+                stats.fileSizeMB = (fileStats.size / (1024 * 1024)).toFixed(2);
+            }
+        } catch (fsError) {
+            // File size not critical, continue without it
+        }
+
         res.json(stats);
     } catch (error) {
         console.error('Get log stats error:', error);
