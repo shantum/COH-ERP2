@@ -142,6 +142,9 @@ interface FabricEditPopoverProps {
     rawItems: any[];
 }
 
+// Common select styling for fabric popovers
+const SELECT_CLASS = "w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100";
+
 // Fabric edit popover component
 function FabricEditPopover({
     row,
@@ -301,7 +304,7 @@ function FabricEditPopover({
                             <select
                                 value={row.fabricTypeId || ''}
                                 onChange={(e) => handleFabricTypeChange(e.target.value)}
-                                className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                className={SELECT_CLASS}
                             >
                                 <option value="">Not set</option>
                                 {fabricTypes.map(ft => (
@@ -316,63 +319,45 @@ function FabricEditPopover({
                         </div>
                     )}
 
-                    {/* Fabric Type filter + Fabric dropdown - for variation level */}
+                    {/* Fabric Type filter - for variation level only (filters, doesn't update) */}
                     {viewLevel === 'variation' && (
-                        <>
-                            <div className="mb-3">
-                                <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
-                                <select
-                                    value={filterFabricTypeId}
-                                    onChange={(e) => setFilterFabricTypeId(e.target.value)}
-                                    className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                >
-                                    <option value="">All fabric types</option>
-                                    {fabricTypes.map(ft => (
-                                        <option key={ft.id} value={ft.id}>{ft.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-600 mb-1">Fabric</label>
-                                <select
-                                    value={row.fabricId || ''}
-                                    onChange={(e) => handleFabricChange(e.target.value)}
-                                    className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                >
-                                    <option value="">Select fabric...</option>
-                                    {filteredFabrics.map(f => (
-                                        <option key={f.id} value={f.id}>{f.displayName}</option>
-                                    ))}
-                                </select>
-                                <p className="text-xs text-gray-400 mt-1">
-                                    Affects {getAffectedCount('fabric')} SKU(s)
-                                </p>
-                                {filteredFabrics.length === 0 && filterFabricTypeId && (
-                                    <p className="text-xs text-amber-600 mt-1">
-                                        No fabrics for this type
-                                    </p>
-                                )}
-                            </div>
-                        </>
+                        <div className="mb-3">
+                            <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
+                            <select
+                                value={filterFabricTypeId}
+                                onChange={(e) => setFilterFabricTypeId(e.target.value)}
+                                className={SELECT_CLASS}
+                            >
+                                <option value="">All fabric types</option>
+                                {fabricTypes.map(ft => (
+                                    <option key={ft.id} value={ft.id}>{ft.name}</option>
+                                ))}
+                            </select>
+                        </div>
                     )}
 
-                    {/* Fabric dropdown - for SKU level only */}
-                    {viewLevel === 'sku' && (
+                    {/* Fabric dropdown - for variation and SKU levels */}
+                    {(viewLevel === 'variation' || viewLevel === 'sku') && (
                         <div>
                             <label className="block text-xs text-gray-600 mb-1">Fabric</label>
                             <select
                                 value={row.fabricId || ''}
                                 onChange={(e) => handleFabricChange(e.target.value)}
-                                className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                className={SELECT_CLASS}
                             >
                                 <option value="">Select fabric...</option>
                                 {filteredFabrics.map(f => (
                                     <option key={f.id} value={f.id}>{f.displayName}</option>
                                 ))}
                             </select>
-                            {filteredFabrics.length === 0 && (
+                            {viewLevel === 'variation' && (
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Affects {getAffectedCount('fabric')} SKU(s)
+                                </p>
+                            )}
+                            {filteredFabrics.length === 0 && (viewLevel === 'variation' ? filterFabricTypeId : row.fabricTypeId) && (
                                 <p className="text-xs text-amber-600 mt-1">
-                                    No fabrics available for this fabric type
+                                    No fabrics for this type
                                 </p>
                             )}
                         </div>
