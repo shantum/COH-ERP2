@@ -3,11 +3,12 @@
  * AG Grid implementation for shipped orders with row grouping by ship date
  */
 
-import { useMemo, useCallback, useRef } from 'react';
+import { useMemo, useCallback, useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Undo2, ExternalLink, Radio, Archive } from 'lucide-react';
+import { Undo2, ExternalLink, Archive, MoreHorizontal, CheckCircle, AlertTriangle, Package } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 import { compactTheme, formatDate, formatRelativeTime, getTrackingUrl } from '../../utils/agGridHelpers';
 import { useGridState, getColumnOrderFromApi, applyColumnWidths } from '../../hooks/useGridState';
@@ -63,6 +64,142 @@ function formatDateTime(date: string | null | undefined): string {
         hour: '2-digit',
         minute: '2-digit',
     });
+}
+
+// Action menu dropdown for shipped orders
+function ShippedActionMenu({
+    order,
+    onMarkDelivered,
+    onMarkRto,
+    onArchive,
+    onUnship,
+    isMarkingDelivered,
+    isMarkingRto,
+    isArchiving,
+    isUnshipping,
+}: {
+    order: any;
+    onMarkDelivered: (id: string) => void;
+    onMarkRto: (id: string) => void;
+    onArchive?: (id: string) => void;
+    onUnship: (id: string) => void;
+    isMarkingDelivered?: boolean;
+    isMarkingRto?: boolean;
+    isArchiving?: boolean;
+    isUnshipping?: boolean;
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [position, setPosition] = useState({ top: 0, left: 0 });
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (
+                menuRef.current && !menuRef.current.contains(e.target as Node) &&
+                buttonRef.current && !buttonRef.current.contains(e.target as Node)
+            ) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen]);
+
+    const handleOpen = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setPosition({
+                top: rect.bottom + 4,
+                left: rect.right - 160,
+            });
+        }
+        setIsOpen(!isOpen);
+    };
+
+    const status = order.trackingStatus || 'in_transit';
+    const canMarkDelivered = status === 'in_transit' || status === 'delivery_delayed' || status === 'out_for_delivery';
+    const canMarkRto = status === 'in_transit' || status === 'delivery_delayed' || status === 'out_for_delivery';
+
+    return (
+        <>
+            <button
+                ref={buttonRef}
+                onClick={handleOpen}
+                className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                title="More actions"
+            >
+                <MoreHorizontal size={14} />
+            </button>
+            {isOpen && createPortal(
+                <div
+                    ref={menuRef}
+                    className="fixed z-[9999] bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px]"
+                    style={{ top: position.top, left: position.left }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {canMarkDelivered && (
+                        <button
+                            onClick={() => { onMarkDelivered(order.id); setIsOpen(false); }}
+                            disabled={isMarkingDelivered}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-green-50 text-green-600 disabled:opacity-50"
+                        >
+                            <CheckCircle size={12} />
+                            Mark Delivered
+                        </button>
+                    )}
+                    {canMarkRto && (
+                        <button
+                            onClick={() => {
+                                if (confirm(`Mark ${order.orderNumber} as RTO?`)) {
+                                    onMarkRto(order.id);
+                                    setIsOpen(false);
+                                }
+                            }}
+                            disabled={isMarkingRto}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-red-50 text-red-600 disabled:opacity-50"
+                        >
+                            <AlertTriangle size={12} />
+                            Mark as RTO
+                        </button>
+                    )}
+                    {onArchive && (
+                        <button
+                            onClick={() => {
+                                if (confirm(`Archive ${order.orderNumber}?`)) {
+                                    onArchive(order.id);
+                                    setIsOpen(false);
+                                }
+                            }}
+                            disabled={isArchiving}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 text-gray-600 disabled:opacity-50"
+                        >
+                            <Archive size={12} />
+                            Archive
+                        </button>
+                    )}
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                        onClick={() => {
+                            if (confirm(`Undo shipping for ${order.orderNumber}?\nThis moves it back to open orders.`)) {
+                                onUnship(order.id);
+                                setIsOpen(false);
+                            }
+                        }}
+                        disabled={isUnshipping}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-amber-50 text-amber-600 disabled:opacity-50"
+                    >
+                        <Undo2 size={12} />
+                        Undo Shipping
+                    </button>
+                </div>,
+                document.body
+            )}
+        </>
+    );
 }
 
 export function ShippedOrdersGrid({
@@ -620,80 +757,54 @@ export function ShippedOrdersGrid({
         // ACTIONS - Pinned to right so always visible
         {
             colId: 'actions',
-            headerName: 'Actions',
-            width: 130,
+            headerName: '',
+            width: 100,
             sortable: false,
             pinned: 'right',
             cellRenderer: (params: ICellRendererParams) => {
                 const order = params.data;
                 if (!order) return null;
 
-                const status = order.trackingStatus || 'in_transit';
-                const canMarkDelivered = status === 'in_transit' || status === 'delivery_delayed';
-                const canMarkRto = status === 'in_transit' || status === 'delivery_delayed';
                 const awb = order.awbNumber || order.shopifyTrackingNumber;
+                const courier = order.courier || order.shopifyTrackingCompany;
+                const trackingUrl = order.trackingUrl || getTrackingUrl(awb, courier);
+                const status = order.trackingStatus || 'in_transit';
+                const isDelivered = status === 'delivered';
 
                 return (
-                    <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
-                        {awb && onTrack && (
-                            <button
-                                onClick={() => onTrack(awb, order.orderNumber)}
-                                className="p-1.5 rounded-md hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
-                                title="Live tracking"
+                    <div className="flex items-center gap-1">
+                        {/* Primary action: Track button or status indicator */}
+                        {awb && trackingUrl ? (
+                            <a
+                                href={trackingUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                                title={`Track on ${courier || 'courier website'}`}
                             >
-                                <Radio size={14} />
-                            </button>
+                                <Package size={11} />
+                                Track
+                            </a>
+                        ) : isDelivered ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-green-50 text-green-600">
+                                <CheckCircle size={11} />
+                                Done
+                            </span>
+                        ) : (
+                            <span className="text-gray-300 text-xs">—</span>
                         )}
-                        {canMarkDelivered && (
-                            <button
-                                onClick={() => onMarkDelivered(order.id)}
-                                disabled={isMarkingDelivered}
-                                className="p-1.5 rounded-md hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors disabled:opacity-50"
-                                title="Mark as Delivered"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                            </button>
-                        )}
-                        {canMarkRto && (
-                            <button
-                                onClick={() => {
-                                    if (confirm(`Mark order ${order.orderNumber} as RTO?`)) {
-                                        onMarkRto(order.id);
-                                    }
-                                }}
-                                disabled={isMarkingRto}
-                                className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
-                                title="Mark as RTO"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            </button>
-                        )}
-                        {onArchive && (
-                            <button
-                                onClick={() => {
-                                    if (confirm(`Archive order ${order.orderNumber}? This will move it to the archived tab.`)) {
-                                        onArchive(order.id);
-                                    }
-                                }}
-                                disabled={isArchiving}
-                                className="p-1.5 rounded-md hover:bg-purple-50 text-gray-400 hover:text-purple-600 transition-colors disabled:opacity-50"
-                                title="Archive order"
-                            >
-                                <Archive size={14} />
-                            </button>
-                        )}
-                        <button
-                            onClick={() => {
-                                if (confirm(`Undo shipping for ${order.orderNumber}? This will move it back to open orders.`)) {
-                                    onUnship(order.id);
-                                }
-                            }}
-                            disabled={isUnshipping}
-                            className="p-1.5 rounded-md hover:bg-amber-50 text-gray-400 hover:text-orange-600 transition-colors disabled:opacity-50"
-                            title="Undo shipping"
-                        >
-                            <Undo2 size={14} />
-                        </button>
+                        {/* Secondary actions dropdown */}
+                        <ShippedActionMenu
+                            order={order}
+                            onMarkDelivered={onMarkDelivered}
+                            onMarkRto={onMarkRto}
+                            onArchive={onArchive}
+                            onUnship={onUnship}
+                            isMarkingDelivered={isMarkingDelivered}
+                            isMarkingRto={isMarkingRto}
+                            isArchiving={isArchiving}
+                            isUnshipping={isUnshipping}
+                        />
                     </div>
                 );
             },

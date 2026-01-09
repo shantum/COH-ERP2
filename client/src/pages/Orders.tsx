@@ -444,7 +444,7 @@ export default function Orders() {
     );
 
     // Grid component
-    const { gridComponent, columnVisibilityDropdown, customHeaders, resetHeaders } = OrdersGrid({
+    const { gridComponent, actionPanel, columnVisibilityDropdown, customHeaders, resetHeaders } = OrdersGrid({
         rows: filteredOpenRows,
         lockedDates: lockedDates || [],
         onAllocate: handleAllocate,
@@ -693,6 +693,8 @@ export default function Orders() {
                 {!isLoading && tab === 'open' && filteredOpenRows.length > 0 && (
                     <div>{gridComponent}</div>
                 )}
+                {/* Action Panel for order management */}
+                {actionPanel}
                 {!isLoading && tab === 'open' && filteredOpenRows.length === 0 && (
                     <div className="text-center text-gray-400 py-16">
                         {searchQuery || dateRange ? 'No orders match your filters' : 'No open orders'}

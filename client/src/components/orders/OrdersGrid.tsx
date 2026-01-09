@@ -17,9 +17,10 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, MoreHorizontal, Eye } from 'lucide-react';
+import { Check, X, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, ChevronRight } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
+import { OrderActionPanel } from './OrderActionPanel';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -328,124 +329,6 @@ const ColumnVisibilityDropdown = ({
     );
 };
 
-// Action menu dropdown component for order actions
-const ActionMenuDropdown = ({
-    order,
-    onCancel,
-    onArchive,
-    onDelete,
-    onQuickShip,
-    canDelete,
-    canQuickShip,
-    isCancelling,
-    isArchiving,
-    isDeleting,
-}: {
-    order: any;
-    onCancel: () => void;
-    onArchive: () => void;
-    onDelete: () => void;
-    onQuickShip?: () => void;
-    canDelete: boolean;
-    canQuickShip: boolean;
-    isCancelling: boolean;
-    isArchiving: boolean;
-    isDeleting: boolean;
-}) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [position, setPosition] = useState({ top: 0, left: 0 });
-    const buttonRef = useRef<HTMLButtonElement>(null);
-    const menuRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (
-                menuRef.current && !menuRef.current.contains(e.target as Node) &&
-                buttonRef.current && !buttonRef.current.contains(e.target as Node)
-            ) {
-                setIsOpen(false);
-            }
-        };
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-            return () => document.removeEventListener('mousedown', handleClickOutside);
-        }
-    }, [isOpen]);
-
-    const handleOpen = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (buttonRef.current) {
-            const rect = buttonRef.current.getBoundingClientRect();
-            setPosition({
-                top: rect.bottom + 4,
-                left: rect.right - 140, // Align right edge
-            });
-        }
-        setIsOpen(!isOpen);
-    };
-
-    return (
-        <>
-            <button
-                ref={buttonRef}
-                onClick={handleOpen}
-                className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                title="More actions"
-            >
-                <MoreHorizontal size={14} />
-            </button>
-            {isOpen && createPortal(
-                <div
-                    ref={menuRef}
-                    className="fixed z-[9999] bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]"
-                    style={{ top: position.top, left: position.left }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    {canQuickShip && onQuickShip && (
-                        <button
-                            onClick={() => { onQuickShip(); setIsOpen(false); }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-green-50 text-green-600"
-                        >
-                            <Truck size={12} />
-                            Quick Ship
-                        </button>
-                    )}
-                    <button
-                        onClick={() => { onCancel(); setIsOpen(false); }}
-                        disabled={isCancelling}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 text-gray-600 disabled:opacity-50"
-                    >
-                        <Ban size={12} />
-                        Cancel Order
-                    </button>
-                    <button
-                        onClick={() => { onArchive(); setIsOpen(false); }}
-                        disabled={isArchiving}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 text-gray-600 disabled:opacity-50"
-                    >
-                        <Archive size={12} />
-                        Archive
-                    </button>
-                    {canDelete && (
-                        <>
-                            <div className="my-1 border-t border-gray-100" />
-                            <button
-                                onClick={() => { onDelete(); setIsOpen(false); }}
-                                disabled={isDeleting}
-                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-red-50 text-red-600 disabled:opacity-50"
-                            >
-                                <Trash2 size={12} />
-                                Delete
-                            </button>
-                        </>
-                    )}
-                </div>,
-                document.body
-            )}
-        </>
-    );
-};
-
 // Editable header component
 const EditableHeader = (props: any) => {
     const [editing, setEditing] = useState(false);
@@ -592,23 +475,26 @@ export function OrdersGrid({
         return row.lineId || `order-${row.orderId}-header`;
     }, []);
 
+    // Action panel state - for the order being managed
+    const [actionPanelOrder, setActionPanelOrder] = useState<any>(null);
+
     // Custom headers state
     const [customHeaders, setCustomHeaders] = useState<Record<string, string>>(() => {
         const saved = localStorage.getItem('ordersGridHeaders');
         return saved ? JSON.parse(saved) : {};
     });
 
-    // Visible columns state
+    // Visible columns state - defaults to curated DEFAULT_VISIBLE_COLUMNS for new users
     const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
         const saved = localStorage.getItem('ordersGridVisibleColumns');
         if (saved) {
             try {
                 return new Set(JSON.parse(saved));
             } catch {
-                return new Set(ALL_COLUMN_IDS);
+                return new Set(DEFAULT_VISIBLE_COLUMNS);
             }
         }
-        return new Set(ALL_COLUMN_IDS);
+        return new Set(DEFAULT_VISIBLE_COLUMNS);
     });
 
     const setCustomHeader = useCallback((colId: string, headerName: string) => {
@@ -633,8 +519,8 @@ export function OrdersGrid({
     }, []);
 
     const resetColumnVisibility = useCallback(() => {
-        const allVisible = new Set(ALL_COLUMN_IDS);
-        setVisibleColumns(allVisible);
+        const defaultVisible = new Set(DEFAULT_VISIBLE_COLUMNS);
+        setVisibleColumns(defaultVisible);
         localStorage.removeItem('ordersGridVisibleColumns');
     }, []);
 
@@ -1261,7 +1147,7 @@ export function OrdersGrid({
                     if (!row?.lineId) return null;
                     const notes = row.lineNotes || '';
                     if (!notes)
-                        return <span className="text-gray-300 italic">click to add</span>;
+                        return <span className="text-gray-300">—</span>;
                     return (
                         <span title={notes}>
                             {notes.length > 15 ? notes.substring(0, 15) + '...' : notes}
@@ -1479,10 +1365,11 @@ export function OrdersGrid({
             },
             {
                 colId: 'actions',
-                headerName: getHeaderName('actions'),
-                width: 140,
+                headerName: '',
+                width: 80,
                 sortable: false,
                 resizable: false,
+                pinned: 'right',
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
                     if (!row) return null;
@@ -1490,117 +1377,47 @@ export function OrdersGrid({
                     const isCancelledLine = row.lineStatus === 'cancelled';
                     const hasLineId = row.lineId != null;
 
+                    // Line-only action (cancel/restore line)
                     const lineAction = hasLineId ? (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (isCancelledLine) {
                                     onUncancelLine(row.lineId);
-                                } else if (
-                                    confirm(
-                                        `Cancel this line item?\n\n${row.productName} - ${row.skuCode}`
-                                    )
-                                ) {
+                                } else if (confirm(`Cancel this line?\n${row.skuCode}`)) {
                                     onCancelLine(row.lineId);
                                 }
                             }}
                             disabled={isCancellingLine || isUncancellingLine}
-                            className={`p-1.5 rounded-md transition-colors disabled:opacity-50 ${isCancelledLine
-                                ? 'text-green-500 hover:text-green-600 hover:bg-green-50'
-                                : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
-                                }`}
+                            className={`p-1 rounded transition-colors disabled:opacity-50 ${
+                                isCancelledLine
+                                    ? 'text-green-500 hover:text-green-600 hover:bg-green-50'
+                                    : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
+                            }`}
                             title={isCancelledLine ? 'Restore line' : 'Cancel line'}
                         >
-                            {isCancelledLine ? <Undo2 size={13} /> : <X size={13} />}
+                            {isCancelledLine ? <Undo2 size={12} /> : <X size={12} />}
                         </button>
                     ) : null;
 
+                    // Non-first lines only show line action
                     if (!row.isFirstLine) {
-                        return <div className="flex items-center justify-end">{lineAction}</div>;
+                        return <div className="flex items-center justify-end pr-1">{lineAction}</div>;
                     }
 
+                    // First line shows "Manage" button that opens the panel
                     return (
-                        <div className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1">
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    onEditOrder(order);
+                                    setActionPanelOrder(order);
                                 }}
-                                className="p-1.5 rounded-md hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
-                                title="Edit order"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-700 transition-colors"
                             >
-                                <Pencil size={13} />
+                                Manage
+                                <ChevronRight size={12} />
                             </button>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    const reason = prompt(
-                                        `Cancel order ${order.orderNumber}?\n\nEnter cancellation reason (optional):`
-                                    );
-                                    if (reason !== null) {
-                                        onCancelOrder(order.id, reason || undefined);
-                                    }
-                                }}
-                                disabled={isCancellingOrder}
-                                className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
-                                title="Cancel order"
-                            >
-                                <Ban size={13} />
-                            </button>
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (
-                                        confirm(
-                                            `Archive order ${order.orderNumber}?\n\nThis will hide it from the open orders list.`
-                                        )
-                                    ) {
-                                        onArchiveOrder(order.id);
-                                    }
-                                }}
-                                disabled={isArchiving}
-                                className="p-1.5 rounded-md hover:bg-amber-50 text-gray-400 hover:text-amber-600 transition-colors disabled:opacity-50"
-                                title="Archive order"
-                            >
-                                <Archive size={13} />
-                            </button>
-                            {onQuickShip && order.awbNumber && order.courier && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (
-                                            confirm(
-                                                `Quick Ship order ${order.orderNumber}?\n\nThis will bypass allocate/pick/pack and mark as shipped directly.`
-                                            )
-                                        ) {
-                                            onQuickShip(order.id);
-                                        }
-                                    }}
-                                    className="p-1.5 rounded-md hover:bg-green-50 text-green-500 hover:text-green-600 transition-colors"
-                                    title="Quick Ship (bypass workflow)"
-                                >
-                                    <Truck size={13} />
-                                </button>
-                            )}
-                            {row.totalLines === 0 && (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (
-                                            confirm(
-                                                `DELETE order ${order.orderNumber}?\n\nThis will permanently remove it from the database.`
-                                            )
-                                        ) {
-                                            onDeleteOrder(order.id);
-                                        }
-                                    }}
-                                    disabled={isDeletingOrder}
-                                    className="p-1.5 rounded-md hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
-                                    title="Delete order (permanently)"
-                                >
-                                    <Trash2 size={13} />
-                                </button>
-                            )}
                             {lineAction}
                         </div>
                     );
@@ -1842,6 +1659,24 @@ export function OrdersGrid({
                     </div>
                 </div>
             </>
+        ),
+        actionPanel: (
+            <OrderActionPanel
+                order={actionPanelOrder}
+                isOpen={!!actionPanelOrder}
+                onClose={() => setActionPanelOrder(null)}
+                onView={() => onViewOrder(actionPanelOrder?.id)}
+                onEdit={() => onEditOrder(actionPanelOrder)}
+                onCancel={(reason) => onCancelOrder(actionPanelOrder?.id, reason)}
+                onArchive={() => onArchiveOrder(actionPanelOrder?.id)}
+                onDelete={() => onDeleteOrder(actionPanelOrder?.id)}
+                onQuickShip={onQuickShip ? () => onQuickShip(actionPanelOrder?.id) : undefined}
+                canDelete={actionPanelOrder?.orderLines?.length === 0}
+                canQuickShip={!!(actionPanelOrder?.awbNumber && actionPanelOrder?.courier)}
+                isCancelling={isCancellingOrder}
+                isArchiving={isArchiving}
+                isDeleting={isDeletingOrder}
+            />
         ),
         columnVisibilityDropdown: (
             <ColumnVisibilityDropdown
