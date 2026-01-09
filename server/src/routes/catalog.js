@@ -126,6 +126,7 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 // Variation (color-level)
                 variationId: variation.id,
                 colorName: variation.colorName,
+                hasLining: variation.hasLining || false,
                 fabricName: variation.fabric?.colorName || null,
                 imageUrl: variation.imageUrl || product.imageUrl || null,
 

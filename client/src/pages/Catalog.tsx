@@ -9,8 +9,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Eye, Plus, Pencil } from 'lucide-react';
+import { Search, Plus, Pencil, X } from 'lucide-react';
 import { catalogApi, productsApi } from '../services/api';
+import { FormModal, ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { ColumnVisibilityDropdown, InventoryStatusBadge } from '../components/common/grid';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumns } from '../hooks/useGridState';
@@ -30,7 +31,7 @@ const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
 const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
     sku: [],
     variation: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'shopifyQty', 'targetStockQty'],
-    product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'fabricName', 'image', 'shopifyQty', 'targetStockQty'],
+    product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'hasLining', 'fabricName', 'image', 'shopifyQty', 'targetStockQty'],
 };
 
 // Aggregate SKU data by variation (product + color)
@@ -335,7 +336,7 @@ function FabricEditPopover({
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
     'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
-    'colorName', 'fabricName', 'image',
+    'colorName', 'hasLining', 'fabricName', 'image',
     'skuCode', 'size', 'mrp', 'fabricConsumption',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'status',
     'actions'
@@ -350,6 +351,7 @@ const DEFAULT_HEADERS: Record<string, string> = {
     productType: 'Type',
     fabricTypeName: 'Fabric Type',
     colorName: 'Color',
+    hasLining: 'Lining',
     fabricName: 'Fabric',
     image: 'Img',
     skuCode: 'SKU Code',
@@ -396,6 +398,14 @@ export default function Catalog() {
         status: '',
     });
     const [searchInput, setSearchInput] = useState('');
+
+    // Edit modal state
+    type EditLevel = 'sku' | 'variation' | 'product';
+    const [editModal, setEditModal] = useState<{
+        isOpen: boolean;
+        level: EditLevel;
+        data: any;
+    }>({ isOpen: false, level: 'sku', data: null });
 
     // Apply quick filter when search input changes (client-side, instant)
     useEffect(() => {
@@ -446,6 +456,59 @@ export default function Catalog() {
         },
     });
 
+    const updateLiningMutation = useMutation({
+        mutationFn: ({ variationId, hasLining }: { variationId: string; hasLining: boolean }) =>
+            productsApi.updateVariation(variationId, { hasLining }),
+        onMutate: async ({ variationId, hasLining }) => {
+            // Cancel any outgoing refetches
+            await queryClient.cancelQueries({ queryKey: ['catalog'] });
+
+            // Snapshot the previous value
+            const previousData = queryClient.getQueryData(['catalog', filter.gender, filter.category, filter.productId, filter.status]);
+
+            // Optimistically update the cache
+            queryClient.setQueryData(
+                ['catalog', filter.gender, filter.category, filter.productId, filter.status],
+                (old: any) => {
+                    if (!old?.items) return old;
+                    return {
+                        ...old,
+                        items: old.items.map((item: any) =>
+                            item.variationId === variationId
+                                ? { ...item, hasLining }
+                                : item
+                        ),
+                    };
+                }
+            );
+
+            return { previousData };
+        },
+        onError: (err: any, _variables, context) => {
+            // Rollback on error
+            if (context?.previousData) {
+                queryClient.setQueryData(
+                    ['catalog', filter.gender, filter.category, filter.productId, filter.status],
+                    context.previousData
+                );
+            }
+            alert(err.response?.data?.error || 'Failed to update lining');
+        },
+        onSettled: () => {
+            // Refetch to ensure we're in sync
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        },
+    });
+
+    // Lining confirmation dialog state
+    const [liningConfirm, setLiningConfirm] = useState<{
+        isOpen: boolean;
+        variationId: string;
+        colorName: string;
+        productName: string;
+        currentValue: boolean;
+    } | null>(null);
+
     const handleUpdateFabricType = useCallback((productId: string, fabricTypeId: string | null) => {
         updateProductMutation.mutate({ productId, fabricTypeId });
     }, [updateProductMutation]);
@@ -453,6 +516,109 @@ export default function Catalog() {
     const handleUpdateFabric = useCallback((variationId: string, fabricId: string) => {
         updateVariationMutation.mutate({ variationId, fabricId });
     }, [updateVariationMutation]);
+
+    // Show confirmation dialog for lining change
+    const promptLiningChange = useCallback((row: any) => {
+        setLiningConfirm({
+            isOpen: true,
+            variationId: row.variationId,
+            colorName: row.colorName,
+            productName: row.productName,
+            currentValue: row.hasLining,
+        });
+    }, []);
+
+    // Confirm lining change
+    const confirmLiningChange = useCallback(() => {
+        if (liningConfirm) {
+            updateLiningMutation.mutate({
+                variationId: liningConfirm.variationId,
+                hasLining: !liningConfirm.currentValue,
+            });
+            setLiningConfirm(null);
+        }
+    }, [liningConfirm, updateLiningMutation]);
+
+    // SKU update mutation
+    const updateSkuMutation = useMutation({
+        mutationFn: ({ skuId, data }: { skuId: string; data: any }) =>
+            productsApi.updateSku(skuId, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            setEditModal({ isOpen: false, level: 'sku', data: null });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update SKU');
+        },
+    });
+
+    // Full variation update mutation (for edit modal)
+    const updateVariationFullMutation = useMutation({
+        mutationFn: ({ variationId, data }: { variationId: string; data: any }) =>
+            productsApi.updateVariation(variationId, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            setEditModal({ isOpen: false, level: 'variation', data: null });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update variation');
+        },
+    });
+
+    // Full product update mutation (for edit modal)
+    const updateProductFullMutation = useMutation({
+        mutationFn: ({ productId, data }: { productId: string; data: any }) =>
+            productsApi.update(productId, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            setEditModal({ isOpen: false, level: 'product', data: null });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update product');
+        },
+    });
+
+    // Handle edit modal submit
+    const handleEditSubmit = useCallback((formData: any) => {
+        if (!editModal.data) return;
+
+        if (editModal.level === 'sku') {
+            updateSkuMutation.mutate({
+                skuId: editModal.data.skuId,
+                data: {
+                    fabricConsumption: parseFloat(formData.fabricConsumption) || undefined,
+                    mrp: parseFloat(formData.mrp) || undefined,
+                    targetStockQty: parseInt(formData.targetStockQty) || undefined,
+                },
+            });
+        } else if (editModal.level === 'variation') {
+            updateVariationFullMutation.mutate({
+                variationId: editModal.data.variationId,
+                data: {
+                    colorName: formData.colorName,
+                    hasLining: formData.hasLining === 'true' || formData.hasLining === true,
+                    fabricId: formData.fabricId || undefined,
+                },
+            });
+        } else if (editModal.level === 'product') {
+            updateProductFullMutation.mutate({
+                productId: editModal.data.productId,
+                data: {
+                    name: formData.name,
+                    styleCode: formData.styleCode || null,
+                    category: formData.category,
+                    gender: formData.gender,
+                    productType: formData.productType,
+                    fabricTypeId: formData.fabricTypeId || null,
+                },
+            });
+        }
+    }, [editModal, updateSkuMutation, updateVariationFullMutation, updateProductFullMutation]);
+
+    // Open edit modal
+    const openEditModal = useCallback((row: any, level: EditLevel) => {
+        setEditModal({ isOpen: true, level, data: row });
+    }, []);
 
     // Filtered products based on selected gender/category
     const filteredProducts = useMemo(() => {
@@ -562,6 +728,29 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.colorName,
             field: 'colorName',
             width: 110,
+        },
+        {
+            colId: 'hasLining',
+            headerName: DEFAULT_HEADERS.hasLining,
+            field: 'hasLining',
+            width: 65,
+            cellRenderer: (params: ICellRendererParams) => {
+                const row = params.data;
+                if (!row || viewLevel === 'product') return null;
+                return (
+                    <button
+                        onClick={() => promptLiningChange(row)}
+                        className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
+                            row.hasLining
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}
+                        title={row.hasLining ? 'Has lining - click to remove' : 'No lining - click to add'}
+                    >
+                        {row.hasLining ? 'Yes' : 'No'}
+                    </button>
+                );
+            },
         },
         {
             colId: 'fabricName',
@@ -700,23 +889,22 @@ export default function Catalog() {
         {
             colId: 'actions',
             headerName: '',
-            width: 60,
+            width: 80,
             pinned: 'right' as const,
             sortable: false,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
+                // Determine edit level based on current view
+                const editLevel = viewLevel === 'product' ? 'product' : viewLevel === 'variation' ? 'variation' : 'sku';
                 return (
                     <div className="flex items-center gap-1">
                         <button
-                            onClick={() => {
-                                // TODO: Open SKU detail modal
-                                console.log('View SKU:', row.skuId);
-                            }}
-                            className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
-                            title="View details"
+                            onClick={() => openEditModal(row, editLevel)}
+                            className="p-1 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
+                            title={`Edit ${editLevel}`}
                         >
-                            <Eye size={14} />
+                            <Pencil size={14} />
                         </button>
                         <button
                             onClick={() => {
@@ -981,6 +1169,286 @@ export default function Catalog() {
                     />
                 </div>
             </div>
+
+            {/* Lining Confirmation Dialog */}
+            <ConfirmModal
+                isOpen={!!liningConfirm?.isOpen}
+                onClose={() => setLiningConfirm(null)}
+                onConfirm={confirmLiningChange}
+                title="Change Lining Status"
+                message={liningConfirm ?
+                    `${liningConfirm.currentValue ? 'Remove' : 'Add'} lining for "${liningConfirm.colorName}" (${liningConfirm.productName})?` :
+                    ''
+                }
+                confirmText={liningConfirm?.currentValue ? 'Remove Lining' : 'Add Lining'}
+                cancelText="Cancel"
+                variant={liningConfirm?.currentValue ? 'warning' : 'primary'}
+                isLoading={updateLiningMutation.isPending}
+            />
+
+            {/* Edit Modal */}
+            <EditModal
+                isOpen={editModal.isOpen}
+                level={editModal.level}
+                data={editModal.data}
+                onClose={() => setEditModal({ isOpen: false, level: 'sku', data: null })}
+                onSubmit={handleEditSubmit}
+                fabricTypes={uniqueFabricTypes}
+                fabrics={filterOptions?.fabrics || []}
+                isLoading={updateSkuMutation.isPending || updateVariationFullMutation.isPending || updateProductFullMutation.isPending}
+            />
         </div>
+    );
+}
+
+// Edit Modal Component
+interface EditModalProps {
+    isOpen: boolean;
+    level: 'sku' | 'variation' | 'product';
+    data: any;
+    onClose: () => void;
+    onSubmit: (formData: any) => void;
+    fabricTypes: Array<{ id: string; name: string }>;
+    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string; displayName: string }>;
+    isLoading: boolean;
+}
+
+function EditModal({ isOpen, level, data, onClose, onSubmit, fabricTypes, fabrics, isLoading }: EditModalProps) {
+    const [formData, setFormData] = useState<any>({});
+
+    // Reset form when data changes
+    useEffect(() => {
+        if (data) {
+            if (level === 'sku') {
+                setFormData({
+                    fabricConsumption: data.fabricConsumption || '',
+                    mrp: data.mrp || '',
+                    targetStockQty: data.targetStockQty || '',
+                });
+            } else if (level === 'variation') {
+                setFormData({
+                    colorName: data.colorName || '',
+                    hasLining: data.hasLining || false,
+                    fabricId: data.fabricId || '',
+                });
+            } else if (level === 'product') {
+                setFormData({
+                    name: data.productName || '',
+                    styleCode: data.styleCode || '',
+                    category: data.category || '',
+                    gender: data.gender || '',
+                    productType: data.productType || '',
+                    fabricTypeId: data.fabricTypeId || '',
+                });
+            }
+        }
+    }, [data, level]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSubmit(formData);
+    };
+
+    const handleChange = (field: string, value: any) => {
+        setFormData((prev: any) => ({ ...prev, [field]: value }));
+    };
+
+    const getTitle = () => {
+        if (level === 'sku') return `Edit SKU: ${data?.skuCode}`;
+        if (level === 'variation') return `Edit Color: ${data?.colorName}`;
+        return `Edit Product: ${data?.productName}`;
+    };
+
+    const getSubtitle = () => {
+        if (level === 'sku') return `${data?.productName} - ${data?.colorName} - ${data?.size}`;
+        if (level === 'variation') return data?.productName;
+        return data?.styleCode || '';
+    };
+
+    // Filter fabrics by selected fabric type
+    const filteredFabrics = useMemo(() => {
+        if (!data?.fabricTypeId) return fabrics;
+        return fabrics.filter(f => f.fabricTypeId === data.fabricTypeId);
+    }, [fabrics, data?.fabricTypeId]);
+
+    return (
+        <FormModal
+            isOpen={isOpen}
+            onClose={onClose}
+            onSubmit={handleSubmit}
+            title={getTitle()}
+            subtitle={getSubtitle()}
+            size="md"
+            isLoading={isLoading}
+        >
+            <div className="space-y-4">
+                {level === 'sku' && (
+                    <>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Fabric Consumption (m)
+                            </label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={formData.fabricConsumption}
+                                onChange={(e) => handleChange('fabricConsumption', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">MRP (₹)</label>
+                            <input
+                                type="number"
+                                step="1"
+                                value={formData.mrp}
+                                onChange={(e) => handleChange('mrp', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Target Stock Qty</label>
+                            <input
+                                type="number"
+                                step="1"
+                                value={formData.targetStockQty}
+                                onChange={(e) => handleChange('targetStockQty', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                    </>
+                )}
+
+                {level === 'variation' && (
+                    <>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Color Name</label>
+                            <input
+                                type="text"
+                                value={formData.colorName}
+                                onChange={(e) => handleChange('colorName', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Has Lining</label>
+                            <div className="flex items-center gap-4 mt-2">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="hasLining"
+                                        checked={formData.hasLining === true}
+                                        onChange={() => handleChange('hasLining', true)}
+                                        className="text-blue-600"
+                                    />
+                                    <span className="text-sm">Yes</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="hasLining"
+                                        checked={formData.hasLining === false}
+                                        onChange={() => handleChange('hasLining', false)}
+                                        className="text-blue-600"
+                                    />
+                                    <span className="text-sm">No</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Fabric</label>
+                            <select
+                                value={formData.fabricId}
+                                onChange={(e) => handleChange('fabricId', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            >
+                                <option value="">Select fabric...</option>
+                                {filteredFabrics.map((f) => (
+                                    <option key={f.id} value={f.id}>{f.displayName}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </>
+                )}
+
+                {level === 'product' && (
+                    <>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Product Name</label>
+                            <input
+                                type="text"
+                                value={formData.name}
+                                onChange={(e) => handleChange('name', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Style Code</label>
+                            <input
+                                type="text"
+                                value={formData.styleCode}
+                                onChange={(e) => handleChange('styleCode', e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                                <select
+                                    value={formData.category}
+                                    onChange={(e) => handleChange('category', e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                    <option value="dress">Dress</option>
+                                    <option value="top">Top</option>
+                                    <option value="bottom">Bottom</option>
+                                    <option value="outerwear">Outerwear</option>
+                                    <option value="accessory">Accessory</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                                <select
+                                    value={formData.gender}
+                                    onChange={(e) => handleChange('gender', e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                    <option value="womens">Womens</option>
+                                    <option value="mens">Mens</option>
+                                    <option value="unisex">Unisex</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Product Type</label>
+                                <select
+                                    value={formData.productType}
+                                    onChange={(e) => handleChange('productType', e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                    <option value="basic">Basic</option>
+                                    <option value="seasonal">Seasonal</option>
+                                    <option value="limited">Limited</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Fabric Type</label>
+                                <select
+                                    value={formData.fabricTypeId}
+                                    onChange={(e) => handleChange('fabricTypeId', e.target.value)}
+                                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                    <option value="">Not set</option>
+                                    {fabricTypes.map((ft) => (
+                                        <option key={ft.id} value={ft.id}>{ft.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    </>
+                )}
+            </div>
+        </FormModal>
     );
 }

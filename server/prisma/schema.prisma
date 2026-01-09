@@ -75,6 +75,7 @@ model Variation {
   colorHex      String?
   fabricId      String
   imageUrl      String? // Color-specific image URL (from Shopify)
+  hasLining     Boolean @default(false) // Whether this color variant has lining
   isActive      Boolean @default(true)
 
   product Product @relation(fields: [productId], references: [id])

@@ -30,6 +30,7 @@ export interface Variation {
   colorHex: string | null;
   fabricId: string;
   imageUrl: string | null;
+  hasLining: boolean;
   isActive: boolean;
   product?: Product;
   fabric?: Fabric;
@@ -464,6 +465,7 @@ export interface CreateVariationData {
   colorHex?: string | null;
   fabricId: string;
   imageUrl?: string | null;
+  hasLining?: boolean;
 }
 
 export interface UpdateVariationData extends Partial<CreateVariationData> {

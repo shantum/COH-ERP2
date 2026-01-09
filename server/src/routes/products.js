@@ -144,7 +144,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 // Create variation
 router.post('/:productId/variations', authenticateToken, async (req, res) => {
     try {
-        const { colorName, standardColor, colorHex, fabricId } = req.body;
+        const { colorName, standardColor, colorHex, fabricId, hasLining } = req.body;
 
         const variation = await req.prisma.variation.create({
             data: {
@@ -153,6 +153,7 @@ router.post('/:productId/variations', authenticateToken, async (req, res) => {
                 standardColor: standardColor || null,
                 colorHex,
                 fabricId,
+                hasLining: hasLining || false,
             },
             include: { fabric: true },
         });
@@ -167,11 +168,11 @@ router.post('/:productId/variations', authenticateToken, async (req, res) => {
 // Update variation
 router.put('/variations/:id', authenticateToken, async (req, res) => {
     try {
-        const { colorName, standardColor, colorHex, fabricId, isActive } = req.body;
+        const { colorName, standardColor, colorHex, fabricId, hasLining, isActive } = req.body;
 
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
-            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, isActive },
+            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, isActive },
             include: { fabric: true },
         });
 
