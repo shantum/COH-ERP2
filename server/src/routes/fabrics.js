@@ -547,7 +547,7 @@ router.get('/transactions/all', authenticateToken, async (req, res) => {
                 fabric: {
                     select: {
                         id: true,
-                        fabricCode: true,
+                        name: true,
                         colorName: true,
                         fabricType: { select: { id: true, name: true } }
                     }
