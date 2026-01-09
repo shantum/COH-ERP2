@@ -444,7 +444,7 @@ export default function Orders() {
     );
 
     // Grid component
-    const { gridComponent, actionPanel, columnVisibilityDropdown, customHeaders, resetHeaders } = OrdersGrid({
+    const { gridComponent, actionPanel, columnVisibilityDropdown } = OrdersGrid({
         rows: filteredOpenRows,
         lockedDates: lockedDates || [],
         onAllocate: handleAllocate,

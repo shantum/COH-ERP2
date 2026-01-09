@@ -66,12 +66,8 @@ export default function ConfirmModal({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose}>
-            <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">
-                    {title}
-                </h2>
-
+        <Modal isOpen={isOpen} onClose={onClose} title={title}>
+            <div className="py-2">
                 <p className="text-gray-600 mb-6 whitespace-pre-line">
                     {message}
                 </p>

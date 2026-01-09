@@ -328,7 +328,7 @@ export function EditOrderModal({
     onUncancelLine,
     onClose,
     isUpdating,
-    isAddingLine,
+    isAddingLine: _isAddingLine,
 }: EditOrderModalProps) {
     const [editForm, setEditForm] = useState({
         customerName: '',

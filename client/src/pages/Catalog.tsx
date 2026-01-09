@@ -22,9 +22,9 @@ const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
 // View options for data grouping
 type ViewLevel = 'sku' | 'variation' | 'product' | 'consumption';
 const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
-    { value: 'sku', label: 'By SKU' },
-    { value: 'variation', label: 'By Color' },
     { value: 'product', label: 'By Product' },
+    { value: 'variation', label: 'By Color' },
+    { value: 'sku', label: 'By SKU' },
     { value: 'consumption', label: 'Fabric Consumption' },
 ];
 
@@ -473,7 +473,7 @@ export default function Catalog() {
     });
 
     // View level state
-    const [viewLevel, setViewLevel] = useState<ViewLevel>('sku');
+    const [viewLevel, setViewLevel] = useState<ViewLevel>('product');
 
     // Filter state
     const [filter, setFilter] = useState({

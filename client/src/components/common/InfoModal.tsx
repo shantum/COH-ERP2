@@ -17,7 +17,7 @@
  * </InfoModal>
  */
 
-import { ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import Modal from '../Modal';
 
 interface InfoModalProps {
@@ -45,12 +45,8 @@ export default function InfoModal({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose}>
-            <div className={`p-6 ${sizeStyles[size]}`}>
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">
-                    {title}
-                </h2>
-
+        <Modal isOpen={isOpen} onClose={onClose} title={title}>
+            <div className={`py-2 ${sizeStyles[size]}`}>
                 <div className="text-gray-700 mb-6">
                     {children}
                 </div>

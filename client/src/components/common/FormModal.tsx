@@ -22,7 +22,7 @@
  * </FormModal>
  */
 
-import { useState, FormEvent, ReactNode } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import Modal from '../Modal';
 
 interface FormModalProps {
@@ -81,12 +81,8 @@ export default function FormModal({
     };
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose}>
-            <form onSubmit={handleSubmit} className={`p-6 ${sizeStyles[size]}`}>
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">
-                    {title}
-                </h2>
-
+        <Modal isOpen={isOpen} onClose={onClose} title={title}>
+            <form onSubmit={handleSubmit} className={`py-2 ${sizeStyles[size]}`}>
                 <div className="space-y-4 mb-6">
                     {children}
                 </div>

@@ -151,6 +151,137 @@ All errors include `statusCode` property for HTTP responses.
 
 ---
 
+## 📁 `arrayUtils.js` (New)
+
+**Purpose**: Array and object manipulation utilities
+
+**Key Functions**:
+```javascript
+import { groupBy, keyBy, sumBy, chunk } from './utils/arrayUtils.js';
+
+// Group orders by status
+const grouped = groupBy(orders, 'status');
+// { open: [...], shipped: [...] }
+
+// Create map for fast lookup
+const orderMap = keyBy(orders, 'id');
+const order = orderMap.get('order-123');
+
+// Sum totals
+const totalRevenue = sumBy(orders, 'totalAmount');
+
+// Process in batches
+const batches = chunk(orderIds, 50);
+for (const batch of batches) {
+    await processBatch(batch);
+}
+```
+
+**All Functions**:
+- `groupBy(array, key)` - Group array by key
+- `keyBy(array, key)` - Create map from array
+- `uniqueBy(array, key)` - Remove duplicates by key
+- `sumBy(array, key)` - Sum values by key
+- `chunk(array, size)` - Split into chunks
+- `pick(obj, keys)` - Pick specific keys
+- `omit(obj, keys)` - Omit specific keys
+- `deepClone(obj)` - Deep clone object
+- `isEmpty(obj)` - Check if empty
+- `get(obj, path, default)` - Safe nested access
+
+---
+
+## 📁 `stringUtils.js` (New)
+
+**Purpose**: String manipulation and formatting
+
+**Key Functions**:
+```javascript
+import { camelCase, slugify, truncate, escapeHtml } from './utils/stringUtils.js';
+
+// Case conversion
+camelCase('hello world'); // 'helloWorld'
+snakeCase('helloWorld'); // 'hello_world'
+kebabCase('Hello World'); // 'hello-world'
+
+// URL slugs
+slugify('Product Name #123'); // 'product-name-123'
+
+// Truncate long text
+truncate('Very long text...', 20); // 'Very long text...'
+
+// Security
+escapeHtml('<script>alert("xss")</script>');
+```
+
+**All Functions**:
+- `capitalize(str)` - Capitalize first letter
+- `titleCase(str)` - Convert to Title Case
+- `camelCase(str)` - Convert to camelCase
+- `snakeCase(str)` - Convert to snake_case
+- `kebabCase(str)` - Convert to kebab-case
+- `truncate(str, length)` - Truncate with ellipsis
+- `cleanWhitespace(str)` - Remove extra spaces
+- `slugify(str)` - Create URL-safe slug
+- `escapeHtml(str)` - Escape HTML characters
+- `stripHtml(str)` - Remove HTML tags
+- `randomString(length)` - Generate random string
+- `pad(str, length, char, side)` - Pad string
+- `extractNumbers(str)` - Extract numbers only
+- `wordCount(str)` - Count words
+
+---
+
+## 📁 `asyncUtils.js` (New)
+
+**Purpose**: Async/promise utilities for common patterns
+
+**Key Functions**:
+```javascript
+import { retry, batchProcess, timeout, safe } from './utils/asyncUtils.js';
+
+// Retry with exponential backoff
+const data = await retry(
+    () => fetch('https://api.example.com/data'),
+    { maxRetries: 5, initialDelay: 500 }
+);
+
+// Process in batches with concurrency limit
+const results = await batchProcess(
+    userIds,
+    id => fetchUser(id),
+    5 // Max 5 concurrent requests
+);
+
+// Timeout long operations
+const result = await timeout(
+    slowOperation(),
+    5000,
+    'Operation timed out'
+);
+
+// Safe error handling
+const [error, user] = await safe(fetchUser(userId));
+if (error) {
+    console.error('Failed:', error);
+    return;
+}
+```
+
+**All Functions**:
+- `sleep(ms)` - Async sleep
+- `retry(fn, options)` - Retry with backoff
+- `batchProcess(items, fn, concurrency)` - Concurrent batching
+- `chunkProcess(items, fn, chunkSize)` - Sequential chunks
+- `timeout(promise, ms)` - Timeout promise
+- `debounce(fn, delay)` - Debounce async function
+- `throttle(fn, limit)` - Throttle async function
+- `memoize(fn)` - Cache async results
+- `rateLimit(fn, maxCalls, period)` - Rate limiting
+- `safe(promise)` - Error handling pattern
+
+---
+
 ## Migration Guide
 
 ### Replace Magic Numbers
@@ -214,6 +345,26 @@ const orders = await prisma.order.findMany({
         orderNumber: { contains: search }
     }
 });
+```
+
+### Use Array Utilities
+
+**Before**:
+```javascript
+const ordersByStatus = {};
+for (const order of orders) {
+    if (!ordersByStatus[order.status]) {
+        ordersByStatus[order.status] = [];
+    }
+    ordersByStatus[order.status].push(order);
+}
+```
+
+**After**:
+```javascript
+import { groupBy } from '../utils/arrayUtils.js';
+
+const ordersByStatus = groupBy(orders, 'status');
 ```
 
 ---

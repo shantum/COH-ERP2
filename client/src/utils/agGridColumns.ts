@@ -12,7 +12,7 @@
  * ];
  */
 
-import { ColDef } from 'ag-grid-community';
+import type { ColDef } from 'ag-grid-community';
 import { formatCurrency, formatDate, formatRelativeTime } from './agGridHelpers';
 
 // ============================================

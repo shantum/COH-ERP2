@@ -17,7 +17,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, ChevronRight } from 'lucide-react';
+import { Check, X, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 import { OrderActionPanel } from './OrderActionPanel';
@@ -1426,7 +1426,7 @@ export function OrdersGrid({
         ].map(col => ({
             ...col,
             hide: !visibleColumns.has(col.colId!),
-        })),
+        })) as ColDef[],
         [
             allocatingLines,
             shippingChecked,
@@ -1502,7 +1502,7 @@ export function OrdersGrid({
     }, []);
 
     // Sort column defs by saved order and apply saved widths
-    const orderedColumnDefs = useMemo(() => {
+    const orderedColumnDefs = useMemo((): ColDef[] => {
         const colDefMap = new Map(columnDefs.map(col => [col.colId, col]));
         const ordered: ColDef[] = [];
 
@@ -1512,7 +1512,7 @@ export function OrdersGrid({
             if (col) {
                 // Apply saved width if available
                 const savedWidth = columnWidths[colId];
-                ordered.push(savedWidth ? { ...col, width: savedWidth } : col);
+                ordered.push(savedWidth ? { ...col, width: savedWidth } as ColDef : col);
                 colDefMap.delete(colId);
             }
         });
@@ -1520,7 +1520,7 @@ export function OrdersGrid({
         // Add any remaining columns (new columns not in saved order)
         colDefMap.forEach(col => {
             const savedWidth = col.colId ? columnWidths[col.colId] : undefined;
-            ordered.push(savedWidth ? { ...col, width: savedWidth } : col);
+            ordered.push(savedWidth ? { ...col, width: savedWidth } as ColDef : col);
         });
 
         return ordered;

@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
     X, Eye, Pencil, Ban, Archive, Trash2, Truck, Package,
-    CheckCircle, Clock, AlertCircle, User, MapPin, CreditCard
+    CheckCircle, Clock, User, MapPin, CreditCard
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/orderHelpers';
 
@@ -62,7 +62,6 @@ function FulfillmentProgress({ order }: { order: any }) {
                     const stageIdx = stages.indexOf(currentStage);
                     const isComplete = idx < stageIdx || (idx === stageIdx && stage === 'packed' && allPacked);
                     const isCurrent = idx === stageIdx && !allPacked;
-                    const isPending = idx > stageIdx;
 
                     return (
                         <div key={stage} className="flex-1 flex items-center">
@@ -175,7 +174,7 @@ export function OrderActionPanel({
 
     if (!isOpen || !order) return null;
 
-    const { date, time } = formatDateTime(order.orderDate);
+    const { date } = formatDateTime(order.orderDate);
     const orderAge = Math.floor((Date.now() - new Date(order.orderDate).getTime()) / (1000 * 60 * 60 * 24));
     const isUrgent = orderAge > 5;
     const isWarning = orderAge >= 3 && orderAge <= 5;
