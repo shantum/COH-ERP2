@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { customersApi } from '../services/api';
 import { useState, useMemo } from 'react';
-import { Crown, Medal, AlertTriangle, TrendingDown, X, Package, ShoppingBag, Calendar, Phone, Mail, Palette, Layers } from 'lucide-react';
+import { Crown, Medal, AlertTriangle, TrendingDown, X, Package, ShoppingBag, Calendar, Phone, Mail, Palette, Layers, Clock, Users, DollarSign, TrendingUp, Repeat } from 'lucide-react';
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -15,11 +15,43 @@ function useDebounce<T>(value: T, delay: number): T {
 
 const PAGE_SIZE = 50;
 
+// Format relative time (e.g., "2 days ago", "3 months ago")
+function formatRelativeTime(date: string | Date | null): string {
+    if (!date) return '-';
+    const now = new Date();
+    const then = new Date(date);
+    const diffMs = now.getTime() - then.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) {
+        const weeks = Math.floor(diffDays / 7);
+        return weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
+    }
+    if (diffDays < 365) {
+        const months = Math.floor(diffDays / 30);
+        return months === 1 ? '1 month ago' : `${months} months ago`;
+    }
+    const years = Math.floor(diffDays / 365);
+    return years === 1 ? '1 year ago' : `${years} years ago`;
+}
+
+// Format short date (e.g., "15 Jan")
+function formatShortDate(date: string | Date | null): string {
+    if (!date) return '-';
+    return new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+const TOP_N_OPTIONS = [10, 20, 50, 100, 500, 1000, 5000];
+
 export default function Customers() {
     const [tab, setTab] = useState<'all' | 'highValue' | 'atRisk' | 'returners'>('all');
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(0);
+    const [topN, setTopN] = useState(100);
     const debouncedSearch = useDebounce(search, 300);
 
     // Reset page when search changes
@@ -34,7 +66,10 @@ export default function Customers() {
             offset: String(page * PAGE_SIZE)
         }).then(r => r.data),
     });
-    const { data: highValue } = useQuery({ queryKey: ['highValueCustomers'], queryFn: () => customersApi.getHighValue().then(r => r.data) });
+    const { data: highValueData } = useQuery({
+        queryKey: ['highValueCustomers', topN],
+        queryFn: () => customersApi.getHighValue(topN).then(r => r.data),
+    });
     const { data: atRisk } = useQuery({ queryKey: ['atRiskCustomers'], queryFn: () => customersApi.getAtRisk().then(r => r.data) });
     const { data: returners } = useQuery({ queryKey: ['frequentReturners'], queryFn: () => customersApi.getFrequentReturners().then(r => r.data) });
     const { data: customerDetail, isLoading: detailLoading } = useQuery({
@@ -42,6 +77,10 @@ export default function Customers() {
         queryFn: () => customersApi.getById(selectedCustomerId!).then(r => r.data),
         enabled: !!selectedCustomerId
     });
+
+    // Extract customers and stats from high value response
+    const highValue = highValueData?.customers || [];
+    const highValueStats = highValueData?.stats;
 
     const hasMore = customers?.length === PAGE_SIZE;
 
@@ -88,12 +127,89 @@ export default function Customers() {
 
             {tab === 'all' && <input type="text" placeholder="Search by name or email..." className="input w-full sm:max-w-md" value={search} onChange={(e) => setSearch(e.target.value)} />}
 
+            {/* High Value Analytics Bar */}
+            {tab === 'highValue' && (
+                <div className="space-y-4">
+                    {/* Top N Selector */}
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-600">Show top</span>
+                        <select
+                            value={topN}
+                            onChange={(e) => setTopN(Number(e.target.value))}
+                            className="input py-1.5 px-3 w-auto"
+                        >
+                            {TOP_N_OPTIONS.map(n => (
+                                <option key={n} value={n}>{n.toLocaleString()}</option>
+                            ))}
+                        </select>
+                        <span className="text-sm text-gray-600">customers by LTV</span>
+                    </div>
+
+                    {/* Stats Cards */}
+                    {highValueStats && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <Users size={14} />
+                                    <span>Customers</span>
+                                </div>
+                                <p className="text-xl font-bold text-gray-900">{highValueStats.totalCustomers.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <DollarSign size={14} />
+                                    <span>Total Revenue</span>
+                                </div>
+                                <p className="text-xl font-bold text-emerald-600">₹{highValueStats.totalRevenue.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <ShoppingBag size={14} />
+                                    <span>Total Orders</span>
+                                </div>
+                                <p className="text-xl font-bold text-gray-900">{highValueStats.totalOrders.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <TrendingUp size={14} />
+                                    <span>Avg LTV</span>
+                                </div>
+                                <p className="text-xl font-bold text-purple-600">₹{highValueStats.avgLTV.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <DollarSign size={14} />
+                                    <span>Avg AOV</span>
+                                </div>
+                                <p className="text-xl font-bold text-blue-600">₹{highValueStats.avgAOV.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <Package size={14} />
+                                    <span>Avg Orders</span>
+                                </div>
+                                <p className="text-xl font-bold text-gray-900">{highValueStats.avgOrdersPerCustomer}</p>
+                            </div>
+                            <div className="bg-white border rounded-lg p-3">
+                                <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                    <Repeat size={14} />
+                                    <span>Order Freq</span>
+                                </div>
+                                <p className="text-xl font-bold text-amber-600">{highValueStats.avgOrderFrequency}/mo</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Customer Table */}
             <div className="card table-scroll-container">
                 <table className="w-full" style={{ minWidth: '600px' }}>
                     <thead><tr className="border-b">
                         <th className="table-header">Customer</th><th className="table-header">Email</th><th className="table-header text-right">Orders</th><th className="table-header text-right">LTV</th>
                         {tab === 'all' && <th className="table-header">Tier</th>}
+                        {tab === 'highValue' && <th className="table-header text-right">AOV</th>}
+                        {tab === 'highValue' && <th className="table-header">Last Order</th>}
                         {tab === 'atRisk' && <th className="table-header text-right">Days Inactive</th>}
                         {tab === 'returners' && <th className="table-header text-right">Return Rate</th>}
                     </tr></thead>
@@ -105,6 +221,16 @@ export default function Customers() {
                                 <td className="table-cell text-right">{c.totalOrders}</td>
                                 <td className="table-cell text-right font-medium">₹{Number(c.lifetimeValue).toLocaleString()}</td>
                                 {tab === 'all' && <td className="table-cell"><span className={`badge ${getTierBadge(c.customerTier)}`}>{c.customerTier}</span></td>}
+                                {tab === 'highValue' && <td className="table-cell text-right text-gray-600">₹{Number(c.avgOrderValue || 0).toLocaleString()}</td>}
+                                {tab === 'highValue' && (
+                                    <td className="table-cell">
+                                        <div className="flex items-center gap-1.5 text-gray-600">
+                                            <Clock size={12} className="text-gray-400" />
+                                            <span className="text-sm">{formatShortDate(c.lastOrderDate)}</span>
+                                            <span className="text-xs text-gray-400">({formatRelativeTime(c.lastOrderDate)})</span>
+                                        </div>
+                                    </td>
+                                )}
                                 {tab === 'atRisk' && <td className="table-cell text-right text-red-600 font-medium">{c.daysSinceLastOrder}</td>}
                                 {tab === 'returners' && <td className="table-cell text-right text-red-600 font-medium">{c.returnRate}%</td>}
                             </tr>

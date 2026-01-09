@@ -363,27 +363,78 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // CUSTOMER ANALYTICS
 // ============================================
 
-// High-value customers (platinum + gold)
+// High-value customers (top N by LTV)
 router.get('/analytics/high-value', async (req, res) => {
     try {
-        const thresholds = await getTierThresholds(req.prisma);
+        const { limit = 100 } = req.query;
+        const topN = Math.min(Number(limit) || 100, 5000);
 
         const customers = await req.prisma.customer.findMany({
             include: {
-                orders: { select: { totalAmount: true, status: true } },
+                orders: { select: { totalAmount: true, status: true, orderDate: true } },
             },
         });
 
-        const highValue = customers
+        // Calculate metrics for all customers
+        const enrichedCustomers = customers
             .map((c) => {
-                const lifetimeValue = calculateLTV(c.orders);
-                const customerTier = calculateTier(lifetimeValue, thresholds);
-                return { ...c, lifetimeValue, customerTier };
-            })
-            .filter((c) => c.lifetimeValue >= thresholds.gold) // Gold and above
-            .sort((a, b) => b.lifetimeValue - a.lifetimeValue);
+                const validOrders = c.orders.filter((o) => o.status !== 'cancelled');
+                const lifetimeValue = validOrders.reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
+                const totalOrders = validOrders.length;
+                const avgOrderValue = totalOrders > 0 ? lifetimeValue / totalOrders : 0;
 
-        res.json(highValue);
+                // Find first and last order dates
+                const orderDates = validOrders.map((o) => new Date(o.orderDate).getTime());
+                const firstOrderDate = orderDates.length > 0 ? new Date(Math.min(...orderDates)) : null;
+                const lastOrderDate = orderDates.length > 0 ? new Date(Math.max(...orderDates)) : null;
+
+                // Calculate order frequency (orders per month since first order)
+                let orderFrequency = 0;
+                if (firstOrderDate && totalOrders > 0) {
+                    const monthsSinceFirst = Math.max(1, (Date.now() - firstOrderDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
+                    orderFrequency = totalOrders / monthsSinceFirst;
+                }
+
+                return {
+                    id: c.id,
+                    email: c.email,
+                    firstName: c.firstName,
+                    lastName: c.lastName,
+                    lifetimeValue,
+                    totalOrders,
+                    avgOrderValue: Math.round(avgOrderValue),
+                    orderFrequency: parseFloat(orderFrequency.toFixed(2)),
+                    firstOrderDate,
+                    lastOrderDate,
+                };
+            })
+            .filter((c) => c.totalOrders > 0) // Only customers with orders
+            .sort((a, b) => b.lifetimeValue - a.lifetimeValue)
+            .slice(0, topN);
+
+        // Calculate aggregate stats for the top N
+        const totalCustomers = enrichedCustomers.length;
+        const totalRevenue = enrichedCustomers.reduce((sum, c) => sum + c.lifetimeValue, 0);
+        const totalOrdersAll = enrichedCustomers.reduce((sum, c) => sum + c.totalOrders, 0);
+        const avgLTV = totalCustomers > 0 ? totalRevenue / totalCustomers : 0;
+        const avgAOV = totalOrdersAll > 0 ? totalRevenue / totalOrdersAll : 0;
+        const avgOrdersPerCustomer = totalCustomers > 0 ? totalOrdersAll / totalCustomers : 0;
+        const avgOrderFrequency = totalCustomers > 0
+            ? enrichedCustomers.reduce((sum, c) => sum + c.orderFrequency, 0) / totalCustomers
+            : 0;
+
+        res.json({
+            customers: enrichedCustomers,
+            stats: {
+                totalCustomers,
+                totalRevenue: Math.round(totalRevenue),
+                totalOrders: totalOrdersAll,
+                avgLTV: Math.round(avgLTV),
+                avgAOV: Math.round(avgAOV),
+                avgOrdersPerCustomer: parseFloat(avgOrdersPerCustomer.toFixed(1)),
+                avgOrderFrequency: parseFloat(avgOrderFrequency.toFixed(2)),
+            },
+        });
     } catch (error) {
         console.error('Get high-value customers error:', error);
         res.status(500).json({ error: 'Failed to fetch high-value customers' });

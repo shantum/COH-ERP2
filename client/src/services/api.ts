@@ -243,7 +243,7 @@ export const customersApi = {
     getById: (id: string) => api.get(`/customers/${id}`),
     getAddresses: (customerId: string) => api.get(`/customers/${customerId}/addresses`),
     create: (data: CreateCustomerData) => api.post('/customers', data),
-    getHighValue: () => api.get('/customers/analytics/high-value'),
+    getHighValue: (limit?: number) => api.get('/customers/analytics/high-value', { params: limit ? { limit } : undefined }),
     getFrequentReturners: () => api.get('/customers/analytics/frequent-returners'),
     getAtRisk: () => api.get('/customers/analytics/at-risk'),
 };
