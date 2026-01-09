@@ -886,3 +886,53 @@ export interface PendingQueueResponse {
   items: QueuePanelItem[];
   total: number;
 }
+
+// ============================================
+// SALES ANALYTICS
+// ============================================
+
+export type SalesDimension =
+  | 'summary'
+  | 'product'
+  | 'category'
+  | 'gender'
+  | 'color'
+  | 'standardColor'
+  | 'fabricType'
+  | 'fabricColor'
+  | 'channel';
+
+export type OrderStatusFilter = 'all' | 'shipped' | 'delivered';
+
+export interface SalesMetricSummary {
+  totalRevenue: number;
+  totalUnits: number;
+  totalOrders: number;
+  avgOrderValue: number;
+}
+
+export interface SalesBreakdownItem {
+  key: string;
+  keyId?: string;
+  revenue: number;
+  units: number;
+  orders: number;
+  percentOfTotal: number;
+}
+
+export interface SalesTimeSeriesPoint {
+  date: string;
+  revenue: number;
+  units: number;
+  orders: number;
+}
+
+export interface SalesAnalyticsResponse {
+  summary: SalesMetricSummary;
+  timeSeries?: SalesTimeSeriesPoint[];
+  breakdown?: SalesBreakdownItem[];
+  period: {
+    startDate: string;
+    endDate: string;
+  };
+}

@@ -438,7 +438,8 @@ export default function Catalog() {
         mutationFn: ({ productId, fabricTypeId }: { productId: string; fabricTypeId: string | null }) =>
             productsApi.update(productId, { fabricTypeId }),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            // Force refetch all catalog queries to ensure data consistency across views
+            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
         },
         onError: (err: any) => {
             alert(err.response?.data?.error || 'Failed to update fabric type');
@@ -449,7 +450,8 @@ export default function Catalog() {
         mutationFn: ({ variationId, fabricId }: { variationId: string; fabricId: string }) =>
             productsApi.updateVariation(variationId, { fabricId }),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            // Force refetch all catalog queries to ensure data consistency across views
+            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
         },
         onError: (err: any) => {
             alert(err.response?.data?.error || 'Failed to update fabric');
@@ -544,7 +546,7 @@ export default function Catalog() {
         mutationFn: ({ skuId, data }: { skuId: string; data: any }) =>
             productsApi.updateSku(skuId, data),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
             setEditModal({ isOpen: false, level: 'sku', data: null });
         },
         onError: (err: any) => {
@@ -557,7 +559,7 @@ export default function Catalog() {
         mutationFn: ({ variationId, data }: { variationId: string; data: any }) =>
             productsApi.updateVariation(variationId, data),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
             setEditModal({ isOpen: false, level: 'variation', data: null });
         },
         onError: (err: any) => {
@@ -570,7 +572,7 @@ export default function Catalog() {
         mutationFn: ({ productId, data }: { productId: string; data: any }) =>
             productsApi.update(productId, data),
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
             setEditModal({ isOpen: false, level: 'product', data: null });
         },
         onError: (err: any) => {

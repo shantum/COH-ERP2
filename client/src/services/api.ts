@@ -386,6 +386,13 @@ export const reportsApi = {
     getSalesVelocity: (days?: number) => api.get('/reports/sales-velocity', { params: { days } }),
     getInventoryTurnover: () => api.get('/reports/inventory-turnover'),
     getCogsSummary: () => api.get('/reports/cogs-summary'),
+    // Sales Analytics
+    getSalesAnalytics: (params: {
+        dimension?: string;
+        startDate?: string;
+        endDate?: string;
+        orderStatus?: string;
+    }) => api.get('/reports/sales-analytics', { params }),
 };
 
 // Shopify Integration

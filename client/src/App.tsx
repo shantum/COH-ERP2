@@ -19,6 +19,7 @@ const Production = lazy(() => import('./pages/Production'));
 const InwardHub = lazy(() => import('./pages/InwardHub'));
 const Picklist = lazy(() => import('./pages/Picklist'));
 const Ledgers = lazy(() => import('./pages/Ledgers'));
+const Analytics = lazy(() => import('./pages/Analytics'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Login = lazy(() => import('./pages/Login'));
 
@@ -87,6 +88,7 @@ function App() {
                 <Route path="return-inward" element={<Navigate to="/inward-hub" replace />} />
                 <Route path="picklist" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Picklist /></ErrorBoundary></Suspense>} />
                 <Route path="ledgers" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Ledgers /></ErrorBoundary></Suspense>} />
+                <Route path="analytics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Analytics /></ErrorBoundary></Suspense>} />
                 <Route path="settings" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Settings /></ErrorBoundary></Suspense>} />
               </Route>
             </Routes>
