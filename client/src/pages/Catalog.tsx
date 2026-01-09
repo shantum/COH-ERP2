@@ -1232,169 +1232,254 @@ export default function Catalog() {
         return { totalUnits, byGender: genderEntries, byFabricType: fabricTypeEntries };
     }, [catalogData?.items]);
 
+    // State for analytics panel expansion
+    const [showFabricBreakdown, setShowFabricBreakdown] = useState(false);
+    const fabricDropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close fabric dropdown on click outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (fabricDropdownRef.current && !fabricDropdownRef.current.contains(e.target as Node)) {
+                setShowFabricBreakdown(false);
+            }
+        };
+        if (showFabricBreakdown) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [showFabricBreakdown]);
+
     return (
         <div className="space-y-4">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-                <div>
-                    <h1 className="text-xl md:text-2xl font-bold text-gray-900">Catalog</h1>
-                    <p className="text-sm text-gray-500">Combined products and inventory view</p>
-                </div>
-                <div className="flex items-center gap-3 md:gap-4 text-sm">
-                    <div className="text-gray-500">
-                        <span className="font-medium text-gray-900">{stats.total}</span> {stats.label}
+            {/* Header with Stats Cards */}
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                {/* Title Section */}
+                <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shadow-lg">
+                        <Layers size={24} className="text-white" />
                     </div>
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Catalog</h1>
+                        <p className="text-sm text-gray-500">Products & Inventory Overview</p>
+                    </div>
+                </div>
+
+                {/* Stats Cards */}
+                <div className="flex flex-wrap gap-3">
+                    {/* Total Items */}
+                    <div className="flex items-center gap-3 px-4 py-2.5 bg-white rounded-xl border border-gray-200 shadow-sm">
+                        <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center">
+                            <Package size={18} className="text-slate-600" />
+                        </div>
+                        <div>
+                            <div className="text-2xl font-bold text-gray-900 leading-none">{stats.total.toLocaleString()}</div>
+                            <div className="text-xs text-gray-500 mt-0.5">{stats.label}</div>
+                        </div>
+                    </div>
+
+                    {/* Low Stock */}
                     {stats.belowTarget > 0 && (
-                        <div className="text-amber-600">
-                            <span className="font-medium">{stats.belowTarget}</span> low stock
+                        <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-50 rounded-xl border border-amber-200 shadow-sm">
+                            <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center">
+                                <AlertTriangle size={18} className="text-amber-600" />
+                            </div>
+                            <div>
+                                <div className="text-2xl font-bold text-amber-700 leading-none">{stats.belowTarget.toLocaleString()}</div>
+                                <div className="text-xs text-amber-600 mt-0.5">Low Stock</div>
+                            </div>
                         </div>
                     )}
+
+                    {/* Out of Stock */}
                     {stats.outOfStock > 0 && (
-                        <div className="text-red-600">
-                            <span className="font-medium">{stats.outOfStock}</span> out of stock
+                        <div className="flex items-center gap-3 px-4 py-2.5 bg-red-50 rounded-xl border border-red-200 shadow-sm">
+                            <div className="w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center">
+                                <XCircle size={18} className="text-red-600" />
+                            </div>
+                            <div>
+                                <div className="text-2xl font-bold text-red-700 leading-none">{stats.outOfStock.toLocaleString()}</div>
+                                <div className="text-xs text-red-600 mt-0.5">Out of Stock</div>
+                            </div>
                         </div>
                     )}
-                </div>
-            </div>
 
-            {/* Analytics Bar */}
-            <div className="bg-gray-50 border rounded-lg p-3 flex flex-wrap gap-6 items-center">
-                {/* Total */}
-                <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500 uppercase tracking-wide">Total Stock</span>
-                    <span className="text-lg font-bold text-gray-900">{analytics.totalUnits.toLocaleString()}</span>
-                </div>
-
-                <div className="w-px h-8 bg-gray-200 hidden sm:block" />
-
-                {/* By Gender */}
-                <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500 uppercase tracking-wide">By Gender</span>
-                    <div className="flex gap-2">
-                        {analytics.byGender.map(([gender, count]) => (
-                            <div key={gender} className="flex items-center gap-1 bg-white px-2 py-1 rounded border text-sm">
-                                <span className="text-gray-600 capitalize">{gender}</span>
-                                <span className="font-semibold text-gray-900">{count.toLocaleString()}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="w-px h-8 bg-gray-200 hidden sm:block" />
-
-                {/* By Fabric Type */}
-                <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500 uppercase tracking-wide">By Fabric</span>
-                    <div className="flex flex-wrap gap-2">
-                        {analytics.byFabricType.map(([fabricType, count]) => (
-                            <div key={fabricType} className="flex items-center gap-1 bg-white px-2 py-1 rounded border text-sm">
-                                <span className="text-gray-600">{fabricType}</span>
-                                <span className="font-semibold text-gray-900">{count.toLocaleString()}</span>
-                            </div>
-                        ))}
+                    {/* Total Units (Stock Summary) */}
+                    <div className="flex items-center gap-3 px-4 py-2.5 bg-emerald-50 rounded-xl border border-emerald-200 shadow-sm">
+                        <div>
+                            <div className="text-2xl font-bold text-emerald-700 leading-none">{analytics.totalUnits.toLocaleString()}</div>
+                            <div className="text-xs text-emerald-600 mt-0.5">Units in Stock</div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* Filters */}
-            <div className="flex flex-wrap gap-2 md:gap-3">
-                {/* View level selector */}
-                <select
-                    value={viewLevel}
-                    onChange={(e) => setViewLevel(e.target.value as ViewLevel)}
-                    className="text-sm border rounded px-2 py-1.5 bg-white font-medium"
-                >
-                    {VIEW_OPTIONS.map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                </select>
+            {/* Compact Analytics Summary */}
+            <div className="bg-gradient-to-r from-slate-50 to-gray-50 border border-gray-200 rounded-xl p-3">
+                <div className="flex flex-wrap items-center gap-4">
+                    {/* Gender Breakdown - Compact */}
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Stock by Gender:</span>
+                        <div className="flex gap-1.5">
+                            {analytics.byGender.map(([gender, count]) => (
+                                <span key={gender} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-gray-200 text-xs">
+                                    <span className="text-gray-600 capitalize">{gender}</span>
+                                    <span className="font-bold text-gray-900">{count.toLocaleString()}</span>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
 
-                <div className="w-px h-6 bg-gray-200 self-center hidden sm:block" />
+                    <div className="w-px h-6 bg-gray-300 hidden sm:block" />
 
-                <div className="relative w-full sm:w-auto">
-                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Search SKU, product, color..."
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        className="pl-8 pr-3 py-1.5 text-sm border rounded-lg w-full sm:w-48 md:w-56 focus:outline-none focus:ring-2 focus:ring-gray-200"
-                    />
+                    {/* Fabric Breakdown - Expandable */}
+                    <div className="relative" ref={fabricDropdownRef}>
+                        <button
+                            onClick={() => setShowFabricBreakdown(!showFabricBreakdown)}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-colors text-xs"
+                        >
+                            <span className="font-medium text-gray-500 uppercase tracking-wider">By Fabric</span>
+                            <span className="font-bold text-gray-900">{analytics.byFabricType.length} types</span>
+                            <ChevronDown size={14} className={`text-gray-400 transition-transform ${showFabricBreakdown ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {/* Fabric Dropdown */}
+                        {showFabricBreakdown && (
+                            <div className="absolute top-full left-0 mt-2 z-50 bg-white rounded-xl border border-gray-200 shadow-xl p-3 min-w-[280px] max-h-[300px] overflow-y-auto">
+                                <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 px-1">Stock by Fabric Type</div>
+                                <div className="space-y-1">
+                                    {analytics.byFabricType.map(([fabricType, count]) => (
+                                        <div key={fabricType} className="flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-gray-50">
+                                            <span className="text-sm text-gray-700">{fabricType}</span>
+                                            <span className="text-sm font-semibold text-gray-900">{count.toLocaleString()}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
-
-                <select
-                    value={filter.gender}
-                    onChange={(e) => setFilter(f => ({ ...f, gender: e.target.value, productId: '' }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
-                >
-                    <option value="">All Genders</option>
-                    {filterOptions?.genders?.map((g: string) => (
-                        <option key={g} value={g}>{g}</option>
-                    ))}
-                </select>
-
-                <select
-                    value={filter.category}
-                    onChange={(e) => setFilter(f => ({ ...f, category: e.target.value, productId: '' }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
-                >
-                    <option value="">All Categories</option>
-                    {filterOptions?.categories?.map((c: string) => (
-                        <option key={c} value={c}>{c}</option>
-                    ))}
-                </select>
-
-                <select
-                    value={filter.productId}
-                    onChange={(e) => setFilter(f => ({ ...f, productId: e.target.value }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto sm:max-w-[200px]"
-                >
-                    <option value="">All Products</option>
-                    {filteredProducts.map((p: any) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                </select>
-
-                <select
-                    value={filter.status}
-                    onChange={(e) => setFilter(f => ({ ...f, status: e.target.value }))}
-                    className="text-sm border rounded px-2 py-1.5 bg-white w-full sm:w-auto"
-                >
-                    <option value="">All Status</option>
-                    <option value="ok">In Stock</option>
-                    <option value="below_target">Below Target</option>
-                </select>
-
-                <div className="hidden sm:block sm:flex-1" />
-
-                {/* Page size selector */}
-                <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-gray-500">Show:</span>
-                    <select
-                        value={pageSize}
-                        onChange={(e) => handlePageSizeChange(parseInt(e.target.value, 10))}
-                        className="text-xs border rounded px-1.5 py-1 bg-white"
-                    >
-                        {PAGE_SIZE_OPTIONS.map(size => (
-                            <option key={size} value={size}>
-                                {size === 0 ? 'All' : size}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-
-                <ColumnVisibilityDropdown
-                    visibleColumns={visibleColumns}
-                    onToggleColumn={handleToggleColumn}
-                    onResetAll={handleResetAll}
-                    columnIds={ALL_COLUMN_IDS}
-                    columnHeaders={DEFAULT_HEADERS}
-                />
             </div>
 
-            {/* AG-Grid */}
-            <div className="table-scroll-container border rounded">
-                <div style={{ minWidth: '1100px', height: 'calc(100vh - 280px)', minHeight: '400px' }}>
+            {/* Filters Bar */}
+            <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                    {/* View Level Selector - Segmented Control Style */}
+                    <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+                        {VIEW_OPTIONS.map(opt => (
+                            <button
+                                key={opt.value}
+                                onClick={() => setViewLevel(opt.value)}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                                    viewLevel === opt.value
+                                        ? 'bg-white text-gray-900 shadow-sm'
+                                        : 'text-gray-500 hover:text-gray-700'
+                                }`}
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="w-px h-7 bg-gray-200 hidden sm:block" />
+
+                    {/* Search */}
+                    <div className="relative flex-1 sm:flex-initial">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Search products, SKUs..."
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            className="w-full sm:w-56 pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300 transition-all"
+                        />
+                    </div>
+
+                    <div className="w-px h-7 bg-gray-200 hidden lg:block" />
+
+                    {/* Filter Dropdowns Group */}
+                    <div className="flex flex-wrap items-center gap-2">
+                        <select
+                            value={filter.gender}
+                            onChange={(e) => setFilter(f => ({ ...f, gender: e.target.value, productId: '' }))}
+                            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all"
+                        >
+                            <option value="">All Genders</option>
+                            {filterOptions?.genders?.map((g: string) => (
+                                <option key={g} value={g}>{g}</option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={filter.category}
+                            onChange={(e) => setFilter(f => ({ ...f, category: e.target.value, productId: '' }))}
+                            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all"
+                        >
+                            <option value="">All Categories</option>
+                            {filterOptions?.categories?.map((c: string) => (
+                                <option key={c} value={c}>{c}</option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={filter.productId}
+                            onChange={(e) => setFilter(f => ({ ...f, productId: e.target.value }))}
+                            className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all max-w-[180px]"
+                        >
+                            <option value="">All Products</option>
+                            {filteredProducts.map((p: any) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={filter.status}
+                            onChange={(e) => setFilter(f => ({ ...f, status: e.target.value }))}
+                            className={`text-sm border rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all ${
+                                filter.status === 'below_target' ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
+                            }`}
+                        >
+                            <option value="">All Status</option>
+                            <option value="ok">In Stock</option>
+                            <option value="below_target">Below Target</option>
+                        </select>
+                    </div>
+
+                    <div className="hidden lg:block lg:flex-1" />
+
+                    {/* Right Side Controls */}
+                    <div className="flex items-center gap-2">
+                        {/* Page Size */}
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-50 rounded-lg">
+                            <span className="text-xs text-gray-500">Show</span>
+                            <select
+                                value={pageSize}
+                                onChange={(e) => handlePageSizeChange(parseInt(e.target.value, 10))}
+                                className="text-xs font-medium bg-transparent border-none focus:outline-none cursor-pointer"
+                            >
+                                {PAGE_SIZE_OPTIONS.map(size => (
+                                    <option key={size} value={size}>
+                                        {size === 0 ? 'All' : size}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Column Visibility - filter out columns hidden by view level */}
+                        <ColumnVisibilityDropdown
+                            visibleColumns={visibleColumns}
+                            onToggleColumn={handleToggleColumn}
+                            onResetAll={handleResetAll}
+                            columnIds={ALL_COLUMN_IDS.filter(id => !HIDDEN_COLUMNS_BY_VIEW[viewLevel].includes(id))}
+                            columnHeaders={DEFAULT_HEADERS}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            {/* AG-Grid Container */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="table-scroll-container">
+                    <div style={{ minWidth: '1100px', height: 'calc(100vh - 320px)', minHeight: '400px' }}>
                     <AgGridReact
                         ref={gridRef}
                         theme={compactThemeSmall}
@@ -1430,6 +1515,7 @@ export default function Catalog() {
                         onGridReady={onGridReady}
                         maintainColumnOrder={true}
                     />
+                    </div>
                 </div>
             </div>
 

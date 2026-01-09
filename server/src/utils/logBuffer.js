@@ -1,8 +1,15 @@
-/**
- * In-memory log buffer for server logs viewer
- * Retains logs for 24 hours with automatic cleanup
- */
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Persistent log buffer for server logs viewer
+ * Retains logs for 24 hours with automatic cleanup
+ * Persists logs to disk to survive server restarts
+ */
 class LogBuffer {
     constructor(maxSize = 50000, retentionMs = 24 * 60 * 60 * 1000) {
         this.maxSize = maxSize;
@@ -10,8 +17,144 @@ class LogBuffer {
         this.logs = [];
         this.lastCleanup = Date.now();
 
+        // Configure log file path
+        this.logsDir = path.resolve(__dirname, '../../logs');
+        this.logFilePath = path.join(this.logsDir, 'server.jsonl');
+
+        // Queue for async file writes to prevent blocking
+        this.writeQueue = [];
+        this.isWriting = false;
+
+        // Initialize: ensure directory exists and load existing logs
+        this._initialize();
+
         // Run cleanup every hour
         this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    }
+
+    /**
+     * Initialize log buffer: create directory and load existing logs
+     */
+    _initialize() {
+        try {
+            // Create logs directory if it doesn't exist
+            if (!fs.existsSync(this.logsDir)) {
+                fs.mkdirSync(this.logsDir, { recursive: true });
+                console.log('[LogBuffer] Created logs directory:', this.logsDir);
+            }
+
+            // Load existing logs from file
+            this._loadLogsFromFile();
+        } catch (error) {
+            console.error('[LogBuffer] Failed to initialize:', error.message);
+        }
+    }
+
+    /**
+     * Load logs from file on startup, filtering to retention window
+     */
+    _loadLogsFromFile() {
+        try {
+            if (!fs.existsSync(this.logFilePath)) {
+                console.log('[LogBuffer] No existing log file found, starting fresh');
+                return;
+            }
+
+            const fileContent = fs.readFileSync(this.logFilePath, 'utf-8');
+            const lines = fileContent.trim().split('\n').filter(line => line.trim());
+
+            const cutoffTime = Date.now() - this.retentionMs;
+            let loaded = 0;
+            let expired = 0;
+
+            for (const line of lines) {
+                try {
+                    const logEntry = JSON.parse(line);
+
+                    // Only load logs within retention window
+                    if (logEntry.timestampMs > cutoffTime) {
+                        this.logs.push(logEntry);
+                        loaded++;
+                    } else {
+                        expired++;
+                    }
+                } catch (parseError) {
+                    console.error('[LogBuffer] Failed to parse log line:', parseError.message);
+                }
+            }
+
+            console.log(`[LogBuffer] Loaded ${loaded} logs from file (${expired} expired logs ignored)`);
+
+            // If we had expired logs, rewrite the file with only active logs
+            if (expired > 0) {
+                this._compactLogFile();
+            }
+        } catch (error) {
+            console.error('[LogBuffer] Failed to load logs from file:', error.message);
+        }
+    }
+
+    /**
+     * Append a log entry to the file (async, non-blocking)
+     */
+    _appendToFile(logEntry) {
+        this.writeQueue.push(logEntry);
+        this._processWriteQueue();
+    }
+
+    /**
+     * Process the write queue asynchronously
+     */
+    async _processWriteQueue() {
+        if (this.isWriting || this.writeQueue.length === 0) {
+            return;
+        }
+
+        this.isWriting = true;
+
+        try {
+            const entries = [...this.writeQueue];
+            this.writeQueue = [];
+
+            const lines = entries.map(entry => JSON.stringify(entry)).join('\n') + '\n';
+
+            await fs.promises.appendFile(this.logFilePath, lines, 'utf-8');
+        } catch (error) {
+            console.error('[LogBuffer] Failed to write logs to file:', error.message);
+            // Put failed entries back in the queue
+            this.writeQueue.unshift(...this.writeQueue);
+        } finally {
+            this.isWriting = false;
+
+            // Process remaining queue items
+            if (this.writeQueue.length > 0) {
+                setImmediate(() => this._processWriteQueue());
+            }
+        }
+    }
+
+    /**
+     * Rewrite the log file with only active logs (removes expired entries)
+     */
+    _compactLogFile() {
+        try {
+            const cutoffTime = Date.now() - this.retentionMs;
+            const activeLogsContent = this.logs
+                .filter(log => log.timestampMs > cutoffTime)
+                .map(log => JSON.stringify(log))
+                .join('\n');
+
+            if (activeLogsContent) {
+                fs.writeFileSync(this.logFilePath, activeLogsContent + '\n', 'utf-8');
+            } else {
+                // No active logs, write empty file
+                fs.writeFileSync(this.logFilePath, '', 'utf-8');
+            }
+
+            console.log('[LogBuffer] Compacted log file, removed expired entries');
+        } catch (error) {
+            console.error('[LogBuffer] Failed to compact log file:', error.message);
+        }
     }
 
     addLog(level, message, context = {}) {
@@ -28,6 +171,9 @@ class LogBuffer {
         };
 
         this.logs.push(logEntry);
+
+        // Persist to file asynchronously
+        this._appendToFile(logEntry);
 
         // Keep only the last maxSize entries (circular buffer)
         if (this.logs.length > this.maxSize) {
@@ -56,6 +202,9 @@ class LogBuffer {
         const removed = originalLength - this.logs.length;
         if (removed > 0) {
             console.log(`[LogBuffer] Cleaned up ${removed} expired logs (older than 24 hours)`);
+
+            // Compact the log file to remove expired entries
+            this._compactLogFile();
         }
     }
 
@@ -97,6 +246,14 @@ class LogBuffer {
     clearLogs() {
         this.logs = [];
         this.lastCleanup = Date.now();
+
+        // Clear the log file
+        try {
+            fs.writeFileSync(this.logFilePath, '', 'utf-8');
+            console.log('[LogBuffer] Cleared log file');
+        } catch (error) {
+            console.error('[LogBuffer] Failed to clear log file:', error.message);
+        }
     }
 
     getStats() {
@@ -152,10 +309,16 @@ class LogBuffer {
     /**
      * Cleanup interval management for graceful shutdown
      */
-    destroy() {
+    async destroy() {
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
+        }
+
+        // Flush any pending writes before shutdown
+        if (this.writeQueue.length > 0) {
+            console.log('[LogBuffer] Flushing pending writes before shutdown...');
+            await this._processWriteQueue();
         }
     }
 }

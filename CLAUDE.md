@@ -75,6 +75,7 @@ npm run db:push
 14. **AG-Grid pinned columns**: Set `pinned: 'right'` after resize to keep Actions visible
 15. **AG-Grid shared utilities**: Theme, formatters in `utils/agGridHelpers.ts`; state persistence in `hooks/useGridState.ts`
 16. **Don't over-engineer shared utilities**: Working code with inline patterns often better than abstraction (order grids kept inline)
+17. **Persistent logs**: Logs stored in `server/logs/server.jsonl`, survive restarts, 24-hour retention
 
 ## Environment
 

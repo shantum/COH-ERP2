@@ -53,7 +53,10 @@ The logging system captures:
    - Module-specific child loggers
 
 2. **`server/src/utils/logBuffer.js`**
-   - In-memory circular buffer (1000 entries)
+   - Persistent log storage in `server/logs/server.jsonl`
+   - In-memory circular buffer (50,000 entries max)
+   - 24-hour retention window
+   - Automatic file compaction during cleanup
    - Log filtering by level
    - Search functionality
    - Statistics aggregation
@@ -216,13 +219,17 @@ Then check the logs in Settings UI to verify all log types are captured.
 
 ## Configuration
 
-### Buffer Size
+### Buffer Size and Retention
 
-Default: 1000 entries (circular buffer)
+Defaults:
+- **Max size**: 50,000 entries (circular buffer)
+- **Retention**: 24 hours
+- **Storage**: `server/logs/server.jsonl` (JSON Lines format)
 
 To change, edit `server/src/utils/logBuffer.js`:
 ```javascript
-const logBuffer = new LogBuffer(2000); // Increase to 2000 entries
+// Increase to 100,000 entries and 48-hour retention
+const logBuffer = new LogBuffer(100000, 48 * 60 * 60 * 1000);
 ```
 
 ### Log Level
@@ -243,10 +250,14 @@ const logger = pino({
 
 ## Performance
 
-- **Circular buffer**: Old logs are automatically removed when buffer is full
+- **Persistent storage**: Logs survive server restarts (crash data preserved)
+- **Async file writes**: Non-blocking write queue prevents performance impact
+- **Circular buffer**: Old logs automatically removed when buffer is full
+- **24-hour retention**: Automatic cleanup of expired logs
+- **File compaction**: Periodic rewrite of log file to remove expired entries
 - **Async logging**: Pino uses async logging for minimal performance impact
 - **Indexed filtering**: Log filtering is optimized for fast searching
-- **Memory efficient**: 1000 log entries ≈ 1-2MB memory
+- **Memory efficient**: 50,000 log entries ≈ 50-100MB memory
 
 ## Troubleshooting
 
@@ -275,13 +286,78 @@ const logger = pino({
 2. Reduce log level (info instead of debug)
 3. Remove excessive logging from hot paths
 
+### Testing Log Persistence
+
+Run the test script to verify logs persist across restarts:
+
+```bash
+cd server
+
+# Write test logs
+node test-log-persistence.js write
+
+# Read logs (simulates restart)
+node test-log-persistence.js read
+```
+
+You should see the test logs successfully loaded after the simulated restart.
+
 ## Future Enhancements
 
 Potential improvements:
 
-- [ ] Persistent log storage (database or file)
-- [ ] Log rotation and archiving
+- [x] Persistent log storage (file-based)
+- [ ] Log rotation and archiving (multiple files)
 - [ ] Real-time log streaming (WebSocket)
 - [ ] Log aggregation and analytics
-- [ ] Export logs to file
+- [ ] Export logs to file (CSV/JSON)
 - [ ] Integration with external log services (Sentry, LogRocket)
+
+## Persistent Storage Details
+
+### File Format
+
+Logs are stored in JSON Lines format (`server/logs/server.jsonl`):
+- Each line is a complete JSON object
+- Easy to append (no need to parse entire file)
+- Easy to read line-by-line for filtering
+
+Example log entry:
+```json
+{"id":"1767966997567-l3b7e3dto","timestamp":"2026-01-09T13:56:37.567Z","timestampMs":1767966997567,"level":"warn","message":"Test warning log","context":{"test":true,"severity":"medium"}}
+```
+
+### Startup Behavior
+
+When the server starts:
+1. Creates `server/logs/` directory if it doesn't exist
+2. Reads existing `server.jsonl` file
+3. Filters logs to 24-hour retention window
+4. Loads active logs into in-memory buffer
+5. If expired logs found, compacts the file
+
+### Write Strategy
+
+- **Async, non-blocking**: Uses write queue to batch writes
+- **Immediate append**: Logs written to file as soon as possible
+- **No data loss**: Queue preserved if write fails, retried on next write
+- **Graceful shutdown**: Pending writes flushed on SIGTERM/SIGINT
+
+### Cleanup Strategy
+
+Every hour (or when triggered):
+1. Remove expired logs from memory buffer
+2. Rewrite file with only active logs
+3. Reduces file size by removing old entries
+
+### File Location
+
+```
+server/
+├── logs/
+│   └── server.jsonl  (auto-created, git-ignored)
+├── src/
+│   └── utils/
+│       └── logBuffer.js
+└── test-log-persistence.js
+```
