@@ -49,10 +49,12 @@ router.get('/', authenticateToken, async (req, res) => {
         }
 
         // Base where clause for order lines (includes archived orders for complete analytics)
+        // Excludes zero-value orders (exchange/replacement orders from Return Prime)
         const baseWhere = {
             order: {
                 orderDate: { gte: start, lte: end },
                 status: statusFilter,
+                totalAmount: { gt: 0 },
             },
         };
 
@@ -123,12 +125,13 @@ async function getSummaryMetrics(prisma, baseWhere) {
  * Get time series data (daily aggregation)
  */
 async function getTimeSeries(prisma, startDate, endDate, statusFilter) {
-    // Get all order lines with order dates
+    // Get all order lines with order dates (excludes zero-value exchange orders)
     const orderLines = await prisma.orderLine.findMany({
         where: {
             order: {
                 orderDate: { gte: startDate, lte: endDate },
                 status: statusFilter,
+                totalAmount: { gt: 0 },
             },
         },
         select: {
