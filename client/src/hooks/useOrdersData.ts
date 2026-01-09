@@ -24,10 +24,11 @@ interface UseOrdersDataOptions {
     shippedPage?: number;
     shippedDays?: number;
     archivedDays?: number;
+    archivedLimit?: number;
     archivedSortBy?: 'orderDate' | 'archivedAt';
 }
 
-export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, archivedDays = 90, archivedSortBy = 'archivedAt' }: UseOrdersDataOptions) {
+export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, shippedDays = 30, archivedDays = 90, archivedLimit = 100, archivedSortBy = 'archivedAt' }: UseOrdersDataOptions) {
     // Order queries with SEQUENTIAL BACKGROUND LOADING
     // Active tab loads immediately, then remaining tabs load one-by-one after it completes
     // This ensures:
@@ -91,9 +92,10 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
     // Archived loads last: when tab is active OR after Cancelled completes
     const archivedOrdersQuery = useQuery({
-        queryKey: ['archivedOrders', archivedDays, archivedSortBy],
+        queryKey: ['archivedOrders', archivedDays, archivedLimit, archivedSortBy],
         queryFn: () => ordersApi.getArchived({
             ...(archivedDays > 0 ? { days: archivedDays } : {}),
+            limit: archivedLimit,
             sortBy: archivedSortBy
         }).then(r => r.data),
         staleTime: STALE_TIME,

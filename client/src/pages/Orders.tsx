@@ -69,8 +69,9 @@ export default function Orders() {
     const [shippedPage, setShippedPage] = useState(1);
     const [shippedDays, setShippedDays] = useState(30);
 
-    // Archived orders period state (0 = all time)
+    // Archived orders period and limit state (0 = all time)
     const [archivedDays, setArchivedDays] = useState(90);
+    const [archivedLimit, setArchivedLimit] = useState(100);
     const [archivedSortBy, setArchivedSortBy] = useState<'orderDate' | 'archivedAt'>('archivedAt');
 
     // Modal state
@@ -134,7 +135,7 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedSortBy });
+    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedLimit, archivedSortBy });
 
     // Shopify config for external links (needed for shipped, rto, cod-pending, and archived tabs)
     const { data: shopifyConfig } = useQuery({
@@ -852,7 +853,7 @@ export default function Orders() {
                 {/* Archived Orders Grid */}
                 {!isLoading && tab === 'archived' && (
                 <div className="p-4 space-y-4">
-                    {/* Period selector */}
+                    {/* Period and limit selectors */}
                     <div className="flex items-center gap-4">
                         <label className="text-sm text-gray-600">Period:</label>
                         <select
@@ -866,8 +867,19 @@ export default function Orders() {
                             <option value={365}>Last year</option>
                             <option value={0}>All time</option>
                         </select>
+                        <label className="text-sm text-gray-600">Show:</label>
+                        <select
+                            value={archivedLimit}
+                            onChange={(e) => setArchivedLimit(Number(e.target.value))}
+                            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
+                        >
+                            <option value={100}>100 orders</option>
+                            <option value={500}>500 orders</option>
+                            <option value={1000}>1,000 orders</option>
+                            <option value={2500}>2,500 orders</option>
+                        </select>
                         <span className="text-sm text-gray-500">
-                            {archivedTotalCount.toLocaleString()} orders
+                            Showing {archivedOrders.length.toLocaleString()} of {archivedTotalCount.toLocaleString()} orders
                         </span>
                     </div>
                     <ArchivedOrdersGrid
