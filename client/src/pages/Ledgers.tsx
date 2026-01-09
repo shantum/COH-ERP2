@@ -32,7 +32,7 @@ export default function Ledgers() {
     const { data: fabricTxns, isLoading: fabLoading } = useQuery({
         queryKey: ['allFabricTransactions'],
         queryFn: async () => {
-            const txns = await fabricsApi.getAllTransactions({ limit: 500, days: 30 }).then(r => r.data);
+            const txns = await fabricsApi.getAllTransactions({ limit: 1000, days: 365 }).then(r => r.data);
             // Transform to expected format
             return txns.map((t: any) => ({
                 ...t,
