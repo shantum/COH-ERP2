@@ -352,6 +352,7 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
                 qty: item.quantity,
                 unitPrice: Math.round(effectiveUnitPrice * 100) / 100, // Round to 2 decimal places
                 lineStatus: 'pending',
+                shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
             });
         }
     }

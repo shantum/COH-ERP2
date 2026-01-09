@@ -103,6 +103,7 @@ export interface FlattenedOrderRow {
     orderId: string;
     orderNumber: string;
     orderDate: string;
+    shipByDate: string | null;
     customerName: string;
     city: string;
     customerOrderCount: number;
@@ -181,6 +182,7 @@ export function flattenOrders(
                 orderId: order.id,
                 orderNumber: order.orderNumber,
                 orderDate: order.orderDate,
+                shipByDate: order.shipByDate || null,
                 customerName: order.customerName,
                 city: parseCity(order.shippingAddress),
                 customerOrderCount: serverOrderCount,
@@ -240,6 +242,7 @@ export function flattenOrders(
                 orderId: order.id,
                 orderNumber: order.orderNumber,
                 orderDate: order.orderDate,
+                shipByDate: order.shipByDate || null,
                 customerName: order.customerName,
                 city: parseCity(order.shippingAddress),
                 customerOrderCount: serverOrderCount,
@@ -389,6 +392,7 @@ export function getSizesForVariation(
 export const DEFAULT_HEADERS: Record<string, string> = {
     orderDate: 'Date',
     orderAge: 'Age',
+    shipByDate: 'Ship By',
     orderNumber: 'Order',
     customerName: 'Customer',
     city: 'City',

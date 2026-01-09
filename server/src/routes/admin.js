@@ -139,7 +139,9 @@ router.get('/channels', authenticateToken, async (req, res) => {
         const defaultChannels = [
             { id: 'offline', name: 'Offline' },
             { id: 'shopify', name: 'Shopify' },
-            { id: 'amazon', name: 'Amazon' },
+            { id: 'nykaa', name: 'Nykaa' },
+            { id: 'ajio', name: 'Ajio' },
+            { id: 'myntra', name: 'Myntra' },
         ];
 
         const channels = setting?.value ? JSON.parse(setting.value) : defaultChannels;

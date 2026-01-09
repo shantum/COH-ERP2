@@ -337,6 +337,7 @@ model Order {
   customerPhone   String?
   shippingAddress String?   // JSON stored as string
   orderDate       DateTime  @default(now())
+  shipByDate      DateTime?  // Optional deadline for shipping
   customerNotes   String?
   internalNotes   String?
   paymentMethod   String?   // COD, Prepaid, etc.
@@ -401,6 +402,7 @@ model Order {
   @@index([isArchived])
   @@index([isExchange])
   @@index([originalOrderId])
+  @@index([shipByDate])
   @@index([status, orderDate])      // Compound: filter by status + sort by date
   @@index([customerId, orderDate])  // Compound: customer order history
   @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)
@@ -456,6 +458,9 @@ model OrderLine {
   refundReason      String?   // quality_issue, size_issue, customer_request, damaged, other
   refundedAt        DateTime?
   refundNotes       String?
+
+  // Shipping address (optional, falls back to Order.shippingAddress if null)
+  shippingAddress   String?   // JSON stored as string
 
   order              Order               @relation(fields: [orderId], references: [id])
   sku                Sku                 @relation(fields: [skuId], references: [id])

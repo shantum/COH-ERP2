@@ -17,19 +17,35 @@ router.get('/', async (req, res) => {
 
         let where = {};
         if (search) {
-            where.OR = [
-                { email: { contains: search, mode: 'insensitive' } },
-                { firstName: { contains: search, mode: 'insensitive' } },
-                { lastName: { contains: search, mode: 'insensitive' } },
-                { phone: { contains: search, mode: 'insensitive' } },
-            ];
+            // Support multi-word search: all words must match across name/email/phone
+            const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+            if (words.length === 1) {
+                // Single word: search in any field
+                where.OR = [
+                    { email: { contains: words[0], mode: 'insensitive' } },
+                    { firstName: { contains: words[0], mode: 'insensitive' } },
+                    { lastName: { contains: words[0], mode: 'insensitive' } },
+                    { phone: { contains: words[0], mode: 'insensitive' } },
+                ];
+            } else {
+                // Multi-word: ALL words must match somewhere in name/email
+                where.AND = words.map(word => ({
+                    OR: [
+                        { email: { contains: word, mode: 'insensitive' } },
+                        { firstName: { contains: word, mode: 'insensitive' } },
+                        { lastName: { contains: word, mode: 'insensitive' } },
+                        { phone: { contains: word, mode: 'insensitive' } },
+                    ]
+                }));
+            }
         }
 
         const customers = await req.prisma.customer.findMany({
             where,
             include: {
                 orders: {
-                    select: { id: true, totalAmount: true, orderDate: true, status: true },
+                    select: { id: true, totalAmount: true, orderDate: true, status: true, customerPhone: true },
                     orderBy: { orderDate: 'desc' },
                 },
                 returnRequests: {
@@ -58,12 +74,17 @@ router.get('/', async (req, res) => {
             // Orders are now sorted by date desc, so first = most recent, last = oldest
             const sortedOrders = validOrders;
 
+            // Get phone from customer record, or fallback to most recent order's phone
+            const phone = customer.phone ||
+                customer.orders.find(o => o.customerPhone)?.customerPhone ||
+                null;
+
             return {
                 id: customer.id,
                 email: customer.email,
                 firstName: customer.firstName,
                 lastName: customer.lastName,
-                phone: customer.phone,
+                phone,
                 tags: customer.tags,
                 totalOrders,
                 lifetimeValue,

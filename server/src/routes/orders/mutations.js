@@ -24,6 +24,7 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
             customerName,
             customerEmail,
             customerPhone,
+            customerId: providedCustomerId, // Existing customer link from frontend
             shippingAddress,
             customerNotes,
             internalNotes,
@@ -32,6 +33,8 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
             // Exchange order fields
             isExchange,
             originalOrderId,
+            // Optional ship by date
+            shipByDate,
         } = req.validatedBody;
 
         // Validate originalOrderId exists if provided
@@ -49,9 +52,9 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
         const orderNumber = providedOrderNumber ||
             (isExchange ? `EXC-${Date.now().toString().slice(-8)}` : `COH-${Date.now().toString().slice(-8)}`);
 
-        // Find or create customer OUTSIDE transaction to prevent timeout
-        let customerId = null;
-        if (customerEmail || customerPhone) {
+        // Use provided customerId if given, otherwise find or create based on contact info
+        let customerId = providedCustomerId || null;
+        if (!customerId && (customerEmail || customerPhone)) {
             const customer = await findOrCreateCustomerByContact(req.prisma, {
                 email: customerEmail,
                 phone: customerPhone,
@@ -79,12 +82,16 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
                     // Exchange order fields
                     isExchange: isExchange || false,
                     originalOrderId: originalOrderId || null,
+                    // Optional ship by date
+                    shipByDate: shipByDate ? new Date(shipByDate) : null,
                     orderLines: {
                         create: lines.map((line) => ({
                             skuId: line.skuId,
                             qty: line.qty,
                             unitPrice: line.unitPrice,
                             lineStatus: 'pending',
+                            // Line-level address, or fall back to order-level address
+                            shippingAddress: line.shippingAddress || shippingAddress || null,
                         })),
                     },
                 },

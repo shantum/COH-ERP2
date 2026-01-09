@@ -165,8 +165,10 @@ export const CreateOrderSchema = z.object({
     customerName: z.string().min(1, 'Customer name is required').trim(),
     customerEmail: z.string().email('Invalid email format').optional().nullable(),
     customerPhone: z.string().optional().nullable(),
+    customerId: z.string().uuid('Invalid customer ID').optional().nullable(), // Link to existing customer
     shippingAddress: z.string().optional().nullable(),
     orderDate: z.string().datetime().optional(),
+    shipByDate: z.string().datetime().optional().nullable(), // Optional shipping deadline
     paymentMethod: z.enum(['Prepaid', 'COD']).default('Prepaid'),
     // totalAmount can be 0 or negative for exchange orders
     totalAmount: z.number().optional(),
@@ -176,6 +178,7 @@ export const CreateOrderSchema = z.object({
         skuId: z.string().uuid('Invalid SKU ID format'),
         qty: z.number().int('Quantity must be an integer').positive('Quantity must be positive'),
         unitPrice: z.number().min(0, 'Unit price cannot be negative').optional(),
+        shippingAddress: z.string().optional().nullable(), // Line-level shipping address (JSON string)
     })).min(1, 'At least one line item is required'),
 }).refine((data) => {
     // For non-exchange orders, totalAmount must be positive if provided

@@ -160,6 +160,7 @@ export interface Order {
   customerPhone: string | null;
   shippingAddress: string | null;
   orderDate: string;
+  shipByDate: string | null;
   customerNotes: string | null;
   internalNotes: string | null;
   status: OrderStatus;
@@ -379,6 +380,7 @@ export interface CreateOrderData {
   customerEmail?: string;
   customerPhone?: string;
   shippingAddress?: string;
+  shipByDate?: string;
   customerNotes?: string;
   internalNotes?: string;
   totalAmount: number;
@@ -412,6 +414,7 @@ export interface OrderRowData {
   orderId: string;
   orderNumber: string;
   orderDate: string;
+  shipByDate: string | null;
   customerName: string;
   city: string;
   customerOrderCount: number;

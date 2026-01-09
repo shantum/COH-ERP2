@@ -241,7 +241,7 @@ function ProductionDatePopover({
 
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
-    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'city', 'orderValue',
+    'orderDate', 'orderAge', 'shipByDate', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'shopifyStatus',
@@ -559,6 +559,50 @@ export function OrdersGrid({
                     if (days > 5) colorClass = 'text-red-600 font-semibold';
                     else if (days >= 3) colorClass = 'text-amber-600 font-medium';
                     return <span className={`text-xs ${colorClass}`}>{days}d</span>;
+                },
+                sortable: true,
+            },
+            {
+                colId: 'shipByDate',
+                headerName: getHeaderName('shipByDate'),
+                field: 'shipByDate',
+                width: 85,
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const shipByDate = params.data.order?.shipByDate;
+                    if (!shipByDate) return <span className="text-gray-300">—</span>;
+
+                    const date = new Date(shipByDate);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const shipDate = new Date(shipByDate);
+                    shipDate.setHours(0, 0, 0, 0);
+                    const daysUntil = Math.ceil((shipDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+                    let colorClass = 'text-gray-600';
+                    let bgClass = '';
+                    if (daysUntil < 0) {
+                        colorClass = 'text-red-700 font-semibold';
+                        bgClass = 'bg-red-100 px-1.5 py-0.5 rounded';
+                    } else if (daysUntil === 0) {
+                        colorClass = 'text-amber-700 font-semibold';
+                        bgClass = 'bg-amber-100 px-1.5 py-0.5 rounded';
+                    } else if (daysUntil <= 2) {
+                        colorClass = 'text-amber-600';
+                    }
+
+                    const formatted = date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+                    const tooltip = daysUntil < 0
+                        ? `${Math.abs(daysUntil)} day${Math.abs(daysUntil) === 1 ? '' : 's'} overdue`
+                        : daysUntil === 0
+                            ? 'Due today'
+                            : `${daysUntil} day${daysUntil === 1 ? '' : 's'} remaining`;
+
+                    return (
+                        <span className={`text-xs ${colorClass} ${bgClass}`} title={tooltip}>
+                            {formatted}
+                        </span>
+                    );
                 },
                 sortable: true,
             },

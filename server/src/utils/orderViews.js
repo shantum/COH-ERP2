@@ -285,6 +285,7 @@ export const ORDER_UNIFIED_SELECT = {
     channel: true,
     status: true,
     orderDate: true,
+    shipByDate: true,
     customerName: true,
     customerEmail: true,
     customerPhone: true,
