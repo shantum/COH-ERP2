@@ -34,22 +34,21 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
         // Generate order number if not provided
         const orderNumber = providedOrderNumber || `COH-${Date.now().toString().slice(-8)}`;
 
-        // Issue #5: Wrap entire order + lines creation in single Prisma transaction
-        const order = await req.prisma.$transaction(async (tx) => {
-            // Find or create customer within transaction
-            let customerId = null;
-            if (customerEmail || customerPhone) {
-                const customer = await findOrCreateCustomerByContact(tx, {
-                    email: customerEmail,
-                    phone: customerPhone,
-                    firstName: customerName?.split(' ')[0],
-                    lastName: customerName?.split(' ').slice(1).join(' '),
-                    defaultAddress: shippingAddress,
-                });
-                customerId = customer.id;
-            }
+        // Find or create customer OUTSIDE transaction to prevent timeout
+        let customerId = null;
+        if (customerEmail || customerPhone) {
+            const customer = await findOrCreateCustomerByContact(req.prisma, {
+                email: customerEmail,
+                phone: customerPhone,
+                firstName: customerName?.split(' ')[0],
+                lastName: customerName?.split(' ').slice(1).join(' '),
+                defaultAddress: shippingAddress,
+            });
+            customerId = customer.id;
+        }
 
-            // Create order with lines in same transaction
+        // Create order with lines in transaction (now fast, just the create)
+        const order = await req.prisma.$transaction(async (tx) => {
             const createdOrder = await tx.order.create({
                 data: {
                     orderNumber,
