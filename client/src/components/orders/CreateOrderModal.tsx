@@ -5,9 +5,21 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, Trash2, Package, RefreshCw, Plus, ShoppingBag, User, Mail, Phone, Hash, Search, UserCheck } from 'lucide-react';
+import { X, Trash2, Package, RefreshCw, Plus, ShoppingBag, User, Mail, Phone, Hash, Search, UserCheck, MapPin, ChevronDown, ChevronUp, History, Clock, Check, FileText, Calendar, Info } from 'lucide-react';
 import { getSkuBalance } from '../../utils/orderHelpers';
 import { customersApi } from '../../services/api';
+
+interface AddressData {
+    first_name?: string;
+    last_name?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    province?: string;
+    zip?: string;
+    country?: string;
+    phone?: string;
+}
 
 interface OrderLine {
     skuId: string;
@@ -452,6 +464,11 @@ function SelectedItemCard({
     );
 }
 
+// Helper to stringify address
+function stringifyAddress(addr: AddressData): string {
+    return JSON.stringify(addr);
+}
+
 export function CreateOrderModal({
     allSkus,
     channels,
@@ -472,6 +489,28 @@ export function CreateOrderModal({
     const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
     const [isAddingItem, setIsAddingItem] = useState(false);
     const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
+    const [addressForm, setAddressForm] = useState<AddressData>({});
+    const [isAddressExpanded, setIsAddressExpanded] = useState(false);
+    // Track original prices for exchange toggle reversion
+    const [originalPrices, setOriginalPrices] = useState<Map<number, number>>(new Map());
+
+    // Fetch past addresses when address section is expanded and customer exists
+    const { data: pastAddressesData, isLoading: isLoadingAddresses } = useQuery({
+        queryKey: ['customer-addresses', orderForm.customerId],
+        queryFn: () => customersApi.getAddresses(orderForm.customerId!),
+        enabled: isAddressExpanded && !!orderForm.customerId,
+        staleTime: 60 * 1000, // Cache for 1 minute
+    });
+
+    const pastAddresses: AddressData[] = pastAddressesData?.data || [];
+
+    const handleSelectPastAddress = (addr: AddressData) => {
+        setAddressForm(addr);
+    };
+
+    const handleAddressChange = (field: keyof AddressData, value: string) => {
+        setAddressForm(f => ({ ...f, [field]: value }));
+    };
 
     // Handle customer selection from search
     const handleSelectCustomer = (customer: any) => {
@@ -502,16 +541,22 @@ export function CreateOrderModal({
     };
 
     const handleSelectSku = (sku: any, stock: number) => {
+        const mrpPrice = Number(sku.mrp) || 0;
         const newLine: OrderLine = {
             skuId: sku.id,
             qty: 1,
-            unitPrice: Number(sku.mrp) || 0,
+            unitPrice: orderForm.isExchange ? 0 : mrpPrice,
             productName: sku.variation?.product?.name || 'Unknown',
             colorName: sku.variation?.colorName || '-',
             size: sku.size || '-',
             skuCode: sku.skuCode || '-',
             stock: stock,
         };
+
+        // Store original price for this line
+        const newIndex = orderLines.length;
+        setOriginalPrices(prev => new Map(prev).set(newIndex, mrpPrice));
+
         setOrderLines([...orderLines, newLine]);
         setIsAddingItem(false);
     };
@@ -526,10 +571,54 @@ export function CreateOrderModal({
         const newLines = [...orderLines];
         newLines[idx].unitPrice = price;
         setOrderLines(newLines);
+
+        // Update original price tracking when user manually changes price
+        setOriginalPrices(prev => new Map(prev).set(idx, price));
     };
 
     const removeLine = (idx: number) => {
         setOrderLines(orderLines.filter((_, i) => i !== idx));
+        // Clean up price tracking
+        setOriginalPrices(prev => {
+            const updated = new Map(prev);
+            updated.delete(idx);
+            // Re-index remaining prices
+            const reindexed = new Map<number, number>();
+            updated.forEach((price, oldIdx) => {
+                if (oldIdx > idx) {
+                    reindexed.set(oldIdx - 1, price);
+                } else {
+                    reindexed.set(oldIdx, price);
+                }
+            });
+            return reindexed;
+        });
+    };
+
+    // Handle exchange checkbox toggle
+    const handleExchangeToggle = (isExchange: boolean) => {
+        setOrderForm(f => ({ ...f, isExchange }));
+
+        if (isExchange) {
+            // Zero out all prices and preserve originals
+            setOrderLines(lines => lines.map((line, idx) => {
+                // Store current price as original if not already stored
+                setOriginalPrices(prev => {
+                    const updated = new Map(prev);
+                    if (!updated.has(idx)) {
+                        updated.set(idx, line.unitPrice);
+                    }
+                    return updated;
+                });
+                return { ...line, unitPrice: 0 };
+            }));
+        } else {
+            // Restore original prices
+            setOrderLines(lines => lines.map((line, idx) => ({
+                ...line,
+                unitPrice: originalPrices.get(idx) || line.unitPrice
+            })));
+        }
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -544,6 +633,7 @@ export function CreateOrderModal({
             ...orderForm,
             orderNumber: `${prefix}-${Date.now().toString().slice(-6)}`,
             totalAmount,
+            shippingAddress: stringifyAddress(addressForm),
             // Convert shipByDate to ISO string if provided
             shipByDate: orderForm.shipByDate ? new Date(orderForm.shipByDate).toISOString() : undefined,
             lines: orderLines.map((l) => ({
@@ -556,6 +646,19 @@ export function CreateOrderModal({
 
     const totalAmount = orderLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
     const totalItems = orderLines.reduce((sum, l) => sum + l.qty, 0);
+
+    // Check if address has any data
+    const hasAddressData = Object.values(addressForm).some(v => v && v.trim());
+
+    // Format address for display
+    const addressDisplay = [
+        addressForm.address1,
+        addressForm.address2,
+        addressForm.city,
+        addressForm.province,
+        addressForm.zip,
+        addressForm.country
+    ].filter(Boolean).join(', ');
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto py-8">
@@ -596,35 +699,18 @@ export function CreateOrderModal({
 
                 <form onSubmit={handleSubmit}>
                     <div className="px-6 py-5 space-y-5 max-h-[calc(100vh-280px)] overflow-y-auto">
-                        {/* Order Type Toggle - Segmented Control */}
-                        <div className="relative">
-                            <div className="flex p-1 bg-gray-100 rounded-xl">
-                                <button
-                                    type="button"
-                                    onClick={() => setOrderForm((f) => ({ ...f, isExchange: false }))}
-                                    className={`relative flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
-                                        !orderForm.isExchange
-                                            ? 'bg-white text-gray-900 shadow-sm'
-                                            : 'text-gray-500 hover:text-gray-700'
-                                    }`}
-                                >
-                                    <Package size={16} className={!orderForm.isExchange ? 'text-blue-600' : ''} />
-                                    <span>Regular Order</span>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setOrderForm((f) => ({ ...f, isExchange: true }))}
-                                    className={`relative flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
-                                        orderForm.isExchange
-                                            ? 'bg-white text-gray-900 shadow-sm'
-                                            : 'text-gray-500 hover:text-gray-700'
-                                    }`}
-                                >
-                                    <RefreshCw size={16} className={orderForm.isExchange ? 'text-amber-600' : ''} />
-                                    <span>Exchange</span>
-                                </button>
+                        {/* Exchange Info Banner - Only shown when exchange is checked */}
+                        {orderForm.isExchange && (
+                            <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                                <Info size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-amber-900 font-medium">Exchange order</p>
+                                    <p className="text-xs text-amber-700 mt-0.5">
+                                        All product prices are set to ₹0. You can adjust them if needed.
+                                    </p>
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         {/* Customer Section */}
                         <div className="space-y-3">
@@ -707,6 +793,39 @@ export function CreateOrderModal({
                                 </div>
                             </div>
 
+                            {/* Exchange Checkbox */}
+                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                <label className="flex items-start gap-3 cursor-pointer flex-1">
+                                    <div className="relative flex items-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={orderForm.isExchange}
+                                            onChange={(e) => handleExchangeToggle(e.target.checked)}
+                                            className="peer appearance-none w-5 h-5 border-2 border-gray-300 rounded bg-white checked:bg-amber-500 checked:border-amber-500 transition-all cursor-pointer focus:ring-2 focus:ring-amber-200 focus:ring-offset-1"
+                                        />
+                                        <svg
+                                            className="absolute w-3 h-3 text-white pointer-events-none left-1 top-1 opacity-0 peer-checked:opacity-100 transition-opacity"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </div>
+                                    <div className="flex-1 min-w-0 select-none">
+                                        <div className="flex items-center gap-2">
+                                            <RefreshCw size={14} className={orderForm.isExchange ? 'text-amber-600' : 'text-gray-400'} />
+                                            <span className={`text-sm font-medium ${orderForm.isExchange ? 'text-gray-900' : 'text-gray-600'}`}>
+                                                This is an exchange order
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            Product prices will be set to zero
+                                        </p>
+                                    </div>
+                                </label>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-xs font-medium text-gray-600 mb-1.5">Email</label>
@@ -753,15 +872,220 @@ export function CreateOrderModal({
                                 <label className="block text-xs font-medium text-gray-600 mb-1.5">
                                     Ship By Date <span className="text-gray-400 font-normal">(optional)</span>
                                 </label>
-                                <input
-                                    type="date"
-                                    className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
-                                    value={orderForm.shipByDate}
-                                    onChange={(e) =>
-                                        setOrderForm((f) => ({ ...f, shipByDate: e.target.value }))
-                                    }
-                                    min={new Date().toISOString().split('T')[0]}
-                                />
+                                <div className="relative">
+                                    <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                        type="date"
+                                        className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
+                                        value={orderForm.shipByDate}
+                                        onChange={(e) =>
+                                            setOrderForm((f) => ({ ...f, shipByDate: e.target.value }))
+                                        }
+                                        min={new Date().toISOString().split('T')[0]}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Shipping Address - Expandable */}
+                            <div className="col-span-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsAddressExpanded(!isAddressExpanded)}
+                                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
+                                        hasAddressData
+                                            ? 'bg-green-50 border-green-200 hover:border-green-300'
+                                            : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <MapPin size={14} className={hasAddressData ? 'text-green-500' : 'text-gray-400'} />
+                                        {hasAddressData ? (
+                                            <span className="text-sm text-gray-700 truncate">{addressDisplay}</span>
+                                        ) : (
+                                            <span className="text-sm text-gray-400 italic">Add shipping address...</span>
+                                        )}
+                                    </div>
+                                    {isAddressExpanded ? (
+                                        <ChevronUp size={16} className="text-gray-400 shrink-0" />
+                                    ) : (
+                                        <ChevronDown size={16} className="text-gray-400 shrink-0" />
+                                    )}
+                                </button>
+
+                                {/* Expanded Address Section */}
+                                {isAddressExpanded && (
+                                    <div className="mt-3 space-y-4">
+                                        {/* Past Addresses from Customer History */}
+                                        {orderForm.customerId && (
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
+                                                    <History size={12} />
+                                                    <span>Previous Addresses</span>
+                                                    {isLoadingAddresses && (
+                                                        <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full" />
+                                                    )}
+                                                </div>
+
+                                                {pastAddresses.length > 0 ? (
+                                                    <div className="grid grid-cols-1 gap-2">
+                                                        {pastAddresses.slice(0, 3).map((addr, idx) => {
+                                                            const addrLine = [addr.address1, addr.city, addr.province, addr.zip].filter(Boolean).join(', ');
+                                                            const isSelected = addr.address1 === addressForm.address1 && addr.zip === addressForm.zip;
+                                                            return (
+                                                                <button
+                                                                    key={idx}
+                                                                    type="button"
+                                                                    onClick={() => handleSelectPastAddress(addr)}
+                                                                    className={`group relative w-full p-3 rounded-lg border text-left transition-all ${
+                                                                        isSelected
+                                                                            ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
+                                                                            : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
+                                                                    }`}
+                                                                >
+                                                                    <div className="flex items-start gap-2">
+                                                                        <div className={`mt-0.5 p-1 rounded ${isSelected ? 'bg-blue-100' : 'bg-gray-100 group-hover:bg-blue-100'}`}>
+                                                                            <MapPin size={12} className={isSelected ? 'text-blue-600' : 'text-gray-400 group-hover:text-blue-500'} />
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <p className="text-sm font-medium text-gray-900 truncate">
+                                                                                {addr.first_name} {addr.last_name}
+                                                                            </p>
+                                                                            <p className="text-xs text-gray-500 truncate">{addrLine}</p>
+                                                                            <div className="flex items-center gap-2 mt-1">
+                                                                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                                                                    (addr as any).source === 'shopify'
+                                                                                        ? 'bg-green-100 text-green-700'
+                                                                                        : 'bg-gray-100 text-gray-600'
+                                                                                }`}>
+                                                                                    {(addr as any).source === 'shopify' ? 'Shopify' : 'Order'}
+                                                                                </span>
+                                                                                {(addr as any).lastUsed && (
+                                                                                    <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                                                                                        <Clock size={10} />
+                                                                                        {new Date((addr as any).lastUsed).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                        {isSelected && (
+                                                                            <Check size={16} className="text-blue-600 shrink-0" />
+                                                                        )}
+                                                                    </div>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : !isLoadingAddresses ? (
+                                                    <p className="text-xs text-gray-400 italic py-2">No previous addresses found</p>
+                                                ) : null}
+                                            </div>
+                                        )}
+
+                                        {/* Manual Address Form */}
+                                        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+                                            <div className="flex items-center gap-2 text-xs font-medium text-gray-500 mb-2">
+                                                <FileText size={12} />
+                                                <span>Enter Address Manually</span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">First Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.first_name || ''}
+                                                        onChange={(e) => handleAddressChange('first_name', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="First name"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">Last Name</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.last_name || ''}
+                                                        onChange={(e) => handleAddressChange('last_name', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="Last name"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-500 mb-1">Address Line 1</label>
+                                                <input
+                                                    type="text"
+                                                    value={addressForm.address1 || ''}
+                                                    onChange={(e) => handleAddressChange('address1', e.target.value)}
+                                                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                    placeholder="Street address"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-gray-500 mb-1">Address Line 2</label>
+                                                <input
+                                                    type="text"
+                                                    value={addressForm.address2 || ''}
+                                                    onChange={(e) => handleAddressChange('address2', e.target.value)}
+                                                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                    placeholder="Apartment, suite, etc."
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-3">
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">City</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.city || ''}
+                                                        onChange={(e) => handleAddressChange('city', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="City"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">State/Province</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.province || ''}
+                                                        onChange={(e) => handleAddressChange('province', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="State"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">ZIP/Postal</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.zip || ''}
+                                                        onChange={(e) => handleAddressChange('zip', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="ZIP"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">Country</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.country || ''}
+                                                        onChange={(e) => handleAddressChange('country', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="Country"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-gray-500 mb-1">Phone</label>
+                                                    <input
+                                                        type="text"
+                                                        value={addressForm.phone || ''}
+                                                        onChange={(e) => handleAddressChange('phone', e.target.value)}
+                                                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:border-blue-400 focus:ring-1 focus:ring-blue-100 outline-none"
+                                                        placeholder="Phone for delivery"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
