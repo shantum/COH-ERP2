@@ -210,7 +210,7 @@ export function CancelledOrdersGrid({
                         >
                             {params.value}
                         </button>
-                        <XCircle size={12} className="text-red-400" title="Cancelled" />
+                        <XCircle size={12} className="text-red-400" />
                     </div>
                 );
             },

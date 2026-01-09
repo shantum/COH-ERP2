@@ -843,8 +843,8 @@ export default function Orders() {
                 <div className="p-4">
                     <CancelledOrdersGrid
                         orders={cancelledOrders || []}
-                        onViewOrder={(order) => setViewingOrder(order)}
-                        onSelectCustomer={(customer) => setSelectedCustomer(customer)}
+                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onRestore={(id) => mutations.uncancelOrder.mutate(id)}
                         isRestoring={mutations.uncancelOrder.isPending}
                         shopDomain={shopifyConfig?.shopDomain}

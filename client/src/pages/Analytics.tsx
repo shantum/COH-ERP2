@@ -91,9 +91,9 @@ export default function Analytics() {
 
     // Column definitions for breakdown table
     const columnDefs: ColDef<SalesBreakdownItem>[] = useMemo(() => {
-        const baseDefs = [
+        const baseDefs: ColDef<SalesBreakdownItem>[] = [
             {
-                field: 'key',
+                field: 'key' as const,
                 headerName: getDimensionColumnHeader(dimension),
                 flex: 2,
                 minWidth: 150,
