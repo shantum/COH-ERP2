@@ -81,7 +81,11 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                                 fabricType: true,
                             },
                         },
-                        fabric: true,
+                        fabric: {
+                            include: {
+                                fabricType: true,
+                            },
+                        },
                     },
                 },
                 shopifyInventoryCache: true,
@@ -127,7 +131,10 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 variationId: variation.id,
                 colorName: variation.colorName,
                 hasLining: variation.hasLining || false,
-                fabricName: variation.fabric?.colorName || null,
+                // Full fabric name: "Fabric Type - Color" (e.g., "Linen 60 Lea - Blue")
+                fabricName: variation.fabric
+                    ? `${variation.fabric.fabricType?.name || variation.fabric.name} - ${variation.fabric.colorName}`
+                    : null,
                 imageUrl: variation.imageUrl || product.imageUrl || null,
 
                 // Product (style-level)
@@ -140,6 +147,8 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 fabricTypeId: product.fabricTypeId || null,
                 fabricTypeName: product.fabricType?.name || null,
                 fabricId: variation.fabricId || null,
+                // Fabric's fabric type (may differ from product's fabricType for multi-type products)
+                variationFabricTypeName: variation.fabric?.fabricType?.name || null,
 
                 // Inventory
                 currentBalance: balance.currentBalance,

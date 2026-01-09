@@ -134,6 +134,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 interface FabricEditPopoverProps {
     row: any;
     viewLevel: ViewLevel;
+    columnType: 'fabricType' | 'fabric'; // Which column this popover is for
     fabricTypes: Array<{ id: string; name: string }>;
     fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string; displayName: string }>;
     onUpdateFabricType: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
@@ -145,6 +146,7 @@ interface FabricEditPopoverProps {
 function FabricEditPopover({
     row,
     viewLevel,
+    columnType,
     fabricTypes,
     fabrics,
     onUpdateFabricType,
@@ -244,12 +246,10 @@ function FabricEditPopover({
         setIsOpen(false);
     };
 
-    // Display text
-    const displayText = viewLevel === 'product'
-        ? (hasMixedFabricTypes ? 'Multiple' : row.fabricTypeName || 'Not set')
-        : viewLevel === 'variation'
-        ? (hasMixedFabrics ? 'Multiple' : row.fabricName || 'Not set')
-        : row.fabricTypeName || 'Not set';
+    // Display text - based on column type, not view level
+    const displayText = columnType === 'fabricType'
+        ? (hasMixedFabricTypes ? 'Multiple' : row.fabricTypeName || row.variationFabricTypeName || 'Not set')
+        : (hasMixedFabrics ? 'Multiple' : row.fabricName || 'Not set');
 
     return (
         <div className="inline-block">
@@ -715,6 +715,7 @@ export default function Catalog() {
                     <FabricEditPopover
                         row={row}
                         viewLevel={viewLevel}
+                        columnType="fabricType"
                         fabricTypes={uniqueFabricTypes}
                         fabrics={filterOptions?.fabrics || []}
                         onUpdateFabricType={handleUpdateFabricType}
@@ -757,7 +758,7 @@ export default function Catalog() {
         {
             colId: 'fabricName',
             headerName: DEFAULT_HEADERS.fabricName,
-            width: 120,
+            width: 140,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
@@ -769,6 +770,7 @@ export default function Catalog() {
                     <FabricEditPopover
                         row={row}
                         viewLevel={viewLevel}
+                        columnType="fabric"
                         fabricTypes={uniqueFabricTypes}
                         fabrics={filterOptions?.fabrics || []}
                         onUpdateFabricType={handleUpdateFabricType}

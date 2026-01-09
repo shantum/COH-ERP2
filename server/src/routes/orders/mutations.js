@@ -19,7 +19,7 @@ const router = Router();
 router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res) => {
     try {
         const {
-            orderNumber,
+            orderNumber: providedOrderNumber,
             channel,
             customerName,
             customerEmail,
@@ -30,6 +30,9 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
             totalAmount,
             lines,
         } = req.validatedBody;
+
+        // Generate order number if not provided
+        const orderNumber = providedOrderNumber || `COH-${Date.now().toString().slice(-8)}`;
 
         // Issue #5: Wrap entire order + lines creation in single Prisma transaction
         const order = await req.prisma.$transaction(async (tx) => {
