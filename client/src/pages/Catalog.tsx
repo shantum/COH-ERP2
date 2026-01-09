@@ -765,6 +765,20 @@ export default function Catalog() {
         }
     };
 
+    // Set default filter for shopifyStatus to "active" when grid is ready
+    const onGridReady = useCallback((params: any) => {
+        // Only apply default filter for SKU view (not consumption view)
+        if (viewLevel !== 'consumption') {
+            params.api.setFilterModel({
+                shopifyStatus: {
+                    filterType: 'text',
+                    type: 'equals',
+                    filter: 'active',
+                },
+            });
+        }
+    }, [viewLevel]);
+
     // Column definitions
     const columnDefs: ColDef[] = useMemo(() => [
         // Product columns
@@ -808,6 +822,14 @@ export default function Catalog() {
             colId: 'fabricTypeName',
             headerName: DEFAULT_HEADERS.fabricTypeName,
             width: 120,
+            // Use valueGetter for filtering (returns displayed text)
+            valueGetter: (params: any) => {
+                const row = params.data;
+                if (!row) return '';
+                return row.variationFabricTypeName || row.fabricTypeName || '';
+            },
+            filter: 'agTextColumnFilter',
+            floatingFilter: true,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
@@ -859,6 +881,14 @@ export default function Catalog() {
             colId: 'fabricName',
             headerName: DEFAULT_HEADERS.fabricName,
             width: 140,
+            // Use valueGetter for filtering (returns displayed text)
+            valueGetter: (params: any) => {
+                const row = params.data;
+                if (!row) return '';
+                return row.fabricName || '';
+            },
+            filter: 'agTextColumnFilter',
+            floatingFilter: true,
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
@@ -984,7 +1014,9 @@ export default function Catalog() {
             colId: 'shopifyStatus',
             headerName: DEFAULT_HEADERS.shopifyStatus,
             field: 'shopifyStatus',
-            width: 85,
+            width: 100,
+            filter: 'agTextColumnFilter',
+            floatingFilter: true,
             cellRenderer: (params: ICellRendererParams) => {
                 const status = params.value;
                 if (!status || status === 'not_linked') return <span className="text-xs text-gray-300">-</span>;
@@ -1046,7 +1078,7 @@ export default function Catalog() {
                 );
             },
         },
-    ], [viewLevel, filterOptions?.fabricTypes, filterOptions?.fabrics, catalogData?.items, handleUpdateFabricType, handleUpdateFabric]);
+    ], [viewLevel, filterOptions?.fabrics, catalogData?.items, handleUpdateFabricType, handleUpdateFabric, uniqueFabricTypes]);
 
     // Mutation for updating fabric consumption by SKU IDs
     const updateConsumption = useMutation({
@@ -1395,6 +1427,7 @@ export default function Catalog() {
                         // Column order and width persistence
                         onColumnMoved={onColumnMoved}
                         onColumnResized={onColumnResized}
+                        onGridReady={onGridReady}
                         maintainColumnOrder={true}
                     />
                 </div>
