@@ -159,20 +159,33 @@ export const ShipOrderSchema = z.object({
 export const CreateOrderSchema = z.object({
     orderNumber: z.string().optional(),
     channel: z.string().default('offline'),
+    // Exchange order fields
+    isExchange: z.boolean().default(false),
+    originalOrderId: z.string().uuid('Invalid original order ID').optional().nullable(),
     customerName: z.string().min(1, 'Customer name is required').trim(),
     customerEmail: z.string().email('Invalid email format').optional().nullable(),
     customerPhone: z.string().optional().nullable(),
     shippingAddress: z.string().optional().nullable(),
     orderDate: z.string().datetime().optional(),
     paymentMethod: z.enum(['Prepaid', 'COD']).default('Prepaid'),
-    totalAmount: z.number().positive('Total amount must be positive').optional(),
+    // totalAmount can be 0 or negative for exchange orders
+    totalAmount: z.number().optional(),
     customerNotes: z.string().optional().nullable(),
     internalNotes: z.string().optional().nullable(),
     lines: z.array(z.object({
         skuId: z.string().uuid('Invalid SKU ID format'),
         qty: z.number().int('Quantity must be an integer').positive('Quantity must be positive'),
-        unitPrice: z.number().positive('Unit price must be positive').optional(),
+        unitPrice: z.number().min(0, 'Unit price cannot be negative').optional(),
     })).min(1, 'At least one line item is required'),
+}).refine((data) => {
+    // For non-exchange orders, totalAmount must be positive if provided
+    if (!data.isExchange && data.totalAmount !== undefined && data.totalAmount <= 0) {
+        return false;
+    }
+    return true;
+}, {
+    message: 'Total amount must be positive for non-exchange orders',
+    path: ['totalAmount'],
 });
 
 /**

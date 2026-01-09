@@ -45,6 +45,7 @@ export function CreateOrderModal({
         customerEmail: '',
         customerPhone: '',
         channel: 'offline',
+        isExchange: false,
     });
     const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
     const [lineSelections, setLineSelections] = useState<Record<number, LineSelection>>({});
@@ -77,9 +78,10 @@ export function CreateOrderModal({
             return;
         }
         const totalAmount = orderLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
+        const prefix = orderForm.isExchange ? 'EXC' : 'COH';
         onCreate({
             ...orderForm,
-            orderNumber: `COH-${Date.now().toString().slice(-6)}`,
+            orderNumber: `${prefix}-${Date.now().toString().slice(-6)}`,
             totalAmount,
             lines: orderLines.map((l) => ({
                 skuId: l.skuId,
@@ -102,6 +104,19 @@ export function CreateOrderModal({
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Order Type Toggle */}
+                    <button
+                        type="button"
+                        onClick={() => setOrderForm((f) => ({ ...f, isExchange: !f.isExchange }))}
+                        className={`w-full px-3 py-2 text-sm rounded border transition-colors ${
+                            orderForm.isExchange
+                                ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                : 'bg-gray-50 border-gray-200 text-gray-600'
+                        }`}
+                    >
+                        {orderForm.isExchange ? '↔ Exchange Order' : 'Regular Order'}
+                    </button>
+
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="text-xs text-gray-500 mb-1 block">Customer Name</label>

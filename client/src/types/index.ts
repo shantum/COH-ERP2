@@ -176,6 +176,11 @@ export interface Order {
   createdAt: string;
   syncedAt: string | null;
   shopifyFulfillmentStatus: string | null;
+  // Exchange order tracking
+  isExchange: boolean;
+  originalOrderId: string | null;
+  originalOrder?: Order;
+  exchangeOrders?: Order[];
   customer?: Customer;
   orderLines?: OrderLine[];
   // Shopify cache data (single source of truth)
@@ -367,6 +372,9 @@ export interface PaginatedResponse<T> {
 export interface CreateOrderData {
   orderNumber?: string;
   channel?: string;
+  // Exchange order fields
+  isExchange?: boolean;
+  originalOrderId?: string;
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;

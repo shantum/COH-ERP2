@@ -29,10 +29,25 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
             internalNotes,
             totalAmount,
             lines,
+            // Exchange order fields
+            isExchange,
+            originalOrderId,
         } = req.validatedBody;
 
-        // Generate order number if not provided
-        const orderNumber = providedOrderNumber || `COH-${Date.now().toString().slice(-8)}`;
+        // Validate originalOrderId exists if provided
+        if (originalOrderId) {
+            const originalOrder = await req.prisma.order.findUnique({
+                where: { id: originalOrderId },
+                select: { id: true, orderNumber: true },
+            });
+            if (!originalOrder) {
+                return res.status(400).json({ error: 'Original order not found' });
+            }
+        }
+
+        // Generate order number with EXC- prefix for exchanges
+        const orderNumber = providedOrderNumber ||
+            (isExchange ? `EXC-${Date.now().toString().slice(-8)}` : `COH-${Date.now().toString().slice(-8)}`);
 
         // Find or create customer OUTSIDE transaction to prevent timeout
         let customerId = null;
@@ -61,6 +76,9 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
                     customerNotes,
                     internalNotes,
                     totalAmount,
+                    // Exchange order fields
+                    isExchange: isExchange || false,
+                    originalOrderId: originalOrderId || null,
                     orderLines: {
                         create: lines.map((line) => ({
                             skuId: line.skuId,
@@ -76,6 +94,7 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), async (req, res
                             sku: { include: { variation: { include: { product: true } } } },
                         },
                     },
+                    originalOrder: { select: { id: true, orderNumber: true } },
                 },
             });
 

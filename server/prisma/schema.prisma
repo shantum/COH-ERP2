@@ -383,16 +383,24 @@ model Order {
   shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
   shopifyData     String?   // DEPRECATED: Use ShopifyOrderCache instead. Kept for Railway migration compatibility.
 
+  // Exchange order tracking
+  isExchange       Boolean   @default(false)  // True for exchange orders
+  originalOrderId  String?                     // Optional link to original order being exchanged
+
   customer         Customer?           @relation(fields: [customerId], references: [id])
   shopifyCache     ShopifyOrderCache?  @relation(fields: [shopifyOrderId], references: [id])
   orderLines       OrderLine[]
   returnRequests   ReturnRequest[]     @relation("OriginalOrder")
   exchangeRequests ReturnRequest[]     @relation("ExchangeOrder")
+  originalOrder    Order?              @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
+  exchangeOrders   Order[]             @relation("ExchangeOriginalOrder")
 
   @@index([customerId])
   @@index([status])
   @@index([orderDate])
   @@index([isArchived])
+  @@index([isExchange])
+  @@index([originalOrderId])
   @@index([status, orderDate])      // Compound: filter by status + sort by date
   @@index([customerId, orderDate])  // Compound: customer order history
   @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)

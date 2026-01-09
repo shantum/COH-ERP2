@@ -298,6 +298,10 @@ export const ORDER_UNIFIED_SELECT = {
     syncedAt: true,
     internalNotes: true,
 
+    // Exchange order fields
+    isExchange: true,
+    originalOrderId: true,
+
     // Fulfillment fields
     awbNumber: true,
     courier: true,
