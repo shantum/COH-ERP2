@@ -299,9 +299,8 @@ router.post('/reconciliation/:id/submit', authenticateToken, async (req, res) =>
             return res.status(400).json({ error: 'Reconciliation already submitted' });
         }
 
-        const transactions = [];
-
-        // Create adjustment transactions for variances
+        // Collect all items with variances for batch processing
+        const itemsToProcess = [];
         for (const item of reconciliation.items) {
             if (item.variance === null || item.variance === 0) continue;
 
@@ -311,42 +310,62 @@ router.post('/reconciliation/:id/submit', authenticateToken, async (req, res) =>
                 });
             }
 
-            if (!item.adjustmentReason && item.variance !== 0) {
-                return res.status(400).json({
-                    error: `Adjustment reason required for ${item.sku.skuCode} (variance: ${item.variance})`,
-                });
-            }
-
-            // Positive variance (overage) = inward, Negative variance (shortage) = outward
+            const adjustmentReason = item.adjustmentReason || 'count_adjustment';
             const txnType = item.variance > 0 ? 'inward' : 'outward';
             const qty = Math.abs(item.variance);
-            const reason = `reconciliation_${item.adjustmentReason}`;
 
-            const txn = await req.prisma.inventoryTransaction.create({
-                data: {
-                    skuId: item.skuId,
-                    txnType,
-                    qty,
-                    reason,
-                    referenceId: reconciliation.id,
-                    notes: item.notes || `Reconciliation adjustment: ${item.adjustmentReason}`,
-                    createdById: req.user.id,
-                },
-            });
-
-            transactions.push({
+            itemsToProcess.push({
+                itemId: item.id,
                 skuId: item.skuId,
                 skuCode: item.sku.skuCode,
                 txnType,
                 qty,
-                reason: item.adjustmentReason,
+                reason: `reconciliation_${adjustmentReason}`,
+                notes: item.notes || `Reconciliation adjustment: ${adjustmentReason}`,
+                adjustmentReason,
             });
+        }
 
-            // Link transaction to item
-            await req.prisma.inventoryReconciliationItem.update({
-                where: { id: item.id },
-                data: { txnId: txn.id },
-            });
+        console.log(`Reconciliation Submit: Processing ${itemsToProcess.length} adjustments...`);
+
+        // Batch create all transactions in a single database transaction
+        const transactions = [];
+        const BATCH_SIZE = 100;
+
+        for (let i = 0; i < itemsToProcess.length; i += BATCH_SIZE) {
+            const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
+
+            await req.prisma.$transaction(async (tx) => {
+                for (const item of batch) {
+                    const txn = await tx.inventoryTransaction.create({
+                        data: {
+                            skuId: item.skuId,
+                            txnType: item.txnType,
+                            qty: item.qty,
+                            reason: item.reason,
+                            referenceId: reconciliation.id,
+                            notes: item.notes,
+                            createdById: req.user.id,
+                        },
+                    });
+
+                    // Link transaction to reconciliation item
+                    await tx.inventoryReconciliationItem.update({
+                        where: { id: item.itemId },
+                        data: { txnId: txn.id },
+                    });
+
+                    transactions.push({
+                        skuId: item.skuId,
+                        skuCode: item.skuCode,
+                        txnType: item.txnType,
+                        qty: item.qty,
+                        reason: item.adjustmentReason,
+                    });
+                }
+            }, { timeout: 60000 }); // 60 second timeout for batch
+
+            console.log(`Reconciliation Submit: Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(itemsToProcess.length / BATCH_SIZE)} complete`);
         }
 
         // Mark reconciliation as submitted
@@ -355,11 +374,14 @@ router.post('/reconciliation/:id/submit', authenticateToken, async (req, res) =>
             data: { status: 'submitted' },
         });
 
+        console.log(`Reconciliation Submit: Complete - ${transactions.length} adjustments created`);
+
         res.json({
             id: reconciliation.id,
             status: 'submitted',
             adjustmentsMade: transactions.length,
-            transactions,
+            // Limit response size - only return first 50 transactions
+            transactions: transactions.slice(0, 50),
         });
     } catch (error) {
         console.error('Submit inventory reconciliation error:', error);
@@ -430,6 +452,23 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
             csvContent = csvContent.slice(1);
         }
 
+        // Debug: log file size and first few hundred chars
+        console.log(`CSV Upload: File size ${req.file.buffer.length} bytes, content length ${csvContent.length} chars`);
+        console.log(`CSV Upload: First 500 chars: ${JSON.stringify(csvContent.slice(0, 500))}`);
+
+        // Count lines in raw content
+        const rawLines = csvContent.split(/\r?\n/).filter(line => line.trim());
+        console.log(`CSV Upload: Raw line count: ${rawLines.length}`);
+
+        // Auto-detect delimiter by checking first line
+        const firstLine = csvContent.split(/\r?\n/)[0] || '';
+        let delimiter = ',';
+        if (firstLine.includes('\t')) {
+            delimiter = '\t';
+        } else if (firstLine.includes(';') && !firstLine.includes(',')) {
+            delimiter = ';';
+        }
+
         let records;
         try {
             records = parse(csvContent, {
@@ -437,9 +476,18 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
                 skip_empty_lines: true,
                 trim: true,
                 bom: true,
+                delimiter,
             });
         } catch (parseError) {
             return res.status(400).json({ error: `CSV parsing error: ${parseError.message}` });
+        }
+
+        // Log parsed column headers for debugging
+        if (records.length > 0) {
+            const columns = Object.keys(records[0]);
+            console.log(`CSV Upload: Parsed ${records.length} rows with columns: ${columns.join(', ')}`);
+        } else {
+            console.log('CSV Upload: No records parsed from file');
         }
 
         // Build SKU code -> item mapping (case-insensitive)
@@ -454,6 +502,9 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
             updated: 0,
             notFound: [],
             errors: [],
+            delimiter: delimiter === '\t' ? 'tab' : delimiter,
+            columns: records.length > 0 ? Object.keys(records[0]) : [],
+            reconItemCount: reconciliation.items.length,
         };
 
         // Process each row - flexible column name matching
@@ -499,18 +550,65 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
 
             const variance = physicalQty - item.systemQty;
 
-            await req.prisma.inventoryReconciliationItem.update({
-                where: { id: item.id },
-                data: { physicalQty, variance },
+            // Collect updates for batch processing
+            results.updates = results.updates || [];
+            results.updates.push({
+                id: item.id,
+                physicalQty,
+                variance,
             });
-
-            results.updated++;
         }
+
+        // Bulk update using raw SQL for performance
+        if (results.updates && results.updates.length > 0) {
+            console.log(`CSV Upload: Bulk updating ${results.updates.length} items...`);
+
+            // Use VALUES clause for efficient bulk update
+            const BATCH_SIZE = 1000;
+            for (let i = 0; i < results.updates.length; i += BATCH_SIZE) {
+                const batch = results.updates.slice(i, i + BATCH_SIZE);
+
+                // Build VALUES list: ('id', physicalQty, variance), ...
+                const values = batch.map(u =>
+                    `('${u.id}', ${u.physicalQty}, ${u.variance})`
+                ).join(',');
+
+                // Single UPDATE using FROM VALUES
+                await req.prisma.$executeRawUnsafe(`
+                    UPDATE "InventoryReconciliationItem" AS t
+                    SET "physicalQty" = v.pq::integer, "variance" = v.var::integer
+                    FROM (VALUES ${values}) AS v(id, pq, var)
+                    WHERE t."id" = v.id
+                `);
+
+                console.log(`CSV Upload: Updated batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(results.updates.length / BATCH_SIZE)}`);
+            }
+            results.updated = results.updates.length;
+            console.log(`CSV Upload: Bulk update complete`);
+        }
+
+        // Clean up internal field before response
+        delete results.updates;
+
+        // Log summary for debugging
+        console.log(`CSV Upload Summary: ${results.total} rows, ${results.matched} matched, ${results.updated} updated, ${results.notFound.length} not found, ${results.errors.length} errors`);
+        if (results.notFound.length > 0) {
+            console.log(`CSV Upload: First 20 not found SKUs: ${results.notFound.slice(0, 20).join(', ')}`);
+        }
+
+        // Limit arrays in response to prevent frontend crash
+        const responseResults = {
+            ...results,
+            notFoundCount: results.notFound.length,
+            notFound: results.notFound.slice(0, 50), // Limit to first 50
+            errorsCount: results.errors.length,
+            errors: results.errors.slice(0, 20), // Limit to first 20
+        };
 
         res.json({
             success: true,
             message: `Processed ${results.total} rows from CSV`,
-            results,
+            results: responseResults,
         });
     } catch (error) {
         console.error('Upload CSV error:', error);

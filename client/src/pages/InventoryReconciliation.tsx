@@ -58,6 +58,7 @@ export default function InventoryReconciliation() {
     const [uploadResult, setUploadResult] = useState<{ success: boolean; message: string; results?: any } | null>(null);
     const [viewingReconId, setViewingReconId] = useState<string | null>(null);
     const [historySearchTerm, setHistorySearchTerm] = useState('');
+    const [submittingFromHistory, setSubmittingFromHistory] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Fetch history
@@ -103,12 +104,17 @@ export default function InventoryReconciliation() {
     // Submit reconciliation
     const submitMutation = useMutation({
         mutationFn: () => inventoryApi.submitReconciliation(currentRecon!.id),
-        onSuccess: () => {
+        onSuccess: (res) => {
+            const adjustments = res.data.adjustmentsMade || 0;
             setCurrentRecon(null);
             setLocalItems([]);
             setUploadResult(null);
             queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
             queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            alert(`Reconciliation submitted successfully!\n\n${adjustments} inventory adjustments created.`);
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to submit reconciliation');
         },
     });
 
@@ -336,15 +342,34 @@ export default function InventoryReconciliation() {
                                             {uploadResult.results && (
                                                 <div className="mt-2 text-sm text-gray-600">
                                                     <p>Matched: {uploadResult.results.matched} | Updated: {uploadResult.results.updated}</p>
-                                                    {uploadResult.results.notFound?.length > 0 && (
+                                                    {/* Show diagnostic info if parsing seems off */}
+                                                    {uploadResult.results.matched < uploadResult.results.total * 0.5 && (
+                                                        <>
+                                                            {uploadResult.results.columns && (
+                                                                <p className="text-blue-600">
+                                                                    Columns found: {uploadResult.results.columns.join(', ')} (delimiter: {uploadResult.results.delimiter || 'comma'})
+                                                                </p>
+                                                            )}
+                                                            {uploadResult.results.reconItemCount !== undefined && (
+                                                                <p className="text-blue-600">
+                                                                    SKUs in reconciliation: {uploadResult.results.reconItemCount}
+                                                                </p>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                    {(uploadResult.results.notFoundCount > 0 || uploadResult.results.notFound?.length > 0) && (
                                                         <p className="text-orange-600">
-                                                            Not found: {uploadResult.results.notFound.slice(0, 5).join(', ')}
-                                                            {uploadResult.results.notFound.length > 5 && ` (+${uploadResult.results.notFound.length - 5} more)`}
+                                                            SKUs not found in system: {uploadResult.results.notFoundCount || uploadResult.results.notFound?.length}
+                                                            {uploadResult.results.notFound?.length > 0 && (
+                                                                <span className="text-gray-500 text-xs ml-2">
+                                                                    (e.g., {uploadResult.results.notFound.slice(0, 5).join(', ')}{uploadResult.results.notFound.length > 5 ? '...' : ''})
+                                                                </span>
+                                                            )}
                                                         </p>
                                                     )}
-                                                    {uploadResult.results.errors?.length > 0 && (
+                                                    {(uploadResult.results.errorsCount > 0 || uploadResult.results.errors?.length > 0) && (
                                                         <p className="text-red-600">
-                                                            Errors: {uploadResult.results.errors.length}
+                                                            Errors: {uploadResult.results.errorsCount || uploadResult.results.errors?.length}
                                                         </p>
                                                     )}
                                                 </div>
@@ -425,11 +450,16 @@ export default function InventoryReconciliation() {
                                         disabled={submitMutation.isPending || stats.entered === 0}
                                     >
                                         {submitMutation.isPending ? (
-                                            <RefreshCw size={16} className="animate-spin" />
+                                            <>
+                                                <RefreshCw size={16} className="animate-spin" />
+                                                Submitting {stats.variances} adjustments...
+                                            </>
                                         ) : (
-                                            <Send size={16} />
+                                            <>
+                                                <Send size={16} />
+                                                Submit Reconciliation
+                                            </>
                                         )}
-                                        Submit Reconciliation
                                     </button>
                                 </div>
                             </div>
@@ -782,7 +812,7 @@ export default function InventoryReconciliation() {
                         </div>
 
                         {/* Modal Footer */}
-                        <div className="px-6 py-4 border-t flex justify-end">
+                        <div className="px-6 py-4 border-t flex justify-end gap-3">
                             <button
                                 onClick={() => {
                                     setViewingReconId(null);
@@ -792,6 +822,36 @@ export default function InventoryReconciliation() {
                             >
                                 Close
                             </button>
+                            {viewingRecon?.status === 'draft' && (
+                                <button
+                                    onClick={async () => {
+                                        if (!viewingReconId || submittingFromHistory) return;
+                                        setSubmittingFromHistory(true);
+                                        try {
+                                            const result = await inventoryApi.submitReconciliation(viewingReconId);
+                                            queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
+                                            setViewingReconId(null);
+                                            setHistorySearchTerm('');
+                                            alert(`Reconciliation submitted successfully!\n\n${result.data.adjustmentsMade} inventory adjustments created.`);
+                                        } catch (err: any) {
+                                            alert(err.response?.data?.error || 'Failed to submit reconciliation');
+                                        } finally {
+                                            setSubmittingFromHistory(false);
+                                        }
+                                    }}
+                                    disabled={submittingFromHistory}
+                                    className="btn btn-primary flex items-center gap-2"
+                                >
+                                    {submittingFromHistory ? (
+                                        <>
+                                            <RefreshCw size={16} className="animate-spin" />
+                                            Submitting...
+                                        </>
+                                    ) : (
+                                        'Submit Reconciliation'
+                                    )}
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

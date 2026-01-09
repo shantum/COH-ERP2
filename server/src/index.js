@@ -98,8 +98,8 @@ app.use('/api/webhooks', express.json({
     }
 }));
 
-// Standard JSON parsing for other routes
-app.use(express.json());
+// Standard JSON parsing for other routes (increased limit for large reconciliations)
+app.use(express.json({ limit: '10mb' }));
 
 // Make prisma available to routes
 app.use((req, res, next) => {
