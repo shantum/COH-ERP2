@@ -157,6 +157,17 @@ function FabricEditPopover({
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
+    // Local filter state for variation level - allows browsing all fabric types
+    const [filterFabricTypeId, setFilterFabricTypeId] = useState<string>('');
+
+    // Reset filter when popover opens
+    useEffect(() => {
+        if (isOpen) {
+            // Default to current fabric's type, or empty to show all
+            const currentFabric = fabrics.find(f => f.id === row.fabricId);
+            setFilterFabricTypeId(currentFabric?.fabricTypeId || '');
+        }
+    }, [isOpen, row.fabricId, fabrics]);
 
     // Close on click outside
     useEffect(() => {
@@ -215,11 +226,14 @@ function FabricEditPopover({
         return uniqueFabrics.size > 1;
     }, [viewLevel, rawItems, row.variationId]);
 
-    // Filter fabrics by selected fabric type (if any)
+    // Filter fabrics by selected fabric type
+    // For variation level: use local filter state (allows browsing all types)
+    // For product/sku level: use product's fabric type
     const filteredFabrics = useMemo(() => {
-        if (!row.fabricTypeId) return fabrics;
-        return fabrics.filter(f => f.fabricTypeId === row.fabricTypeId);
-    }, [fabrics, row.fabricTypeId]);
+        const typeIdToFilter = viewLevel === 'variation' ? filterFabricTypeId : row.fabricTypeId;
+        if (!typeIdToFilter) return fabrics;
+        return fabrics.filter(f => f.fabricTypeId === typeIdToFilter);
+    }, [fabrics, viewLevel, filterFabricTypeId, row.fabricTypeId]);
 
     const handleFabricTypeChange = (fabricTypeId: string) => {
         const affectedCount = getAffectedCount('fabricType');
@@ -278,7 +292,7 @@ function FabricEditPopover({
                         Edit Fabric - {viewLevel === 'product' ? 'Product Level' : viewLevel === 'variation' ? 'Color Level' : 'SKU Level'}
                     </div>
 
-                    {/* Fabric Type dropdown - always show for product level, or when editing SKU */}
+                    {/* Fabric Type dropdown - for product/sku level: updates product, for variation: filters fabrics */}
                     {(viewLevel === 'product' || viewLevel === 'sku') && (
                         <div className="mb-3">
                             <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
@@ -300,8 +314,48 @@ function FabricEditPopover({
                         </div>
                     )}
 
-                    {/* Fabric dropdown - show for variation and SKU level */}
-                    {(viewLevel === 'variation' || viewLevel === 'sku') && (
+                    {/* Fabric Type filter + Fabric dropdown - for variation level */}
+                    {viewLevel === 'variation' && (
+                        <>
+                            <div className="mb-3">
+                                <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
+                                <select
+                                    value={filterFabricTypeId}
+                                    onChange={(e) => setFilterFabricTypeId(e.target.value)}
+                                    className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                    <option value="">All fabric types</option>
+                                    {fabricTypes.map(ft => (
+                                        <option key={ft.id} value={ft.id}>{ft.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-600 mb-1">Fabric</label>
+                                <select
+                                    value={row.fabricId || ''}
+                                    onChange={(e) => handleFabricChange(e.target.value)}
+                                    className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                >
+                                    <option value="">Select fabric...</option>
+                                    {filteredFabrics.map(f => (
+                                        <option key={f.id} value={f.id}>{f.displayName}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Affects {getAffectedCount('fabric')} SKU(s)
+                                </p>
+                                {filteredFabrics.length === 0 && filterFabricTypeId && (
+                                    <p className="text-xs text-amber-600 mt-1">
+                                        No fabrics for this type
+                                    </p>
+                                )}
+                            </div>
+                        </>
+                    )}
+
+                    {/* Fabric dropdown - for SKU level only */}
+                    {viewLevel === 'sku' && (
                         <div>
                             <label className="block text-xs text-gray-600 mb-1">Fabric</label>
                             <select
@@ -314,11 +368,6 @@ function FabricEditPopover({
                                     <option key={f.id} value={f.id}>{f.displayName}</option>
                                 ))}
                             </select>
-                            {viewLevel === 'variation' && (
-                                <p className="text-xs text-gray-400 mt-1">
-                                    Affects {getAffectedCount('fabric')} SKU(s)
-                                </p>
-                            )}
                             {filteredFabrics.length === 0 && (
                                 <p className="text-xs text-amber-600 mt-1">
                                     No fabrics available for this fabric type
