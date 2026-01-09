@@ -46,12 +46,12 @@ export default function Analytics() {
         return getDateRange(datePreset, customStart, customEnd);
     }, [datePreset, customStart, customEnd]);
 
-    // Fetch analytics data
+    // Fetch analytics data (includes all orders except cancelled, including archived)
     const { data, isLoading, error } = useSalesAnalytics({
         dimension,
         startDate,
         endDate,
-        orderStatus: 'shipped',
+        orderStatus: 'all',
     });
 
     // Format currency

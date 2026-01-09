@@ -16,7 +16,7 @@ const router = Router();
  * - dimension: summary | product | category | gender | color | standardColor | fabricType | fabricColor | channel
  * - startDate: ISO date string (default: 30 days ago)
  * - endDate: ISO date string (default: today)
- * - orderStatus: all | shipped | delivered (default: shipped)
+ * - orderStatus: all | shipped | delivered (default: all)
  */
 router.get('/', authenticateToken, async (req, res) => {
     try {
@@ -24,7 +24,7 @@ router.get('/', authenticateToken, async (req, res) => {
             dimension = 'summary',
             startDate,
             endDate,
-            orderStatus = 'shipped',
+            orderStatus = 'all',
         } = req.query;
 
         // Parse dates
@@ -48,12 +48,11 @@ router.get('/', authenticateToken, async (req, res) => {
             statusFilter = { in: ['shipped', 'delivered'] };
         }
 
-        // Base where clause for order lines
+        // Base where clause for order lines (includes archived orders for complete analytics)
         const baseWhere = {
             order: {
                 orderDate: { gte: start, lte: end },
                 status: statusFilter,
-                isArchived: false,
             },
         };
 
@@ -130,7 +129,6 @@ async function getTimeSeries(prisma, startDate, endDate, statusFilter) {
             order: {
                 orderDate: { gte: startDate, lte: endDate },
                 status: statusFilter,
-                isArchived: false,
             },
         },
         select: {
