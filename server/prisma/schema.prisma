@@ -165,7 +165,7 @@ model CostConfig {
 
 model FabricType {
   id              String  @id @default(uuid())
-  name            String
+  name            String  @unique
   composition     String?
   unit            String  // meter, kg
   avgShrinkagePct Float   @default(0)

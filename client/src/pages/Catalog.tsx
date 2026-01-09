@@ -3,13 +3,14 @@
  * Flat AG-Grid table with 1 row per SKU showing all product and inventory data
  */
 
-import { useState, useMemo, useRef, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Eye, Plus } from 'lucide-react';
-import { catalogApi } from '../services/api';
+import { Search, Eye, Plus, Pencil } from 'lucide-react';
+import { catalogApi, productsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { ColumnVisibilityDropdown, InventoryStatusBadge } from '../components/common/grid';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, orderColumns } from '../hooks/useGridState';
@@ -128,6 +129,209 @@ function aggregateByProduct(items: any[]): any[] {
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+// Fabric edit popover props
+interface FabricEditPopoverProps {
+    row: any;
+    viewLevel: ViewLevel;
+    fabricTypes: Array<{ id: string; name: string }>;
+    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string; displayName: string }>;
+    onUpdateFabricType: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
+    onUpdateFabric: (variationId: string, fabricId: string, affectedCount: number) => void;
+    rawItems: any[];
+}
+
+// Fabric edit popover component
+function FabricEditPopover({
+    row,
+    viewLevel,
+    fabricTypes,
+    fabrics,
+    onUpdateFabricType,
+    onUpdateFabric,
+    rawItems,
+}: FabricEditPopoverProps) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const popoverRef = useRef<HTMLDivElement>(null);
+
+    // Close on click outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (
+                popoverRef.current &&
+                !popoverRef.current.contains(e.target as Node) &&
+                buttonRef.current &&
+                !buttonRef.current.contains(e.target as Node)
+            ) {
+                setIsOpen(false);
+            }
+        };
+
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen]);
+
+    const handleOpen = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setPopoverPosition({
+                top: rect.bottom + window.scrollY + 4,
+                left: Math.min(rect.left + window.scrollX, window.innerWidth - 320),
+            });
+        }
+        setIsOpen(!isOpen);
+    };
+
+    // Calculate affected items count for cascading updates
+    const getAffectedCount = (type: 'fabricType' | 'fabric') => {
+        if (type === 'fabricType') {
+            // Count all SKUs under this product
+            return rawItems.filter(item => item.productId === row.productId).length;
+        } else {
+            // Count all SKUs under this variation
+            return rawItems.filter(item => item.variationId === row.variationId).length;
+        }
+    };
+
+    // Check if values are mixed (for aggregated views)
+    const hasMixedFabricTypes = useMemo(() => {
+        if (viewLevel === 'sku') return false;
+        const productItems = rawItems.filter(item => item.productId === row.productId);
+        const uniqueTypes = new Set(productItems.map(i => i.fabricTypeId));
+        return uniqueTypes.size > 1;
+    }, [viewLevel, rawItems, row.productId]);
+
+    const hasMixedFabrics = useMemo(() => {
+        if (viewLevel === 'sku') return false;
+        const variationItems = rawItems.filter(item => item.variationId === row.variationId);
+        const uniqueFabrics = new Set(variationItems.map(i => i.fabricId));
+        return uniqueFabrics.size > 1;
+    }, [viewLevel, rawItems, row.variationId]);
+
+    // Filter fabrics by selected fabric type (if any)
+    const filteredFabrics = useMemo(() => {
+        if (!row.fabricTypeId) return fabrics;
+        return fabrics.filter(f => f.fabricTypeId === row.fabricTypeId);
+    }, [fabrics, row.fabricTypeId]);
+
+    const handleFabricTypeChange = (fabricTypeId: string) => {
+        const affectedCount = getAffectedCount('fabricType');
+        if (affectedCount > 1) {
+            const confirmed = window.confirm(
+                `This will update the fabric type for ${affectedCount} SKU${affectedCount > 1 ? 's' : ''}. Continue?`
+            );
+            if (!confirmed) return;
+        }
+        onUpdateFabricType(row.productId, fabricTypeId || null, affectedCount);
+        setIsOpen(false);
+    };
+
+    const handleFabricChange = (fabricId: string) => {
+        if (!fabricId) return;
+        const affectedCount = getAffectedCount('fabric');
+        if (affectedCount > 1) {
+            const confirmed = window.confirm(
+                `This will update the fabric for ${affectedCount} SKU${affectedCount > 1 ? 's' : ''}. Continue?`
+            );
+            if (!confirmed) return;
+        }
+        onUpdateFabric(row.variationId, fabricId, affectedCount);
+        setIsOpen(false);
+    };
+
+    // Display text
+    const displayText = viewLevel === 'product'
+        ? (hasMixedFabricTypes ? 'Multiple' : row.fabricTypeName || 'Not set')
+        : viewLevel === 'variation'
+        ? (hasMixedFabrics ? 'Multiple' : row.fabricName || 'Not set')
+        : row.fabricTypeName || 'Not set';
+
+    return (
+        <div className="inline-block">
+            <button
+                ref={buttonRef}
+                onClick={handleOpen}
+                className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors max-w-full ${
+                    displayText === 'Not set' || displayText === 'Multiple'
+                        ? 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
+                        : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
+                }`}
+                title="Edit fabric"
+            >
+                <span className="truncate">{displayText}</span>
+                <Pencil size={10} className="flex-shrink-0 opacity-50" />
+            </button>
+
+            {isOpen && createPortal(
+                <div
+                    ref={popoverRef}
+                    className="fixed z-[9999] bg-white rounded-lg shadow-lg border border-gray-200 p-3 w-72"
+                    style={{ top: popoverPosition.top, left: popoverPosition.left }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div className="text-xs font-medium text-gray-500 mb-2">
+                        Edit Fabric - {viewLevel === 'product' ? 'Product Level' : viewLevel === 'variation' ? 'Color Level' : 'SKU Level'}
+                    </div>
+
+                    {/* Fabric Type dropdown - always show for product level, or when editing SKU */}
+                    {(viewLevel === 'product' || viewLevel === 'sku') && (
+                        <div className="mb-3">
+                            <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
+                            <select
+                                value={row.fabricTypeId || ''}
+                                onChange={(e) => handleFabricTypeChange(e.target.value)}
+                                className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            >
+                                <option value="">Not set</option>
+                                {fabricTypes.map(ft => (
+                                    <option key={ft.id} value={ft.id}>{ft.name}</option>
+                                ))}
+                            </select>
+                            {viewLevel === 'product' && (
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Affects {getAffectedCount('fabricType')} SKU(s)
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Fabric dropdown - show for variation and SKU level */}
+                    {(viewLevel === 'variation' || viewLevel === 'sku') && (
+                        <div>
+                            <label className="block text-xs text-gray-600 mb-1">Fabric</label>
+                            <select
+                                value={row.fabricId || ''}
+                                onChange={(e) => handleFabricChange(e.target.value)}
+                                className="w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+                            >
+                                <option value="">Select fabric...</option>
+                                {filteredFabrics.map(f => (
+                                    <option key={f.id} value={f.id}>{f.displayName}</option>
+                                ))}
+                            </select>
+                            {viewLevel === 'variation' && (
+                                <p className="text-xs text-gray-400 mt-1">
+                                    Affects {getAffectedCount('fabric')} SKU(s)
+                                </p>
+                            )}
+                            {filteredFabrics.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">
+                                    No fabrics available for this fabric type
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>,
+                document.body
+            )}
+        </div>
+    );
+}
+
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
     'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
@@ -164,6 +368,7 @@ const DEFAULT_HEADERS: Record<string, string> = {
 export default function Catalog() {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
+    const queryClient = useQueryClient();
 
     // Use shared grid state hook for column visibility, order, and page size
     const {
@@ -218,6 +423,37 @@ export default function Catalog() {
         staleTime: 5 * 60 * 1000,
     });
 
+    // Mutations for updating fabric type and fabric
+    const updateProductMutation = useMutation({
+        mutationFn: ({ productId, fabricTypeId }: { productId: string; fabricTypeId: string | null }) =>
+            productsApi.update(productId, { fabricTypeId }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update fabric type');
+        },
+    });
+
+    const updateVariationMutation = useMutation({
+        mutationFn: ({ variationId, fabricId }: { variationId: string; fabricId: string }) =>
+            productsApi.updateVariation(variationId, { fabricId }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update fabric');
+        },
+    });
+
+    const handleUpdateFabricType = useCallback((productId: string, fabricTypeId: string | null) => {
+        updateProductMutation.mutate({ productId, fabricTypeId });
+    }, [updateProductMutation]);
+
+    const handleUpdateFabric = useCallback((variationId: string, fabricId: string) => {
+        updateVariationMutation.mutate({ variationId, fabricId });
+    }, [updateVariationMutation]);
+
     // Filtered products based on selected gender/category
     const filteredProducts = useMemo(() => {
         if (!filterOptions?.products) return [];
@@ -227,6 +463,18 @@ export default function Catalog() {
             return true;
         });
     }, [filterOptions?.products, filter.gender, filter.category]);
+
+    // Deduplicate fabric types by name (database may have duplicates with same name)
+    const uniqueFabricTypes = useMemo(() => {
+        if (!filterOptions?.fabricTypes) return [];
+        const seen = new Map<string, { id: string; name: string }>();
+        for (const ft of filterOptions.fabricTypes) {
+            if (!seen.has(ft.name)) {
+                seen.set(ft.name, ft);
+            }
+        }
+        return Array.from(seen.values());
+    }, [filterOptions?.fabricTypes]);
 
     // Aggregate data based on view level
     const displayData = useMemo(() => {
@@ -291,9 +539,22 @@ export default function Catalog() {
         {
             colId: 'fabricTypeName',
             headerName: DEFAULT_HEADERS.fabricTypeName,
-            field: 'fabricTypeName',
-            width: 100,
-            cellClass: 'text-xs',
+            width: 120,
+            cellRenderer: (params: ICellRendererParams) => {
+                const row = params.data;
+                if (!row) return null;
+                return (
+                    <FabricEditPopover
+                        row={row}
+                        viewLevel={viewLevel}
+                        fabricTypes={uniqueFabricTypes}
+                        fabrics={filterOptions?.fabrics || []}
+                        onUpdateFabricType={handleUpdateFabricType}
+                        onUpdateFabric={handleUpdateFabric}
+                        rawItems={catalogData?.items || []}
+                    />
+                );
+            },
         },
         // Variation columns
         {
@@ -305,9 +566,26 @@ export default function Catalog() {
         {
             colId: 'fabricName',
             headerName: DEFAULT_HEADERS.fabricName,
-            field: 'fabricName',
-            width: 100,
-            cellClass: 'text-xs',
+            width: 120,
+            cellRenderer: (params: ICellRendererParams) => {
+                const row = params.data;
+                if (!row) return null;
+                // Only show fabric editor for variation and SKU views
+                if (viewLevel === 'product') {
+                    return <span className="text-xs text-gray-400">-</span>;
+                }
+                return (
+                    <FabricEditPopover
+                        row={row}
+                        viewLevel={viewLevel}
+                        fabricTypes={uniqueFabricTypes}
+                        fabrics={filterOptions?.fabrics || []}
+                        onUpdateFabricType={handleUpdateFabricType}
+                        onUpdateFabric={handleUpdateFabric}
+                        rawItems={catalogData?.items || []}
+                    />
+                );
+            },
         },
         {
             colId: 'image',
@@ -454,7 +732,7 @@ export default function Catalog() {
                 );
             },
         },
-    ], []);
+    ], [viewLevel, filterOptions?.fabricTypes, filterOptions?.fabrics, catalogData?.items, handleUpdateFabricType, handleUpdateFabric]);
 
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {

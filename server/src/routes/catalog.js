@@ -136,7 +136,9 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 category: product.category,
                 gender: product.gender,
                 productType: product.productType,
+                fabricTypeId: product.fabricTypeId || null,
                 fabricTypeName: product.fabricType?.name || null,
+                fabricId: variation.fabricId || null,
 
                 // Inventory
                 currentBalance: balance.currentBalance,
@@ -193,20 +195,39 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
 
 /**
  * GET /filters
- * Returns filter options for the catalog (genders, categories, products)
+ * Returns filter options for the catalog (genders, categories, products, fabric types, fabrics)
  */
 router.get('/filters', authenticateToken, async (req, res) => {
     try {
-        const products = await req.prisma.product.findMany({
-            where: { isActive: true },
-            select: {
-                id: true,
-                name: true,
-                gender: true,
-                category: true,
-            },
-            orderBy: { name: 'asc' },
-        });
+        const [products, fabricTypes, fabrics] = await Promise.all([
+            req.prisma.product.findMany({
+                where: { isActive: true },
+                select: {
+                    id: true,
+                    name: true,
+                    gender: true,
+                    category: true,
+                },
+                orderBy: { name: 'asc' },
+            }),
+            req.prisma.fabricType.findMany({
+                select: {
+                    id: true,
+                    name: true,
+                },
+                orderBy: { name: 'asc' },
+            }),
+            req.prisma.fabric.findMany({
+                where: { isActive: true },
+                select: {
+                    id: true,
+                    name: true,
+                    colorName: true,
+                    fabricTypeId: true,
+                },
+                orderBy: [{ name: 'asc' }, { colorName: 'asc' }],
+            }),
+        ]);
 
         // Extract unique genders and categories
         const genders = [...new Set(products.map(p => p.gender))].filter(Boolean).sort();
@@ -220,6 +241,17 @@ router.get('/filters', authenticateToken, async (req, res) => {
                 name: p.name,
                 gender: p.gender,
                 category: p.category,
+            })),
+            fabricTypes: fabricTypes.map(ft => ({
+                id: ft.id,
+                name: ft.name,
+            })),
+            fabrics: fabrics.map(f => ({
+                id: f.id,
+                name: f.name,
+                colorName: f.colorName,
+                fabricTypeId: f.fabricTypeId,
+                displayName: `${f.name} - ${f.colorName}`,
             })),
         });
     } catch (error) {
