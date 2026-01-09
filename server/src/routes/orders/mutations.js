@@ -124,6 +124,8 @@ router.put('/:id', authenticateToken, validate(UpdateOrderSchema), async (req, r
             customerPhone,
             shippingAddress,
             internalNotes,
+            shipByDate,
+            isExchange,
         } = req.validatedBody;
 
         const order = await req.prisma.order.findUnique({
@@ -140,6 +142,8 @@ router.put('/:id', authenticateToken, validate(UpdateOrderSchema), async (req, r
         if (customerPhone !== undefined) updateData.customerPhone = customerPhone;
         if (shippingAddress !== undefined) updateData.shippingAddress = shippingAddress;
         if (internalNotes !== undefined) updateData.internalNotes = internalNotes;
+        if (shipByDate !== undefined) updateData.shipByDate = shipByDate ? new Date(shipByDate) : null;
+        if (isExchange !== undefined) updateData.isExchange = isExchange;
 
         const updated = await req.prisma.order.update({
             where: { id: req.params.id },

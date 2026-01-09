@@ -51,7 +51,7 @@ ReturnRequest -> ReturnRequestLine -> RepackingQueueItem -> WriteOffLog
 | `Variation` | productId, colorName, fabricId, imageUrl |
 | `Sku` | skuCode, size, mrp, isCustomSku, parentSkuId |
 | `Order` | orderNumber, status, isArchived, isExchange (new), originalOrderId (new) |
-| `OrderLine` | skuId, qty, lineStatus, isCustomized, isNonReturnable |
+| `OrderLine` | skuId, qty, lineStatus, shippingAddress (new), isCustomized, isNonReturnable |
 | `InventoryTransaction` | txnType (inward/outward/reserved), qty, reason |
 | `ReturnRequest` | requestNumber, status, resolution, valueDifference, exchangeOrderId |
 | `ProductionBatch` | batchDate, skuId, qtyPlanned, qtyCompleted, status |
@@ -147,9 +147,10 @@ Single endpoint `GET /orders?view=<name>` with config-driven architecture:
 
 ## Changelog
 
-### January 9, 2026 (WIP)
-- **Exchange Order Tracking**: Schema changes for `isExchange`, `originalOrderId` (⚠️ migration pending)
-- Order creation supports exchange orders with EXC- prefix
+### January 9, 2026
+- **Exchange Orders**: Create exchange orders with EXC- prefix, link to original order via `originalOrderId`
+- **Line-level Shipping Addresses**: OrderLine now has optional `shippingAddress` for multi-drop shipments
+- **Product Sync Status**: Shopify settings now display product sync status and counts
 
 ### January 8, 2026
 - **Unified Order Views**: Single endpoint `GET /orders?view=` replaces 5 endpoints

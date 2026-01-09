@@ -444,6 +444,62 @@ export function determineTrackingStatus(order, daysInTransit) {
 }
 
 /**
+ * Resolve shipping address for an order line with fallback chain:
+ * 1. OrderLine.shippingAddress (if populated)
+ * 2. Order.shippingAddress (parent order)
+ * 3. ShopifyOrderCache.rawData.shipping_address (if Shopify order)
+ *
+ * @param {Object} orderLine - OrderLine object
+ * @param {Object} order - Parent order with shopifyCache relation
+ * @returns {string|null} Resolved shipping address (JSON string)
+ */
+export function resolveLineShippingAddress(orderLine, order) {
+    // 1. Line-level address (highest priority)
+    if (orderLine.shippingAddress) {
+        return orderLine.shippingAddress;
+    }
+
+    // 2. Order-level address
+    if (order.shippingAddress) {
+        return order.shippingAddress;
+    }
+
+    // 3. Shopify cache fallback
+    if (order.shopifyCache?.rawData) {
+        try {
+            const shopifyOrder = JSON.parse(order.shopifyCache.rawData);
+            if (shopifyOrder.shipping_address) {
+                return JSON.stringify(shopifyOrder.shipping_address);
+            }
+        } catch {
+            // Invalid JSON in cache, skip
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Enrich order lines with resolved shipping addresses
+ * Modifies order lines in place, adding resolvedShippingAddress
+ *
+ * @param {Object} order - Order with orderLines and shopifyCache
+ * @returns {Object} Order with enriched order lines
+ */
+export function enrichOrderLinesWithAddresses(order) {
+    if (!order.orderLines) return order;
+
+    return {
+        ...order,
+        orderLines: order.orderLines.map(line => ({
+            ...line,
+            // Add resolved address while keeping original
+            resolvedShippingAddress: resolveLineShippingAddress(line, order),
+        })),
+    };
+}
+
+/**
  * Calculate inventory balance for a SKU
  * Uses aggregation to avoid N+1 queries
  * @param {PrismaClient} prisma - Prisma client instance

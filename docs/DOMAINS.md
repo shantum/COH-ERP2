@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 9, 2026** (Exchange order tracking WIP)
+> All backend and frontend domains consolidated. **Last updated: January 9, 2026** (Exchange orders, line-level addresses)
 
 ---
 
@@ -64,6 +64,19 @@ pending → allocated → picked → packed → [ship order] → shipped
 ### Frontend
 - `Orders.tsx` (40KB) - 5 tabs: Open, Shipped, RTO, COD Pending, Archived
 - `OrdersGrid.tsx` (56KB), `ShippedOrdersGrid.tsx` (38KB), `RtoOrdersGrid.tsx`, `CodPendingGrid.tsx`, `ArchivedOrdersGrid.tsx`
+
+### Exchange Orders
+**Pattern**: Create exchange orders linked to original order
+- Order number prefix: `EXC-` (vs `COH-` for regular orders)
+- Schema: `isExchange` boolean, `originalOrderId` self-relation
+- UI: Amber "E" badge in grid, toggle in CreateOrderModal
+- Validation: Allows zero/negative totalAmount for exchanges
+
+### Line-level Shipping Addresses
+**Pattern**: Each OrderLine can have its own shipping address
+- Schema: `OrderLine.shippingAddress` (nullable JSON string)
+- Fallback: Uses `Order.shippingAddress` when null
+- Use cases: Multi-drop shipments, marketplace orders (Nykaa/Ajio/Myntra)
 
 ---
 

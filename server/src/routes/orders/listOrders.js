@@ -16,6 +16,7 @@ import {
     extractShopifyTrackingFields,
     calculateDaysSince,
     determineTrackingStatus,
+    enrichOrderLinesWithAddresses,
 } from '../../utils/queryPatterns.js';
 import {
     ORDER_VIEWS,
@@ -165,8 +166,11 @@ router.get('/open', async (req, res) => {
             includeLineStatusCounts: true,
         });
 
+        // Add resolved shipping addresses to order lines
+        const ordersWithAddresses = enrichedOrders.map(enrichOrderLinesWithAddresses);
+
         res.json({
-            orders: enrichedOrders,
+            orders: ordersWithAddresses,
             pagination: {
                 total: totalCount,
                 limit: take,

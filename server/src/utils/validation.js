@@ -203,6 +203,8 @@ export const UpdateOrderSchema = z.object({
     customerNotes: z.string().optional().nullable(),
     internalNotes: z.string().optional().nullable(),
     totalAmount: z.number().positive('Total amount must be positive').optional(),
+    shipByDate: z.string().datetime().optional().nullable(),
+    isExchange: z.boolean().optional(),
 });
 
 /**
@@ -265,4 +267,142 @@ export function validate(schema) {
         req.validatedBody = result.data;
         next();
     };
+}
+
+// ============================================
+// INPUT SANITIZATION
+// ============================================
+
+/**
+ * Sanitize search input to prevent SQL injection and special character issues
+ * Escapes SQL wildcards (%, _) and removes potentially dangerous characters
+ * 
+ * @param {string} input - User input to sanitize
+ * @returns {string} Sanitized input safe for database queries
+ * 
+ * @example
+ * sanitizeSearchInput("test%_input") // "test\\%\\_input"
+ * sanitizeSearchInput("user@email.com") // "user@email.com"
+ */
+export function sanitizeSearchInput(input) {
+    if (!input || typeof input !== 'string') return '';
+
+    return input
+        .replace(/[%_]/g, '\\$&')           // Escape SQL wildcards
+        .replace(/[^\w\s@.-]/g, '')         // Remove special chars except @, ., -
+        .trim();
+}
+
+/**
+ * Validate SKU code format
+ * SKU codes should be uppercase alphanumeric with optional hyphens
+ * 
+ * @param {string} code - SKU code to validate
+ * @returns {boolean} True if valid SKU code format
+ * 
+ * @example
+ * isValidSkuCode("ABC-123") // true
+ * isValidSkuCode("abc_123") // false
+ */
+export function isValidSkuCode(code) {
+    if (!code || typeof code !== 'string') return false;
+    return /^[A-Z0-9-]+$/.test(code);
+}
+
+/**
+ * Validate email format
+ * Basic email validation using regex
+ * 
+ * @param {string} email - Email address to validate
+ * @returns {boolean} True if valid email format
+ * 
+ * @example
+ * isValidEmail("user@example.com") // true
+ * isValidEmail("invalid.email") // false
+ */
+export function isValidEmail(email) {
+    if (!email || typeof email !== 'string') return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/**
+ * Validate phone number format (Indian format)
+ * Accepts formats: +91XXXXXXXXXX, 91XXXXXXXXXX, XXXXXXXXXX
+ * 
+ * @param {string} phone - Phone number to validate
+ * @returns {boolean} True if valid phone format
+ * 
+ * @example
+ * isValidPhone("+919876543210") // true
+ * isValidPhone("9876543210") // true
+ * isValidPhone("123") // false
+ */
+export function isValidPhone(phone) {
+    if (!phone || typeof phone !== 'string') return false;
+    const cleaned = phone.replace(/[\s-]/g, '');
+    return /^(\+91|91)?[6-9]\d{9}$/.test(cleaned);
+}
+
+/**
+ * Validate UUID format
+ * 
+ * @param {string} uuid - UUID string to validate
+ * @returns {boolean} True if valid UUID format
+ * 
+ * @example
+ * isValidUuid("123e4567-e89b-12d3-a456-426614174000") // true
+ * isValidUuid("invalid-uuid") // false
+ */
+export function isValidUuid(uuid) {
+    if (!uuid || typeof uuid !== 'string') return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
+}
+
+/**
+ * Sanitize and validate order number
+ * Order numbers should be alphanumeric with optional hyphens
+ * 
+ * @param {string} orderNumber - Order number to sanitize
+ * @returns {string} Sanitized order number
+ * 
+ * @example
+ * sanitizeOrderNumber("ORD-123") // "ORD-123"
+ * sanitizeOrderNumber("ord@123!") // "ord-123"
+ */
+export function sanitizeOrderNumber(orderNumber) {
+    if (!orderNumber || typeof orderNumber !== 'string') return '';
+    return orderNumber
+        .replace(/[^a-zA-Z0-9-]/g, '')
+        .trim()
+        .toUpperCase();
+}
+
+/**
+ * Validate positive integer
+ * 
+ * @param {any} value - Value to validate
+ * @returns {boolean} True if value is a positive integer
+ * 
+ * @example
+ * isPositiveInteger(5) // true
+ * isPositiveInteger(-1) // false
+ * isPositiveInteger(1.5) // false
+ */
+export function isPositiveInteger(value) {
+    return Number.isInteger(value) && value > 0;
+}
+
+/**
+ * Validate non-negative number
+ * 
+ * @param {any} value - Value to validate
+ * @returns {boolean} True if value is a non-negative number
+ * 
+ * @example
+ * isNonNegativeNumber(0) // true
+ * isNonNegativeNumber(5.5) // true
+ * isNonNegativeNumber(-1) // false
+ */
+export function isNonNegativeNumber(value) {
+    return typeof value === 'number' && !isNaN(value) && value >= 0;
 }

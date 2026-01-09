@@ -27,7 +27,7 @@ export const ORDER_VIEWS = {
             isArchived: false,
         },
         orderBy: { orderDate: 'asc' }, // Oldest first (FIFO queue)
-        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats'],
+        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
         defaultLimit: 10000,
     },
 
@@ -182,6 +182,7 @@ import {
     calculateDaysSince,
     determineTrackingStatus,
     extractShopifyTrackingFields,
+    enrichOrderLinesWithAddresses,
 } from './queryPatterns.js';
 
 /**
@@ -262,6 +263,11 @@ export async function enrichOrdersForView(prisma, orders, enrichments = []) {
                 daysInRto: calculateDaysSince(order.rtoInitiatedAt),
             };
         });
+    }
+
+    // Address resolution (fallback to shopifyCache for old orders)
+    if (enrichments.includes('addressResolution')) {
+        enriched = enriched.map(enrichOrderLinesWithAddresses);
     }
 
     return enriched;

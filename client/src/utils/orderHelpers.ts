@@ -388,35 +388,41 @@ export function getSizesForVariation(
         .sort((a, b) => sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size));
 }
 
-// Default column headers for the orders grid
+// Default column headers for the orders grid (cleaner, more readable names)
 export const DEFAULT_HEADERS: Record<string, string> = {
-    orderDate: 'Date',
+    orderDate: 'Order Date',
     orderAge: 'Age',
     shipByDate: 'Ship By',
-    orderNumber: 'Order',
+    orderNumber: 'Order #',
     customerName: 'Customer',
     city: 'City',
     orderValue: 'Value',
     discountCode: 'Discount',
-    paymentMethod: 'Pay',
+    paymentMethod: 'Payment',
     customerNotes: 'Order Notes',
-    customerOrderCount: '#',
+    customerOrderCount: 'Orders',
     customerLtv: 'LTV',
     skuCode: 'SKU',
-    productName: 'Item',
+    productName: 'Product',
     customize: 'Custom',
-    qty: 'Q',
-    skuStock: 'St',
-    fabricBalance: 'Fab',
-    allocate: 'A',
+    qty: 'Qty',
+    skuStock: 'Stock',
+    fabricBalance: 'Fabric',
+    allocate: 'Alloc',
     production: 'Production',
     notes: 'Notes',
-    pick: 'P',
-    pack: 'Pk',
-    ship: 'S',
+    pick: 'Pick',
+    pack: 'Pack',
+    ship: 'Ship',
     shopifyStatus: 'Shopify',
     awb: 'AWB',
     courier: 'Courier',
-    trackingStatus: 'iThink',
-    actions: '...',
+    trackingStatus: 'Tracking',
+    actions: 'Actions',
 };
+
+// Columns shown by default (cleaner initial view)
+export const DEFAULT_VISIBLE_COLUMNS = [
+    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'productName',
+    'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'actions'
+];

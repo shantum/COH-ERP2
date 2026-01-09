@@ -525,187 +525,162 @@ export default function Orders() {
 
             {/* Tabs */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                {/* Tab Navigation */}
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between px-2 md:px-4 border-b border-gray-100 bg-gray-50/50">
-                    <div className="flex overflow-x-auto">
+                {/* Tab Navigation - Clean row */}
+                <div className="flex items-center justify-between px-4 border-b border-gray-100">
+                    <div className="flex overflow-x-auto -mb-px">
                         {tabs.map((t) => (
                             <button
                                 key={t.id}
-                                className={`relative px-4 py-3 text-sm font-medium transition-colors ${
+                                className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
                                     tab === t.id
                                         ? 'text-primary-600'
                                         : 'text-gray-500 hover:text-gray-700'
                                 }`}
                                 onClick={() => setTab(t.id)}
                             >
-                                <span className="flex items-center gap-2">
+                                <span className="flex items-center gap-1.5">
                                     {t.label}
                                     {t.count > 0 && (
-                                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${
                                             tab === t.id
                                                 ? 'bg-primary-100 text-primary-700'
                                                 : t.highlight
                                                     ? 'bg-amber-100 text-amber-700'
-                                                    : 'bg-gray-100 text-gray-600'
+                                                    : 'bg-gray-100 text-gray-500'
                                         }`}>
                                             {t.filteredCount !== undefined && t.filteredCount !== null ? `${t.filteredCount}/${t.count}` : t.count}
                                         </span>
                                     )}
                                 </span>
                                 {tab === t.id && (
-                                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-600" />
+                                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary-600 rounded-full" />
                                 )}
                             </button>
                         ))}
                     </div>
+                </div>
 
-                    {/* Tab-specific controls */}
-                    <div className="flex flex-wrap items-center gap-2 py-2 px-2 md:px-0">
-                        {tab === 'open' && (
-                            <>
-                                <select
-                                    value={dateRange}
-                                    onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-                                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                                >
-                                    <option value="">All time</option>
-                                    <option value="14">Last 14 days</option>
-                                    <option value="30">Last 30 days</option>
-                                    <option value="60">Last 60 days</option>
-                                    <option value="90">Last 90 days</option>
-                                    <option value="180">Last 180 days</option>
-                                    <option value="365">Last 365 days</option>
-                                </select>
-                                <select
-                                    value={allocatedFilter}
-                                    onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
-                                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                                >
-                                    <option value="">All (Allocated)</option>
-                                    <option value="yes">Allocated</option>
-                                    <option value="no">Not Allocated</option>
-                                </select>
-                                <select
-                                    value={productionFilter}
-                                    onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
-                                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                                >
-                                    <option value="">All (Production)</option>
-                                    <option value="scheduled">Scheduled</option>
-                                    <option value="needs">Needs Production</option>
-                                    <option value="ready">Ready to Ship</option>
-                                </select>
-                                <div className="w-px h-5 bg-gray-200" />
-                                <button
-                                    onClick={() => trackingSyncMutation.mutate()}
-                                    disabled={trackingSyncMutation.isPending}
-                                    className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all ${
-                                        syncResult?.success
-                                            ? 'bg-green-50 text-green-700 border border-green-200'
-                                            : syncResult && !syncResult.success
-                                            ? 'bg-red-50 text-red-700 border border-red-200'
-                                            : 'bg-white border border-gray-200 hover:bg-gray-50 text-gray-600'
-                                    } disabled:opacity-50`}
-                                    title="Sync iThink tracking data for fulfilled orders with AWB"
-                                >
-                                    <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
-                                    {trackingSyncMutation.isPending ? (
-                                        'Syncing...'
-                                    ) : syncResult?.success ? (
-                                        `✓ ${syncResult.updated} updated`
-                                    ) : syncResult && !syncResult.success ? (
-                                        'Failed'
-                                    ) : (
-                                        'Sync'
-                                    )}
-                                </button>
-                                {quickShipEligibleCount > 0 && (
-                                    <button
-                                        onClick={() => {
-                                            if (confirm(`Quick ship ${quickShipEligibleCount} order(s) with AWB and courier?\n\nThis will bypass allocate/pick/pack and mark them as shipped.`)) {
-                                                mutations.bulkQuickShip.mutate();
-                                            }
-                                        }}
-                                        disabled={mutations.bulkQuickShip.isPending}
-                                        className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 disabled:opacity-50"
-                                        title="Quick ship all orders that have AWB and courier set"
-                                    >
-                                        <Truck size={12} />
-                                        {mutations.bulkQuickShip.isPending ? 'Shipping...' : `Quick Ship (${quickShipEligibleCount})`}
-                                    </button>
-                                )}
-                                <div className="w-px h-5 bg-gray-200" />
-                                {columnVisibilityDropdown}
-                                {Object.keys(customHeaders).length > 0 && (
-                                    <button
-                                        onClick={resetHeaders}
-                                        className="text-xs text-gray-400 hover:text-gray-600 px-2"
-                                        title="Reset column headers to default"
-                                    >
-                                        Reset
-                                    </button>
-                                )}
-                            </>
-                        )}
-                        {tab === 'shipped' && (
-                            <>
-                                <select
-                                    value={shippedDays}
-                                    onChange={(e) => {
-                                        setShippedDays(Number(e.target.value));
-                                        setShippedPage(1);
-                                    }}
-                                    className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                                >
-                                    <option value={7}>Last 7 days</option>
-                                    <option value={14}>Last 14 days</option>
-                                    <option value={30}>Last 30 days</option>
-                                    <option value={60}>Last 60 days</option>
-                                    <option value={90}>Last 90 days</option>
-                                    <option value={180}>Last 180 days</option>
-                                    <option value={365}>Last 365 days</option>
-                                </select>
-                                <div className="w-px h-5 bg-gray-200" />
-                                <button
-                                    onClick={() => trackingSyncMutation.mutate()}
-                                    disabled={trackingSyncMutation.isPending}
-                                    className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-all ${
-                                        syncResult?.success
-                                            ? 'bg-green-50 text-green-700 border border-green-200'
-                                            : syncResult && !syncResult.success
-                                            ? 'bg-red-50 text-red-700 border border-red-200'
-                                            : 'bg-white border border-gray-200 hover:bg-gray-50 text-gray-600'
-                                    } disabled:opacity-50`}
-                                    title="Sync iThink tracking data for all orders with AWB"
-                                >
-                                    <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
-                                    {trackingSyncMutation.isPending ? (
-                                        'Syncing...'
-                                    ) : syncResult?.success ? (
-                                        `✓ ${syncResult.updated} updated${syncResult.delivered > 0 ? `, ${syncResult.delivered} delivered` : ''}`
-                                    ) : syncResult && !syncResult.success ? (
-                                        'Failed'
-                                    ) : (
-                                        'Sync'
-                                    )}
-                                </button>
+                {/* Tab-specific toolbar - Separate row */}
+                {tab === 'open' && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={dateRange}
+                                onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                            >
+                                <option value="">All time</option>
+                                <option value="14">Last 14 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="60">Last 60 days</option>
+                                <option value="90">Last 90 days</option>
+                                <option value="180">Last 180 days</option>
+                                <option value="365">Last 365 days</option>
+                            </select>
+                            <select
+                                value={allocatedFilter}
+                                onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                            >
+                                <option value="">All status</option>
+                                <option value="yes">Allocated</option>
+                                <option value="no">Not allocated</option>
+                            </select>
+                            <select
+                                value={productionFilter}
+                                onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                            >
+                                <option value="">All production</option>
+                                <option value="scheduled">Scheduled</option>
+                                <option value="needs">Needs production</option>
+                                <option value="ready">Ready to ship</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => trackingSyncMutation.mutate()}
+                                disabled={trackingSyncMutation.isPending}
+                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
+                                    syncResult?.success
+                                        ? 'bg-green-100 text-green-700'
+                                        : syncResult && !syncResult.success
+                                        ? 'bg-red-100 text-red-700'
+                                        : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
+                                } disabled:opacity-50`}
+                                title="Sync tracking status"
+                            >
+                                <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
+                                {trackingSyncMutation.isPending ? 'Syncing' : syncResult?.success ? `${syncResult.updated} synced` : 'Sync'}
+                            </button>
+                            {quickShipEligibleCount > 0 && (
                                 <button
                                     onClick={() => {
-                                        if (confirm('Archive all delivered orders?\n\nThis will archive:\n• Prepaid orders marked as delivered\n• COD orders that are delivered AND paid')) {
-                                            archivePrepaidMutation.mutate();
+                                        if (confirm(`Quick ship ${quickShipEligibleCount} order(s) with AWB?`)) {
+                                            mutations.bulkQuickShip.mutate();
                                         }
                                     }}
-                                    disabled={archivePrepaidMutation.isPending}
-                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 disabled:opacity-50"
-                                    title="Archive delivered prepaid orders and delivered+paid COD orders"
+                                    disabled={mutations.bulkQuickShip.isPending}
+                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
                                 >
-                                    <Archive size={12} />
-                                    {archivePrepaidMutation.isPending ? 'Archiving...' : 'Archive Delivered'}
+                                    <Truck size={12} />
+                                    Ship {quickShipEligibleCount}
                                 </button>
-                            </>
-                        )}
+                            )}
+                            <div className="w-px h-4 bg-gray-200" />
+                            {columnVisibilityDropdown}
+                        </div>
                     </div>
-                </div>
+                )}
+                {tab === 'shipped' && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
+                        <select
+                            value={shippedDays}
+                            onChange={(e) => {
+                                setShippedDays(Number(e.target.value));
+                                setShippedPage(1);
+                            }}
+                            className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                        >
+                            <option value={7}>Last 7 days</option>
+                            <option value={14}>Last 14 days</option>
+                            <option value={30}>Last 30 days</option>
+                            <option value={60}>Last 60 days</option>
+                            <option value={90}>Last 90 days</option>
+                            <option value={180}>Last 180 days</option>
+                            <option value={365}>Last 365 days</option>
+                        </select>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => trackingSyncMutation.mutate()}
+                                disabled={trackingSyncMutation.isPending}
+                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
+                                    syncResult?.success
+                                        ? 'bg-green-100 text-green-700'
+                                        : syncResult && !syncResult.success
+                                        ? 'bg-red-100 text-red-700'
+                                        : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
+                                } disabled:opacity-50`}
+                                title="Sync tracking status"
+                            >
+                                <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
+                                {trackingSyncMutation.isPending ? 'Syncing' : syncResult?.success ? `${syncResult.updated} synced` : 'Sync'}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (confirm('Archive all delivered orders?')) {
+                                        archivePrepaidMutation.mutate();
+                                    }
+                                }}
+                                disabled={archivePrepaidMutation.isPending}
+                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 disabled:opacity-50"
+                            >
+                                <Archive size={12} />
+                                {archivePrepaidMutation.isPending ? 'Archiving' : 'Archive'}
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Loading */}
                 {isLoading && (

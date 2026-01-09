@@ -241,6 +241,7 @@ export const catalogApi = {
 export const customersApi = {
     getAll: (params?: Record<string, string>) => api.get('/customers', { params }),
     getById: (id: string) => api.get(`/customers/${id}`),
+    getAddresses: (customerId: string) => api.get(`/customers/${customerId}/addresses`),
     create: (data: CreateCustomerData) => api.post('/customers', data),
     getHighValue: () => api.get('/customers/analytics/high-value'),
     getFrequentReturners: () => api.get('/customers/analytics/frequent-returners'),

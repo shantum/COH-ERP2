@@ -111,6 +111,107 @@ router.get('/', async (req, res) => {
     }
 });
 
+// Get customer's past shipping addresses (for address autofill)
+// Searches both ERP orders and Shopify cache
+router.get('/:id/addresses', async (req, res) => {
+    try {
+        // Get customer email for Shopify cache lookup
+        const customer = await req.prisma.customer.findUnique({
+            where: { id: req.params.id },
+            select: { email: true },
+        });
+
+        const addressMap = new Map();
+
+        // 1. Get addresses from ERP orders
+        const orders = await req.prisma.order.findMany({
+            where: {
+                customerId: req.params.id,
+                shippingAddress: { not: null },
+            },
+            select: {
+                shippingAddress: true,
+                orderDate: true,
+            },
+            orderBy: { orderDate: 'desc' },
+            take: 20,
+        });
+
+        for (const order of orders) {
+            if (!order.shippingAddress) continue;
+            try {
+                const addr = JSON.parse(order.shippingAddress);
+                const key = `${addr.address1 || ''}-${addr.city || ''}-${addr.zip || ''}`.toLowerCase();
+                if (key && key !== '--' && !addressMap.has(key)) {
+                    addressMap.set(key, {
+                        ...addr,
+                        lastUsed: order.orderDate,
+                        source: 'order',
+                    });
+                }
+            } catch {
+                // Skip invalid JSON
+            }
+        }
+
+        // 2. Get addresses from Shopify cache (if customer has email)
+        if (customer?.email) {
+            const shopifyOrders = await req.prisma.shopifyOrderCache.findMany({
+                where: {
+                    rawData: { contains: customer.email },
+                },
+                select: {
+                    rawData: true,
+                    createdAt: true,
+                },
+                orderBy: { createdAt: 'desc' },
+                take: 20,
+            });
+
+            for (const shopifyOrder of shopifyOrders) {
+                try {
+                    const data = JSON.parse(shopifyOrder.rawData);
+                    const shippingAddr = data.shipping_address;
+                    if (!shippingAddr) continue;
+
+                    // Normalize Shopify address format to our format
+                    const addr = {
+                        first_name: shippingAddr.first_name,
+                        last_name: shippingAddr.last_name,
+                        address1: shippingAddr.address1,
+                        address2: shippingAddr.address2,
+                        city: shippingAddr.city,
+                        province: shippingAddr.province,
+                        zip: shippingAddr.zip,
+                        country: shippingAddr.country,
+                        phone: shippingAddr.phone,
+                    };
+
+                    const key = `${addr.address1 || ''}-${addr.city || ''}-${addr.zip || ''}`.toLowerCase();
+                    if (key && key !== '--' && !addressMap.has(key)) {
+                        addressMap.set(key, {
+                            ...addr,
+                            lastUsed: shopifyOrder.createdAt,
+                            source: 'shopify',
+                        });
+                    }
+                } catch {
+                    // Skip invalid JSON
+                }
+            }
+        }
+
+        // Return as array, most recently used first
+        const addresses = Array.from(addressMap.values())
+            .sort((a, b) => new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime());
+
+        res.json(addresses);
+    } catch (error) {
+        console.error('Get customer addresses error:', error);
+        res.status(500).json({ error: 'Failed to fetch addresses' });
+    }
+});
+
 // Get single customer with full details
 router.get('/:id', async (req, res) => {
     try {

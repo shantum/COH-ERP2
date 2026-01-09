@@ -17,8 +17,8 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar } from 'lucide-react';
-import { formatDateTime, DEFAULT_HEADERS } from '../../utils/orderHelpers';
+import { Check, X, Pencil, Ban, Archive, Trash2, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, MoreHorizontal, Eye } from 'lucide-react';
+import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
 // Register AG Grid modules
@@ -325,6 +325,124 @@ const ColumnVisibilityDropdown = ({
                 </div>
             )}
         </div>
+    );
+};
+
+// Action menu dropdown component for order actions
+const ActionMenuDropdown = ({
+    order,
+    onCancel,
+    onArchive,
+    onDelete,
+    onQuickShip,
+    canDelete,
+    canQuickShip,
+    isCancelling,
+    isArchiving,
+    isDeleting,
+}: {
+    order: any;
+    onCancel: () => void;
+    onArchive: () => void;
+    onDelete: () => void;
+    onQuickShip?: () => void;
+    canDelete: boolean;
+    canQuickShip: boolean;
+    isCancelling: boolean;
+    isArchiving: boolean;
+    isDeleting: boolean;
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [position, setPosition] = useState({ top: 0, left: 0 });
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (
+                menuRef.current && !menuRef.current.contains(e.target as Node) &&
+                buttonRef.current && !buttonRef.current.contains(e.target as Node)
+            ) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen]);
+
+    const handleOpen = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setPosition({
+                top: rect.bottom + 4,
+                left: rect.right - 140, // Align right edge
+            });
+        }
+        setIsOpen(!isOpen);
+    };
+
+    return (
+        <>
+            <button
+                ref={buttonRef}
+                onClick={handleOpen}
+                className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                title="More actions"
+            >
+                <MoreHorizontal size={14} />
+            </button>
+            {isOpen && createPortal(
+                <div
+                    ref={menuRef}
+                    className="fixed z-[9999] bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]"
+                    style={{ top: position.top, left: position.left }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {canQuickShip && onQuickShip && (
+                        <button
+                            onClick={() => { onQuickShip(); setIsOpen(false); }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-green-50 text-green-600"
+                        >
+                            <Truck size={12} />
+                            Quick Ship
+                        </button>
+                    )}
+                    <button
+                        onClick={() => { onCancel(); setIsOpen(false); }}
+                        disabled={isCancelling}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 text-gray-600 disabled:opacity-50"
+                    >
+                        <Ban size={12} />
+                        Cancel Order
+                    </button>
+                    <button
+                        onClick={() => { onArchive(); setIsOpen(false); }}
+                        disabled={isArchiving}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-gray-50 text-gray-600 disabled:opacity-50"
+                    >
+                        <Archive size={12} />
+                        Archive
+                    </button>
+                    {canDelete && (
+                        <>
+                            <div className="my-1 border-t border-gray-100" />
+                            <button
+                                onClick={() => { onDelete(); setIsOpen(false); }}
+                                disabled={isDeleting}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-red-50 text-red-600 disabled:opacity-50"
+                            >
+                                <Trash2 size={12} />
+                                Delete
+                            </button>
+                        </>
+                    )}
+                </div>,
+                document.body
+            )}
+        </>
     );
 };
 
