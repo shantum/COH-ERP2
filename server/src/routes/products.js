@@ -99,6 +99,12 @@ router.put('/:id', authenticateToken, async (req, res) => {
     try {
         const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, isActive } = req.body;
 
+        // Get current product to check if fabricTypeId is changing
+        const currentProduct = await req.prisma.product.findUnique({
+            where: { id: req.params.id },
+            select: { fabricTypeId: true },
+        });
+
         const product = await req.prisma.product.update({
             where: { id: req.params.id },
             data: {
@@ -114,6 +120,27 @@ router.put('/:id', authenticateToken, async (req, res) => {
             },
             include: { fabricType: true },
         });
+
+        // If fabricTypeId changed, clear mismatched fabric colors from variations
+        if (fabricTypeId && fabricTypeId !== currentProduct?.fabricTypeId) {
+            // Find variations with fabrics that don't belong to the new fabric type
+            const mismatchedVariations = await req.prisma.variation.findMany({
+                where: {
+                    productId: req.params.id,
+                    fabricId: { not: null },
+                    fabric: { fabricTypeId: { not: fabricTypeId } },
+                },
+                select: { id: true },
+            });
+
+            // Clear fabricId for mismatched variations
+            if (mismatchedVariations.length > 0) {
+                await req.prisma.variation.updateMany({
+                    where: { id: { in: mismatchedVariations.map(v => v.id) } },
+                    data: { fabricId: null },
+                });
+            }
+        }
 
         res.json(product);
     } catch (error) {
@@ -176,12 +203,19 @@ router.put('/variations/:id', authenticateToken, async (req, res) => {
             include: { fabric: { include: { fabricType: true } }, product: true },
         });
 
-        // If fabric was set and product doesn't have a fabricTypeId, inherit it from the fabric
-        if (fabricId && variation.fabric?.fabricTypeId && !variation.product?.fabricTypeId) {
-            await req.prisma.product.update({
-                where: { id: variation.productId },
-                data: { fabricTypeId: variation.fabric.fabricTypeId },
-            });
+        // If fabric was set, ensure product's fabricTypeId matches the fabric's fabricTypeId
+        // This keeps fabric type and fabric color in sync
+        if (fabricId && variation.fabric?.fabricTypeId) {
+            const productFabricTypeId = variation.product?.fabricTypeId;
+            const fabricFabricTypeId = variation.fabric.fabricTypeId;
+
+            // Update product's fabricTypeId if it's different or not set
+            if (productFabricTypeId !== fabricFabricTypeId) {
+                await req.prisma.product.update({
+                    where: { id: variation.productId },
+                    data: { fabricTypeId: fabricFabricTypeId },
+                });
+            }
         }
 
         res.json(variation);
