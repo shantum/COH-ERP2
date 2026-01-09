@@ -163,13 +163,8 @@ router.get('/flat', authenticateToken, async (req, res) => {
 // Get filter options for fabrics
 router.get('/filters', authenticateToken, async (req, res) => {
     try {
-        // Only return fabric types that have at least one active fabric
+        // Return all fabric types (including those without fabrics yet)
         const fabricTypes = await req.prisma.fabricType.findMany({
-            where: {
-                fabrics: {
-                    some: { isActive: true },
-                },
-            },
             select: { id: true, name: true },
             orderBy: { name: 'asc' },
         });
