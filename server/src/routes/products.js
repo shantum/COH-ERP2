@@ -97,7 +97,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update product
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, isActive } = req.body;
+        const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, trimsCost, packagingCost, isActive } = req.body;
 
         // Get current product with variations to check if fabricTypeId is changing
         const currentProduct = await req.prisma.product.findUnique({
@@ -128,6 +128,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 fabricTypeId,
                 baseProductionTimeMins,
                 defaultFabricConsumption,
+                trimsCost: trimsCost !== undefined ? trimsCost : undefined,
+                packagingCost: packagingCost !== undefined ? packagingCost : undefined,
                 isActive,
             },
             include: { fabricType: true },
@@ -203,11 +205,11 @@ router.post('/:productId/variations', authenticateToken, async (req, res) => {
 // Update variation
 router.put('/variations/:id', authenticateToken, async (req, res) => {
     try {
-        const { colorName, standardColor, colorHex, fabricId, hasLining, isActive } = req.body;
+        const { colorName, standardColor, colorHex, fabricId, hasLining, trimsCost, packagingCost, isActive } = req.body;
 
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
-            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, isActive },
+            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, trimsCost: trimsCost !== undefined ? trimsCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
             include: {
                 fabric: { include: { fabricType: true } },
                 product: { select: { id: true, fabricTypeId: true } },
@@ -299,11 +301,11 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
 // Update SKU
 router.put('/skus/:id', authenticateToken, async (req, res) => {
     try {
-        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive } = req.body;
+        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost, packagingCost, isActive } = req.body;
 
         const sku = await req.prisma.sku.update({
             where: { id: req.params.id },
-            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, isActive },
+            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost: trimsCost !== undefined ? trimsCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
         });
 
         res.json(sku);
@@ -373,6 +375,25 @@ router.get('/cogs', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Get COGS error:', error);
         res.status(500).json({ error: 'Failed to fetch COGS data' });
+    }
+});
+
+// Get cost config
+router.get('/cost-config', authenticateToken, async (req, res) => {
+    try {
+        let config = await req.prisma.costConfig.findFirst();
+
+        if (!config) {
+            // Create default config if none exists
+            config = await req.prisma.costConfig.create({
+                data: { laborRatePerMin: 2.5, defaultPackagingCost: 50 },
+            });
+        }
+
+        res.json(config);
+    } catch (error) {
+        console.error('Get cost config error:', error);
+        res.status(500).json({ error: 'Failed to fetch cost config' });
     }
 });
 

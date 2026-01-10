@@ -45,6 +45,8 @@ model Product {
   fabricTypeId              String?  // Default fabric type for this product (e.g., "Linen 60 Lea")
   baseProductionTimeMins    Int      @default(60)
   defaultFabricConsumption  Float?   // Default fabric consumption for SKUs (fallback)
+  trimsCost                 Float?   // Default trims cost (₹) - cascades to variations/SKUs
+  packagingCost             Float?   // Default packaging cost (₹) - cascades to variations/SKUs (null = use global default)
   imageUrl                  String?  // Main product image URL (from Shopify)
   isActive                  Boolean  @default(true)
   createdAt                 DateTime @default(now())
@@ -76,6 +78,8 @@ model Variation {
   fabricId      String
   imageUrl      String? // Color-specific image URL (from Shopify)
   hasLining     Boolean @default(false) // Whether this color variant has lining
+  trimsCost     Float?  // Override trims cost for this variation (null = inherit from Product)
+  packagingCost Float?  // Override packaging cost for this variation (null = inherit from Product)
   isActive      Boolean @default(true)
 
   product Product @relation(fields: [productId], references: [id])
@@ -94,6 +98,8 @@ model Sku {
   size              String  // XS, S, M, L, XL, 2XL, 3XL, 4XL, Free
   fabricConsumption Float   @default(1.5)
   mrp               Float
+  trimsCost         Float?  // Override trims cost for this SKU (null = inherit from Variation/Product)
+  packagingCost     Float?  // Override packaging cost for this SKU (null = inherit from Variation/Product)
   targetStockQty    Int     @default(10)
   targetStockMethod String  @default("day14") // day7, day14, day28, manual
   isActive          Boolean @default(true)

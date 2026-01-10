@@ -60,6 +60,10 @@ function aggregateByVariation(items: any[]): any[] {
                 shopifyQty: null,
                 targetStockQty: null,
                 skuCount: 0,
+                // Use variation-level costs for editing
+                trimsCost: item.variationTrimsCost ?? item.productTrimsCost ?? null,
+                packagingCost: item.variationPackagingCost ?? item.productPackagingCost ?? item.globalPackagingCost ?? null,
+                totalCost: null, // Aggregate doesn't have meaningful total
             });
         }
 
@@ -105,6 +109,10 @@ function aggregateByProduct(items: any[]): any[] {
                 targetStockQty: null,
                 variationCount: 0,
                 skuCount: 0,
+                // Use product-level costs for editing
+                trimsCost: item.productTrimsCost ?? null,
+                packagingCost: item.productPackagingCost ?? item.globalPackagingCost ?? null,
+                totalCost: null, // Aggregate doesn't have meaningful total
             });
         }
 
@@ -419,7 +427,7 @@ function FabricEditPopover({
 const ALL_COLUMN_IDS = [
     'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
-    'skuCode', 'size', 'mrp', 'fabricConsumption',
+    'skuCode', 'size', 'mrp', 'fabricConsumption', 'trimsCost', 'packagingCost', 'totalCost',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
 ];
@@ -440,6 +448,9 @@ const DEFAULT_HEADERS: Record<string, string> = {
     size: 'Size',
     mrp: 'MRP',
     fabricConsumption: 'Fab (m)',
+    trimsCost: 'Trims ₹',
+    packagingCost: 'Pkg ₹',
+    totalCost: 'Cost ₹',
     currentBalance: 'Balance',
     reservedBalance: 'Reserved',
     availableBalance: 'Available',
@@ -662,6 +673,26 @@ export default function Catalog() {
         },
         onError: (err: any) => {
             alert(err.response?.data?.error || 'Failed to update product');
+        },
+    });
+
+    // Inline cost update mutation (trimsCost or packagingCost)
+    const updateCostMutation = useMutation({
+        mutationFn: ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'packagingCost'; value: number | null }) => {
+            const data = { [field]: value };
+            if (level === 'product') {
+                return productsApi.update(id, data);
+            } else if (level === 'variation') {
+                return productsApi.updateVariation(id, data);
+            } else {
+                return productsApi.updateSku(id, data);
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
+        },
+        onError: (err: any) => {
+            alert(err.response?.data?.error || 'Failed to update cost');
         },
     });
 
@@ -962,6 +993,37 @@ export default function Catalog() {
                 params.value != null ? params.value.toFixed(2) : '-',
             cellClass: 'text-right text-xs',
         },
+        {
+            colId: 'trimsCost',
+            headerName: DEFAULT_HEADERS.trimsCost,
+            field: 'trimsCost',
+            width: 70,
+            editable: true,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
+            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
+            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
+        },
+        {
+            colId: 'packagingCost',
+            headerName: DEFAULT_HEADERS.packagingCost,
+            field: 'packagingCost',
+            width: 65,
+            editable: true,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
+            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
+            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
+        },
+        {
+            colId: 'totalCost',
+            headerName: DEFAULT_HEADERS.totalCost,
+            field: 'totalCost',
+            width: 70,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
+            cellClass: 'text-right text-xs font-medium text-emerald-700',
+        },
         // Inventory columns
         {
             colId: 'currentBalance',
@@ -1115,6 +1177,25 @@ export default function Catalog() {
             updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
         }
     }, [updateConsumption]);
+
+    // Handle cost cell value change (trimsCost or packagingCost)
+    const handleCostChange = useCallback((params: any) => {
+        const { data, colDef, newValue } = params;
+        const field = colDef.field as 'trimsCost' | 'packagingCost';
+        if (field !== 'trimsCost' && field !== 'packagingCost') return;
+
+        const newCost = newValue === '' || newValue === null ? null : parseFloat(newValue);
+        if (newValue !== '' && newValue !== null && isNaN(newCost as number)) return;
+
+        // Determine which level to update based on current view
+        if (viewLevel === 'product') {
+            updateCostMutation.mutate({ level: 'product', id: data.productId, field, value: newCost });
+        } else if (viewLevel === 'variation') {
+            updateCostMutation.mutate({ level: 'variation', id: data.variationId, field, value: newCost });
+        } else {
+            updateCostMutation.mutate({ level: 'sku', id: data.skuId, field, value: newCost });
+        }
+    }, [viewLevel, updateCostMutation]);
 
     // Column definitions for consumption matrix view
     const consumptionColumnDefs: ColDef[] = useMemo(() => [
@@ -1495,7 +1576,7 @@ export default function Catalog() {
                             suppressMovable: false,
                         }}
                         animateRows={false}
-                        suppressCellFocus={viewLevel !== 'consumption'}
+                        suppressCellFocus={false}
                         singleClickEdit={true}
                         stopEditingWhenCellsLoseFocus={true}
                         getRowId={(params) => {
@@ -1504,8 +1585,14 @@ export default function Catalog() {
                             if (viewLevel === 'variation') return params.data.variationId;
                             return params.data.skuId;
                         }}
-                        // Handle consumption cell edits
-                        onCellValueChanged={viewLevel === 'consumption' ? handleConsumptionChange : undefined}
+                        // Handle cell edits (consumption and cost fields)
+                        onCellValueChanged={(params) => {
+                            if (viewLevel === 'consumption') {
+                                handleConsumptionChange(params);
+                            } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'packagingCost') {
+                                handleCostChange(params);
+                            }
+                        }}
                         // Pagination
                         pagination={true}
                         paginationPageSize={pageSize === 0 ? 999999 : pageSize}

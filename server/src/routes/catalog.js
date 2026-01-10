@@ -105,6 +105,10 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             excludeCustomSkus: true,
         });
 
+        // Fetch global cost config for default packaging cost
+        const costConfig = await req.prisma.costConfig.findFirst();
+        const globalPackagingCost = costConfig?.defaultPackagingCost || 50;
+
         // Batch fetch Shopify product cache for status lookup
         const shopifyProductIds = [...new Set(
             skus.map(sku => sku.variation.product.shopifyProductId).filter(Boolean)
@@ -138,6 +142,17 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             const product = sku.variation.product;
             const variation = sku.variation;
 
+            // Cascade trims cost: SKU -> Variation -> Product
+            const effectiveTrimsCost = sku.trimsCost ?? variation.trimsCost ?? product.trimsCost ?? null;
+
+            // Cascade packaging cost: SKU -> Variation -> Product -> Global default
+            const effectivePackagingCost = sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? globalPackagingCost;
+
+            // Calculate fabric cost and total cost
+            const fabricCostPerUnit = variation.fabric?.costPerUnit ? Number(variation.fabric.costPerUnit) : 0;
+            const fabricCost = sku.fabricConsumption ? Number(sku.fabricConsumption) * fabricCostPerUnit : 0;
+            const totalCost = fabricCost + (effectiveTrimsCost || 0) + effectivePackagingCost;
+
             return {
                 // SKU identifiers
                 skuId: sku.id,
@@ -145,6 +160,20 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 size: sku.size,
                 mrp: sku.mrp,
                 fabricConsumption: sku.fabricConsumption,
+                trimsCost: effectiveTrimsCost,
+                packagingCost: effectivePackagingCost,
+                // Raw values for editing (to know where override exists)
+                skuTrimsCost: sku.trimsCost,
+                variationTrimsCost: variation.trimsCost,
+                productTrimsCost: product.trimsCost,
+                skuPackagingCost: sku.packagingCost,
+                variationPackagingCost: variation.packagingCost,
+                productPackagingCost: product.packagingCost,
+                globalPackagingCost,
+                // Costing
+                fabricCostPerUnit,
+                fabricCost: fabricCost > 0 ? Math.round(fabricCost * 100) / 100 : null,
+                totalCost: totalCost > 0 ? Math.round(totalCost * 100) / 100 : null,
                 isActive: sku.isActive,
 
                 // Variation (color-level)
