@@ -732,11 +732,17 @@ router.get('/status/archived', async (req, res) => {
     }
 });
 
-// Get cancelled orders
+// Get cancelled orders (fully cancelled OR partially cancelled)
 router.get('/status/cancelled', async (req, res) => {
     try {
         const orders = await req.prisma.order.findMany({
-            where: { status: 'cancelled', isArchived: false },
+            where: {
+                OR: [
+                    { status: 'cancelled' },
+                    { partiallyCancelled: true },
+                ],
+                isArchived: false,
+            },
             include: {
                 customer: true,
                 orderLines: {

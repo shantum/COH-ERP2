@@ -182,6 +182,8 @@ export interface Order {
   originalOrderId: string | null;
   originalOrder?: Order;
   exchangeOrders?: Order[];
+  // Partial cancellation tracking
+  partiallyCancelled: boolean;
   customer?: Customer;
   orderLines?: OrderLine[];
   // Shopify cache data (single source of truth)

@@ -87,6 +87,21 @@ export const ORDER_VIEWS = {
         defaultLimit: 100,
     },
 
+    cancelled: {
+        name: 'Cancelled Orders',
+        description: 'Fully or partially cancelled orders',
+        where: {
+            OR: [
+                { status: 'cancelled' },
+                { partiallyCancelled: true },
+            ],
+            isArchived: false,
+        },
+        orderBy: { createdAt: 'desc' },
+        enrichment: ['customerStats', 'lineStatusCounts'],
+        defaultLimit: 200,
+    },
+
     all: {
         name: 'All Orders',
         description: 'All orders without filtering',
@@ -427,6 +442,9 @@ export const ORDER_UNIFIED_SELECT = {
     // Exchange order fields
     isExchange: true,
     originalOrderId: true,
+
+    // Partial cancellation
+    partiallyCancelled: true,
 
     // Fulfillment fields
     awbNumber: true,

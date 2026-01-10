@@ -405,6 +405,9 @@ model Order {
   shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
   shopifyData     String?   // DEPRECATED: Use ShopifyOrderCache instead. Kept for Railway migration compatibility.
 
+  // Partial cancellation tracking
+  partiallyCancelled Boolean @default(false)  // True if any line is cancelled but order has active lines
+
   // Exchange order tracking
   isExchange       Boolean   @default(false)  // True for exchange orders
   originalOrderId  String?                     // Optional link to original order being exchanged

@@ -933,6 +933,7 @@ router.post('/lines/:lineId/cancel', authenticateToken, async (req, res) => {
             const activeLines = allLines.filter(l => l.id === req.params.lineId ? false : l.lineStatus !== 'cancelled');
 
             if (activeLines.length === 0) {
+                // All lines cancelled - mark order as fully cancelled
                 await tx.order.update({
                     where: { id: line.orderId },
                     data: {
@@ -940,13 +941,18 @@ router.post('/lines/:lineId/cancel', authenticateToken, async (req, res) => {
                         terminalStatus: 'cancelled',
                         terminalAt: new Date(),
                         totalAmount: 0,
+                        partiallyCancelled: false, // Fully cancelled, not partial
                     },
                 });
             } else {
+                // Some lines still active - mark as partially cancelled
                 const newTotal = activeLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0);
                 await tx.order.update({
                     where: { id: line.orderId },
-                    data: { totalAmount: newTotal },
+                    data: {
+                        totalAmount: newTotal,
+                        partiallyCancelled: true,
+                    },
                 });
             }
         });
@@ -984,9 +990,27 @@ router.post('/lines/:lineId/uncancel', authenticateToken, async (req, res) => {
                 data: { lineStatus: 'pending' },
             });
 
-            const newTotal = (line.order.totalAmount || 0) + (line.qty * line.unitPrice);
+            // Get all lines to check if any cancelled lines remain
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId: line.orderId },
+            });
 
-            const updateData = { totalAmount: newTotal };
+            // Calculate new total from all non-cancelled lines (including the one we just restored)
+            const activeLines = allLines.filter(l =>
+                l.id === req.params.lineId || l.lineStatus !== 'cancelled'
+            );
+            const newTotal = activeLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0);
+
+            // Check if any cancelled lines remain (excluding the one we just restored)
+            const remainingCancelledLines = allLines.filter(l =>
+                l.id !== req.params.lineId && l.lineStatus === 'cancelled'
+            );
+
+            const updateData = {
+                totalAmount: newTotal,
+                partiallyCancelled: remainingCancelledLines.length > 0,
+            };
+
             if (line.order.status === 'cancelled') {
                 updateData.status = 'open';
                 updateData.terminalStatus = null;
