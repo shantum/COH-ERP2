@@ -263,6 +263,8 @@ router.post('/:id/cancel', authenticateToken, async (req, res) => {
                 where: { id: req.params.id },
                 data: {
                     status: 'cancelled',
+                    terminalStatus: 'cancelled',
+                    terminalAt: new Date(),
                     internalNotes: reason
                         ? (order.internalNotes ? `${order.internalNotes}\n\nCancelled: ${reason}` : `Cancelled: ${reason}`)
                         : order.internalNotes,
@@ -307,10 +309,14 @@ router.post('/:id/uncancel', authenticateToken, async (req, res) => {
         // Issue #8: Uncancel needs to restore line statuses to pending
         // Note: We don't auto-allocate on uncancel - that requires manual allocation
         await req.prisma.$transaction(async (tx) => {
-            // Restore order to open status
+            // Restore order to open status and clear terminal status
             await tx.order.update({
                 where: { id: req.params.id },
-                data: { status: 'open' },
+                data: {
+                    status: 'open',
+                    terminalStatus: null,
+                    terminalAt: null,
+                },
             });
 
             // Restore all lines to pending status
@@ -641,28 +647,112 @@ router.post('/:id/unarchive', authenticateToken, async (req, res) => {
     }
 });
 
-// Auto-archive shipped orders older than 90 days
+/**
+ * Auto-archive orders based on terminal status (Zen Philosophy)
+ *
+ * Rules:
+ * - Prepaid delivered: Archive after 15 days from terminalAt
+ * - COD delivered: Archive after 15 days from terminalAt (only if remitted)
+ * - RTO received: Archive after 15 days from terminalAt
+ * - Cancelled: Archive after 1 day from terminalAt
+ * - Legacy: Also archive shipped orders >90 days (backward compat)
+ */
 export async function autoArchiveOldOrders(prisma) {
     try {
+        const fifteenDaysAgo = new Date();
+        fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+
+        const oneDayAgo = new Date();
+        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
         const ninetyDaysAgo = new Date();
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-        const result = await prisma.order.updateMany({
+        const now = new Date();
+        let totalArchived = 0;
+
+        // 1. Archive delivered prepaid orders (15 days)
+        const prepaidResult = await prisma.order.updateMany({
+            where: {
+                terminalStatus: 'delivered',
+                paymentMethod: { not: 'COD' },
+                terminalAt: { lt: fifteenDaysAgo },
+                isArchived: false,
+            },
+            data: {
+                isArchived: true,
+                archivedAt: now,
+            },
+        });
+        totalArchived += prepaidResult.count;
+
+        // 2. Archive delivered COD orders (15 days, only if remitted)
+        const codResult = await prisma.order.updateMany({
+            where: {
+                terminalStatus: 'delivered',
+                paymentMethod: 'COD',
+                codRemittedAt: { not: null },
+                terminalAt: { lt: fifteenDaysAgo },
+                isArchived: false,
+            },
+            data: {
+                isArchived: true,
+                archivedAt: now,
+            },
+        });
+        totalArchived += codResult.count;
+
+        // 3. Archive RTO received orders (15 days)
+        const rtoResult = await prisma.order.updateMany({
+            where: {
+                terminalStatus: 'rto_received',
+                terminalAt: { lt: fifteenDaysAgo },
+                isArchived: false,
+            },
+            data: {
+                isArchived: true,
+                archivedAt: now,
+            },
+        });
+        totalArchived += rtoResult.count;
+
+        // 4. Archive cancelled orders (1 day grace)
+        const cancelledResult = await prisma.order.updateMany({
+            where: {
+                terminalStatus: 'cancelled',
+                terminalAt: { lt: oneDayAgo },
+                isArchived: false,
+            },
+            data: {
+                isArchived: true,
+                archivedAt: now,
+            },
+        });
+        totalArchived += cancelledResult.count;
+
+        // 5. Legacy: Archive shipped orders >90 days (backward compat for orders without terminalStatus)
+        const legacyResult = await prisma.order.updateMany({
             where: {
                 status: 'shipped',
+                terminalStatus: null,
                 isArchived: false,
                 shippedAt: { lt: ninetyDaysAgo },
             },
             data: {
                 isArchived: true,
-                archivedAt: new Date(),
+                archivedAt: now,
             },
         });
+        totalArchived += legacyResult.count;
 
-        if (result.count > 0) {
-            console.log(`Auto-archived ${result.count} shipped orders older than 90 days`);
+        if (totalArchived > 0) {
+            console.log(`[Auto-Archive] Archived ${totalArchived} orders: ` +
+                `${prepaidResult.count} prepaid, ${codResult.count} COD, ` +
+                `${rtoResult.count} RTO, ${cancelledResult.count} cancelled, ` +
+                `${legacyResult.count} legacy`);
         }
-        return result.count;
+
+        return totalArchived;
     } catch (error) {
         console.error('Auto-archive error:', error);
         return 0;
@@ -845,7 +935,12 @@ router.post('/lines/:lineId/cancel', authenticateToken, async (req, res) => {
             if (activeLines.length === 0) {
                 await tx.order.update({
                     where: { id: line.orderId },
-                    data: { status: 'cancelled', totalAmount: 0 },
+                    data: {
+                        status: 'cancelled',
+                        terminalStatus: 'cancelled',
+                        terminalAt: new Date(),
+                        totalAmount: 0,
+                    },
                 });
             } else {
                 const newTotal = activeLines.reduce((sum, l) => sum + (l.qty * l.unitPrice), 0);
@@ -894,6 +989,8 @@ router.post('/lines/:lineId/uncancel', authenticateToken, async (req, res) => {
             const updateData = { totalAmount: newTotal };
             if (line.order.status === 'cancelled') {
                 updateData.status = 'open';
+                updateData.terminalStatus = null;
+                updateData.terminalAt = null;
             }
 
             await tx.order.update({

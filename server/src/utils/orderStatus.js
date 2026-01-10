@@ -235,12 +235,101 @@ export function getLineStatusSummary(order) {
     return summary;
 }
 
+// ============================================
+// ACTION-ORIENTED ORDER STATE (Zen Philosophy)
+// ============================================
+
+/**
+ * Compute the action-oriented order state
+ * This is what users see - focused on "what do I need to do?"
+ *
+ * States:
+ *   - needs_fulfillment: Not yet shipped
+ *   - in_transit: Shipped, awaiting delivery
+ *   - at_risk: COD >7 days OR RTO in progress
+ *   - pending_payment: COD delivered, awaiting remittance
+ *   - completed: Done (delivered/rto_received/cancelled)
+ *   - archived: Historical (no longer active)
+ *
+ * @param {Object} order - Order with necessary fields
+ * @returns {string} Action-oriented order state
+ */
+export function computeOrderState(order) {
+    // Archived is final
+    if (order.isArchived) return 'archived';
+
+    // Completed states (terminal status set)
+    if (order.terminalStatus) return 'completed';
+
+    // COD pending payment (delivered but not remitted)
+    if (order.trackingStatus === 'delivered' &&
+        order.paymentMethod === 'COD' &&
+        !order.codRemittedAt) {
+        return 'pending_payment';
+    }
+
+    // At risk: RTO in progress OR COD in transit > 7 days
+    if (order.status === 'shipped') {
+        const isRto = order.trackingStatus?.startsWith('rto_');
+        if (isRto) return 'at_risk';
+
+        // COD orders in transit > 7 days are at risk
+        if (order.paymentMethod === 'COD' && order.shippedAt) {
+            const daysSinceShipped = Math.floor(
+                (Date.now() - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24)
+            );
+            if (daysSinceShipped > 7) return 'at_risk';
+        }
+
+        return 'in_transit';
+    }
+
+    // Default: needs fulfillment
+    return 'needs_fulfillment';
+}
+
+/**
+ * Calculate processing time metrics for an order
+ *
+ * @param {Object} order - Order with date fields
+ * @returns {Object} Processing time metrics in days
+ */
+export function calculateProcessingTimes(order) {
+    const times = {
+        orderToShipped: null,
+        shippedToDelivered: null,
+        totalOrderToDelivered: null,
+    };
+
+    if (order.shippedAt && order.orderDate) {
+        times.orderToShipped = Math.floor(
+            (new Date(order.shippedAt) - new Date(order.orderDate)) / (1000 * 60 * 60 * 24)
+        );
+    }
+
+    if (order.deliveredAt && order.shippedAt) {
+        times.shippedToDelivered = Math.floor(
+            (new Date(order.deliveredAt) - new Date(order.shippedAt)) / (1000 * 60 * 60 * 24)
+        );
+    }
+
+    if (order.deliveredAt && order.orderDate) {
+        times.totalOrderToDelivered = Math.floor(
+            (new Date(order.deliveredAt) - new Date(order.orderDate)) / (1000 * 60 * 60 * 24)
+        );
+    }
+
+    return times;
+}
+
 export default {
     computeOrderStatus,
     recomputeOrderStatus,
     batchRecomputeOrderStatus,
     isValidLineStatusTransition,
     getLineStatusSummary,
+    computeOrderState,
+    calculateProcessingTimes,
     LINE_STATUSES,
     SHIPPED_OR_BEYOND
 };

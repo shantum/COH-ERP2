@@ -726,11 +726,16 @@ router.post('/rto-inward-line', authenticateToken, async (req, res) => {
             const pendingLines = allLines.filter(l => l.rtoCondition === null);
             const allLinesProcessed = pendingLines.length === 0;
 
-            // If all lines processed, update order's rtoReceivedAt
+            // If all lines processed, update order's rtoReceivedAt and terminal status
             if (allLinesProcessed) {
+                const now = new Date();
                 await tx.order.update({
                     where: { id: orderLine.orderId },
-                    data: { rtoReceivedAt: new Date() }
+                    data: {
+                        rtoReceivedAt: now,
+                        terminalStatus: 'rto_received',
+                        terminalAt: now,
+                    }
                 });
             }
 

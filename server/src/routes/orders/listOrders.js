@@ -886,4 +886,113 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+// ============================================
+// DASHBOARD STATS (Zen Philosophy)
+// ============================================
+
+/**
+ * GET /orders/dashboard-stats
+ * Returns counts for all action queues (for dashboard summary)
+ */
+router.get('/dashboard-stats', async (req, res) => {
+    try {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        // Run all count queries in parallel
+        const [
+            readyToShip,
+            needsAttention,
+            inTransit,
+            rtoInProgress,
+            codAtRisk,
+            pendingPayment,
+            completed,
+        ] = await Promise.all([
+            // Ready to ship: Open, not on hold, not archived
+            req.prisma.order.count({
+                where: {
+                    status: 'open',
+                    isArchived: false,
+                    isOnHold: false,
+                },
+            }),
+
+            // Needs attention: On hold OR RTO delivered but not processed
+            req.prisma.order.count({
+                where: {
+                    OR: [
+                        { isOnHold: true },
+                        { trackingStatus: 'rto_delivered', terminalStatus: null },
+                    ],
+                    isArchived: false,
+                },
+            }),
+
+            // In transit: Shipped, no terminal status, not RTO
+            req.prisma.order.count({
+                where: {
+                    status: 'shipped',
+                    terminalStatus: null,
+                    isArchived: false,
+                    NOT: {
+                        trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                    },
+                },
+            }),
+
+            // RTO in progress
+            req.prisma.order.count({
+                where: {
+                    trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] },
+                    isArchived: false,
+                },
+            }),
+
+            // COD at risk: COD shipped > 7 days ago, not terminal
+            req.prisma.order.count({
+                where: {
+                    status: 'shipped',
+                    paymentMethod: 'COD',
+                    terminalStatus: null,
+                    shippedAt: { lt: sevenDaysAgo },
+                    isArchived: false,
+                },
+            }),
+
+            // Pending payment: Delivered COD awaiting remittance
+            req.prisma.order.count({
+                where: {
+                    terminalStatus: 'delivered',
+                    paymentMethod: 'COD',
+                    codRemittedAt: null,
+                    isArchived: false,
+                },
+            }),
+
+            // Completed (last 15 days for reference)
+            req.prisma.order.count({
+                where: {
+                    terminalStatus: { not: null },
+                    isArchived: false,
+                },
+            }),
+        ]);
+
+        res.json({
+            readyToShip,
+            needsAttention,
+            inTransit,
+            watchList: rtoInProgress + codAtRisk, // Combined watch list
+            rtoInProgress,
+            codAtRisk,
+            pendingPayment,
+            completed,
+        });
+    } catch (error) {
+        console.error('Dashboard stats error:', error);
+        res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+    }
+});
+
 export default router;

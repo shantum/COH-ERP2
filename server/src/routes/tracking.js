@@ -334,6 +334,8 @@ router.post('/sync/backfill', authenticateToken, async (req, res) => {
                 id: true,
                 orderNumber: true,
                 awbNumber: true,
+                customerId: true,
+                rtoInitiatedAt: true,
             },
             orderBy: { shippedAt: 'desc' },
             take: limit,
@@ -405,6 +407,14 @@ router.post('/sync/backfill', authenticateToken, async (req, res) => {
                         // RTO
                         if (rawData.return_tracking_no) {
                             updateData.rtoInitiatedAt = new Date();
+
+                            // Increment customer RTO count on first RTO initiation
+                            if (!order.rtoInitiatedAt && order.customerId) {
+                                await req.prisma.customer.update({
+                                    where: { id: order.customerId },
+                                    data: { rtoCount: { increment: 1 } },
+                                });
+                            }
                         }
 
                         await req.prisma.order.update({

@@ -91,6 +91,7 @@ router.get('/', async (req, res) => {
                 avgOrderValue,
                 returns,
                 exchanges,
+                rtoCount: customer.rtoCount || 0,
                 returnRate: parseFloat(returnRate.toFixed(1)),
                 customerTier,
                 firstOrderDate: sortedOrders.length > 0 ? sortedOrders[sortedOrders.length - 1].orderDate : null,

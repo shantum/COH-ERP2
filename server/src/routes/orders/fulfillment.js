@@ -531,6 +531,7 @@ router.post('/:id/mark-rto', authenticateToken, async (req, res) => {
     try {
         const order = await req.prisma.order.findUnique({
             where: { id: req.params.id },
+            select: { id: true, status: true, customerId: true, rtoInitiatedAt: true },
         });
 
         if (!order) {
@@ -541,11 +542,23 @@ router.post('/:id/mark-rto', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Order must be shipped to initiate RTO' });
         }
 
-        const updated = await req.prisma.order.update({
-            where: { id: req.params.id },
-            data: {
-                rtoInitiatedAt: new Date(),
-            },
+        const updated = await req.prisma.$transaction(async (tx) => {
+            const updatedOrder = await tx.order.update({
+                where: { id: req.params.id },
+                data: {
+                    rtoInitiatedAt: new Date(),
+                },
+            });
+
+            // Increment customer RTO count on first RTO initiation
+            if (!order.rtoInitiatedAt && order.customerId) {
+                await tx.customer.update({
+                    where: { id: order.customerId },
+                    data: { rtoCount: { increment: 1 } },
+                });
+            }
+
+            return updatedOrder;
         });
 
         res.json(updated);

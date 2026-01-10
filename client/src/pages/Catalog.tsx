@@ -100,6 +100,8 @@ function aggregateByVariation(items: any[]): any[] {
 
     // Calculate averages and status
     for (const group of groups.values()) {
+        // Show SKU count in SKU Code column at variation level
+        group.skuCode = group.skuCount === 1 ? '1 SKU' : `${group.skuCount} SKUs`;
         group.status = group.availableBalance === 0 ? 'out_of_stock' :
                        group.availableBalance < 10 ? 'below_target' : 'ok';
         // Calculate averages
@@ -159,6 +161,7 @@ function aggregateByProduct(items: any[]): any[] {
                 variationCount: 0,
                 skuCount: 0,
                 skuIds: [], // Track all SKU IDs for bulk updates
+                _uniqueFabricIds: new Set<string>(), // Track unique fabric IDs
                 // Use product-level costs for editing
                 trimsCost: item.productTrimsCost ?? null,
                 liningCost: item.productLiningCost ?? null,
@@ -180,6 +183,7 @@ function aggregateByProduct(items: any[]): any[] {
 
         const group = groups.get(key)!;
         group.skuIds.push(item.skuId); // Collect SKU IDs
+        if (item.fabricId) group._uniqueFabricIds.add(item.fabricId); // Track unique fabrics
         group.currentBalance += item.currentBalance || 0;
         group.reservedBalance += item.reservedBalance || 0;
         group.availableBalance += item.availableBalance || 0;
@@ -211,6 +215,12 @@ function aggregateByProduct(items: any[]): any[] {
 
     for (const [productId, group] of groups.entries()) {
         group.variationCount = variationCounts.get(productId)?.size || 0;
+        // Show color count, fabric count, and SKU count at product level
+        const colorCount = group.variationCount;
+        const fabricCount = group._uniqueFabricIds?.size || 0;
+        group.colorName = colorCount === 1 ? '1 color' : `${colorCount} colors`;
+        group.fabricName = fabricCount === 1 ? '1 fabric' : `${fabricCount} fabrics`;
+        group.skuCode = group.skuCount === 1 ? '1 SKU' : `${group.skuCount} SKUs`;
         group.status = group.availableBalance === 0 ? 'out_of_stock' :
                        group.availableBalance < 20 ? 'below_target' : 'ok';
         // Calculate averages
@@ -240,6 +250,7 @@ function aggregateByProduct(items: any[]): any[] {
         delete group._totalCostSum;
         delete group._exGstPriceSum;
         delete group._gstAmountSum;
+        delete group._uniqueFabricIds;
     }
 
     return Array.from(groups.values());
@@ -1104,9 +1115,9 @@ export default function Catalog() {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
-                // Only show fabric editor for variation and SKU views
+                // Show fabric count at product level, editor for variation and SKU views
                 if (viewLevel === 'product') {
-                    return <span className="text-xs text-gray-400">-</span>;
+                    return <span className="text-xs text-gray-500">{row.fabricName || '-'}</span>;
                 }
                 return (
                     <FabricEditPopover

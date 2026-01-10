@@ -185,6 +185,25 @@ export const ordersApi = {
     getArchived: (params?: { limit?: number; offset?: number; days?: number; search?: string; sortBy?: string }) =>
         api.get('/orders', { params: { view: 'archived', ...params } }),
 
+    // Action-oriented views (Zen Philosophy)
+    getReadyToShip: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'ready_to_ship', ...params } }),
+
+    getNeedsAttention: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'needs_attention', ...params } }),
+
+    getWatchList: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'watch_list', ...params } }),
+
+    getInTransit: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'in_transit', ...params } }),
+
+    getPendingPayment: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'pending_payment', ...params } }),
+
+    getCompleted: (params?: { limit?: number; offset?: number; search?: string }) =>
+        api.get('/orders', { params: { view: 'completed', ...params } }),
+
     getCancelled: () => api.get('/orders/status/cancelled'),
     archive: (id: string) => api.post(`/orders/${id}/archive`),
     unarchive: (id: string) => api.post(`/orders/${id}/unarchive`),
@@ -217,6 +236,8 @@ export const ordersApi = {
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),
     getArchivedAnalytics: (params?: { days?: number }) => api.get('/orders/archived/analytics', { params }),
     getRtoSummary: () => api.get('/orders/rto/summary'),
+    // Dashboard stats (Zen Philosophy - action queue counts)
+    getDashboardStats: () => api.get('/orders/dashboard-stats'),
     // RTO actions
     markDelivered: (id: string) => api.post(`/orders/${id}/mark-delivered`),
     markRto: (id: string) => api.post(`/orders/${id}/mark-rto`),

@@ -95,6 +95,125 @@ export const ORDER_VIEWS = {
         enrichment: ['customerStats'],
         defaultLimit: 50,
     },
+
+    // ============================================
+    // ACTION-ORIENTED VIEWS (Zen Philosophy)
+    // "What needs my attention right now?"
+    // ============================================
+
+    /**
+     * Ready to Ship: What can I ship now?
+     * Open orders not on hold, ready for fulfillment
+     */
+    ready_to_ship: {
+        name: 'Ready to Ship',
+        description: 'Orders ready for fulfillment',
+        where: {
+            status: 'open',
+            isArchived: false,
+            isOnHold: false,
+        },
+        orderBy: { orderDate: 'asc' }, // FIFO - oldest first
+        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
+        defaultLimit: 10000,
+    },
+
+    /**
+     * Needs Attention: What's stuck or unusual?
+     * Orders on hold, or RTO awaiting processing
+     */
+    needs_attention: {
+        name: 'Needs Attention',
+        description: 'Orders requiring manual attention',
+        where: {
+            OR: [
+                { isOnHold: true },
+                // RTO delivered but not yet processed (terminalStatus still null)
+                { trackingStatus: 'rto_delivered', terminalStatus: null },
+            ],
+            isArchived: false,
+        },
+        orderBy: { orderDate: 'asc' },
+        enrichment: ['customerStats', 'rtoStatus'],
+        defaultLimit: 200,
+    },
+
+    /**
+     * Watch List: What's at risk in transit?
+     * COD orders >7 days OR RTO in progress
+     */
+    watch_list: {
+        name: 'Watch List',
+        description: 'At-risk orders requiring monitoring',
+        where: {
+            OR: [
+                // RTO in progress (not yet received)
+                { trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] } },
+            ],
+            isArchived: false,
+            terminalStatus: null,
+        },
+        // Note: COD >7 days requires runtime filter (see enrichment)
+        orderBy: { shippedAt: 'asc' }, // Oldest at-risk first
+        enrichment: ['daysInTransit', 'customerStats'],
+        runtimeFilters: ['codAtRisk'], // Applied after query
+        defaultLimit: 200,
+    },
+
+    /**
+     * In Transit: Orders in transit (happy path monitoring)
+     * Shipped but not yet terminal
+     */
+    in_transit: {
+        name: 'In Transit',
+        description: 'Orders currently in transit',
+        where: {
+            status: 'shipped',
+            terminalStatus: null,
+            isArchived: false,
+        },
+        // Exclude RTO orders (they go to watch_list)
+        excludeWhere: {
+            trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+        },
+        orderBy: { shippedAt: 'desc' },
+        enrichment: ['daysInTransit', 'trackingStatus', 'customerStats'],
+        defaultLimit: 200,
+    },
+
+    /**
+     * Pending Payment: COD delivered awaiting remittance
+     * Finance queue for payment reconciliation
+     */
+    pending_payment: {
+        name: 'Pending Payment',
+        description: 'Delivered COD orders awaiting payment',
+        where: {
+            terminalStatus: 'delivered',
+            paymentMethod: 'COD',
+            codRemittedAt: null,
+            isArchived: false,
+        },
+        orderBy: { terminalAt: 'asc' }, // Oldest pending first
+        enrichment: ['daysSinceDelivery', 'customerStats'],
+        defaultLimit: 200,
+    },
+
+    /**
+     * Completed: All orders that reached terminal status
+     * Reference only - everything that's "done"
+     */
+    completed: {
+        name: 'Completed',
+        description: 'Orders that have reached a terminal state',
+        where: {
+            terminalStatus: { not: null },
+            isArchived: false,
+        },
+        orderBy: { terminalAt: 'desc' },
+        enrichment: ['customerStats'],
+        defaultLimit: 100,
+    },
 };
 
 // ============================================
@@ -328,6 +447,10 @@ export const ORDER_UNIFIED_SELECT = {
     // RTO fields
     rtoInitiatedAt: true,
     rtoReceivedAt: true,
+
+    // Terminal status (zen philosophy: what's the final state?)
+    terminalStatus: true,
+    terminalAt: true,
 
     // COD fields
     codRemittedAt: true,

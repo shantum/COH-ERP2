@@ -486,18 +486,22 @@ export default function Customers() {
                                 </div>
 
                                 {/* Stats Grid */}
-                                <div className="grid grid-cols-3 gap-2 md:gap-4 p-3 md:p-4 border-b bg-gray-50">
+                                <div className="grid grid-cols-4 gap-2 md:gap-4 p-3 md:p-4 border-b bg-gray-50">
                                     <div className="text-center">
                                         <p className="text-xl md:text-2xl font-bold text-gray-900">{customerDetail.totalOrders}</p>
-                                        <p className="text-xs md:text-sm text-gray-500">Total Orders</p>
+                                        <p className="text-xs md:text-sm text-gray-500">Orders</p>
                                     </div>
                                     <div className="text-center">
                                         <p className="text-xl md:text-2xl font-bold text-gray-900">{customerDetail.returnRequests?.length || 0}</p>
                                         <p className="text-xs md:text-sm text-gray-500">Returns</p>
                                     </div>
                                     <div className="text-center">
+                                        <p className="text-xl md:text-2xl font-bold text-orange-600">{customerDetail.rtoCount || 0}</p>
+                                        <p className="text-xs md:text-sm text-gray-500">RTOs</p>
+                                    </div>
+                                    <div className="text-center">
                                         <p className="text-xl md:text-2xl font-bold text-gray-900">{customerDetail.productAffinity?.length || 0}</p>
-                                        <p className="text-xs md:text-sm text-gray-500">Products Ordered</p>
+                                        <p className="text-xs md:text-sm text-gray-500">Products</p>
                                     </div>
                                 </div>
 

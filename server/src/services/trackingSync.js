@@ -72,6 +72,8 @@ async function getAwbsNeedingUpdate() {
                     orderNumber: true,
                     status: true,
                     paymentMethod: true,
+                    customerId: true,
+                    rtoInitiatedAt: true,
                 }
             }
         },
@@ -87,6 +89,8 @@ async function getAwbsNeedingUpdate() {
                 orderNumber: line.order.orderNumber,
                 orderStatus: line.order.status,
                 paymentMethod: line.order.paymentMethod,
+                customerId: line.order.customerId,
+                rtoInitiatedAt: line.order.rtoInitiatedAt,
                 previousTrackingStatus: line.trackingStatus,
             });
         }
@@ -137,17 +141,10 @@ async function updateLineTracking(awbNumber, trackingData, orderInfo) {
     let statusChanged = false;
 
     if (trackingData.internalStatus === 'delivered') {
-        // Auto-archive prepaid orders
-        const isPrepaid = orderInfo.paymentMethod === 'Prepaid' ||
-                          orderInfo.paymentMethod === 'prepaid';
-
-        if (isPrepaid && orderInfo.orderStatus === 'shipped') {
-            orderUpdateData.status = 'archived';
-            orderUpdateData.isArchived = true;
-            orderUpdateData.archivedAt = new Date();
-            statusChanged = true;
-            console.log(`[Tracking Sync] Auto-archived prepaid order ${orderInfo.orderNumber} (delivered)`);
-        }
+        // Set terminal status for delivered orders
+        orderUpdateData.terminalStatus = 'delivered';
+        orderUpdateData.terminalAt = lineUpdateData.deliveredAt || new Date();
+        console.log(`[Tracking Sync] Order ${orderInfo.orderNumber} terminal status -> delivered`);
     }
 
     if (trackingData.internalStatus === 'rto_delivered') {
@@ -174,6 +171,15 @@ async function updateLineTracking(awbNumber, trackingData, orderInfo) {
     }
     if (lineUpdateData.rtoInitiatedAt) {
         orderUpdateData.rtoInitiatedAt = lineUpdateData.rtoInitiatedAt;
+
+        // Increment customer RTO count on first RTO initiation
+        if (!orderInfo.rtoInitiatedAt && orderInfo.customerId) {
+            await prisma.customer.update({
+                where: { id: orderInfo.customerId },
+                data: { rtoCount: { increment: 1 } },
+            });
+            console.log(`[Tracking Sync] Incremented rtoCount for customer ${orderInfo.customerId}`);
+        }
     }
     if (lineUpdateData.rtoReceivedAt) {
         orderUpdateData.rtoReceivedAt = lineUpdateData.rtoReceivedAt;
