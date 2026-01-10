@@ -1210,18 +1210,23 @@ router.post('/lines/:lineId/customize', authenticateToken, validate(CustomizeLin
 
 /**
  * Remove customization from an order line
- * DELETE /lines/:lineId/customize
+ * DELETE /lines/:lineId/customize?force=true
  *
  * Reverts the order line to the original SKU and deletes the custom SKU.
  * Only allowed if no inventory transactions or production batches exist.
+ * Pass force=true to delete any existing inventory transactions and production batches.
  */
 router.delete('/lines/:lineId/customize', authenticateToken, async (req, res) => {
     try {
         const { lineId } = req.params;
+        const force = req.query.force === 'true';
 
-        const result = await removeCustomization(req.prisma, lineId);
+        const result = await removeCustomization(req.prisma, lineId, { force });
 
-        console.log(`[Uncustomize] Order ${result.orderLine.order.orderNumber}: Removed custom SKU ${result.deletedCustomSkuCode} from line ${lineId}`);
+        const forceMsg = result.forcedCleanup
+            ? ` (force-deleted ${result.deletedTransactions} inventory txns, ${result.deletedBatches} batches)`
+            : '';
+        console.log(`[Uncustomize] Order ${result.orderLine.order.orderNumber}: Removed custom SKU ${result.deletedCustomSkuCode} from line ${lineId}${forceMsg}`);
 
         res.json({
             id: result.orderLine.id,
@@ -1229,6 +1234,9 @@ router.delete('/lines/:lineId/customize', authenticateToken, async (req, res) =>
             skuId: result.orderLine.sku.id,
             isCustomized: false,
             deletedCustomSkuCode: result.deletedCustomSkuCode,
+            forcedCleanup: result.forcedCleanup,
+            deletedTransactions: result.deletedTransactions,
+            deletedBatches: result.deletedBatches,
         });
     } catch (error) {
         // Handle specific error codes from removeCustomization

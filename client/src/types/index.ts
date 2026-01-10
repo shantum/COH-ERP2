@@ -406,6 +406,12 @@ export interface ShipOrderData {
   courier: string;
 }
 
+export interface ShipLinesData {
+  lineIds: string[];
+  awbNumber: string;
+  courier: string;
+}
+
 // ============================================
 // UI HELPER TYPES
 // ============================================

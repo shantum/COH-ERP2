@@ -415,6 +415,8 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     pack: 'Pack',
     ship: 'Ship',
     shopifyStatus: 'Shopify',
+    shopifyAwb: 'Shopify AWB',
+    shopifyCourier: 'Shopify Courier',
     awb: 'AWB',
     courier: 'Courier',
     trackingStatus: 'Tracking',

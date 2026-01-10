@@ -40,6 +40,7 @@ import {
     CustomizationModal,
     SummaryPanel,
     TrackingModal,
+    ProcessShippedModal,
 } from '../components/orders';
 
 export default function Orders() {
@@ -83,10 +84,10 @@ export default function Orders() {
     const [notesText, setNotesText] = useState('');
     const [pendingShipOrder, setPendingShipOrder] = useState<any>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+    const [showProcessShippedModal, setShowProcessShippedModal] = useState(false);
 
     // Shipping form state
     const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
-    const [shippingChecked, setShippingChecked] = useState<Set<string>>(new Set());
     // Optimistic updates handle button state - use empty set for grid interface compatibility
     const allocatingLines = new Set<string>();
 
@@ -151,7 +152,6 @@ export default function Orders() {
             setSelectedOrder(null);
             setPendingShipOrder(null);
             setShipForm({ awbNumber: '', courier: '' });
-            setShippingChecked(new Set());
         },
         onCreateSuccess: () => {
             setShowCreateOrder(false);
@@ -165,6 +165,9 @@ export default function Orders() {
         onNotesSuccess: () => {
             setNotesOrder(null);
             setNotesText('');
+        },
+        onProcessMarkedShippedSuccess: () => {
+            setShowProcessShippedModal(false);
         },
     });
 
@@ -296,24 +299,46 @@ export default function Orders() {
         return openOrders.filter((order: any) => order.awbNumber && order.courier).length;
     }, [openOrders]);
 
-    // Handlers
-    const handleShippingCheck = useCallback(
-        (lineId: string, order: any) => {
-            const newChecked = new Set(shippingChecked);
-            if (newChecked.has(lineId)) {
-                newChecked.delete(lineId);
-            } else {
-                newChecked.add(lineId);
+    // Count lines marked as shipped (ready for batch processing)
+    const markedShippedCount = useMemo(() => {
+        if (!openOrders) return 0;
+        let count = 0;
+        for (const order of openOrders) {
+            const lines = order.orderLines || [];
+            for (const line of lines) {
+                if (line.lineStatus === 'marked_shipped') {
+                    count++;
+                }
             }
-            setShippingChecked(newChecked);
+        }
+        return count;
+    }, [openOrders]);
 
-            const orderLineIds = order.orderLines?.map((l: any) => l.id) || [];
-            const allChecked = orderLineIds.every((id: string) => newChecked.has(id));
-            if (allChecked && orderLineIds.length > 0) {
-                setPendingShipOrder(order);
-            }
-        },
-        [shippingChecked]
+    // Get orders with marked_shipped lines for the modal
+    const ordersWithMarkedShipped = useMemo(() => {
+        if (!openOrders) return [];
+        return openOrders.filter((order: any) => {
+            const lines = order.orderLines || [];
+            return lines.some((line: any) => line.lineStatus === 'marked_shipped');
+        });
+    }, [openOrders]);
+
+    // Handlers - mark shipped workflow
+    const handleMarkShippedLine = useCallback(
+        (lineId: string, data?: { awbNumber?: string; courier?: string }) =>
+            mutations.markShippedLine.mutate({ lineId, data }),
+        [mutations.markShippedLine]
+    );
+
+    const handleUnmarkShippedLine = useCallback(
+        (lineId: string) => mutations.unmarkShippedLine.mutate(lineId),
+        [mutations.unmarkShippedLine]
+    );
+
+    const handleUpdateLineTracking = useCallback(
+        (lineId: string, data: { awbNumber?: string; courier?: string }) =>
+            mutations.updateLineTracking.mutate({ lineId, data }),
+        [mutations.updateLineTracking]
     );
 
     // Optimistic updates handle UI state instantly - no need for loading tracking
@@ -396,7 +421,7 @@ export default function Orders() {
     const handleRemoveCustomization = useCallback(
         (lineId: string, skuCode: string) => {
             if (confirm(`Remove customization from ${skuCode}?\n\nThis will revert the line to its original state.`)) {
-                mutations.removeCustomization.mutate(lineId);
+                mutations.removeCustomization.mutate({ lineId });
             }
         },
         [mutations.removeCustomization]
@@ -409,7 +434,7 @@ export default function Orders() {
             if (isEditingCustomization) {
                 // Edit mode: delete existing customization then create new one
                 // Using a chain of mutations for delete + create
-                mutations.removeCustomization.mutate(customizingLine.lineId, {
+                mutations.removeCustomization.mutate({ lineId: customizingLine.lineId }, {
                     onSuccess: () => {
                         mutations.customizeLine.mutate(
                             { lineId: customizingLine.lineId, data },
@@ -444,7 +469,7 @@ export default function Orders() {
     );
 
     // Grid component
-    const { gridComponent, actionPanel, columnVisibilityDropdown } = OrdersGrid({
+    const { gridComponent, actionPanel, columnVisibilityDropdown, statusLegend } = OrdersGrid({
         rows: filteredOpenRows,
         lockedDates: lockedDates || [],
         onAllocate: handleAllocate,
@@ -453,7 +478,10 @@ export default function Orders() {
         onUnpick: handleUnpick,
         onPack: handlePack,
         onUnpack: handleUnpack,
-        onShippingCheck: handleShippingCheck,
+        onMarkShippedLine: handleMarkShippedLine,
+        onUnmarkShippedLine: handleUnmarkShippedLine,
+        onUpdateLineTracking: handleUpdateLineTracking,
+        onShip: (order) => setPendingShipOrder(order),
         onQuickShip: (id) => mutations.quickShip.mutate(id),
         onCreateBatch: (data) => mutations.createBatch.mutate(data),
         onUpdateBatch: (id, data) => mutations.updateBatch.mutate({ id, data }),
@@ -471,7 +499,6 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         allocatingLines,
-        shippingChecked,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
@@ -627,7 +654,18 @@ export default function Orders() {
                                     Ship {quickShipEligibleCount}
                                 </button>
                             )}
+                            {markedShippedCount > 0 && (
+                                <button
+                                    onClick={() => setShowProcessShippedModal(true)}
+                                    disabled={mutations.processMarkedShipped.isPending}
+                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 font-medium"
+                                >
+                                    <Truck size={12} />
+                                    Clear {markedShippedCount} Shipped
+                                </button>
+                            )}
                             <div className="w-px h-4 bg-gray-200" />
+                            {statusLegend}
                             {columnVisibilityDropdown}
                         </div>
                     </div>
@@ -906,11 +944,24 @@ export default function Orders() {
                     shipForm={shipForm}
                     onShipFormChange={setShipForm}
                     onShip={() => mutations.ship.mutate({ id: pendingShipOrder.id, data: shipForm })}
+                    onShipLines={(lineIds) => mutations.shipLines.mutate({
+                        id: pendingShipOrder.id,
+                        data: { lineIds, awbNumber: shipForm.awbNumber, courier: shipForm.courier }
+                    })}
                     onClose={() => {
                         setPendingShipOrder(null);
                         setShipForm({ awbNumber: '', courier: '' });
                     }}
-                    isShipping={mutations.ship.isPending}
+                    isShipping={mutations.ship.isPending || mutations.shipLines.isPending}
+                />
+            )}
+
+            {showProcessShippedModal && (
+                <ProcessShippedModal
+                    orders={ordersWithMarkedShipped}
+                    onProcess={(data) => mutations.processMarkedShipped.mutate(data)}
+                    onClose={() => setShowProcessShippedModal(false)}
+                    isProcessing={mutations.processMarkedShipped.isPending}
                 />
             )}
 

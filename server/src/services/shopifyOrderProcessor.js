@@ -132,6 +132,103 @@ export async function markCacheError(prisma, shopifyOrderId, errorMessage) {
     });
 }
 
+// ============================================
+// FULFILLMENT SYNC (Line-Level Tracking)
+// ============================================
+
+/**
+ * Map Shopify shipment_status to ERP trackingStatus
+ */
+function mapShipmentStatus(shopifyStatus) {
+    const map = {
+        'in_transit': 'in_transit',
+        'out_for_delivery': 'out_for_delivery',
+        'delivered': 'delivered',
+        'failure': 'delivery_delayed',
+        'attempted_delivery': 'out_for_delivery',
+    };
+    return map[shopifyStatus] || 'in_transit';
+}
+
+/**
+ * Update order status based on line statuses
+ * Order becomes 'shipped' when ALL non-cancelled lines are shipped
+ */
+async function updateOrderStatusFromLines(prisma, orderId) {
+    const lines = await prisma.orderLine.findMany({
+        where: { orderId, lineStatus: { not: 'cancelled' } },
+        select: { lineStatus: true }
+    });
+
+    if (lines.length === 0) return;
+
+    const allShipped = lines.every(l => l.lineStatus === 'shipped');
+
+    if (allShipped) {
+        await prisma.order.update({
+            where: { id: orderId },
+            data: { status: 'shipped' }
+        });
+    }
+}
+
+/**
+ * Sync fulfillment data from Shopify to OrderLines
+ * Maps each fulfillment's line_items to ERP OrderLines via shopifyLineId
+ *
+ * This enables partial shipment tracking - different lines can have different AWBs
+ *
+ * @param {PrismaClient} prisma
+ * @param {string} orderId - ERP Order ID
+ * @param {object} shopifyOrder - Raw Shopify order object
+ * @returns {object} { synced: number, fulfillments: number }
+ */
+export async function syncFulfillmentsToOrderLines(prisma, orderId, shopifyOrder) {
+    const fulfillments = shopifyOrder.fulfillments || [];
+    if (fulfillments.length === 0) return { synced: 0, fulfillments: 0 };
+
+    let syncedCount = 0;
+
+    for (const fulfillment of fulfillments) {
+        // Skip if no line_items in this fulfillment
+        if (!fulfillment.line_items?.length) continue;
+
+        const awbNumber = fulfillment.tracking_number || null;
+        const courier = fulfillment.tracking_company || null;
+        const shippedAt = fulfillment.created_at ? new Date(fulfillment.created_at) : new Date();
+        const trackingStatus = mapShipmentStatus(fulfillment.shipment_status);
+
+        // Get Shopify line IDs from this fulfillment
+        const shopifyLineIds = fulfillment.line_items.map(li => String(li.id));
+
+        // Update matching OrderLines that aren't already shipped
+        // Skip cancelled lines and lines already shipped (to preserve existing tracking)
+        const result = await prisma.orderLine.updateMany({
+            where: {
+                orderId,
+                shopifyLineId: { in: shopifyLineIds },
+                lineStatus: { notIn: ['cancelled', 'shipped'] },
+            },
+            data: {
+                awbNumber,
+                courier,
+                shippedAt,
+                lineStatus: 'shipped',
+                trackingStatus,
+            }
+        });
+
+        syncedCount += result.count;
+    }
+
+    // Update order status if all non-cancelled lines are now shipped
+    if (syncedCount > 0) {
+        await updateOrderStatusFromLines(prisma, orderId);
+    }
+
+    return { synced: syncedCount, fulfillments: fulfillments.length };
+}
+
 /**
  * Process a Shopify order to the ERP Order table
  * This is the SINGLE source of truth for order processing logic
@@ -313,7 +410,18 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
                 changeType = 'fulfilled';
             }
 
-            return { action: changeType, orderId: existingOrder.id };
+            // Sync fulfillments to order lines (partial shipment support)
+            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+
+            return { action: changeType, orderId: existingOrder.id, fulfillmentSync };
+        }
+
+        // Even if order data hasn't changed, sync fulfillments (they may have updated)
+        if (shopifyOrder.fulfillments?.length > 0) {
+            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+            if (fulfillmentSync.synced > 0) {
+                return { action: 'fulfillment_synced', orderId: existingOrder.id, fulfillmentSync };
+            }
         }
 
         return { action: 'skipped', orderId: existingOrder.id };
@@ -375,11 +483,19 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         }
     });
 
+    // Sync fulfillments to order lines if order came in already fulfilled
+    // This handles orders that were fulfilled before sync
+    let fulfillmentSync = null;
+    if (shopifyOrder.fulfillments?.length > 0) {
+        fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
+    }
+
     return {
         action: 'created',
         orderId: newOrder.id,
         linesCreated: orderLines.length,
-        totalLineItems: lineItems.length
+        totalLineItems: lineItems.length,
+        fulfillmentSync,
     };
 }
 

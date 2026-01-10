@@ -246,8 +246,71 @@ const ALL_COLUMN_IDS = [
     'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'shopifyStatus',
-    'awb', 'courier', 'trackingStatus', 'actions'
+    'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus', 'actions'
 ];
+
+// Row status legend component
+const StatusLegend = () => {
+    const [isOpen, setIsOpen] = useState(false);
+    const legendRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (legendRef.current && !legendRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isOpen]);
+
+    const statuses = [
+        { color: '#f9fafb', border: '#d1d5db', label: 'Pending (no stock)', desc: 'Waiting for inventory' },
+        { color: '#fef3c7', border: '#f59e0b', label: 'In Production', desc: 'Has production date set' },
+        { color: '#f0fdf4', border: '#86efac', label: 'Ready to Allocate', desc: 'Has stock available' },
+        { color: '#f3e8ff', border: '#a855f7', label: 'Allocated', desc: 'Stock reserved' },
+        { color: '#ccfbf1', border: '#14b8a6', label: 'Picked', desc: 'Ready to pack' },
+        { color: '#dbeafe', border: '#3b82f6', label: 'Packed', desc: 'Ready to ship - enter AWB' },
+        { color: '#bbf7d0', border: '#10b981', label: 'Marked Shipped', desc: 'Pending batch process' },
+    ];
+
+    return (
+        <div className="relative" ref={legendRef}>
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
+                title="Show status legend"
+            >
+                <span className="w-3 h-3 rounded" style={{ background: 'linear-gradient(135deg, #dbeafe 0%, #bbf7d0 100%)', border: '1px solid #93c5fd' }} />
+                <span>Legend</span>
+            </button>
+            {isOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3 min-w-[240px]">
+                    <div className="text-xs font-medium text-gray-600 mb-2">Row Status Colors</div>
+                    <div className="space-y-1.5">
+                        {statuses.map((status) => (
+                            <div key={status.label} className="flex items-center gap-2">
+                                <div
+                                    className="w-4 h-4 rounded flex-shrink-0"
+                                    style={{
+                                        backgroundColor: status.color,
+                                        borderLeft: `3px solid ${status.border}`,
+                                    }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-xs font-medium text-gray-700">{status.label}</div>
+                                    <div className="text-[10px] text-gray-500">{status.desc}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 // Column visibility dropdown component
 const ColumnVisibilityDropdown = ({
@@ -379,6 +442,18 @@ const EditableHeader = (props: any) => {
     );
 };
 
+// Common courier options
+const COURIER_OPTIONS = [
+    'Delhivery',
+    'BlueDart',
+    'DTDC',
+    'Ekart',
+    'Xpressbees',
+    'Shadowfax',
+    'Ecom Express',
+    'Other',
+];
+
 interface OrdersGridProps {
     rows: FlattenedOrderRow[];
     lockedDates: string[];
@@ -388,7 +463,11 @@ interface OrdersGridProps {
     onUnpick: (lineId: string) => void;
     onPack: (lineId: string) => void;
     onUnpack: (lineId: string) => void;
-    onShippingCheck: (lineId: string, order: any) => void;
+    // Mark shipped (spreadsheet workflow)
+    onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
+    onUnmarkShippedLine: (lineId: string) => void;
+    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+    onShip?: (order: any) => void;
     onQuickShip?: (orderId: string) => void;
     onCreateBatch: (data: any) => void;
     onUpdateBatch: (id: string, data: any) => void;
@@ -423,7 +502,6 @@ interface OrdersGridProps {
     }) => void;
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;
     allocatingLines: Set<string>;
-    shippingChecked: Set<string>;
     isCancellingOrder: boolean;
     isCancellingLine: boolean;
     isUncancellingLine: boolean;
@@ -440,7 +518,10 @@ export function OrdersGrid({
     onUnpick,
     onPack,
     onUnpack,
-    onShippingCheck,
+    onMarkShippedLine,
+    onUnmarkShippedLine,
+    onUpdateLineTracking,
+    onShip,
     onQuickShip,
     onCreateBatch,
     onUpdateBatch,
@@ -458,7 +539,6 @@ export function OrdersGrid({
     onEditCustomization,
     onRemoveCustomization,
     allocatingLines,
-    shippingChecked,
     isCancellingOrder,
     isCancellingLine,
     isUncancellingLine,
@@ -647,25 +727,26 @@ export function OrdersGrid({
                 colId: 'customerName',
                 headerName: getHeaderName('customerName'),
                 field: 'customerName',
-                width: 130,
+                width: 150,
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
                     const order = params.data.order;
                     const customerId = order?.customerId;
+                    const fullName = params.value || '';
                     return (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (customerId) onSelectCustomer(customerId);
                             }}
-                            className={`text-left truncate max-w-full ${customerId
+                            className={`text-left truncate max-w-full block ${customerId
                                 ? 'text-blue-600 hover:text-blue-800 hover:underline'
                                 : 'text-gray-700'
                                 }`}
-                            title={params.value}
+                            title={fullName}
                             disabled={!customerId}
                         >
-                            {params.value}
+                            {fullName}
                         </button>
                     );
                 },
@@ -776,39 +857,41 @@ export function OrdersGrid({
                 colId: 'customerLtv',
                 headerName: getHeaderName('customerLtv'),
                 field: 'customerLtv',
-                width: 75,
+                width: 85,
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
                     const orderCount = params.data.customerOrderCount || 0;
                     const ltv = params.data.customerLtv || 0;
                     const tier = params.data.order?.customerTier || 'bronze';
 
-                    // First order customer
+                    // First order customer - show NEW badge
                     if (orderCount <= 1) {
                         return (
                             <span
-                                className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700"
-                                title={`First order - ₹${ltv.toLocaleString()}`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200"
+                                title={`First order customer`}
                             >
-                                1st
+                                ✨ NEW
                             </span>
                         );
                     }
 
-                    // Returning customer - show tier badge
-                    const tierStyles: Record<string, string> = {
-                        platinum: 'bg-purple-100 text-purple-700',
-                        gold: 'bg-yellow-100 text-yellow-700',
-                        silver: 'bg-gray-200 text-gray-700',
-                        bronze: 'bg-orange-100 text-orange-700',
+                    // Returning customer - show order count with tier color
+                    const tierStyles: Record<string, { bg: string; border: string; icon: string }> = {
+                        platinum: { bg: 'bg-purple-100 text-purple-700', border: 'border-purple-300', icon: '💎' },
+                        gold: { bg: 'bg-amber-100 text-amber-700', border: 'border-amber-300', icon: '⭐' },
+                        silver: { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300', icon: '🥈' },
+                        bronze: { bg: 'bg-orange-100 text-orange-700', border: 'border-orange-300', icon: '' },
                     };
+                    const style = tierStyles[tier] || tierStyles.bronze;
 
                     return (
                         <span
-                            className={`px-1.5 py-0.5 rounded text-xs font-medium ${tierStyles[tier] || tierStyles.bronze}`}
-                            title={`${tier.charAt(0).toUpperCase() + tier.slice(1)} - ₹${ltv.toLocaleString()} (${orderCount} orders)`}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${style.bg} border ${style.border}`}
+                            title={`${tier.charAt(0).toUpperCase() + tier.slice(1)} tier • ${orderCount} orders • ₹${ltv.toLocaleString()} lifetime value`}
                         >
-                            {tier === 'platinum' ? '⭐' : ''}{`₹${(ltv / 1000).toFixed(0)}k`}
+                            {style.icon && <span>{style.icon}</span>}
+                            {orderCount} orders
                         </span>
                     );
                 },
@@ -827,9 +910,20 @@ export function OrdersGrid({
                 headerName: getHeaderName('productName'),
                 field: 'productName',
                 flex: 1,
-                minWidth: 180,
-                valueFormatter: (params: ValueFormatterParams) =>
-                    `${params.value} - ${params.data?.colorName} - ${params.data?.size}`,
+                minWidth: 220,
+                cellRenderer: (params: ICellRendererParams) => {
+                    const row = params.data;
+                    if (!row) return null;
+                    const fullText = `${row.productName} - ${row.colorName} - ${row.size}`;
+                    return (
+                        <span
+                            className="text-xs truncate block"
+                            title={fullText}
+                        >
+                            {fullText}
+                        </span>
+                    );
+                },
                 cellClass: 'text-xs',
             },
             {
@@ -1034,13 +1128,13 @@ export function OrdersGrid({
                                     if (row.lineStatus === 'allocated') onUnallocate(row.lineId);
                                 }}
                                 disabled={isToggling || row.lineStatus !== 'allocated'}
-                                className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${row.lineStatus === 'allocated'
-                                    ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
-                                    : 'bg-green-100 text-green-600'
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${row.lineStatus === 'allocated'
+                                    ? 'bg-purple-500 border-purple-500 text-white hover:bg-purple-600 shadow-sm'
+                                    : 'bg-purple-200 border-purple-200 text-purple-600'
                                     }`}
-                                title={row.lineStatus === 'allocated' ? 'Unallocate' : row.lineStatus}
+                                title={row.lineStatus === 'allocated' ? 'Click to unallocate' : `Status: ${row.lineStatus}`}
                             >
-                                <Check size={10} />
+                                <Check size={12} strokeWidth={3} />
                             </button>
                         );
                     }
@@ -1053,11 +1147,11 @@ export function OrdersGrid({
                                 if (canAllocate) onAllocate(row.lineId);
                             }}
                             disabled={isToggling || !canAllocate}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${canAllocate
-                                ? 'border-gray-300 hover:border-purple-400 hover:bg-purple-50 cursor-pointer'
-                                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${canAllocate
+                                ? 'border-purple-400 bg-white hover:bg-purple-100 hover:border-purple-500 cursor-pointer shadow-sm'
+                                : 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-40'
                                 }`}
-                            title={canAllocate ? 'Allocate' : 'No stock available'}
+                            title={canAllocate ? 'Click to allocate' : 'No stock available'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
                         </button>
@@ -1164,7 +1258,8 @@ export function OrdersGrid({
                     if (!row || row.lineStatus === 'cancelled') return null;
                     const isToggling = allocatingLines.has(row.lineId);
                     const canPick = row.lineStatus === 'allocated';
-                    const isPicked = row.lineStatus === 'picked' || row.lineStatus === 'packed';
+                    // Include marked_shipped in picked state (it must have been picked)
+                    const isPicked = ['picked', 'packed', 'marked_shipped'].includes(row.lineStatus);
 
                     if (isPicked) {
                         return (
@@ -1174,13 +1269,13 @@ export function OrdersGrid({
                                     if (row.lineStatus === 'picked') onUnpick(row.lineId);
                                 }}
                                 disabled={isToggling || row.lineStatus !== 'picked'}
-                                className={`w-4 h-4 rounded flex items-center justify-center mx-auto ${row.lineStatus === 'picked'
-                                    ? 'bg-green-500 text-white hover:bg-green-600'
-                                    : 'bg-green-500 text-white'
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${row.lineStatus === 'picked'
+                                    ? 'bg-teal-500 border-teal-500 text-white hover:bg-teal-600 shadow-sm'
+                                    : 'bg-teal-200 border-teal-200 text-teal-600'
                                     }`}
-                                title={row.lineStatus === 'picked' ? 'Unpick' : 'Packed'}
+                                title={row.lineStatus === 'picked' ? 'Click to unpick' : row.lineStatus === 'marked_shipped' ? 'Marked shipped' : 'Packed'}
                             >
-                                <Check size={10} />
+                                <Check size={12} strokeWidth={3} />
                             </button>
                         );
                     }
@@ -1193,11 +1288,11 @@ export function OrdersGrid({
                                 if (canPick) onPick(row.lineId);
                             }}
                             disabled={isToggling || !canPick}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${canPick
-                                ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
-                                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${canPick
+                                ? 'border-teal-400 bg-white hover:bg-teal-100 hover:border-teal-500 cursor-pointer shadow-sm'
+                                : 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-40'
                                 }`}
-                            title={canPick ? 'Pick' : 'Not allocated yet'}
+                            title={canPick ? 'Click to pick' : 'Not allocated yet'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
                         </button>
@@ -1214,20 +1309,26 @@ export function OrdersGrid({
                     if (!row || row.lineStatus === 'cancelled') return null;
                     const isToggling = allocatingLines.has(row.lineId);
                     const canPack = row.lineStatus === 'picked';
-                    const isPacked = row.lineStatus === 'packed';
+                    // Include marked_shipped in packed state (it must have been packed)
+                    const isPacked = ['packed', 'marked_shipped'].includes(row.lineStatus);
 
                     if (isPacked) {
+                        const isMarkedShipped = row.lineStatus === 'marked_shipped';
                         return (
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    onUnpack(row.lineId);
+                                    if (!isMarkedShipped) onUnpack(row.lineId);
                                 }}
-                                disabled={isToggling}
-                                className="w-4 h-4 rounded flex items-center justify-center mx-auto bg-blue-500 text-white hover:bg-blue-600"
-                                title="Unpack"
+                                disabled={isToggling || isMarkedShipped}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${
+                                    isMarkedShipped
+                                        ? 'bg-blue-200 border-blue-200 text-blue-600 cursor-not-allowed'
+                                        : 'bg-blue-500 border-blue-500 text-white hover:bg-blue-600 shadow-sm'
+                                }`}
+                                title={isMarkedShipped ? 'Marked shipped' : 'Click to unpack'}
                             >
-                                <Check size={10} />
+                                <Check size={12} strokeWidth={3} />
                             </button>
                         );
                     }
@@ -1240,11 +1341,11 @@ export function OrdersGrid({
                                 if (canPack) onPack(row.lineId);
                             }}
                             disabled={isToggling || !canPack}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${canPack
-                                ? 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
-                                : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${canPack
+                                ? 'border-blue-400 bg-white hover:bg-blue-100 hover:border-blue-500 cursor-pointer shadow-sm'
+                                : 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-40'
                                 }`}
-                            title={canPack ? 'Pack' : 'Not picked yet'}
+                            title={canPack ? 'Click to pack' : 'Not picked yet'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
                         </button>
@@ -1255,43 +1356,77 @@ export function OrdersGrid({
             {
                 colId: 'ship',
                 headerName: getHeaderName('ship'),
-                width: 35,
+                width: 40,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    if (!row || row.lineStatus === 'cancelled') return null;
+                    if (!row || row.lineStatus === 'cancelled' || row.lineStatus === 'shipped') return null;
 
-                    const activeLines = row.order?.orderLines?.filter(
-                        (line: any) => line.lineStatus !== 'cancelled'
-                    ) || [];
-                    const allLinesPicked = activeLines.length > 0 && activeLines.every(
-                        (line: any) => line.lineStatus === 'picked' || line.lineStatus === 'packed'
-                    );
-                    const allLinesAllocated = activeLines.length > 0 && activeLines.every(
-                        (line: any) =>
-                            line.lineStatus === 'allocated' ||
-                            line.lineStatus === 'picked' ||
-                            line.lineStatus === 'packed'
-                    );
-                    const isChecked = shippingChecked.has(row.lineId);
+                    const isPacked = row.lineStatus === 'packed';
+                    const isMarkedShipped = row.lineStatus === 'marked_shipped';
 
-                    // Show checkbox - active only if all lines are picked
-                    return (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if (allLinesPicked) onShippingCheck(row.lineId, row.order);
-                            }}
-                            disabled={!allLinesPicked}
-                            className={`w-4 h-4 rounded border flex items-center justify-center mx-auto ${isChecked
-                                ? 'bg-green-500 border-green-500 text-white'
-                                : allLinesPicked
-                                    ? 'border-gray-300 hover:border-green-400 hover:bg-green-50 cursor-pointer'
-                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                    // Get AWB info for validation
+                    const orderLines = row.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === row.lineId);
+                    const lineAwb = line?.awbNumber || '';
+                    const expectedAwb = row.order?.shopifyCache?.trackingNumber || '';
+                    const hasAwb = !!lineAwb;
+                    const awbMatches = hasAwb && expectedAwb && lineAwb.toLowerCase() === expectedAwb.toLowerCase();
+
+                    // Toggle between packed <-> marked_shipped
+                    if (isMarkedShipped) {
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUnmarkShippedLine(row.lineId);
+                                }}
+                                className="w-5 h-5 rounded border-2 border-green-500 bg-green-500 text-white flex items-center justify-center mx-auto hover:bg-green-600 hover:border-green-600"
+                                title="Click to unmark shipped"
+                            >
+                                <Truck size={12} />
+                            </button>
+                        );
+                    }
+
+                    if (isPacked) {
+                        const handleMarkShipped = (e: React.MouseEvent) => {
+                            e.stopPropagation();
+
+                            // Validate AWB
+                            if (!hasAwb) {
+                                if (!window.confirm('No AWB entered for this line. Mark as shipped anyway?')) {
+                                    return;
+                                }
+                            } else if (expectedAwb && !awbMatches) {
+                                if (!window.confirm(`AWB mismatch!\n\nEntered: ${lineAwb}\nExpected: ${expectedAwb}\n\nMark as shipped anyway?`)) {
+                                    return;
+                                }
+                            }
+
+                            onMarkShippedLine(row.lineId);
+                        };
+
+                        // Visual indicator for AWB status
+                        const hasWarning = !hasAwb || (expectedAwb && !awbMatches);
+
+                        return (
+                            <button
+                                onClick={handleMarkShipped}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto cursor-pointer ${
+                                    hasWarning
+                                        ? 'border-amber-300 hover:border-amber-400 hover:bg-amber-50'
+                                        : 'border-gray-300 hover:border-green-400 hover:bg-green-50'
                                 }`}
-                            title={allLinesPicked ? 'Mark for shipping' : allLinesAllocated ? 'Pick all items first' : 'Allocate all items first'}
-                        >
-                            {isChecked && <Check size={10} />}
-                        </button>
+                                title={!hasAwb ? 'No AWB - click to mark shipped' : !awbMatches && expectedAwb ? 'AWB mismatch - click to mark shipped' : 'Mark as shipped'}
+                            >
+                                <Truck size={12} className={hasWarning ? 'text-amber-500' : 'text-gray-400'} />
+                            </button>
+                        );
+                    }
+
+                    // Not ready for shipping (not packed yet)
+                    return (
+                        <div className="w-5 h-5 rounded border-2 border-gray-200 bg-gray-100 mx-auto opacity-40" title="Pack item first" />
                     );
                 },
                 cellClass: 'text-center',
@@ -1325,22 +1460,149 @@ export function OrdersGrid({
                 cellClass: 'text-xs',
             },
             {
+                colId: 'shopifyAwb',
+                headerName: getHeaderName('shopifyAwb'),
+                width: 130,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return '';
+                    return params.data.order?.shopifyCache?.trackingNumber || '';
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const awb = params.data.order?.shopifyCache?.trackingNumber;
+                    if (!awb) return <span className="text-gray-300 text-xs">—</span>;
+                    return (
+                        <span className="font-mono text-xs text-gray-600" title={awb}>
+                            {awb.length > 14 ? awb.substring(0, 14) + '...' : awb}
+                        </span>
+                    );
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'shopifyCourier',
+                headerName: getHeaderName('shopifyCourier'),
+                width: 100,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return '';
+                    return params.data.order?.shopifyCache?.trackingCompany || '';
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const courier = params.data.order?.shopifyCache?.trackingCompany;
+                    if (!courier) return <span className="text-gray-300 text-xs">—</span>;
+                    return <span className="text-xs text-gray-600">{courier}</span>;
+                },
+                cellClass: 'text-xs',
+            },
+            {
                 colId: 'awb',
                 headerName: getHeaderName('awb'),
-                field: 'order.awbNumber',
-                width: 100,
-                valueFormatter: (params: ValueFormatterParams) =>
-                    params.data?.isFirstLine ? params.data.order?.awbNumber || '' : '',
-                cellClass: 'text-xs font-mono text-gray-500',
+                width: 140,
+                editable: (params: EditableCallbackParams) => {
+                    const status = params.data?.lineStatus;
+                    return ['packed', 'marked_shipped'].includes(status);
+                },
+                valueGetter: (params: ValueGetterParams) => {
+                    // Get line-level AWB from the order line
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    return line?.awbNumber || '';
+                },
+                valueSetter: (params: ValueSetterParams) => {
+                    if (params.data?.lineId) {
+                        onUpdateLineTracking(params.data.lineId, { awbNumber: params.newValue || '' });
+                    }
+                    return true;
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    const row = params.data;
+                    if (!row?.lineId) return null;
+
+                    const lineId = row.lineId;
+                    const orderLines = row.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const lineAwb = line?.awbNumber || '';
+                    const expectedAwb = row.order?.shopifyCache?.trackingNumber || '';
+
+                    // Check if cell is editable
+                    const isEditable = ['packed', 'marked_shipped'].includes(row.lineStatus);
+
+                    // Determine match status
+                    const hasExpected = !!expectedAwb;
+                    const hasLine = !!lineAwb;
+                    const isMatch = hasExpected && hasLine && lineAwb.toLowerCase() === expectedAwb.toLowerCase();
+                    const isMismatch = hasExpected && hasLine && !isMatch;
+
+                    if (!hasLine) {
+                        // Show placeholder for editable cells, dash for non-editable
+                        if (isEditable) {
+                            return <span className="text-gray-400 text-xs italic">Enter AWB...</span>;
+                        }
+                        return <span className="text-gray-300 text-xs">—</span>;
+                    }
+
+                    return (
+                        <div className="flex items-center gap-1">
+                            <span className={`font-mono text-xs ${isMismatch ? 'text-amber-600' : isMatch ? 'text-green-600' : 'text-gray-600'}`}>
+                                {lineAwb.length > 12 ? lineAwb.substring(0, 12) + '...' : lineAwb}
+                            </span>
+                            {isMatch && <CheckCircle size={10} className="text-green-500" />}
+                            {isMismatch && <span title={`Expected: ${expectedAwb}`}><AlertCircle size={10} className="text-amber-500" /></span>}
+                        </div>
+                    );
+                },
+                cellClass: (params: CellClassParams) => {
+                    const status = params.data?.lineStatus;
+                    const editable = ['packed', 'marked_shipped'].includes(status);
+                    return editable ? 'text-xs bg-blue-50' : 'text-xs';
+                },
             },
             {
                 colId: 'courier',
                 headerName: getHeaderName('courier'),
-                field: 'order.courier',
-                width: 80,
-                valueFormatter: (params: ValueFormatterParams) =>
-                    params.data?.isFirstLine ? params.data.order?.courier || '' : '',
-                cellClass: 'text-xs text-blue-600',
+                width: 100,
+                editable: (params: EditableCallbackParams) => {
+                    const status = params.data?.lineStatus;
+                    return ['packed', 'marked_shipped'].includes(status);
+                },
+                cellEditor: 'agSelectCellEditor',
+                cellEditorParams: {
+                    values: COURIER_OPTIONS,
+                },
+                valueGetter: (params: ValueGetterParams) => {
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    return line?.courier || '';
+                },
+                valueSetter: (params: ValueSetterParams) => {
+                    if (params.data?.lineId) {
+                        onUpdateLineTracking(params.data.lineId, { courier: params.newValue || '' });
+                    }
+                    return true;
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    const row = params.data;
+                    if (!row?.lineId) return null;
+
+                    const lineId = row.lineId;
+                    const orderLines = row.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const courier = line?.courier || '';
+
+                    if (!courier) {
+                        return <span className="text-gray-300 text-xs">—</span>;
+                    }
+
+                    return <span className="text-xs text-blue-600">{courier}</span>;
+                },
+                cellClass: (params: CellClassParams) => {
+                    const status = params.data?.lineStatus;
+                    const editable = ['packed', 'marked_shipped'].includes(status);
+                    return editable ? 'text-xs bg-blue-50' : 'text-xs';
+                },
             },
             {
                 colId: 'trackingStatus',
@@ -1406,18 +1668,48 @@ export function OrdersGrid({
                     }
 
                     // First line shows "Manage" button that opens the panel
+                    // Check if order has lines ready to ship (partial ship support)
+                    const orderLines = order.orderLines || [];
+                    const activeLines = orderLines.filter((l: any) => l.lineStatus !== 'cancelled');
+                    const packedLines = activeLines.filter((l: any) => l.lineStatus === 'packed');
+                    const shippedLines = activeLines.filter((l: any) => l.lineStatus === 'shipped');
+                    const hasPackedLines = packedLines.length > 0;
+                    const hasShopifyAwb = !!(order.shopifyCache?.trackingNumber || order.awbNumber);
+                    // Show Ship button if there are packed lines with AWB (supports partial shipping)
+                    const canShip = hasPackedLines && hasShopifyAwb;
+                    // Visual indicator: all packed = full ship, some packed = partial ship
+                    const isPartialShip = shippedLines.length > 0 && hasPackedLines;
+
                     return (
                         <div className="flex items-center gap-1">
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActionPanelOrder(order);
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-700 transition-colors"
-                            >
-                                Manage
-                                <ChevronRight size={12} />
-                            </button>
+                            {canShip && onShip ? (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onShip(order);
+                                    }}
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded text-white transition-colors shadow-sm ${
+                                        isPartialShip
+                                            ? 'bg-amber-500 hover:bg-amber-600'
+                                            : 'bg-emerald-500 hover:bg-emerald-600'
+                                    }`}
+                                    title={isPartialShip ? `Ship ${packedLines.length} remaining item(s)` : 'Ship order'}
+                                >
+                                    <Truck size={12} />
+                                    {isPartialShip ? `Ship (${packedLines.length})` : 'Ship'}
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActionPanelOrder(order);
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-700 transition-colors"
+                                >
+                                    Manage
+                                    <ChevronRight size={12} />
+                                </button>
+                            )}
                             {lineAction}
                         </div>
                     );
@@ -1429,7 +1721,6 @@ export function OrdersGrid({
         })) as ColDef[],
         [
             allocatingLines,
-            shippingChecked,
             lockedDates,
             getHeaderName,
             isCancellingOrder,
@@ -1546,42 +1837,86 @@ export function OrdersGrid({
         const row = params.data;
         if (!row) return undefined;
 
+        // Cancelled - clearly struck through and grayed
         if (row.lineStatus === 'cancelled') {
-            return { backgroundColor: '#f3f4f6', color: '#9ca3af', textDecoration: 'line-through' };
-        }
-
-        // Customized lines get special orange styling with left border
-        if (row.isCustomized) {
             return {
-                backgroundColor: '#fff7ed',  // Orange-50
-                borderLeft: '3px solid #f97316',  // Orange-500
+                backgroundColor: '#f3f4f6',
+                color: '#9ca3af',
+                textDecoration: 'line-through',
+                opacity: 0.6,
             };
         }
 
-        const activeLines =
-            row.order?.orderLines?.filter((line: any) => line.lineStatus !== 'cancelled') || [];
-        const allLinesAllocated =
-            activeLines.length > 0 &&
-            activeLines.every(
-                (line: any) =>
-                    line.lineStatus === 'allocated' ||
-                    line.lineStatus === 'picked' ||
-                    line.lineStatus === 'packed'
-            );
+        // Marked shipped - DONE state, very distinct green with strikethrough
+        if (row.lineStatus === 'marked_shipped') {
+            return {
+                backgroundColor: '#bbf7d0',  // Green-200 - strong green
+                textDecoration: 'line-through',
+                borderLeft: '4px solid #10b981',  // Emerald-500
+            };
+        }
+
+        // Packed - READY TO SHIP, bright distinct blue
+        if (row.lineStatus === 'packed') {
+            return {
+                backgroundColor: '#dbeafe',  // Blue-100
+                borderLeft: '4px solid #3b82f6',  // Blue-500
+            };
+        }
+
+        // Picked - Ready to pack, teal tint
+        if (row.lineStatus === 'picked') {
+            return {
+                backgroundColor: '#ccfbf1',  // Teal-100
+                borderLeft: '4px solid #14b8a6',  // Teal-500
+            };
+        }
+
+        // Allocated - Ready to pick, light purple
+        if (row.lineStatus === 'allocated') {
+            return {
+                backgroundColor: '#f3e8ff',  // Purple-100
+                borderLeft: '4px solid #a855f7',  // Purple-500
+            };
+        }
+
+        // Customized lines in pending - special orange styling
+        if (row.isCustomized && row.lineStatus === 'pending') {
+            return {
+                backgroundColor: '#fff7ed',  // Orange-50
+                borderLeft: '4px solid #f97316',  // Orange-500
+            };
+        }
+
+        // Pending with stock - actionable, subtle green tint
         const hasStock = row.skuStock >= row.qty;
-        const isAllocated =
-            row.lineStatus === 'allocated' ||
-            row.lineStatus === 'picked' ||
-            row.lineStatus === 'packed';
         const isPending = row.lineStatus === 'pending';
         const hasProductionDate = !!row.productionBatchId;
 
-        if (row.lineStatus === 'packed') return { backgroundColor: '#f0fdf4' };
-        if (row.lineStatus === 'picked') return { backgroundColor: '#ecfdf5' };
-        if (allLinesAllocated) return { backgroundColor: '#bbf7d0' };
-        if (isAllocated) return { backgroundColor: '#dcfce7' };
-        if (hasStock && isPending) return { backgroundColor: '#f0fdf4' };
-        if (hasProductionDate) return { backgroundColor: '#fffbeb' };
+        if (hasStock && isPending) {
+            return {
+                backgroundColor: '#f0fdf4',  // Green-50
+                borderLeft: '4px solid #86efac',  // Green-300 (soft)
+            };
+        }
+
+        // Pending without stock but has production date - amber
+        if (hasProductionDate && isPending) {
+            return {
+                backgroundColor: '#fef3c7',  // Amber-100
+                borderLeft: '4px solid #f59e0b',  // Amber-500
+            };
+        }
+
+        // Pending without stock - blocked, dim/gray
+        if (isPending && !hasStock) {
+            return {
+                backgroundColor: '#f9fafb',  // Gray-50
+                color: '#6b7280',  // Gray-500
+                borderLeft: '4px solid #d1d5db',  // Gray-300
+            };
+        }
+
         return undefined;
     }, []);
 
@@ -1670,6 +2005,7 @@ export function OrdersGrid({
                 onCancel={(reason) => onCancelOrder(actionPanelOrder?.id, reason)}
                 onArchive={() => onArchiveOrder(actionPanelOrder?.id)}
                 onDelete={() => onDeleteOrder(actionPanelOrder?.id)}
+                onShip={onShip ? () => onShip(actionPanelOrder) : undefined}
                 onQuickShip={onQuickShip ? () => onQuickShip(actionPanelOrder?.id) : undefined}
                 canDelete={actionPanelOrder?.orderLines?.length === 0}
                 canQuickShip={!!(actionPanelOrder?.awbNumber && actionPanelOrder?.courier)}
@@ -1689,6 +2025,7 @@ export function OrdersGrid({
                 getHeaderName={getHeaderName}
             />
         ),
+        statusLegend: <StatusLegend />,
         customHeaders,
         resetHeaders,
         resetColumnOrder,

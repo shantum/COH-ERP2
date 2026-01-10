@@ -1070,13 +1070,17 @@ export async function createCustomSku(prisma, baseSkuId, customizationData, orde
 /**
  * Remove customization from an order line
  * Reverts the line to original SKU and deletes the custom SKU
- * Only allowed if no inventory transactions or production batches exist
+ * Only allowed if no inventory transactions or production batches exist (unless force=true)
  *
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string} orderLineId - The order line ID to uncustomize
+ * @param {Object} options - Options for the operation
+ * @param {boolean} options.force - If true, delete inventory transactions and production batches first
  * @returns {Object} Result with success status and updated order line
  */
-export async function removeCustomization(prisma, orderLineId) {
+export async function removeCustomization(prisma, orderLineId, options = {}) {
+    const { force = false } = options;
+
     return prisma.$transaction(async (tx) => {
         // 1. Get order line with custom SKU
         const orderLine = await tx.orderLine.findUnique({
@@ -1103,7 +1107,13 @@ export async function removeCustomization(prisma, orderLineId) {
         });
 
         if (txnCount > 0) {
-            throw new Error('CANNOT_UNDO_HAS_INVENTORY');
+            if (!force) {
+                throw new Error('CANNOT_UNDO_HAS_INVENTORY');
+            }
+            // Force mode: delete inventory transactions for this custom SKU
+            await tx.inventoryTransaction.deleteMany({
+                where: { skuId: customSkuId },
+            });
         }
 
         // 3. Check if production batch exists for this custom SKU
@@ -1112,7 +1122,13 @@ export async function removeCustomization(prisma, orderLineId) {
         });
 
         if (batchCount > 0) {
-            throw new Error('CANNOT_UNDO_HAS_PRODUCTION');
+            if (!force) {
+                throw new Error('CANNOT_UNDO_HAS_PRODUCTION');
+            }
+            // Force mode: delete production batches for this custom SKU
+            await tx.productionBatch.deleteMany({
+                where: { skuId: customSkuId },
+            });
         }
 
         // 4. Get original SKU for response
@@ -1151,6 +1167,9 @@ export async function removeCustomization(prisma, orderLineId) {
             success: true,
             orderLine: updatedLine,
             deletedCustomSkuCode: orderLine.sku.skuCode,
+            forcedCleanup: force && (txnCount > 0 || batchCount > 0),
+            deletedTransactions: force ? txnCount : 0,
+            deletedBatches: force ? batchCount : 0,
         };
     }, {
         maxWait: 15000,

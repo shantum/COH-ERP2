@@ -12,6 +12,7 @@ interface UseOrdersMutationsOptions {
     onDeleteSuccess?: () => void;
     onEditSuccess?: () => void;
     onNotesSuccess?: () => void;
+    onProcessMarkedShippedSuccess?: () => void;
 }
 
 // Context types for optimistic update mutations
@@ -91,6 +92,25 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 alert(`Validation failed:\n${messages}`);
             } else {
                 alert(errorData?.error || 'Failed to ship order');
+            }
+        }
+    });
+
+    // Ship specific lines mutation - supports partial shipments
+    const shipLines = useMutation({
+        mutationFn: ({ id, data }: { id: string; data: { lineIds: string[]; awbNumber: string; courier: string } }) =>
+            ordersApi.shipLines(id, data),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+            options.onShipSuccess?.();
+        },
+        onError: (err: any) => {
+            const errorData = err.response?.data;
+            if (errorData?.notPackedLines) {
+                alert(`Cannot ship: ${errorData.notPackedLines.length} lines are not packed yet`);
+            } else {
+                alert(errorData?.error || 'Failed to ship lines');
             }
         }
     });
@@ -354,6 +374,102 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             if (context?.skipped) return;
             debouncedInvalidateOpenOrders();
         }
+    });
+
+    // Mark shipped (visual only - no inventory release)
+    const markShippedLine = useMutation<unknown, any, { lineId: string; data?: { awbNumber?: string; courier?: string } }, LineUpdateContext>({
+        mutationFn: ({ lineId, data }) => ordersApi.markShippedLine(lineId, data),
+        onMutate: async ({ lineId }): Promise<LineUpdateContext> => {
+            const status = getLineStatus(lineId);
+            if (status !== 'packed') return { skipped: true };
+            return optimisticLineUpdate(lineId, 'marked_shipped');
+        },
+        onError: (err: any, _vars, context) => {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            if (errorMsg.includes('packed') || errorMsg.includes('marked_shipped')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            if (context && 'previousOrders' in context) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(errorMsg || 'Failed to mark line as shipped');
+        },
+        onSettled: (_data, _err, _vars, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
+    });
+
+    const unmarkShippedLine = useMutation<unknown, any, string, LineUpdateContext>({
+        mutationFn: (lineId: string) => ordersApi.unmarkShippedLine(lineId),
+        onMutate: async (lineId): Promise<LineUpdateContext> => {
+            const status = getLineStatus(lineId);
+            if (status !== 'marked_shipped') return { skipped: true };
+            return optimisticLineUpdate(lineId, 'packed');
+        },
+        onError: (err: any, _lineId, context) => {
+            if (context?.skipped) return;
+            const errorMsg = err.response?.data?.error || '';
+            if (errorMsg.includes('packed') || errorMsg.includes('marked_shipped')) {
+                debouncedInvalidateOpenOrders();
+                return;
+            }
+            if (context && 'previousOrders' in context) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(errorMsg || 'Failed to unmark shipped line');
+        },
+        onSettled: (_data, _err, _lineId, context) => {
+            if (context?.skipped) return;
+            debouncedInvalidateOpenOrders();
+        }
+    });
+
+    // Update line tracking (AWB/courier) with optimistic update
+    const updateLineTracking = useMutation({
+        mutationFn: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }) =>
+            ordersApi.updateLineTracking(lineId, data),
+        onMutate: async ({ lineId, data }) => {
+            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+            const previousOrders = queryClient.getQueryData(['openOrders']);
+
+            // Optimistically update tracking info in cache
+            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map(order => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.id === lineId
+                            ? { ...line, ...data }
+                            : line
+                    )
+                }));
+            });
+
+            return { previousOrders };
+        },
+        onError: (err: any, _vars, context) => {
+            if (context?.previousOrders) {
+                queryClient.setQueryData(['openOrders'], context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to update tracking info');
+        },
+        // No invalidation needed - optimistic update is sufficient
+    });
+
+    // Process all marked shipped lines (batch clear)
+    const processMarkedShipped = useMutation({
+        mutationFn: (data?: { comment?: string }) => ordersApi.processMarkedShipped(data),
+        onSuccess: (response: any) => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+            const { processed, orders } = response.data;
+            alert(`Processed ${processed} lines across ${orders?.length || 0} orders`);
+            options.onProcessMarkedShippedSuccess?.();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to process marked shipped lines')
     });
 
     // Production batch mutations - only affects open orders (with optimistic updates)
@@ -701,14 +817,38 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const removeCustomization = useMutation({
-        mutationFn: (lineId: string) => ordersApi.removeCustomization(lineId),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to remove customization')
+        mutationFn: ({ lineId, force = false }: { lineId: string; force?: boolean }) =>
+            ordersApi.removeCustomization(lineId, { force }),
+        onSuccess: (response: any) => {
+            invalidateOpenOrders();
+            if (response.data?.forcedCleanup) {
+                alert(`Customization removed.\nCleared ${response.data.deletedTransactions} inventory transactions and ${response.data.deletedBatches} production batches.`);
+            }
+        },
+        onError: (err: any, variables) => {
+            const errorCode = err.response?.data?.code;
+            const errorMsg = err.response?.data?.error;
+
+            // If blocked by inventory/production, offer force option
+            if (errorCode === 'CANNOT_UNDO_HAS_INVENTORY' || errorCode === 'CANNOT_UNDO_HAS_PRODUCTION') {
+                const confirmMsg = errorCode === 'CANNOT_UNDO_HAS_INVENTORY'
+                    ? 'Inventory transactions exist for this custom SKU.\n\nForce remove? This will delete all inventory records for this custom item.'
+                    : 'Production batches exist for this custom SKU.\n\nForce remove? This will delete all production records for this custom item.';
+
+                if (window.confirm(confirmMsg)) {
+                    // Retry with force=true
+                    removeCustomization.mutate({ lineId: variables.lineId, force: true });
+                }
+            } else {
+                alert(errorMsg || 'Failed to remove customization');
+            }
+        }
     });
 
     return {
         // Ship
         ship,
+        shipLines,
         unship,
         quickShip,
         bulkQuickShip,
@@ -718,13 +858,19 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         markRto,
         receiveRto,
 
-        // Allocate/Pick
+        // Allocate/Pick/Pack
         allocate,
         unallocate,
         pickLine,
         unpickLine,
         packLine,
         unpackLine,
+
+        // Mark shipped (spreadsheet workflow)
+        markShippedLine,
+        unmarkShippedLine,
+        updateLineTracking,
+        processMarkedShipped,
 
         // Production
         createBatch,

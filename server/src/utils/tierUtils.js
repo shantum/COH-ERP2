@@ -66,11 +66,13 @@ export async function getCustomerStatsMap(prisma, customerIds) {
     if (!customerIds || customerIds.length === 0) return {};
 
     // Use aggregate query - much faster than loading all orders
+    // Exclude cancelled orders and zero-value orders (exchanges, giveaways)
     const stats = await prisma.order.groupBy({
         by: ['customerId'],
         where: {
             customerId: { in: customerIds },
-            status: { not: 'cancelled' }
+            status: { not: 'cancelled' },
+            totalAmount: { gt: 0 }
         },
         _sum: { totalAmount: true },
         _count: { id: true }

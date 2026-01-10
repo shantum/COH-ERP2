@@ -238,6 +238,123 @@ router.post('/lines/:lineId/unpack', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
+// MARK SHIPPED (Visual Only - No Side Effects)
+// Part of spreadsheet-style shipping workflow
+// ============================================
+
+// Mark order line as shipped (visual only - no inventory release)
+router.post('/lines/:lineId/mark-shipped', authenticateToken, async (req, res) => {
+    try {
+        const { awbNumber, courier } = req.body || {};
+
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (line.lineStatus !== 'packed') {
+            return res.status(400).json({
+                error: 'Line must be in packed status to mark as shipped',
+                currentStatus: line.lineStatus,
+            });
+        }
+
+        const updated = await req.prisma.orderLine.update({
+            where: { id: req.params.lineId },
+            data: {
+                lineStatus: 'marked_shipped',
+                // Optionally set AWB/courier if provided
+                ...(awbNumber && { awbNumber: awbNumber.trim() }),
+                ...(courier && { courier: courier.trim() }),
+            },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Mark shipped error:', error);
+        res.status(500).json({ error: 'Failed to mark line as shipped' });
+    }
+});
+
+// Unmark shipped line (revert to packed)
+router.post('/lines/:lineId/unmark-shipped', authenticateToken, async (req, res) => {
+    try {
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        if (line.lineStatus !== 'marked_shipped') {
+            return res.status(400).json({
+                error: 'Line is not in marked_shipped status',
+                currentStatus: line.lineStatus,
+            });
+        }
+
+        const updated = await req.prisma.orderLine.update({
+            where: { id: req.params.lineId },
+            data: { lineStatus: 'packed' },
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Unmark shipped error:', error);
+        res.status(500).json({ error: 'Failed to unmark shipped line' });
+    }
+});
+
+// Update line tracking info (AWB/courier)
+router.patch('/lines/:lineId/tracking', authenticateToken, async (req, res) => {
+    try {
+        const { awbNumber, courier } = req.body;
+
+        const line = await req.prisma.orderLine.findUnique({
+            where: { id: req.params.lineId },
+        });
+
+        if (!line) {
+            return res.status(404).json({ error: 'Order line not found' });
+        }
+
+        // Only allow updating tracking on packed or marked_shipped lines
+        if (!['packed', 'marked_shipped'].includes(line.lineStatus)) {
+            return res.status(400).json({
+                error: 'Can only update tracking on packed or marked_shipped lines',
+                currentStatus: line.lineStatus,
+            });
+        }
+
+        const updateData = {};
+        if (awbNumber !== undefined) {
+            updateData.awbNumber = awbNumber?.trim() || null;
+        }
+        if (courier !== undefined) {
+            updateData.courier = courier?.trim() || null;
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ error: 'No tracking data provided' });
+        }
+
+        const updated = await req.prisma.orderLine.update({
+            where: { id: req.params.lineId },
+            data: updateData,
+        });
+
+        res.json(updated);
+    } catch (error) {
+        console.error('Update tracking error:', error);
+        res.status(500).json({ error: 'Failed to update tracking info' });
+    }
+});
+
 // Bulk update line statuses
 router.post('/lines/bulk-update', authenticateToken, async (req, res) => {
     try {
@@ -400,6 +517,290 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
         }
         console.error('Ship order error:', error);
         res.status(500).json({ error: 'Failed to ship order' });
+    }
+});
+
+// ============================================
+// SHIP SPECIFIC LINES (Partial Shipment Support)
+// ============================================
+
+/**
+ * Ship specific order lines with a given AWB
+ * Enables partial shipments - different lines can ship at different times with different AWBs
+ *
+ * POST /orders/:id/ship-lines
+ * Body: { lineIds: string[], awbNumber: string, courier: string }
+ */
+router.post('/:id/ship-lines', authenticateToken, async (req, res) => {
+    try {
+        const { lineIds, awbNumber, courier } = req.body;
+
+        // Validate required fields
+        if (!lineIds?.length) {
+            return res.status(400).json({ error: 'lineIds array required' });
+        }
+        if (!awbNumber?.trim()) {
+            return res.status(400).json({ error: 'awbNumber required' });
+        }
+        if (!courier?.trim()) {
+            return res.status(400).json({ error: 'courier required' });
+        }
+
+        const order = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Validate all requested lines exist and belong to this order
+        const linesToShip = order.orderLines.filter(l => lineIds.includes(l.id));
+        if (linesToShip.length !== lineIds.length) {
+            return res.status(400).json({
+                error: 'Some lineIds not found in this order',
+                found: linesToShip.length,
+                requested: lineIds.length,
+            });
+        }
+
+        // Validate all lines are packed (ready to ship)
+        const notPacked = linesToShip.filter(l => l.lineStatus !== 'packed');
+        if (notPacked.length > 0) {
+            return res.status(400).json({
+                error: 'All lines must be packed before shipping',
+                notPackedLines: notPacked.map(l => ({
+                    id: l.id,
+                    status: l.lineStatus,
+                })),
+            });
+        }
+
+        // Check for duplicate AWB on other orders
+        const existingAwb = await req.prisma.orderLine.findFirst({
+            where: {
+                awbNumber: awbNumber.trim(),
+                orderId: { not: req.params.id },
+            },
+            select: { id: true, orderId: true, order: { select: { orderNumber: true } } },
+        });
+
+        if (existingAwb) {
+            return res.status(400).json({
+                error: 'AWB number already used on another order',
+                existingOrderNumber: existingAwb.order?.orderNumber,
+            });
+        }
+
+        await req.prisma.$transaction(async (tx) => {
+            // Update selected lines with shipping info
+            await tx.orderLine.updateMany({
+                where: { id: { in: lineIds } },
+                data: {
+                    lineStatus: 'shipped',
+                    shippedAt: new Date(),
+                    awbNumber: awbNumber.trim(),
+                    courier: courier.trim(),
+                    trackingStatus: 'in_transit',
+                },
+            });
+
+            // Release inventory and create sale transactions for shipped lines
+            for (const line of linesToShip) {
+                await releaseReservedInventory(tx, line.id);
+                await createSaleTransaction(tx, {
+                    skuId: line.skuId,
+                    qty: line.qty,
+                    orderLineId: line.id,
+                    userId: req.user.id,
+                });
+            }
+
+            // Check if ALL non-cancelled lines are now shipped
+            const remainingLines = await tx.orderLine.findMany({
+                where: {
+                    orderId: req.params.id,
+                    lineStatus: { notIn: ['cancelled', 'shipped'] },
+                },
+            });
+
+            // Update order status only when all lines are shipped
+            if (remainingLines.length === 0) {
+                await tx.order.update({
+                    where: { id: req.params.id },
+                    data: { status: 'shipped' },
+                });
+            }
+        });
+
+        const updated = await req.prisma.order.findUnique({
+            where: { id: req.params.id },
+            include: { orderLines: true },
+        });
+
+        res.json({
+            ...updated,
+            linesShipped: linesToShip.length,
+            allShipped: updated.status === 'shipped',
+        });
+    } catch (error) {
+        console.error('Ship lines error:', error);
+        res.status(500).json({ error: 'Failed to ship lines' });
+    }
+});
+
+// ============================================
+// PROCESS MARKED SHIPPED (Batch Clear)
+// Final step of spreadsheet-style shipping workflow
+// Releases inventory and creates sale transactions
+// ============================================
+
+router.post('/process-marked-shipped', authenticateToken, async (req, res) => {
+    try {
+        const { comment } = req.body || {};
+
+        // Find all orders with marked_shipped lines
+        const ordersWithMarkedLines = await req.prisma.order.findMany({
+            where: {
+                status: 'open',
+                isArchived: false,
+                orderLines: {
+                    some: { lineStatus: 'marked_shipped' },
+                },
+            },
+            include: {
+                orderLines: true,
+                shopifyCache: {
+                    select: { trackingNumber: true },
+                },
+            },
+        });
+
+        if (ordersWithMarkedLines.length === 0) {
+            return res.json({
+                processed: 0,
+                orders: [],
+                message: 'No marked shipped lines to process',
+            });
+        }
+
+        // Collect all marked_shipped lines and validate
+        const linesToProcess = [];
+        const validationIssues = [];
+
+        for (const order of ordersWithMarkedLines) {
+            const expectedAwb = order.shopifyCache?.trackingNumber || null;
+
+            for (const line of order.orderLines) {
+                if (line.lineStatus !== 'marked_shipped') continue;
+
+                linesToProcess.push({
+                    line,
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                    expectedAwb,
+                });
+
+                // Track validation issues for reporting
+                if (!line.awbNumber) {
+                    validationIssues.push({
+                        lineId: line.id,
+                        orderNumber: order.orderNumber,
+                        issue: 'missing_awb',
+                    });
+                } else if (expectedAwb && line.awbNumber.toLowerCase() !== expectedAwb.toLowerCase()) {
+                    validationIssues.push({
+                        lineId: line.id,
+                        orderNumber: order.orderNumber,
+                        issue: 'awb_mismatch',
+                        expected: expectedAwb,
+                        actual: line.awbNumber,
+                    });
+                }
+
+                if (!line.courier) {
+                    validationIssues.push({
+                        lineId: line.id,
+                        orderNumber: order.orderNumber,
+                        issue: 'missing_courier',
+                    });
+                }
+            }
+        }
+
+        const now = new Date();
+
+        // Process all lines in a transaction
+        await req.prisma.$transaction(async (tx) => {
+            // 1. Release reserved inventory for all lines
+            const lineIds = linesToProcess.map(l => l.line.id);
+            await tx.inventoryTransaction.deleteMany({
+                where: {
+                    referenceId: { in: lineIds },
+                    txnType: TXN_TYPE.RESERVED,
+                    reason: TXN_REASON.ORDER_ALLOCATION,
+                },
+            });
+
+            // 2. Create sale transactions for all lines
+            const saleTransactions = linesToProcess.map(l => ({
+                skuId: l.line.skuId,
+                txnType: TXN_TYPE.OUTWARD,
+                qty: l.line.qty,
+                reason: TXN_REASON.SALE,
+                referenceId: l.line.id,
+                createdById: req.user.id,
+                notes: comment || null,
+            }));
+            await tx.inventoryTransaction.createMany({ data: saleTransactions });
+
+            // 3. Update all lines to shipped status
+            await tx.orderLine.updateMany({
+                where: { id: { in: lineIds } },
+                data: {
+                    lineStatus: 'shipped',
+                    shippedAt: now,
+                    trackingStatus: 'in_transit',
+                },
+            });
+
+            // 4. Check each order - if all non-cancelled lines are shipped, update order status
+            for (const order of ordersWithMarkedLines) {
+                const remainingLines = await tx.orderLine.findMany({
+                    where: {
+                        orderId: order.id,
+                        lineStatus: { notIn: ['cancelled', 'shipped'] },
+                    },
+                });
+
+                if (remainingLines.length === 0) {
+                    await tx.order.update({
+                        where: { id: order.id },
+                        data: { status: 'shipped' },
+                    });
+                }
+            }
+        });
+
+        // Build response summary
+        const orderSummary = ordersWithMarkedLines.map(o => ({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            linesProcessed: o.orderLines.filter(l => l.lineStatus === 'marked_shipped').length,
+        }));
+
+        console.log(`[Process Marked Shipped] Processed ${linesToProcess.length} lines across ${ordersWithMarkedLines.length} orders`);
+
+        res.json({
+            processed: linesToProcess.length,
+            orders: orderSummary,
+            validationIssues: validationIssues.length > 0 ? validationIssues : undefined,
+            message: `Processed ${linesToProcess.length} lines across ${ordersWithMarkedLines.length} orders`,
+        });
+    } catch (error) {
+        console.error('Process marked shipped error:', error);
+        res.status(500).json({ error: 'Failed to process marked shipped lines' });
     }
 });
 

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryApi, fabricsApi } from '../services/api';
 import { useState } from 'react';
-import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2 } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2, Wrench } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 type Tab = 'inventory' | 'fabric';
@@ -11,7 +11,7 @@ export default function Ledgers() {
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
     const [activeTab, setActiveTab] = useState<Tab>('inventory');
-    const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '' });
+    const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '', customOnly: false });
     const [fabricFilter, setFabricFilter] = useState({ search: '', txnType: '' });
 
     // Fetch all inventory transactions
@@ -54,8 +54,19 @@ export default function Ledgers() {
         }
         if (inventoryFilter.txnType && txn.txnType !== inventoryFilter.txnType) return false;
         if (inventoryFilter.reason && txn.reason !== inventoryFilter.reason) return false;
+        // Custom SKU filter - check isCustomSku flag or skuCode starting with 'C-'
+        if (inventoryFilter.customOnly) {
+            const isCustom = txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-');
+            if (!isCustom) return false;
+        }
         return true;
     });
+
+    // Count custom transactions for badge
+    const customTxnCount = inventoryTxns?.filter((txn: any) => {
+        if (txn.txnType === 'reserved') return false;
+        return txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-');
+    })?.length || 0;
 
     // Filter fabric transactions
     const filteredFabric = fabricTxns?.filter((txn: any) => {
@@ -166,6 +177,28 @@ export default function Ledgers() {
                                 <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
                             ))}
                         </select>
+                        {/* Custom SKU toggle */}
+                        <button
+                            onClick={() => setInventoryFilter(f => ({ ...f, customOnly: !f.customOnly }))}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                                inventoryFilter.customOnly
+                                    ? 'bg-orange-100 text-orange-700 border-orange-300'
+                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200'
+                            }`}
+                            title="Show only custom SKU transactions"
+                        >
+                            <Wrench size={14} />
+                            Custom
+                            {customTxnCount > 0 && (
+                                <span className={`ml-0.5 px-1.5 py-0.5 text-[10px] rounded-full ${
+                                    inventoryFilter.customOnly
+                                        ? 'bg-orange-200 text-orange-800'
+                                        : 'bg-gray-200 text-gray-600'
+                                }`}>
+                                    {customTxnCount}
+                                </span>
+                            )}
+                        </button>
                         <span className="text-sm text-gray-500">
                             {filteredInventory?.length || 0} transactions
                         </span>
@@ -201,9 +234,17 @@ export default function Ledgers() {
                                                         </div>
                                                     )}
                                                     <div>
-                                                        <p className="font-medium text-gray-900">
-                                                            {txn.sku?.skuCode}
-                                                            <span className="ml-2 text-sm font-normal text-gray-500">
+                                                        <p className="font-medium text-gray-900 flex items-center gap-2">
+                                                            <span className={txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-') ? 'text-orange-700' : ''}>
+                                                                {txn.sku?.skuCode}
+                                                            </span>
+                                                            {(txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-')) && (
+                                                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">
+                                                                    <Wrench size={10} />
+                                                                    Custom
+                                                                </span>
+                                                            )}
+                                                            <span className="text-sm font-normal text-gray-500">
                                                                 {txn.sku?.variation?.product?.name} • {txn.sku?.variation?.colorName} • {txn.sku?.size}
                                                             </span>
                                                         </p>

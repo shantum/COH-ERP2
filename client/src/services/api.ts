@@ -15,6 +15,7 @@ import type {
     CreateOrderData,
     UpdateOrderData,
     ShipOrderData,
+    ShipLinesData,
     AddOrderLineData,
     UpdateOrderLineData,
     CreateCustomerData,
@@ -222,12 +223,22 @@ export const ordersApi = {
     // Customization
     customizeLine: (lineId: string, data: { type: string; value: string; notes?: string }) =>
         api.post(`/orders/lines/${lineId}/customize`, data),
-    removeCustomization: (lineId: string) => api.delete(`/orders/lines/${lineId}/customize`),
+    removeCustomization: (lineId: string, options?: { force?: boolean }) =>
+        api.delete(`/orders/lines/${lineId}/customize${options?.force ? '?force=true' : ''}`),
     pickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pick`),
     unpickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpick`),
     packLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pack`),
     unpackLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpack`),
+    // Mark shipped (visual only - no inventory release)
+    markShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) =>
+        api.post(`/orders/lines/${lineId}/mark-shipped`, data),
+    unmarkShippedLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unmark-shipped`),
+    updateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) =>
+        api.patch(`/orders/lines/${lineId}/tracking`, data),
+    processMarkedShipped: (data?: { comment?: string }) => api.post('/orders/process-marked-shipped', data),
+    // Ship (with inventory release)
     ship: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/ship`, data),
+    shipLines: (id: string, data: ShipLinesData) => api.post(`/orders/${id}/ship-lines`, data),
     unship: (id: string) => api.post(`/orders/${id}/unship`),
     quickShip: (id: string) => api.post(`/orders/${id}/quick-ship`),
     bulkQuickShip: () => api.post('/orders/bulk-quick-ship'),

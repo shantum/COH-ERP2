@@ -20,6 +20,7 @@ interface OrderActionPanelProps {
     onCancel: (reason?: string) => void;
     onArchive: () => void;
     onDelete: () => void;
+    onShip?: () => void;
     onQuickShip?: () => void;
     canDelete: boolean;
     canQuickShip: boolean;
@@ -133,6 +134,7 @@ export function OrderActionPanel({
     onCancel,
     onArchive,
     onDelete,
+    onShip,
     onQuickShip,
     canDelete,
     canQuickShip,
@@ -194,6 +196,13 @@ export function OrderActionPanel({
     const lines = order.orderLines || [];
     const itemCount = lines.length;
     const activeCount = lines.filter((l: any) => l.lineStatus !== 'cancelled').length;
+    const activeLines = lines.filter((l: any) => l.lineStatus !== 'cancelled');
+
+    // Check if ready to ship: all lines packed + has AWB from Shopify
+    const allPacked = activeLines.length > 0 &&
+                      activeLines.every((l: any) => l.lineStatus === 'packed');
+    const hasShopifyAwb = !!(order.shopifyCache?.trackingNumber || order.awbNumber);
+    const isReadyToShip = allPacked && hasShopifyAwb;
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex justify-end">
@@ -333,8 +342,22 @@ export function OrderActionPanel({
                         </button>
                     </div>
 
-                    {/* Quick Ship - if available */}
-                    {canQuickShip && onQuickShip && (
+                    {/* Ship Button - prominent when ready to ship */}
+                    {isReadyToShip && onShip && (
+                        <button
+                            onClick={() => {
+                                onShip();
+                                onClose();
+                            }}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all text-sm font-semibold shadow-lg shadow-emerald-200 animate-pulse"
+                        >
+                            <Truck size={18} />
+                            Ship Order
+                        </button>
+                    )}
+
+                    {/* Quick Ship - for orders without verification needed */}
+                    {!isReadyToShip && canQuickShip && onQuickShip && (
                         <button
                             onClick={() => {
                                 if (confirm(`Quick ship ${order.orderNumber}?`)) {
@@ -342,10 +365,10 @@ export function OrderActionPanel({
                                     onClose();
                                 }
                             }}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all text-sm font-medium shadow-sm"
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gray-600 text-white hover:bg-gray-700 transition-all text-sm font-medium shadow-sm"
                         >
                             <Truck size={16} />
-                            Quick Ship (AWB ready)
+                            Quick Ship (skip verification)
                         </button>
                     )}
 
