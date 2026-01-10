@@ -148,10 +148,10 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             // Cascade packaging cost: SKU -> Variation -> Product -> Global default
             const effectivePackagingCost = sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? globalPackagingCost;
 
-            // Calculate fabric cost and total cost
-            const fabricCostPerUnit = variation.fabric?.costPerUnit ? Number(variation.fabric.costPerUnit) : 0;
-            const fabricCost = sku.fabricConsumption ? Number(sku.fabricConsumption) * fabricCostPerUnit : 0;
-            const totalCost = fabricCost + (effectiveTrimsCost || 0) + effectivePackagingCost;
+            // Calculate fabric cost and total cost (handle NaN safely)
+            const fabricCostPerUnit = Number(variation.fabric?.costPerUnit) || 0;
+            const fabricCost = (Number(sku.fabricConsumption) || 0) * fabricCostPerUnit;
+            const totalCost = (fabricCost || 0) + (effectiveTrimsCost || 0) + (effectivePackagingCost || 0);
 
             return {
                 // SKU identifiers
@@ -172,8 +172,8 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 globalPackagingCost,
                 // Costing
                 fabricCostPerUnit,
-                fabricCost: fabricCost > 0 ? Math.round(fabricCost * 100) / 100 : null,
-                totalCost: totalCost > 0 ? Math.round(totalCost * 100) / 100 : null,
+                fabricCost: Math.round(fabricCost * 100) / 100,
+                totalCost: Math.round(totalCost * 100) / 100,
                 isActive: sku.isActive,
 
                 // Variation (color-level)

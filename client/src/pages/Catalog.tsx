@@ -427,7 +427,7 @@ function FabricEditPopover({
 const ALL_COLUMN_IDS = [
     'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
-    'skuCode', 'size', 'mrp', 'fabricConsumption', 'trimsCost', 'packagingCost', 'totalCost',
+    'skuCode', 'size', 'mrp', 'fabricConsumption', 'fabricCost', 'trimsCost', 'packagingCost', 'totalCost',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
 ];
@@ -448,6 +448,7 @@ const DEFAULT_HEADERS: Record<string, string> = {
     size: 'Size',
     mrp: 'MRP',
     fabricConsumption: 'Fab (m)',
+    fabricCost: 'Fab ₹',
     trimsCost: 'Trims ₹',
     packagingCost: 'Pkg ₹',
     totalCost: 'Cost ₹',
@@ -989,9 +990,20 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.fabricConsumption,
             field: 'fabricConsumption',
             width: 65,
+            editable: () => viewLevel === 'sku', // Only editable in SKU view
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? params.value.toFixed(2) : '-',
             cellClass: 'text-right text-xs',
+            cellStyle: () => viewLevel === 'sku' ? { backgroundColor: '#f0f9ff' } : undefined,
+        },
+        {
+            colId: 'fabricCost',
+            headerName: DEFAULT_HEADERS.fabricCost,
+            field: 'fabricCost',
+            width: 70,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
+            cellClass: 'text-right text-xs text-blue-600',
         },
         {
             colId: 'trimsCost',
@@ -1591,6 +1603,15 @@ export default function Catalog() {
                                 handleConsumptionChange(params);
                             } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'packagingCost') {
                                 handleCostChange(params);
+                            } else if (params.colDef.field === 'fabricConsumption' && viewLevel === 'sku') {
+                                // Handle fabric consumption edit in SKU view
+                                const newConsumption = parseFloat(params.newValue);
+                                if (!isNaN(newConsumption) && newConsumption > 0) {
+                                    updateSkuMutation.mutate({
+                                        skuId: params.data.skuId,
+                                        data: { fabricConsumption: newConsumption },
+                                    });
+                                }
                             }
                         }}
                         // Pagination
