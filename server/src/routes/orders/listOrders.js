@@ -732,36 +732,70 @@ router.get('/status/archived', async (req, res) => {
     }
 });
 
-// Get cancelled orders (fully cancelled OR partially cancelled)
+// Get cancelled lines (line-level view for cancelled tab)
+// Returns individual cancelled lines with their parent order info
 router.get('/status/cancelled', async (req, res) => {
     try {
-        const orders = await req.prisma.order.findMany({
+        // Fetch all cancelled lines with order and SKU info
+        const cancelledLines = await req.prisma.orderLine.findMany({
             where: {
-                OR: [
-                    { status: 'cancelled' },
-                    { partiallyCancelled: true },
-                ],
-                isArchived: false,
+                lineStatus: 'cancelled',
+                order: {
+                    isArchived: false,
+                },
             },
             include: {
-                customer: true,
-                orderLines: {
+                order: {
                     include: {
-                        sku: {
-                            include: {
-                                variation: { include: { product: true, fabric: true } },
-                            },
+                        customer: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: { product: true, fabric: true },
                         },
                     },
                 },
             },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { updatedAt: 'desc' },
         });
 
-        res.json(orders);
+        // Transform to order-like structure for frontend compatibility
+        // Each cancelled line becomes a row with order context
+        const rows = cancelledLines.map(line => {
+            const order = line.order;
+            return {
+                // Order-level fields (for display)
+                id: order.id,
+                orderNumber: order.orderNumber,
+                customerId: order.customerId,
+                customerName: order.customerName,
+                customerEmail: order.customerEmail,
+                customerPhone: order.customerPhone,
+                shippingAddress: order.shippingAddress,
+                channel: order.channel,
+                orderDate: order.orderDate,
+                paymentMethod: order.paymentMethod,
+                status: order.status,
+                partiallyCancelled: order.partiallyCancelled,
+                customer: order.customer,
+                // Line-specific fields
+                lineId: line.id,
+                lineStatus: line.lineStatus,
+                // Single line as orderLines array for grid compatibility
+                orderLines: [line],
+                // Calculated total for this cancelled line only
+                totalAmount: (line.unitPrice || 0) * (line.qty || 1),
+                // Flag to indicate this is a line-level row
+                _isLineView: true,
+            };
+        });
+
+        res.json(rows);
     } catch (error) {
-        console.error('Get cancelled orders error:', error);
-        res.status(500).json({ error: 'Failed to fetch cancelled orders' });
+        console.error('Get cancelled lines error:', error);
+        res.status(500).json({ error: 'Failed to fetch cancelled lines' });
     }
 });
 

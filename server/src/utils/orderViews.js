@@ -25,7 +25,7 @@ export const ORDER_VIEWS = {
         where: {
             status: 'open',
             isArchived: false,
-            partiallyCancelled: false, // Exclude partially cancelled - they show in cancelled tab
+            // Include partially cancelled orders - they have active lines to fulfill
         },
         orderBy: { orderDate: 'asc' }, // Oldest first (FIFO queue)
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
@@ -89,18 +89,19 @@ export const ORDER_VIEWS = {
     },
 
     cancelled: {
-        name: 'Cancelled Orders',
-        description: 'Fully or partially cancelled orders',
+        name: 'Cancelled Lines',
+        description: 'Individual cancelled order lines (line-level view)',
+        // Note: This view uses a special line-level query in listOrders.js
+        // The where clause here is just for reference
         where: {
-            OR: [
-                { status: 'cancelled' },
-                { partiallyCancelled: true },
-            ],
+            status: 'cancelled', // Fully cancelled orders only for unified API
             isArchived: false,
         },
         orderBy: { createdAt: 'desc' },
-        enrichment: ['customerStats', 'lineStatusCounts'],
+        enrichment: ['customerStats'],
         defaultLimit: 200,
+        // Flag indicating this is a line-level view
+        isLineView: true,
     },
 
     all: {
@@ -128,7 +129,7 @@ export const ORDER_VIEWS = {
             status: 'open',
             isArchived: false,
             isOnHold: false,
-            partiallyCancelled: false, // Exclude partially cancelled
+            // Include partially cancelled - they have active lines to fulfill
         },
         orderBy: { orderDate: 'asc' }, // FIFO - oldest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
