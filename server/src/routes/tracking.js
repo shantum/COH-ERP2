@@ -553,18 +553,24 @@ router.post('/create-shipment', authenticateToken, async (req, res) => {
             });
         }
 
-        // Build products array from order lines
-        const products = order.orderLines.map(line => ({
+        // Build products array from order lines - exclude cancelled lines
+        const activeLines = order.orderLines.filter(line => line.status !== 'cancelled');
+        const products = activeLines.map(line => ({
             name: line.sku?.variation?.product?.name || line.productName || 'Product',
             sku: line.sku?.skuCode || '',
             quantity: line.quantity || 1,
             price: line.unitPrice || line.price || 0,
         }));
 
-        // Validate products
+        // Validate products - must have at least one active line
         if (products.length === 0) {
-            return res.status(400).json({ error: 'Order has no line items' });
+            return res.status(400).json({ error: 'Order has no active line items (all lines may be cancelled)' });
         }
+
+        // Calculate active order value (excluding cancelled lines)
+        const activeOrderValue = activeLines.reduce((sum, line) => {
+            return sum + ((line.unitPrice || line.price || 0) * (line.quantity || 1));
+        }, 0);
 
         console.log(`[Create Shipment] Order ${order.orderNumber} - ${products.length} products:`, JSON.stringify(products));
 
@@ -576,15 +582,15 @@ router.post('/create-shipment', authenticateToken, async (req, res) => {
             weight: 0.5, // kg
         };
 
-        // Determine payment mode and COD amount
+        // Determine payment mode and COD amount (use active order value, not original total)
         const paymentMode = order.paymentStatus === 'cod_pending' || order.shopifyCache?.financialStatus === 'pending' ? 'COD' : 'Prepaid';
-        const codAmount = paymentMode === 'COD' ? (order.totalAmount || 0) : 0;
+        const codAmount = paymentMode === 'COD' ? activeOrderValue : 0;
 
         // Create shipment with iThink
         const result = await ithinkLogistics.createOrder({
             orderNumber: order.orderNumber,
             orderDate: order.orderDate || new Date(),
-            totalAmount: order.totalAmount || 0,
+            totalAmount: activeOrderValue, // Use active lines value, not original total
             customer: customerData,
             products,
             dimensions,
