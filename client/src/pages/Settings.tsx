@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import {
-    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator
+    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator, RefreshCw
 } from 'lucide-react';
 
 // Tab components
@@ -18,9 +18,10 @@ import {
     RemittanceTab,
     ServerLogsTab,
     CostingTab,
+    BackgroundJobsTab,
 } from '../components/settings/tabs';
 
-type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'costing' | 'database' | 'inspector' | 'logs';
+type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'costing' | 'database' | 'inspector' | 'logs' | 'jobs';
 
 export default function Settings() {
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -111,6 +112,16 @@ export default function Settings() {
                 >
                     <Terminal size={16} /> <span className="hidden sm:inline">Server Logs</span><span className="sm:hidden">Logs</span>
                 </button>
+                <button
+                    className={`px-3 md:px-4 py-2 font-medium flex items-center gap-1.5 md:gap-2 text-sm whitespace-nowrap ${
+                        activeTab === 'jobs'
+                            ? 'text-primary-600 border-b-2 border-primary-600'
+                            : 'text-gray-500'
+                    }`}
+                    onClick={() => setActiveTab('jobs')}
+                >
+                    <RefreshCw size={16} /> <span className="hidden sm:inline">Background Jobs</span><span className="sm:hidden">Jobs</span>
+                </button>
             </div>
 
             {/* Tab Content */}
@@ -122,6 +133,7 @@ export default function Settings() {
             {activeTab === 'database' && <DatabaseTab />}
             {activeTab === 'inspector' && <InspectorTab />}
             {activeTab === 'logs' && <ServerLogsTab />}
+            {activeTab === 'jobs' && <BackgroundJobsTab />}
         </div>
     );
 }

@@ -6,6 +6,9 @@ import { validatePassword } from '../utils/validation.js';
 import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
 import logBuffer from '../utils/logBuffer.js';
 import { chunkProcess } from '../utils/asyncUtils.js';
+import scheduledSync from '../services/scheduledSync.js';
+import trackingSync from '../services/trackingSync.js';
+import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 
 const router = Router();
 
@@ -754,6 +757,183 @@ router.delete('/logs', requireAdmin, (req, res) => {
     } catch (error) {
         console.error('Clear logs error:', error);
         res.status(500).json({ error: 'Failed to clear logs' });
+    }
+});
+
+// ============================================
+// BACKGROUND JOBS MANAGEMENT
+// ============================================
+
+/**
+ * Get status of all background jobs
+ * Returns current status, last run time, and configuration
+ */
+router.get('/background-jobs', authenticateToken, async (req, res) => {
+    try {
+        // Get sync service statuses
+        const shopifyStatus = scheduledSync.getStatus();
+        const trackingStatus = trackingSync.getStatus();
+
+        // Get cache stats for cleanup job context
+        const cacheStats = await getCacheStats();
+
+        // Get any stored settings from database
+        const settings = await req.prisma.systemSetting.findUnique({
+            where: { key: 'background_jobs' }
+        });
+        const savedSettings = settings?.value ? JSON.parse(settings.value) : {};
+
+        res.json({
+            jobs: [
+                {
+                    id: 'shopify_sync',
+                    name: 'Shopify Order Sync',
+                    description: 'Fetches orders from the last 24 hours from Shopify and processes any that were missed by webhooks. Ensures ERP stays in sync with Shopify.',
+                    enabled: shopifyStatus.schedulerActive,
+                    intervalMinutes: shopifyStatus.intervalMinutes,
+                    isRunning: shopifyStatus.isRunning,
+                    lastRunAt: shopifyStatus.lastSyncAt,
+                    lastResult: shopifyStatus.lastSyncResult,
+                    config: {
+                        lookbackHours: shopifyStatus.lookbackHours || 24,
+                    }
+                },
+                {
+                    id: 'tracking_sync',
+                    name: 'Tracking Status Sync',
+                    description: 'Updates delivery status for shipped orders via iThink Logistics API. Tracks deliveries, RTOs, and updates order status automatically.',
+                    enabled: trackingStatus.schedulerActive,
+                    intervalMinutes: trackingStatus.intervalMinutes,
+                    isRunning: trackingStatus.isRunning,
+                    lastRunAt: trackingStatus.lastSyncAt,
+                    lastResult: trackingStatus.lastSyncResult,
+                },
+                {
+                    id: 'cache_cleanup',
+                    name: 'Cache Cleanup',
+                    description: 'Removes old Shopify cache entries, webhook logs, and completed sync records to prevent database bloat. Runs daily at 2 AM.',
+                    enabled: savedSettings.cacheCleanupEnabled !== false,
+                    schedule: 'Daily at 2:00 AM',
+                    lastRunAt: savedSettings.lastCacheCleanupAt || null,
+                    lastResult: savedSettings.lastCacheCleanupResult || null,
+                    stats: cacheStats,
+                },
+                {
+                    id: 'auto_archive',
+                    name: 'Auto-Archive Old Orders',
+                    description: 'Archives shipped/delivered orders older than 90 days on server startup. Reduces clutter in active order views.',
+                    enabled: true,
+                    schedule: 'On server startup',
+                    lastRunAt: savedSettings.lastAutoArchiveAt || null,
+                    note: 'Runs automatically when server starts',
+                }
+            ],
+        });
+    } catch (error) {
+        console.error('Get background jobs error:', error);
+        res.status(500).json({ error: 'Failed to get background jobs status' });
+    }
+});
+
+/**
+ * Trigger a specific background job manually
+ */
+router.post('/background-jobs/:jobId/trigger', requireAdmin, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+
+        switch (jobId) {
+            case 'shopify_sync': {
+                const result = await scheduledSync.triggerSync();
+                res.json({
+                    message: 'Shopify sync triggered',
+                    result,
+                });
+                break;
+            }
+            case 'tracking_sync': {
+                const result = await trackingSync.triggerSync();
+                res.json({
+                    message: 'Tracking sync triggered',
+                    result,
+                });
+                break;
+            }
+            case 'cache_cleanup': {
+                const result = await runAllCleanup();
+
+                // Save result to settings
+                const existingSettings = await req.prisma.systemSetting.findUnique({
+                    where: { key: 'background_jobs' }
+                });
+                const savedSettings = existingSettings?.value ? JSON.parse(existingSettings.value) : {};
+                savedSettings.lastCacheCleanupAt = new Date().toISOString();
+                savedSettings.lastCacheCleanupResult = result.summary;
+
+                await req.prisma.systemSetting.upsert({
+                    where: { key: 'background_jobs' },
+                    update: { value: JSON.stringify(savedSettings) },
+                    create: { key: 'background_jobs', value: JSON.stringify(savedSettings) }
+                });
+
+                res.json({
+                    message: 'Cache cleanup completed',
+                    result,
+                });
+                break;
+            }
+            default:
+                res.status(400).json({ error: `Unknown job: ${jobId}` });
+        }
+    } catch (error) {
+        console.error(`Trigger job ${req.params.jobId} error:`, error);
+        res.status(500).json({ error: `Failed to trigger job: ${error.message}` });
+    }
+});
+
+/**
+ * Update background job settings
+ * Currently just tracks enabled/disabled state for cache cleanup
+ * (Shopify and tracking sync are controlled by their services)
+ */
+router.put('/background-jobs/:jobId', requireAdmin, async (req, res) => {
+    try {
+        const { jobId } = req.params;
+        const { enabled } = req.body;
+
+        // Get existing settings
+        const existingSettings = await req.prisma.systemSetting.findUnique({
+            where: { key: 'background_jobs' }
+        });
+        const savedSettings = existingSettings?.value ? JSON.parse(existingSettings.value) : {};
+
+        switch (jobId) {
+            case 'cache_cleanup':
+                savedSettings.cacheCleanupEnabled = enabled;
+                break;
+            // Note: shopify_sync and tracking_sync are always running
+            // They can only be stopped/started at server level
+            default:
+                res.status(400).json({
+                    error: `Cannot update settings for ${jobId}. Sync services are managed at server level.`
+                });
+                return;
+        }
+
+        await req.prisma.systemSetting.upsert({
+            where: { key: 'background_jobs' },
+            update: { value: JSON.stringify(savedSettings) },
+            create: { key: 'background_jobs', value: JSON.stringify(savedSettings) }
+        });
+
+        res.json({
+            message: 'Job settings updated',
+            jobId,
+            enabled,
+        });
+    } catch (error) {
+        console.error(`Update job ${req.params.jobId} error:`, error);
+        res.status(500).json({ error: 'Failed to update job settings' });
     }
 });
 

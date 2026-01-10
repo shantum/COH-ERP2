@@ -549,6 +549,11 @@ export const adminApi = {
         api.get('/admin/logs', { params }),
     getLogStats: () => api.get('/admin/logs/stats'),
     clearLogs: () => api.delete('/admin/logs'),
+    // Background jobs
+    getBackgroundJobs: () => api.get('/admin/background-jobs'),
+    triggerBackgroundJob: (jobId: string) => api.post(`/admin/background-jobs/${jobId}/trigger`),
+    updateBackgroundJob: (jobId: string, data: { enabled: boolean }) =>
+        api.put(`/admin/background-jobs/${jobId}`, data),
 };
 
 // Tracking API (iThink Logistics integration)
