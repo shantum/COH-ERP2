@@ -25,6 +25,7 @@ export const ORDER_VIEWS = {
         where: {
             status: 'open',
             isArchived: false,
+            partiallyCancelled: false, // Exclude partially cancelled - they show in cancelled tab
         },
         orderBy: { orderDate: 'asc' }, // Oldest first (FIFO queue)
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
@@ -127,6 +128,7 @@ export const ORDER_VIEWS = {
             status: 'open',
             isArchived: false,
             isOnHold: false,
+            partiallyCancelled: false, // Exclude partially cancelled
         },
         orderBy: { orderDate: 'asc' }, // FIFO - oldest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
