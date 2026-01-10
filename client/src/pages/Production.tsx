@@ -831,35 +831,46 @@ export default function Production() {
             )}
 
             {/* Complete Modal */}
-            {showComplete && (
+            {showComplete && (() => {
+                // Detect custom SKU by flag OR by code pattern (e.g., 10291013-C01)
+                const skuCode = showComplete.sku?.skuCode || '';
+                const isCustomByPattern = /-C\d{2}$/.test(skuCode);
+                const isCustomSku = showComplete.isCustomSku || showComplete.sku?.isCustomSku || isCustomByPattern;
+
+                return (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                     <div className="bg-white rounded-xl p-6 w-full max-w-sm">
                         <h2 className="text-lg font-semibold mb-2">Complete Batch</h2>
-                        <p className="text-sm text-gray-500 mb-4">{showComplete.sku?.skuCode} - Planned: {showComplete.qtyPlanned}</p>
+                        <p className="text-sm text-gray-500 mb-4">{skuCode} - Planned: {showComplete.qtyPlanned}</p>
 
                         {/* Custom SKU details */}
-                        {showComplete.isCustomSku && showComplete.customization && (
+                        {isCustomSku && (
                             <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
                                 <div className="flex items-center gap-2 mb-2">
                                     <Scissors size={14} className="text-orange-600" />
                                     <span className="text-sm font-medium text-orange-700">Custom Item</span>
                                 </div>
-                                {showComplete.customization.type && (
+                                {showComplete.customization?.type && (
                                     <p className="text-xs text-orange-600">
                                         {showComplete.customization.type}: {showComplete.customization.value}
                                     </p>
                                 )}
-                                {showComplete.customization.notes && (
+                                {showComplete.customization?.notes && (
                                     <p className="text-xs text-orange-600 mt-1 italic">
                                         Notes: {showComplete.customization.notes}
                                     </p>
                                 )}
-                                {showComplete.customization.linkedOrder && (
+                                {showComplete.customization?.linkedOrder && (
                                     <p className="text-xs text-gray-600 mt-1">
                                         For Order: {showComplete.customization.linkedOrder.orderNumber}
                                         {showComplete.customization.linkedOrder.customerName && (
                                             <span> ({showComplete.customization.linkedOrder.customerName})</span>
                                         )}
+                                    </p>
+                                )}
+                                {!showComplete.customization && isCustomByPattern && (
+                                    <p className="text-xs text-orange-600">
+                                        Custom SKU detected by code pattern
                                     </p>
                                 )}
                             </div>
@@ -871,7 +882,7 @@ export default function Production() {
                         </div>
 
                         {/* Custom SKU confirmation checkbox */}
-                        {showComplete.isCustomSku && (
+                        {isCustomSku && (
                             <label className="flex items-start gap-3 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors">
                                 <input
                                     type="checkbox"
@@ -890,21 +901,22 @@ export default function Production() {
                             <button
                                 onClick={() => completeBatch.mutate({ id: showComplete.id, data: { qtyCompleted } })}
                                 className="btn-primary flex-1 text-sm"
-                                disabled={completeBatch.isPending || (showComplete.isCustomSku && !customConfirmed)}
+                                disabled={completeBatch.isPending || (isCustomSku && !customConfirmed)}
                             >
                                 {completeBatch.isPending ? 'Completing...' : 'Complete'}
                             </button>
                         </div>
 
                         {/* Warning if checkbox not checked */}
-                        {showComplete.isCustomSku && !customConfirmed && (
+                        {isCustomSku && !customConfirmed && (
                             <p className="text-xs text-amber-600 mt-2 text-center">
                                 Please confirm customization is complete to proceed
                             </p>
                         )}
                     </div>
                 </div>
-            )}
+                );
+            })()}
 
             {/* Add Item Modal */}
             {showAddItem && (
