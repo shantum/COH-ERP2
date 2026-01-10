@@ -8,9 +8,14 @@ import prisma from '../lib/prisma.js';
 
 class IThinkLogisticsClient {
     constructor() {
-        this.baseUrl = 'https://api.ithinklogistics.com/api_v3';
+        // Different base URLs for different endpoints
+        this.trackingBaseUrl = 'https://api.ithinklogistics.com/api_v3';
+        this.orderBaseUrl = 'https://my.ithinklogistics.com/api_v3';
         this.accessToken = null;
         this.secretKey = null;
+        this.pickupAddressId = null;
+        this.returnAddressId = null;
+        this.defaultLogistics = 'delhivery'; // delhivery, bluedart, xpressbees, ecom, ekart
     }
 
     /**
@@ -20,7 +25,13 @@ class IThinkLogisticsClient {
         try {
             const settings = await prisma.systemSetting.findMany({
                 where: {
-                    key: { in: ['ithink_access_token', 'ithink_secret_key'] }
+                    key: { in: [
+                        'ithink_access_token',
+                        'ithink_secret_key',
+                        'ithink_pickup_address_id',
+                        'ithink_return_address_id',
+                        'ithink_default_logistics'
+                    ] }
                 }
             });
 
@@ -29,6 +40,12 @@ class IThinkLogisticsClient {
                     this.accessToken = setting.value;
                 } else if (setting.key === 'ithink_secret_key') {
                     this.secretKey = setting.value;
+                } else if (setting.key === 'ithink_pickup_address_id') {
+                    this.pickupAddressId = setting.value;
+                } else if (setting.key === 'ithink_return_address_id') {
+                    this.returnAddressId = setting.value;
+                } else if (setting.key === 'ithink_default_logistics') {
+                    this.defaultLogistics = setting.value;
                 }
             }
         } catch (error) {
@@ -39,31 +56,76 @@ class IThinkLogisticsClient {
     /**
      * Update credentials in database
      */
-    async updateConfig(accessToken, secretKey) {
-        await prisma.$transaction([
-            prisma.systemSetting.upsert({
+    async updateConfig(config) {
+        const { accessToken, secretKey, pickupAddressId, returnAddressId, defaultLogistics } = config;
+
+        const updates = [];
+
+        if (accessToken !== undefined) {
+            updates.push(prisma.systemSetting.upsert({
                 where: { key: 'ithink_access_token' },
                 update: { value: accessToken },
                 create: { key: 'ithink_access_token', value: accessToken }
-            }),
-            prisma.systemSetting.upsert({
+            }));
+            this.accessToken = accessToken;
+        }
+
+        if (secretKey !== undefined) {
+            updates.push(prisma.systemSetting.upsert({
                 where: { key: 'ithink_secret_key' },
                 update: { value: secretKey },
                 create: { key: 'ithink_secret_key', value: secretKey }
-            })
-        ]);
+            }));
+            this.secretKey = secretKey;
+        }
 
-        this.accessToken = accessToken;
-        this.secretKey = secretKey;
+        if (pickupAddressId !== undefined) {
+            updates.push(prisma.systemSetting.upsert({
+                where: { key: 'ithink_pickup_address_id' },
+                update: { value: pickupAddressId },
+                create: { key: 'ithink_pickup_address_id', value: pickupAddressId }
+            }));
+            this.pickupAddressId = pickupAddressId;
+        }
+
+        if (returnAddressId !== undefined) {
+            updates.push(prisma.systemSetting.upsert({
+                where: { key: 'ithink_return_address_id' },
+                update: { value: returnAddressId },
+                create: { key: 'ithink_return_address_id', value: returnAddressId }
+            }));
+            this.returnAddressId = returnAddressId;
+        }
+
+        if (defaultLogistics !== undefined) {
+            updates.push(prisma.systemSetting.upsert({
+                where: { key: 'ithink_default_logistics' },
+                update: { value: defaultLogistics },
+                create: { key: 'ithink_default_logistics', value: defaultLogistics }
+            }));
+            this.defaultLogistics = defaultLogistics;
+        }
+
+        if (updates.length > 0) {
+            await prisma.$transaction(updates);
+        }
     }
 
     isConfigured() {
         return !!(this.accessToken && this.secretKey);
     }
 
+    isFullyConfigured() {
+        return !!(this.accessToken && this.secretKey && this.pickupAddressId && this.returnAddressId);
+    }
+
     getConfig() {
         return {
             hasCredentials: this.isConfigured(),
+            hasWarehouseConfig: !!(this.pickupAddressId && this.returnAddressId),
+            pickupAddressId: this.pickupAddressId,
+            returnAddressId: this.returnAddressId,
+            defaultLogistics: this.defaultLogistics,
         };
     }
 
@@ -83,7 +145,7 @@ class IThinkLogisticsClient {
             throw new Error('Maximum 10 AWB numbers per request');
         }
 
-        const response = await axios.post(`${this.baseUrl}/order/track.json`, {
+        const response = await axios.post(`${this.trackingBaseUrl}/order/track.json`, {
             data: {
                 access_token: this.accessToken,
                 secret_key: this.secretKey,
@@ -99,6 +161,485 @@ class IThinkLogisticsClient {
         }
 
         return response.data.data;
+    }
+
+    /**
+     * Create a new order/shipment with iThink Logistics
+     * This books the shipment and returns an AWB number
+     *
+     * @param {Object} orderData - Order details
+     * @param {string} orderData.orderNumber - Unique order number
+     * @param {Date} orderData.orderDate - Order date
+     * @param {number} orderData.totalAmount - Total order amount
+     * @param {Object} orderData.customer - Customer details
+     * @param {string} orderData.customer.name - Customer name
+     * @param {string} orderData.customer.phone - Customer phone
+     * @param {string} orderData.customer.address - Address line 1
+     * @param {string} orderData.customer.address2 - Address line 2 (optional)
+     * @param {string} orderData.customer.city - City
+     * @param {string} orderData.customer.state - State
+     * @param {string} orderData.customer.pincode - Pincode
+     * @param {string} orderData.customer.email - Email (optional)
+     * @param {Array} orderData.products - Array of products
+     * @param {Object} orderData.dimensions - Shipment dimensions
+     * @param {number} orderData.dimensions.length - Length in cm
+     * @param {number} orderData.dimensions.width - Width in cm
+     * @param {number} orderData.dimensions.height - Height in cm
+     * @param {number} orderData.dimensions.weight - Weight in kg
+     * @param {string} orderData.paymentMode - 'COD' or 'Prepaid'
+     * @param {number} orderData.codAmount - COD amount (if payment mode is COD)
+     * @param {string} orderData.logistics - Logistics provider (optional, uses default)
+     * @returns {Promise<Object>} Response with AWB number
+     */
+    async createOrder(orderData) {
+        if (!this.isFullyConfigured()) {
+            throw new Error('iThink Logistics not fully configured. Need credentials and warehouse IDs.');
+        }
+
+        const {
+            orderNumber,
+            orderDate,
+            totalAmount,
+            customer,
+            products,
+            dimensions,
+            paymentMode = 'Prepaid',
+            codAmount = 0,
+            logistics,
+        } = orderData;
+
+        // Format order date as DD-MM-YYYY
+        const formattedDate = orderDate instanceof Date
+            ? `${String(orderDate.getDate()).padStart(2, '0')}-${String(orderDate.getMonth() + 1).padStart(2, '0')}-${orderDate.getFullYear()}`
+            : orderDate;
+
+        // Build shipment object per iThink API v3 spec
+        const shipment = {
+            waybill: '', // Empty - iThink will generate
+            order: orderNumber,
+            sub_order: '',
+            order_date: formattedDate,
+            total_amount: String(totalAmount),
+            // Customer details
+            name: customer.name,
+            company_name: '',
+            add: customer.address,
+            add2: customer.address2 || '',
+            add3: '',
+            pin: String(customer.pincode),
+            city: customer.city || '',
+            state: customer.state || '',
+            country: 'India',
+            phone: String(customer.phone),
+            alt_phone: '',
+            email: customer.email || '',
+            // Billing same as shipping
+            is_billing_same_as_shipping: 'yes',
+            billing_name: customer.name,
+            billing_company_name: '',
+            billing_add: customer.address,
+            billing_add2: customer.address2 || '',
+            billing_add3: '',
+            billing_pin: String(customer.pincode),
+            billing_city: customer.city || '',
+            billing_state: customer.state || '',
+            billing_country: 'India',
+            billing_phone: String(customer.phone),
+            billing_alt_phone: '',
+            billing_email: customer.email || '',
+            // Products
+            products: products.map(p => ({
+                product_name: p.name,
+                product_sku: p.sku || '',
+                product_quantity: String(p.quantity),
+                product_price: String(p.price),
+                product_tax_rate: '0',
+                product_hsn_code: '',
+                product_discount: '0',
+            })),
+            // Dimensions (weight in kg, dimensions in cm)
+            shipment_length: String(dimensions.length || 10),
+            shipment_width: String(dimensions.width || 10),
+            shipment_height: String(dimensions.height || 5),
+            weight: String(dimensions.weight || 0.5),
+            // Charges
+            shipping_charges: '0',
+            giftwrap_charges: '0',
+            transaction_charges: '0',
+            total_discount: '0',
+            first_attemp_discount: '0',
+            cod_charges: '0',
+            advance_amount: '0',
+            cod_amount: paymentMode.toUpperCase() === 'COD' ? String(codAmount) : '0',
+            payment_mode: paymentMode.toUpperCase() === 'COD' ? 'COD' : 'Prepaid',
+            // Other
+            reseller_name: '',
+            eway_bill_number: '',
+            gst_number: '',
+            what3words: '',
+            return_address_id: this.returnAddressId,
+        };
+
+        const requestData = {
+            data: {
+                shipments: [shipment],
+                pickup_address_id: this.pickupAddressId,
+                access_token: this.accessToken,
+                secret_key: this.secretKey,
+                logistics: logistics || this.defaultLogistics,
+                s_type: '', // air/surface - optional
+                order_type: 'forward', // forward/reverse
+            }
+        };
+
+        console.log(`[iThink] Creating order ${orderNumber} with ${logistics || this.defaultLogistics}`);
+
+        const response = await axios.post(`${this.orderBaseUrl}/order/add.json`, requestData, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+        });
+
+        // Log full response for debugging
+        console.log(`[iThink] Response:`, JSON.stringify(response.data, null, 2));
+
+        // Handle top-level error response
+        if (response.data.status === 'error' || response.data.status_code === 400 || response.data.status_code === 500) {
+            const errorMsg = response.data.message || response.data.html_message || 'Order creation failed';
+            console.error(`[iThink] Error response:`, JSON.stringify(response.data));
+            throw new Error(`iThink API error: ${errorMsg}`);
+        }
+
+        // Success response - extract AWB from response
+        // Response structure: { status: "success", status_code: 200, data: { "1": { waybill: "AWB123", status: "success", ... } } }
+        // Note: data is an object with numeric string keys, not an array
+        const dataObj = response.data.data;
+        let result = null;
+
+        if (dataObj) {
+            // Get first entry from the data object
+            const firstKey = Object.keys(dataObj)[0];
+            result = dataObj[firstKey];
+        }
+
+        // Check if the logistics provider returned an error
+        if (result?.status === 'error') {
+            const errorMsg = result.remark || result.reason || 'Logistics provider rejected the order';
+            console.error(`[iThink] Logistics error:`, errorMsg);
+            throw new Error(`Logistics error: ${errorMsg}`);
+        }
+
+        if (!result || !result.waybill) {
+            console.error('[iThink] Unexpected response:', JSON.stringify(response.data));
+            throw new Error('No AWB number returned from iThink');
+        }
+
+        console.log(`[iThink] Order ${orderNumber} created successfully. AWB: ${result.waybill}`);
+
+        return {
+            success: true,
+            awbNumber: result.waybill,
+            orderId: result.order_id,
+            logistics: logistics || this.defaultLogistics,
+            rawResponse: response.data,
+        };
+    }
+
+    /**
+     * Get shipping label PDF for AWB number(s)
+     * Returns URL to the PDF label file
+     *
+     * @param {string|string[]} awbNumbers - Single AWB or array of AWBs
+     * @param {Object} options - Label options
+     * @param {string} options.pageSize - 'A4' or 'A6' (default: A4)
+     * @param {boolean} options.displayCodPrepaid - Show COD/Prepaid on label
+     * @param {boolean} options.displayShipperMobile - Show shipper mobile on label
+     * @param {boolean} options.displayShipperAddress - Show shipper address on label
+     * @returns {Promise<Object>} URL to the PDF label
+     */
+    async getShippingLabel(awbNumbers, options = {}) {
+        if (!this.isConfigured()) {
+            throw new Error('iThink Logistics credentials not configured');
+        }
+
+        // Normalize to comma-separated string
+        const awbList = Array.isArray(awbNumbers) ? awbNumbers.join(',') : awbNumbers;
+
+        if (!awbList) {
+            throw new Error('AWB number(s) required');
+        }
+
+        const {
+            pageSize = 'A4',
+            displayCodPrepaid,
+            displayShipperMobile,
+            displayShipperAddress,
+        } = options;
+
+        const requestData = {
+            data: {
+                awb_numbers: awbList,
+                page_size: pageSize,
+                access_token: this.accessToken,
+                secret_key: this.secretKey,
+            }
+        };
+
+        // Add optional display settings (1 = yes, 0 = no, blank = default)
+        if (displayCodPrepaid !== undefined) {
+            requestData.data.display_cod_prepaid = displayCodPrepaid ? '1' : '0';
+        }
+        if (displayShipperMobile !== undefined) {
+            requestData.data.display_shipper_mobile = displayShipperMobile ? '1' : '0';
+        }
+        if (displayShipperAddress !== undefined) {
+            requestData.data.display_shipper_address = displayShipperAddress ? '1' : '0';
+        }
+
+        const response = await axios.post(`${this.orderBaseUrl}/shipping/label.json`, requestData, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+        });
+
+        console.log(`[iThink] Shipping label response:`, JSON.stringify(response.data, null, 2));
+
+        if (response.data.status !== 'success' || response.data.status_code !== 200) {
+            const errorMsg = response.data.message || response.data.html_message || 'Label generation failed';
+            throw new Error(`iThink API error: ${errorMsg}`);
+        }
+
+        return {
+            success: true,
+            labelUrl: response.data.file_name,
+            rawResponse: response.data,
+        };
+    }
+
+    /**
+     * Check pincode serviceability
+     * Returns logistics providers that can service the pincode with their capabilities
+     *
+     * @param {string} pincode - Pincode to check
+     * @returns {Promise<Object>} Serviceability info for each logistics provider
+     */
+    async checkPincode(pincode) {
+        if (!this.isConfigured()) {
+            throw new Error('iThink Logistics credentials not configured');
+        }
+
+        if (!pincode) {
+            throw new Error('Pincode is required');
+        }
+
+        const response = await axios.post(`${this.orderBaseUrl}/pincode/check.json`, {
+            data: {
+                pincode: String(pincode),
+                access_token: this.accessToken,
+                secret_key: this.secretKey,
+            }
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+        });
+
+        console.log(`[iThink] Pincode check response:`, JSON.stringify(response.data, null, 2));
+
+        if (response.data.status !== 'success' || response.data.status_code !== 200) {
+            const errorMsg = response.data.message || response.data.html_message || 'Pincode check failed';
+            throw new Error(`iThink API error: ${errorMsg}`);
+        }
+
+        // Parse response - data is { "pincode": { "provider": { ... } } }
+        // Also contains metadata fields like remark, state_name, city_name, etc.
+        const pincodeData = response.data.data?.[pincode] || {};
+        const providers = [];
+
+        // Metadata fields to skip (not logistics providers)
+        const metadataFields = ['remark', 'state_name', 'city_name', 'city_id', 'state_id'];
+
+        for (const [providerName, details] of Object.entries(pincodeData)) {
+            // Skip metadata fields
+            if (metadataFields.includes(providerName) || typeof details !== 'object') {
+                continue;
+            }
+            providers.push({
+                logistics: providerName,
+                supportsCod: details.cod === 'Y',
+                supportsPrepaid: details.prepaid === 'Y',
+                supportsPickup: details.pickup === 'Y',
+                district: details.district || '',
+                stateCode: details.state_code || '',
+                sortCode: details.sort_code || '',
+            });
+        }
+
+        // Extract metadata
+        const metadata = {
+            stateName: pincodeData.state_name || '',
+            cityName: pincodeData.city_name || '',
+            remark: pincodeData.remark || '',
+        };
+
+        return {
+            success: true,
+            pincode,
+            serviceable: providers.length > 0,
+            city: metadata.cityName,
+            state: metadata.stateName,
+            providers,
+            rawResponse: response.data,
+        };
+    }
+
+    /**
+     * Get shipping rates for a package
+     * Returns available logistics providers with rates, zones, and delivery TAT
+     *
+     * @param {Object} params - Rate query parameters
+     * @param {string} params.fromPincode - Origin pincode
+     * @param {string} params.toPincode - Destination pincode
+     * @param {number} params.length - Length in cm
+     * @param {number} params.width - Width in cm
+     * @param {number} params.height - Height in cm
+     * @param {number} params.weight - Weight in kg
+     * @param {string} params.orderType - 'forward' or 'reverse' (default: forward)
+     * @param {string} params.paymentMethod - 'cod' or 'prepaid' (default: prepaid)
+     * @param {number} params.productMrp - Product MRP for COD orders
+     * @returns {Promise<Object>} Available rates and delivery info
+     */
+    async getRates(params) {
+        if (!this.isConfigured()) {
+            throw new Error('iThink Logistics credentials not configured');
+        }
+
+        const {
+            fromPincode,
+            toPincode,
+            length = 10,
+            width = 10,
+            height = 5,
+            weight = 0.5,
+            orderType = 'forward',
+            paymentMethod = 'prepaid',
+            productMrp = 0,
+        } = params;
+
+        if (!fromPincode || !toPincode) {
+            throw new Error('fromPincode and toPincode are required');
+        }
+
+        const response = await axios.post(`${this.orderBaseUrl}/rate/check.json`, {
+            data: {
+                from_pincode: String(fromPincode),
+                to_pincode: String(toPincode),
+                shipping_length_cms: String(length),
+                shipping_width_cms: String(width),
+                shipping_height_cms: String(height),
+                shipping_weight_kg: String(weight),
+                order_type: orderType,
+                payment_method: paymentMethod.toLowerCase(),
+                product_mrp: String(productMrp),
+                access_token: this.accessToken,
+                secret_key: this.secretKey,
+            }
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+        });
+
+        console.log(`[iThink] Rate check response:`, JSON.stringify(response.data, null, 2));
+
+        if (response.data.status !== 'success' || response.data.status_code !== 200) {
+            const errorMsg = response.data.message || response.data.html_message || 'Rate check failed';
+            throw new Error(`iThink API error: ${errorMsg}`);
+        }
+
+        // Parse rates - data is object with numeric keys
+        const rates = [];
+        const dataObj = response.data.data || {};
+        for (const key of Object.keys(dataObj)) {
+            const provider = dataObj[key];
+            rates.push({
+                logistics: provider.logistic_name,
+                serviceType: provider.logistic_service_type || '',
+                rate: parseFloat(provider.rate) || 0,
+                zone: provider.logistics_zone,
+                deliveryTat: provider.delivery_tat,
+                supportsCod: provider.cod === 'Y',
+                supportsPrepaid: provider.prepaid === 'Y',
+                supportsPickup: provider.pickup === 'Y',
+                supportsReversePickup: provider.rev_pickup === 'Y',
+            });
+        }
+
+        // Sort by rate (lowest first)
+        rates.sort((a, b) => a.rate - b.rate);
+
+        return {
+            success: true,
+            zone: response.data.zone,
+            expectedDelivery: response.data.expected_delivery_date,
+            rates,
+            rawResponse: response.data,
+        };
+    }
+
+    /**
+     * Cancel shipment(s) by AWB number(s)
+     * @param {string|string[]} awbNumbers - Single AWB or array of AWBs (max 100)
+     * @returns {Promise<Object>} Cancellation results
+     */
+    async cancelShipment(awbNumbers) {
+        if (!this.isConfigured()) {
+            throw new Error('iThink Logistics credentials not configured');
+        }
+
+        // Normalize to array
+        const awbList = Array.isArray(awbNumbers) ? awbNumbers : [awbNumbers];
+        if (awbList.length > 100) {
+            throw new Error('Maximum 100 AWB numbers per cancellation request');
+        }
+
+        console.log(`[iThink] Cancelling ${awbList.length} shipment(s): ${awbList.join(', ')}`);
+
+        const response = await axios.post(`${this.orderBaseUrl}/order/cancel.json`, {
+            data: {
+                access_token: this.accessToken,
+                secret_key: this.secretKey,
+                awb_numbers: awbList.join(',')
+            }
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+        });
+
+        console.log(`[iThink] Cancel response:`, JSON.stringify(response.data, null, 2));
+
+        // Handle error response
+        if (response.data.status === 'error' || response.data.status_code === 400) {
+            const errorMsg = response.data.html_message || response.data.message || 'Cancellation failed';
+            throw new Error(`iThink API error: ${errorMsg}`);
+        }
+
+        // Process results - data is object with numeric keys
+        const results = {};
+        const dataObj = response.data.data || {};
+
+        for (const key of Object.keys(dataObj)) {
+            const item = dataObj[key];
+            const awb = awbList[parseInt(key) - 1] || item.refnum;
+            results[awb] = {
+                success: item.status?.toLowerCase() === 'success',
+                status: item.status,
+                remark: item.remark || '',
+                refnum: item.refnum,
+            };
+        }
+
+        return {
+            success: true,
+            results,
+            rawResponse: response.data,
+        };
     }
 
     /**

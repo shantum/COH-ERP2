@@ -26,15 +26,27 @@ router.get('/config', authenticateToken, async (req, res) => {
 
 router.put('/config', authenticateToken, async (req, res) => {
     try {
-        const { accessToken, secretKey } = req.body;
+        const { accessToken, secretKey, pickupAddressId, returnAddressId, defaultLogistics } = req.body;
 
-        if (!accessToken || !secretKey) {
-            return res.status(400).json({ error: 'Access token and secret key are required' });
+        // At minimum need tokens if updating credentials
+        if (accessToken !== undefined || secretKey !== undefined) {
+            if (!accessToken || !secretKey) {
+                return res.status(400).json({ error: 'Both access token and secret key are required' });
+            }
         }
 
-        await ithinkLogistics.updateConfig(accessToken, secretKey);
+        await ithinkLogistics.updateConfig({
+            accessToken,
+            secretKey,
+            pickupAddressId,
+            returnAddressId,
+            defaultLogistics,
+        });
 
-        res.json({ message: 'iThink Logistics configuration updated' });
+        res.json({
+            message: 'iThink Logistics configuration updated',
+            config: ithinkLogistics.getConfig(),
+        });
     } catch (error) {
         console.error('Update tracking config error:', error);
         res.status(500).json({ error: 'Failed to update configuration' });
@@ -441,6 +453,446 @@ router.post('/sync/backfill', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error('Backfill tracking error:', error);
         res.status(500).json({ error: 'Failed to backfill tracking data' });
+    }
+});
+
+// ============================================
+// ORDER CREATION (Book shipment with iThink)
+// ============================================
+
+/**
+ * Create a shipment with iThink Logistics and get AWB
+ * POST /api/tracking/create-shipment
+ * Body: { orderId: "uuid" } or direct order data
+ */
+router.post('/create-shipment', authenticateToken, async (req, res) => {
+    try {
+        await ithinkLogistics.loadFromDatabase();
+
+        if (!ithinkLogistics.isFullyConfigured()) {
+            return res.status(400).json({
+                error: 'iThink Logistics not fully configured',
+                details: 'Need access_token, secret_key, pickup_address_id, and return_address_id',
+                config: ithinkLogistics.getConfig(),
+            });
+        }
+
+        const { orderId, logistics } = req.body;
+
+        if (!orderId) {
+            return res.status(400).json({ error: 'orderId is required' });
+        }
+
+        // Fetch order with customer, shopify cache, and line items
+        const order = await req.prisma.order.findUnique({
+            where: { id: orderId },
+            include: {
+                customer: true,
+                shopifyCache: true,
+                orderLines: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: {
+                                    include: { product: true }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!order) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        if (order.awbNumber) {
+            return res.status(400).json({
+                error: 'Order already has an AWB number',
+                awbNumber: order.awbNumber,
+            });
+        }
+
+        // Parse Shopify raw data if available
+        let shopifyShippingAddress = null;
+        let shopifyPhone = null;
+        if (order.shopifyCache?.rawData) {
+            try {
+                const rawData = typeof order.shopifyCache.rawData === 'string'
+                    ? JSON.parse(order.shopifyCache.rawData)
+                    : order.shopifyCache.rawData;
+                shopifyShippingAddress = rawData.shipping_address || rawData.billing_address;
+                shopifyPhone = rawData.phone || rawData.billing_address?.phone || rawData.shipping_address?.phone;
+            } catch (e) {
+                console.error('Failed to parse shopify rawData:', e.message);
+            }
+        }
+
+        // Build customer address from order or customer record
+        const customerData = {
+            name: order.customerName || `${order.customer?.firstName || ''} ${order.customer?.lastName || ''}`.trim() || 'Customer',
+            phone: shopifyPhone || order.customer?.phone || '9999999999',
+            email: order.customer?.email || order.shopifyCache?.email || '',
+            address: shopifyShippingAddress?.address1 || order.customer?.address || '',
+            address2: shopifyShippingAddress?.address2 || '',
+            city: shopifyShippingAddress?.city || order.shopifyCache?.shippingCity || order.customer?.city || '',
+            state: shopifyShippingAddress?.province || order.shopifyCache?.shippingState || order.customer?.state || '',
+            pincode: shopifyShippingAddress?.zip || order.customer?.pincode || '',
+        };
+
+        // Validate required fields
+        if (!customerData.address || !customerData.pincode || !customerData.phone) {
+            return res.status(400).json({
+                error: 'Missing required address information',
+                details: {
+                    hasAddress: !!customerData.address,
+                    hasPincode: !!customerData.pincode,
+                    hasPhone: !!customerData.phone,
+                },
+            });
+        }
+
+        // Build products array from order lines
+        const products = order.orderLines.map(line => ({
+            name: line.sku?.variation?.product?.name || line.productName || 'Product',
+            sku: line.sku?.skuCode || '',
+            quantity: line.quantity || 1,
+            price: line.unitPrice || line.price || 0,
+        }));
+
+        // Validate products
+        if (products.length === 0) {
+            return res.status(400).json({ error: 'Order has no line items' });
+        }
+
+        console.log(`[Create Shipment] Order ${order.orderNumber} - ${products.length} products:`, JSON.stringify(products));
+
+        // Default dimensions (can be made configurable later)
+        const dimensions = {
+            length: 20, // cm
+            width: 15,  // cm
+            height: 10, // cm
+            weight: 0.5, // kg
+        };
+
+        // Determine payment mode and COD amount
+        const paymentMode = order.paymentStatus === 'cod_pending' || order.shopifyCache?.financialStatus === 'pending' ? 'COD' : 'Prepaid';
+        const codAmount = paymentMode === 'COD' ? (order.totalAmount || 0) : 0;
+
+        // Create shipment with iThink
+        const result = await ithinkLogistics.createOrder({
+            orderNumber: order.orderNumber,
+            orderDate: order.orderDate || new Date(),
+            totalAmount: order.totalAmount || 0,
+            customer: customerData,
+            products,
+            dimensions,
+            paymentMode,
+            codAmount,
+            logistics: logistics || undefined,
+        });
+
+        // Update order with AWB number
+        await req.prisma.order.update({
+            where: { id: orderId },
+            data: {
+                awbNumber: result.awbNumber,
+                courier: result.logistics,
+                trackingStatus: 'manifested',
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Shipment created successfully',
+            awbNumber: result.awbNumber,
+            logistics: result.logistics,
+            orderId: result.orderId,
+        });
+    } catch (error) {
+        console.error('Create shipment error:', error);
+        res.status(500).json({ error: error.message || 'Failed to create shipment' });
+    }
+});
+
+/**
+ * Cancel a shipment by AWB number
+ * POST /api/tracking/cancel-shipment
+ * Body: { awbNumber: "AWB123" } or { awbNumbers: ["AWB1", "AWB2"] } or { orderId: "uuid" }
+ */
+router.post('/cancel-shipment', authenticateToken, async (req, res) => {
+    try {
+        await ithinkLogistics.loadFromDatabase();
+
+        if (!ithinkLogistics.isConfigured()) {
+            return res.status(400).json({ error: 'iThink Logistics not configured' });
+        }
+
+        const { awbNumber, awbNumbers, orderId } = req.body;
+
+        let awbsToCancel = [];
+
+        // Option 1: Single AWB
+        if (awbNumber) {
+            awbsToCancel = [awbNumber];
+        }
+        // Option 2: Multiple AWBs
+        else if (awbNumbers && Array.isArray(awbNumbers)) {
+            awbsToCancel = awbNumbers;
+        }
+        // Option 3: By order ID - lookup AWB from order
+        else if (orderId) {
+            const order = await req.prisma.order.findUnique({
+                where: { id: orderId },
+                select: { id: true, orderNumber: true, awbNumber: true }
+            });
+
+            if (!order) {
+                return res.status(404).json({ error: 'Order not found' });
+            }
+
+            if (!order.awbNumber) {
+                return res.status(400).json({ error: 'Order has no AWB number to cancel' });
+            }
+
+            awbsToCancel = [order.awbNumber];
+        } else {
+            return res.status(400).json({ error: 'awbNumber, awbNumbers, or orderId is required' });
+        }
+
+        // Call iThink cancel API
+        const result = await ithinkLogistics.cancelShipment(awbsToCancel);
+
+        // If cancelling by order ID, update the order status
+        if (orderId && result.results) {
+            const awb = awbsToCancel[0];
+            const cancelResult = result.results[awb];
+
+            if (cancelResult?.success) {
+                await req.prisma.order.update({
+                    where: { id: orderId },
+                    data: {
+                        trackingStatus: 'cancelled',
+                    }
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Cancellation request processed',
+            results: result.results,
+        });
+    } catch (error) {
+        console.error('Cancel shipment error:', error);
+        res.status(500).json({ error: error.message || 'Failed to cancel shipment' });
+    }
+});
+
+// ============================================
+// SHIPPING LABELS
+// ============================================
+
+/**
+ * Get shipping label PDF for AWB number(s)
+ * POST /api/tracking/label
+ * Body: { awbNumber: "AWB123" } or { awbNumbers: ["AWB1", "AWB2"] } or { orderId: "uuid" }
+ * Optional: pageSize ("A4" or "A6"), displayCodPrepaid, displayShipperMobile, displayShipperAddress
+ */
+router.post('/label', authenticateToken, async (req, res) => {
+    try {
+        await ithinkLogistics.loadFromDatabase();
+
+        if (!ithinkLogistics.isConfigured()) {
+            return res.status(400).json({ error: 'iThink Logistics not configured' });
+        }
+
+        const {
+            awbNumber,
+            awbNumbers,
+            orderId,
+            pageSize,
+            displayCodPrepaid,
+            displayShipperMobile,
+            displayShipperAddress,
+        } = req.body;
+
+        let awbsForLabel = [];
+
+        // Option 1: Single AWB
+        if (awbNumber) {
+            awbsForLabel = [awbNumber];
+        }
+        // Option 2: Multiple AWBs
+        else if (awbNumbers && Array.isArray(awbNumbers)) {
+            awbsForLabel = awbNumbers;
+        }
+        // Option 3: By order ID - lookup AWB from order
+        else if (orderId) {
+            const order = await req.prisma.order.findUnique({
+                where: { id: orderId },
+                select: { id: true, orderNumber: true, awbNumber: true }
+            });
+
+            if (!order) {
+                return res.status(404).json({ error: 'Order not found' });
+            }
+
+            if (!order.awbNumber) {
+                return res.status(400).json({ error: 'Order has no AWB number' });
+            }
+
+            awbsForLabel = [order.awbNumber];
+        } else {
+            return res.status(400).json({ error: 'awbNumber, awbNumbers, or orderId is required' });
+        }
+
+        const result = await ithinkLogistics.getShippingLabel(awbsForLabel, {
+            pageSize,
+            displayCodPrepaid,
+            displayShipperMobile,
+            displayShipperAddress,
+        });
+
+        res.json(result);
+    } catch (error) {
+        console.error('Get shipping label error:', error);
+        res.status(500).json({ error: error.message || 'Failed to get shipping label' });
+    }
+});
+
+// ============================================
+// PINCODE & RATE CHECK
+// ============================================
+
+/**
+ * Check pincode serviceability
+ * GET /api/tracking/pincode/:pincode
+ */
+router.get('/pincode/:pincode', authenticateToken, async (req, res) => {
+    try {
+        await ithinkLogistics.loadFromDatabase();
+
+        if (!ithinkLogistics.isConfigured()) {
+            return res.status(400).json({ error: 'iThink Logistics not configured' });
+        }
+
+        const { pincode } = req.params;
+
+        if (!pincode || pincode.length !== 6) {
+            return res.status(400).json({ error: 'Valid 6-digit pincode is required' });
+        }
+
+        const result = await ithinkLogistics.checkPincode(pincode);
+        res.json(result);
+    } catch (error) {
+        console.error('Check pincode error:', error);
+        res.status(500).json({ error: error.message || 'Failed to check pincode' });
+    }
+});
+
+/**
+ * Get shipping rates from logistics providers
+ * POST /api/tracking/rates
+ * Body: { fromPincode, toPincode, length?, width?, height?, weight?, paymentMethod?, productMrp? }
+ */
+router.post('/rates', authenticateToken, async (req, res) => {
+    try {
+        await ithinkLogistics.loadFromDatabase();
+
+        if (!ithinkLogistics.isConfigured()) {
+            return res.status(400).json({ error: 'iThink Logistics not configured' });
+        }
+
+        const {
+            fromPincode,
+            toPincode,
+            length,
+            width,
+            height,
+            weight,
+            orderType,
+            paymentMethod,
+            productMrp,
+        } = req.body;
+
+        if (!fromPincode || !toPincode) {
+            return res.status(400).json({ error: 'fromPincode and toPincode are required' });
+        }
+
+        const result = await ithinkLogistics.getRates({
+            fromPincode,
+            toPincode,
+            length,
+            width,
+            height,
+            weight,
+            orderType,
+            paymentMethod,
+            productMrp,
+        });
+
+        res.json(result);
+    } catch (error) {
+        console.error('Get rates error:', error);
+        res.status(500).json({ error: error.message || 'Failed to get rates' });
+    }
+});
+
+/**
+ * Test order creation with sample data (for testing API connection)
+ * POST /api/tracking/test-create
+ */
+router.post('/test-create', authenticateToken, async (req, res) => {
+    try {
+        await ithinkLogistics.loadFromDatabase();
+
+        if (!ithinkLogistics.isFullyConfigured()) {
+            return res.status(400).json({
+                error: 'iThink Logistics not fully configured',
+                config: ithinkLogistics.getConfig(),
+            });
+        }
+
+        // Use test data
+        const testOrderNumber = `TEST-${Date.now()}`;
+        const testData = {
+            orderNumber: testOrderNumber,
+            orderDate: new Date(),
+            totalAmount: 999,
+            customer: {
+                name: 'Test Customer',
+                phone: '9876543210',
+                email: 'test@example.com',
+                address: '123 Test Street',
+                address2: 'Test Area',
+                city: 'Mumbai',
+                state: 'Maharashtra',
+                pincode: '400001',
+            },
+            products: [
+                { name: 'Test Product', sku: 'TEST-001', quantity: 1, price: 999 }
+            ],
+            dimensions: { length: 10, width: 10, height: 5, weight: 0.5 },
+            paymentMode: 'Prepaid',
+            codAmount: 0,
+            logistics: req.body.logistics || undefined,
+        };
+
+        const result = await ithinkLogistics.createOrder(testData);
+
+        res.json({
+            success: true,
+            message: 'Test shipment created successfully',
+            testOrderNumber,
+            awbNumber: result.awbNumber,
+            logistics: result.logistics,
+            note: 'This is a test order. You may want to cancel it in iThink dashboard.',
+        });
+    } catch (error) {
+        console.error('Test create error:', error);
+        res.status(500).json({ error: error.message || 'Failed to create test shipment' });
     }
 });
 
