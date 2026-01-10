@@ -553,17 +553,22 @@ class IThinkLogisticsClient {
             throw new Error(`iThink API error: ${errorMsg}`);
         }
 
-        // Parse rates - data is object with numeric keys
+        // Parse rates - data is array of rate options
         const rates = [];
-        const dataObj = response.data.data || {};
-        for (const key of Object.keys(dataObj)) {
-            const provider = dataObj[key];
+        const dataArr = Array.isArray(response.data.data) ? response.data.data : Object.values(response.data.data || {});
+        for (const provider of dataArr) {
             rates.push({
                 logistics: provider.logistic_name,
-                serviceType: provider.logistic_service_type || '',
+                serviceType: provider.service_type || '', // "Surface", "Air", etc.
+                logisticId: provider.logistic_id || provider.logistic_service_type || '',
                 rate: parseFloat(provider.rate) || 0,
+                freightCharges: parseFloat(provider.freight_charges) || 0,
+                codCharges: parseFloat(provider.cod_charges) || 0,
+                gstCharges: parseFloat(provider.gst_charges) || 0,
+                rtoCharges: parseFloat(provider.rto_charges) || 0,
                 zone: provider.logistics_zone,
                 deliveryTat: provider.delivery_tat,
+                weightSlab: provider.weight_slab || '0.50', // "0.50", "1.00", "2.00", "5.00" kg
                 supportsCod: provider.cod === 'Y',
                 supportsPrepaid: provider.prepaid === 'Y',
                 supportsPickup: provider.pickup === 'Y',

@@ -560,8 +560,13 @@ export const adminApi = {
 export const trackingApi = {
     // Config
     getConfig: () => api.get('/tracking/config'),
-    updateConfig: (data: { accessToken: string; secretKey: string }) =>
-        api.put('/tracking/config', data),
+    updateConfig: (data: {
+        accessToken?: string;
+        secretKey?: string;
+        pickupAddressId?: string;
+        returnAddressId?: string;
+        defaultLogistics?: string;
+    }) => api.put('/tracking/config', data),
     testConnection: () => api.post('/tracking/test-connection'),
 
     // Tracking
@@ -569,6 +574,33 @@ export const trackingApi = {
     getTrackingHistory: (awbNumber: string) => api.get(`/tracking/history/${awbNumber}`),
     batchTrack: (awbNumbers: string[]) => api.post('/tracking/batch', { awbNumbers }),
     trackOrders: (orderIds: string[]) => api.post('/tracking/orders', { orderIds }),
+
+    // Shipment booking
+    getRates: (data: {
+        fromPincode: string;
+        toPincode: string;
+        length?: number;
+        width?: number;
+        height?: number;
+        weight?: number;
+        orderType?: string;
+        paymentMethod?: string;
+        productMrp?: number;
+    }) => api.post('/tracking/rates', data),
+
+    checkPincode: (pincode: string) => api.get(`/tracking/pincode/${pincode}`),
+
+    createShipment: (data: { orderId: string; logistics?: string }) =>
+        api.post('/tracking/create-shipment', data),
+
+    cancelShipment: (data: { awbNumber?: string; orderId?: string }) =>
+        api.post('/tracking/cancel-shipment', data),
+
+    getLabel: (data: {
+        awbNumber?: string;
+        orderId?: string;
+        pageSize?: 'A4' | 'A6';
+    }) => api.post('/tracking/label', data),
 
     // Sync
     syncBackfill: (params?: { days?: number; limit?: number }) =>

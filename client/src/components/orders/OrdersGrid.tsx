@@ -2034,6 +2034,7 @@ export function OrdersGrid({
                 onDelete={() => onDeleteOrder(actionPanelOrder?.id)}
                 onShip={onShip ? () => onShip(actionPanelOrder) : undefined}
                 onQuickShip={onQuickShip ? () => onQuickShip(actionPanelOrder?.id) : undefined}
+                onBookShipment={() => onEditOrder(actionPanelOrder)}
                 canDelete={actionPanelOrder?.orderLines?.length === 0}
                 canQuickShip={!!(actionPanelOrder?.awbNumber && actionPanelOrder?.courier)}
                 isCancelling={isCancellingOrder}

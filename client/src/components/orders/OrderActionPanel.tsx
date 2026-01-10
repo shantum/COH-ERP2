@@ -22,6 +22,7 @@ interface OrderActionPanelProps {
     onDelete: () => void;
     onShip?: () => void;
     onQuickShip?: () => void;
+    onBookShipment?: () => void;
     canDelete: boolean;
     canQuickShip: boolean;
     isCancelling: boolean;
@@ -136,6 +137,7 @@ export function OrderActionPanel({
     onDelete,
     onShip,
     onQuickShip,
+    onBookShipment,
     canDelete,
     canQuickShip,
     isCancelling,
@@ -203,6 +205,10 @@ export function OrderActionPanel({
                       activeLines.every((l: any) => l.lineStatus === 'packed');
     const hasShopifyAwb = !!(order.shopifyCache?.trackingNumber || order.awbNumber);
     const isReadyToShip = allPacked && hasShopifyAwb;
+
+    // Check if this is an offline order that needs manual shipment booking
+    const isOfflineOrder = order.channel === 'offline' || !order.shopifyOrderId;
+    const needsShipmentBooking = isOfflineOrder && allPacked && !order.awbNumber;
 
     return createPortal(
         <div className="fixed inset-0 z-[9999] flex justify-end">
@@ -342,7 +348,7 @@ export function OrderActionPanel({
                         </button>
                     </div>
 
-                    {/* Ship Button - prominent when ready to ship */}
+                    {/* Ship Button - prominent when ready to ship (has AWB) */}
                     {isReadyToShip && onShip && (
                         <button
                             onClick={() => {
@@ -353,6 +359,20 @@ export function OrderActionPanel({
                         >
                             <Truck size={18} />
                             Ship Order
+                        </button>
+                    )}
+
+                    {/* Book Shipment Button - for offline orders without AWB */}
+                    {needsShipmentBooking && onBookShipment && (
+                        <button
+                            onClick={() => {
+                                onBookShipment();
+                                onClose();
+                            }}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700 transition-all text-sm font-semibold shadow-lg shadow-blue-200"
+                        >
+                            <Truck size={18} />
+                            Book Shipment
                         </button>
                     )}
 

@@ -1233,7 +1233,21 @@ router.post('/outward', authenticateToken, async (req, res) => {
         }
 
         // Check available balance (currentBalance minus reserved)
+        // Note: calculateInventoryBalance now returns true negative balances
         const balance = await calculateInventoryBalance(req.prisma, skuId);
+
+        // Block if balance is already negative (data integrity issue)
+        if (balance.currentBalance < 0) {
+            return res.status(400).json({
+                error: 'Cannot create outward: inventory balance is already negative',
+                message: 'This SKU has a data integrity issue. Please reconcile inventory before making further outward transactions.',
+                currentBalance: balance.currentBalance,
+                totalInward: balance.totalInward,
+                totalOutward: balance.totalOutward,
+            });
+        }
+
+        // Block if insufficient stock
         if (balance.availableBalance < qty) {
             return res.status(400).json({
                 error: 'Insufficient stock',

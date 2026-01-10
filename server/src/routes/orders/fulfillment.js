@@ -13,6 +13,7 @@ import {
     createReservedTransaction,
     createSaleTransaction,
     deleteSaleTransactions,
+    validateOutwardTransaction,
 } from '../../utils/queryPatterns.js';
 import { validate, ShipOrderSchema } from '../../utils/validation.js';
 
@@ -442,6 +443,27 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), async (re
                     id: l.id,
                     status: l.lineStatus,
                 })),
+            });
+        }
+
+        // Validate no lines have negative inventory (data integrity check)
+        const negativeBalanceLines = [];
+        for (const line of order.orderLines) {
+            const balance = await calculateInventoryBalance(req.prisma, line.skuId);
+            if (balance.currentBalance < 0) {
+                negativeBalanceLines.push({
+                    lineId: line.id,
+                    skuCode: line.sku?.skuCode,
+                    currentBalance: balance.currentBalance,
+                });
+            }
+        }
+
+        if (negativeBalanceLines.length > 0) {
+            return res.status(400).json({
+                error: 'Cannot ship: some items have negative inventory balance',
+                message: 'Fix data integrity issues before shipping. Inward the missing quantities first.',
+                negativeBalanceLines,
             });
         }
 

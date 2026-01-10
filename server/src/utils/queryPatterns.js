@@ -505,11 +505,11 @@ export function enrichOrderLinesWithAddresses(order) {
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string} skuId - SKU ID
  * @param {Object} options - Options for balance calculation
- * @param {boolean} options.allowNegative - If false (default), floors balance at 0
+ * @param {boolean} options.allowNegative - If true (default), shows negative balances; if false, floors at 0
  * @returns {Object} Balance information
  */
 export async function calculateInventoryBalance(prisma, skuId, options = {}) {
-    const { allowNegative = false } = options;
+    const { allowNegative = true } = options;
 
     const result = await prisma.inventoryTransaction.groupBy({
         by: ['txnType'],
@@ -555,12 +555,12 @@ export async function calculateInventoryBalance(prisma, skuId, options = {}) {
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string[]} skuIds - Optional array of SKU IDs to filter
  * @param {Object} options - Options for balance calculation
- * @param {boolean} options.allowNegative - If false (default), floors balance at 0
+ * @param {boolean} options.allowNegative - If true (default), shows negative balances; if false, floors at 0
  * @param {boolean} options.excludeCustomSkus - If true, excludes custom SKUs (isCustomSku=true) from results
  * @returns {Map} Map of skuId -> balance info
  */
 export async function calculateAllInventoryBalances(prisma, skuIds = null, options = {}) {
-    const { allowNegative = false, excludeCustomSkus = false } = options;
+    const { allowNegative = true, excludeCustomSkus = false } = options;
 
     // Build where clause for inventory transactions
     let where = {};
@@ -706,6 +706,47 @@ export function getEffectiveFabricConsumption(sku) {
 // ============================================
 // INVENTORY TRANSACTION HELPERS
 // ============================================
+
+/**
+ * Validate if an outward transaction is allowed
+ * Blocks outward if:
+ * - Current balance is already negative (data integrity issue)
+ * - Transaction would make balance negative (insufficient stock)
+ *
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} skuId - SKU ID
+ * @param {number} qty - Quantity to remove
+ * @returns {Object} { allowed: boolean, reason?: string, currentBalance: number }
+ */
+export async function validateOutwardTransaction(prisma, skuId, qty) {
+    const balance = await calculateInventoryBalance(prisma, skuId, { allowNegative: true });
+
+    // Block if balance is already negative (data integrity issue - needs fixing first)
+    if (balance.currentBalance < 0) {
+        return {
+            allowed: false,
+            reason: `Cannot create outward: balance is already negative (${balance.currentBalance}). Fix data integrity issue first.`,
+            currentBalance: balance.currentBalance,
+            availableBalance: balance.availableBalance,
+        };
+    }
+
+    // Block if transaction would make balance negative
+    if (balance.availableBalance < qty) {
+        return {
+            allowed: false,
+            reason: `Insufficient stock: available=${balance.availableBalance}, requested=${qty}`,
+            currentBalance: balance.currentBalance,
+            availableBalance: balance.availableBalance,
+        };
+    }
+
+    return {
+        allowed: true,
+        currentBalance: balance.currentBalance,
+        availableBalance: balance.availableBalance,
+    };
+}
 
 /**
  * Release reserved inventory for an order line
