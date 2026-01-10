@@ -321,11 +321,22 @@ router.post('/:productId/variations', authenticateToken, async (req, res) => {
 // Update variation
 router.put('/variations/:id', authenticateToken, async (req, res) => {
     try {
-        const { colorName, standardColor, colorHex, fabricId, hasLining, trimsCost, liningCost, packagingCost, isActive } = req.body;
+        const { colorName, standardColor, colorHex, fabricId, hasLining, trimsCost, liningCost, packagingCost, laborMinutes, isActive } = req.body;
 
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
-            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, trimsCost: trimsCost !== undefined ? trimsCost : undefined, liningCost: liningCost !== undefined ? liningCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
+            data: {
+                colorName,
+                standardColor: standardColor || null,
+                colorHex,
+                fabricId,
+                hasLining,
+                trimsCost: trimsCost !== undefined ? trimsCost : undefined,
+                liningCost: liningCost !== undefined ? liningCost : undefined,
+                packagingCost: packagingCost !== undefined ? packagingCost : undefined,
+                laborMinutes: laborMinutes !== undefined ? laborMinutes : undefined,
+                isActive,
+            },
             include: {
                 fabric: { include: { fabricType: true } },
                 product: { select: { id: true, fabricTypeId: true } },
@@ -417,11 +428,21 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
 // Update SKU
 router.put('/skus/:id', authenticateToken, async (req, res) => {
     try {
-        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost, liningCost, packagingCost, isActive } = req.body;
+        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost, liningCost, packagingCost, laborMinutes, isActive } = req.body;
 
         const sku = await req.prisma.sku.update({
             where: { id: req.params.id },
-            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost: trimsCost !== undefined ? trimsCost : undefined, liningCost: liningCost !== undefined ? liningCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
+            data: {
+                fabricConsumption,
+                mrp,
+                targetStockQty,
+                targetStockMethod,
+                trimsCost: trimsCost !== undefined ? trimsCost : undefined,
+                liningCost: liningCost !== undefined ? liningCost : undefined,
+                packagingCost: packagingCost !== undefined ? packagingCost : undefined,
+                laborMinutes: laborMinutes !== undefined ? laborMinutes : undefined,
+                isActive,
+            },
         });
 
         res.json(sku);

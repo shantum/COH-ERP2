@@ -82,6 +82,7 @@ model Variation {
   trimsCost     Float?  // Override trims cost for this variation (null = inherit from Product)
   liningCost    Float?  // Override lining cost for this variation (null = inherit from Product)
   packagingCost Float?  // Override packaging cost for this variation (null = inherit from Product)
+  laborMinutes  Float?  // Override labor minutes for this variation (null = inherit from Product.baseProductionTimeMins)
   isActive      Boolean @default(true)
 
   product Product @relation(fields: [productId], references: [id])
@@ -103,6 +104,7 @@ model Sku {
   trimsCost         Float?  // Override trims cost for this SKU (null = inherit from Variation/Product)
   liningCost        Float?  // Override lining cost for this SKU (null = inherit from Variation/Product)
   packagingCost     Float?  // Override packaging cost for this SKU (null = inherit from Variation/Product)
+  laborMinutes      Float?  // Override labor minutes for this SKU (null = inherit from Variation/Product)
   targetStockQty    Int     @default(10)
   targetStockMethod String  @default("day14") // day7, day14, day28, manual
   isActive          Boolean @default(true)

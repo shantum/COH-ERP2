@@ -18,8 +18,21 @@ const getSizeIndex = (size) => {
 
 /**
  * GET /sku-inventory
- * Returns flat array of all SKUs with product hierarchy and inventory data
- * Supports filtering by gender, category, productId, status, search
+ * Returns flat array of all SKUs with product hierarchy, inventory, and costing data
+ *
+ * Supports filtering:
+ * - gender, category, productId: Filter products
+ * - status: 'below_target' | 'ok' (based on calculated balance vs targetStockQty)
+ * - search: SKU code, product name, or color name (case-insensitive)
+ * - limit, offset: Pagination
+ *
+ * Costing cascade (null at any level = fallback to next):
+ * - trimsCost: SKU → Variation → Product → null
+ * - liningCost: SKU → Variation → Product → null (only if hasLining=true)
+ * - packagingCost: SKU → Variation → Product → CostConfig.defaultPackagingCost
+ * - fabricCostPerUnit: Fabric.costPerUnit → FabricType.defaultCostPerUnit → 0
+ *
+ * Returns raw cascade values for editing (skuTrimsCost, variationTrimsCost, etc.)
  */
 router.get('/sku-inventory', authenticateToken, async (req, res) => {
     try {
@@ -105,9 +118,10 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             excludeCustomSkus: true,
         });
 
-        // Fetch global cost config for default packaging cost and GST settings
+        // Fetch global cost config for default packaging cost, labor rate, and GST settings
         const costConfig = await req.prisma.costConfig.findFirst();
         const globalPackagingCost = costConfig?.defaultPackagingCost || 50;
+        const laborRatePerMin = costConfig?.laborRatePerMin || 2.5;
         // GST configuration (for catalog pricing only - order pricing calculated separately)
         const gstThreshold = costConfig?.gstThreshold || 2500;
         const gstRateAbove = costConfig?.gstRateAbove || 18;
@@ -157,11 +171,15 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             // Cascade packaging cost: SKU -> Variation -> Product -> Global default
             const effectivePackagingCost = sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? globalPackagingCost;
 
+            // Cascade labor minutes: SKU -> Variation -> Product.baseProductionTimeMins
+            const effectiveLaborMinutes = sku.laborMinutes ?? variation.laborMinutes ?? product.baseProductionTimeMins ?? 60;
+
             // Calculate fabric cost and total cost (handle NaN safely)
             // Cascade: Fabric.costPerUnit -> FabricType.defaultCostPerUnit
             const fabricCostPerUnit = Number(variation.fabric?.costPerUnit ?? variation.fabric?.fabricType?.defaultCostPerUnit) || 0;
             const fabricCost = (Number(sku.fabricConsumption) || 0) * fabricCostPerUnit;
-            const totalCost = (fabricCost || 0) + (effectiveTrimsCost || 0) + (effectiveLiningCost || 0) + (effectivePackagingCost || 0);
+            const laborCost = (Number(effectiveLaborMinutes) || 0) * laborRatePerMin;
+            const totalCost = (fabricCost || 0) + (laborCost || 0) + (effectiveTrimsCost || 0) + (effectiveLiningCost || 0) + (effectivePackagingCost || 0);
 
             // GST calculations (catalog pricing - MRP is inclusive of GST)
             const mrp = Number(sku.mrp) || 0;
@@ -180,6 +198,7 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 trimsCost: effectiveTrimsCost,
                 liningCost: effectiveLiningCost,
                 packagingCost: effectivePackagingCost,
+                laborMinutes: effectiveLaborMinutes,
                 // Raw values for editing (to know where override exists)
                 skuTrimsCost: sku.trimsCost,
                 variationTrimsCost: variation.trimsCost,
@@ -191,9 +210,14 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 variationPackagingCost: variation.packagingCost,
                 productPackagingCost: product.packagingCost,
                 globalPackagingCost,
+                skuLaborMinutes: sku.laborMinutes,
+                variationLaborMinutes: variation.laborMinutes,
+                productLaborMinutes: product.baseProductionTimeMins,
+                laborRatePerMin,
                 // Costing
                 fabricCostPerUnit,
                 fabricCost: Math.round(fabricCost * 100) / 100,
+                laborCost: Math.round(laborCost * 100) / 100,
                 totalCost: Math.round(totalCost * 100) / 100,
                 // GST & Pricing (catalog-level calculations)
                 gstRate,

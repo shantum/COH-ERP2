@@ -64,10 +64,12 @@ function aggregateByVariation(items: any[]): any[] {
                 trimsCost: item.variationTrimsCost ?? item.productTrimsCost ?? null,
                 liningCost: item.hasLining ? (item.variationLiningCost ?? item.productLiningCost ?? null) : null,
                 packagingCost: item.variationPackagingCost ?? item.productPackagingCost ?? item.globalPackagingCost ?? null,
+                laborMinutes: item.variationLaborMinutes ?? item.productLaborMinutes ?? null,
                 // Track sums for averaging
                 _mrpSum: 0,
                 _fabricConsumptionSum: 0,
                 _fabricCostSum: 0,
+                _laborCostSum: 0,
                 _liningCostSum: 0,
                 _liningCostCount: 0, // Only count items with lining
                 _totalCostSum: 0,
@@ -86,6 +88,7 @@ function aggregateByVariation(items: any[]): any[] {
         group._mrpSum += item.mrp || 0;
         group._fabricConsumptionSum += item.fabricConsumption || 0;
         group._fabricCostSum += item.fabricCost || 0;
+        group._laborCostSum += item.laborCost || 0;
         if (item.hasLining && item.liningCost != null) {
             group._liningCostSum += item.liningCost;
             group._liningCostCount += 1;
@@ -104,6 +107,7 @@ function aggregateByVariation(items: any[]): any[] {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
             group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
             group.fabricCost = Math.round(group._fabricCostSum / group.skuCount);
+            group.laborCost = Math.round(group._laborCostSum / group.skuCount);
             if (group._liningCostCount > 0) {
                 group.liningCost = Math.round(group._liningCostSum / group._liningCostCount);
             }
@@ -119,6 +123,7 @@ function aggregateByVariation(items: any[]): any[] {
         delete group._mrpSum;
         delete group._fabricConsumptionSum;
         delete group._fabricCostSum;
+        delete group._laborCostSum;
         delete group._liningCostSum;
         delete group._liningCostCount;
         delete group._totalCostSum;
@@ -158,11 +163,13 @@ function aggregateByProduct(items: any[]): any[] {
                 trimsCost: item.productTrimsCost ?? null,
                 liningCost: item.productLiningCost ?? null,
                 packagingCost: item.productPackagingCost ?? item.globalPackagingCost ?? null,
+                laborMinutes: item.productLaborMinutes ?? null,
                 hasLining: false, // Will be set to true if any variation has lining
                 // Track sums for averaging
                 _mrpSum: 0,
                 _fabricConsumptionSum: 0,
                 _fabricCostSum: 0,
+                _laborCostSum: 0,
                 _liningCostSum: 0,
                 _liningCostCount: 0,
                 _totalCostSum: 0,
@@ -183,6 +190,7 @@ function aggregateByProduct(items: any[]): any[] {
         group._mrpSum += item.mrp || 0;
         group._fabricConsumptionSum += item.fabricConsumption || 0;
         group._fabricCostSum += item.fabricCost || 0;
+        group._laborCostSum += item.laborCost || 0;
         if (item.hasLining && item.liningCost != null) {
             group._liningCostSum += item.liningCost;
             group._liningCostCount += 1;
@@ -210,6 +218,7 @@ function aggregateByProduct(items: any[]): any[] {
             group.mrp = Math.round(group._mrpSum / group.skuCount);
             group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
             group.fabricCost = Math.round(group._fabricCostSum / group.skuCount);
+            group.laborCost = Math.round(group._laborCostSum / group.skuCount);
             if (group._liningCostCount > 0) {
                 group.liningCost = Math.round(group._liningCostSum / group._liningCostCount);
             }
@@ -225,6 +234,7 @@ function aggregateByProduct(items: any[]): any[] {
         delete group._mrpSum;
         delete group._fabricConsumptionSum;
         delete group._fabricCostSum;
+        delete group._laborCostSum;
         delete group._liningCostSum;
         delete group._liningCostCount;
         delete group._totalCostSum;
@@ -521,7 +531,7 @@ function FabricEditPopover({
 const ALL_COLUMN_IDS = [
     'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
-    'skuCode', 'size', 'mrp', 'fabricConsumption', 'fabricCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost',
+    'skuCode', 'size', 'mrp', 'fabricConsumption', 'fabricCost', 'laborMinutes', 'laborCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost',
     'exGstPrice', 'gstAmount', 'costMultiple',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
@@ -544,6 +554,8 @@ const DEFAULT_HEADERS: Record<string, string> = {
     mrp: 'MRP',
     fabricConsumption: 'Fab (m)',
     fabricCost: 'Fab ₹',
+    laborMinutes: 'Labor (min)',
+    laborCost: 'Labor ₹',
     trimsCost: 'Trims ₹',
     liningCost: 'Lin ₹',
     packagingCost: 'Pkg ₹',
@@ -583,7 +595,7 @@ export default function Catalog() {
         defaultPageSize: 100,
         // Hide cost calculation columns by default (users can enable via Columns dropdown)
         // fabricConsumption remains visible as it's a key data field
-        defaultHiddenColumns: ['fabricCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
+        defaultHiddenColumns: ['fabricCost', 'laborMinutes', 'laborCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
     });
 
     // View level state
@@ -781,9 +793,9 @@ export default function Catalog() {
         },
     });
 
-    // Inline cost update mutation (trimsCost, liningCost, or packagingCost)
+    // Inline cost update mutation (trimsCost, liningCost, packagingCost, or laborMinutes)
     const updateCostMutation = useMutation({
-        mutationFn: ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'liningCost' | 'packagingCost'; value: number | null }) => {
+        mutationFn: ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes'; value: number | null }) => {
             const data = { [field]: value };
             if (level === 'product') {
                 return productsApi.update(id, data);
@@ -1155,6 +1167,26 @@ export default function Catalog() {
             cellClass: 'text-right text-xs text-blue-600',
         },
         {
+            colId: 'laborMinutes',
+            headerName: DEFAULT_HEADERS.laborMinutes,
+            field: 'laborMinutes',
+            width: 75,
+            editable: true,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? params.value.toFixed(0) : '-',
+            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
+            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
+        },
+        {
+            colId: 'laborCost',
+            headerName: DEFAULT_HEADERS.laborCost,
+            field: 'laborCost',
+            width: 70,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
+            cellClass: 'text-right text-xs text-purple-600',
+        },
+        {
             colId: 'trimsCost',
             headerName: DEFAULT_HEADERS.trimsCost,
             field: 'trimsCost',
@@ -1400,11 +1432,11 @@ export default function Catalog() {
         }
     }, [updateConsumption]);
 
-    // Handle cost cell value change (trimsCost, liningCost, or packagingCost)
+    // Handle cost cell value change (trimsCost, liningCost, packagingCost, or laborMinutes)
     const handleCostChange = useCallback((params: any) => {
         const { data, colDef, newValue } = params;
-        const field = colDef.field as 'trimsCost' | 'liningCost' | 'packagingCost';
-        if (field !== 'trimsCost' && field !== 'liningCost' && field !== 'packagingCost') return;
+        const field = colDef.field as 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes';
+        if (field !== 'trimsCost' && field !== 'liningCost' && field !== 'packagingCost' && field !== 'laborMinutes') return;
 
         const newCost = newValue === '' || newValue === null ? null : parseFloat(newValue);
         if (newValue !== '' && newValue !== null && isNaN(newCost as number)) return;
@@ -1921,7 +1953,7 @@ export default function Catalog() {
                         onCellValueChanged={(params) => {
                             if (viewLevel === 'consumption') {
                                 handleConsumptionChange(params);
-                            } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'liningCost' || params.colDef.field === 'packagingCost') {
+                            } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'liningCost' || params.colDef.field === 'packagingCost' || params.colDef.field === 'laborMinutes') {
                                 handleCostChange(params);
                             } else if (params.colDef.field === 'fabricConsumption') {
                                 // Handle fabric consumption edit
