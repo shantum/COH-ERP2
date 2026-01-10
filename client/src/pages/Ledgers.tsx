@@ -105,9 +105,19 @@ export default function Ledgers() {
 
     const deleteInventoryTransaction = useMutation({
         mutationFn: (txnId: string) => inventoryApi.deleteTransaction(txnId),
-        onSuccess: () => {
+        onSuccess: (data: any) => {
             queryClient.invalidateQueries({ queryKey: ['allInventoryTransactions'] });
             queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            // If production batch was reverted, also invalidate production queries
+            if (data?.data?.revertedProductionBatch) {
+                queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
+                queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
+                queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            }
+            // If allocation was reverted, also invalidate orders
+            if (data?.data?.revertedAllocation) {
+                queryClient.invalidateQueries({ queryKey: ['orders'] });
+            }
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
     });

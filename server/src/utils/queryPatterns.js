@@ -899,6 +899,34 @@ export async function validateTransactionDeletion(prisma, transactionId) {
         }
     }
 
+    // For production transactions, check if the production batch is still completed
+    // Note: Deletion will automatically revert the production batch and fabric usage
+    // This is informational - the delete handler will cascade properly
+    if ((transaction.reason === TXN_REASON.PRODUCTION || transaction.reason === 'production_custom') && transaction.referenceId) {
+        const productionBatch = await prisma.productionBatch.findUnique({
+            where: { id: transaction.referenceId },
+            include: {
+                sku: { select: { skuCode: true, isCustomSku: true } },
+                sourceOrderLine: { select: { lineStatus: true } }
+            },
+        });
+
+        if (productionBatch && productionBatch.status === 'completed') {
+            // Check if custom SKU order has progressed - this IS a blocking issue
+            if (productionBatch.sku?.isCustomSku && productionBatch.sourceOrderLine) {
+                const lineStatus = productionBatch.sourceOrderLine.lineStatus;
+                if (['picked', 'packed', 'shipped'].includes(lineStatus)) {
+                    dependencies.push({
+                        type: 'order_progression',
+                        message: `Cannot delete - linked order line has progressed to ${lineStatus}`,
+                        hint: 'Unship or unpick the order line first',
+                    });
+                }
+            }
+            // Note: Production batch revert is handled automatically by delete handler
+        }
+    }
+
     return {
         canDelete: dependencies.length === 0,
         reason: dependencies.length > 0 ? 'Transaction has dependencies that must be resolved first' : null,

@@ -1579,6 +1579,9 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
         }
 
         let revertedQueueItem = null;
+        let revertedProductionBatch = null;
+        let deletedFabricTxn = null;
+        let revertedAllocation = null;
 
         // Use transaction for atomic operation
         await req.prisma.$transaction(async (tx) => {
@@ -1603,17 +1606,94 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
                 }
             }
 
+            // If this is a production transaction, revert the production batch and delete fabric outward
+            if ((existing.reason === TXN_REASON.PRODUCTION || existing.reason === 'production_custom') && existing.referenceId) {
+                const productionBatch = await tx.productionBatch.findUnique({
+                    where: { id: existing.referenceId },
+                    include: { sku: { include: { variation: true } } }
+                });
+
+                if (productionBatch && productionBatch.status === 'completed') {
+                    // Check if this is a custom SKU batch that was auto-allocated
+                    const isCustomSkuBatch = productionBatch.sku.isCustomSku && productionBatch.sourceOrderLineId;
+
+                    // If custom SKU, check if order line has progressed beyond allocation
+                    if (isCustomSkuBatch) {
+                        const orderLine = await tx.orderLine.findUnique({
+                            where: { id: productionBatch.sourceOrderLineId }
+                        });
+
+                        if (orderLine && ['picked', 'packed', 'shipped'].includes(orderLine.lineStatus)) {
+                            throw new Error(`Cannot delete - order line has progressed to ${orderLine.lineStatus}. Unship or unpick first.`);
+                        }
+
+                        // Reverse auto-allocation: delete reserved transaction
+                        await tx.inventoryTransaction.deleteMany({
+                            where: {
+                                skuId: productionBatch.skuId,
+                                referenceId: productionBatch.sourceOrderLineId,
+                                txnType: TXN_TYPE.RESERVED,
+                                reason: TXN_REASON.ORDER_ALLOCATION
+                            }
+                        });
+
+                        // Reset order line status back to pending
+                        await tx.orderLine.update({
+                            where: { id: productionBatch.sourceOrderLineId },
+                            data: {
+                                lineStatus: 'pending',
+                                allocatedAt: null
+                            }
+                        });
+
+                        revertedAllocation = productionBatch.sourceOrderLineId;
+                    }
+
+                    // Revert production batch status
+                    await tx.productionBatch.update({
+                        where: { id: existing.referenceId },
+                        data: {
+                            qtyCompleted: 0,
+                            status: 'planned',
+                            completedAt: null
+                        }
+                    });
+
+                    // Delete fabric outward transaction
+                    const deletedFabric = await tx.fabricTransaction.deleteMany({
+                        where: {
+                            referenceId: existing.referenceId,
+                            reason: TXN_REASON.PRODUCTION,
+                            txnType: 'outward'
+                        }
+                    });
+
+                    revertedProductionBatch = {
+                        id: productionBatch.id,
+                        skuCode: productionBatch.sku?.skuCode,
+                        isCustomSku: productionBatch.sku?.isCustomSku
+                    };
+                    deletedFabricTxn = deletedFabric.count > 0;
+                }
+            }
+
             await tx.inventoryTransaction.delete({ where: { id } });
         });
 
         // Get updated balance
         const balance = await calculateInventoryBalance(req.prisma, existing.skuId);
 
+        // Build response message
+        let message = 'Transaction deleted';
+        if (revertedQueueItem) {
+            message = 'Transaction deleted and item returned to QC queue';
+        } else if (revertedProductionBatch) {
+            message = `Transaction deleted, production batch reverted to planned${deletedFabricTxn ? ', fabric usage reversed' : ''}${revertedAllocation ? ', order allocation reversed' : ''}`;
+        }
+
         res.json({
             success: true,
-            message: revertedQueueItem
-                ? 'Transaction deleted and item returned to QC queue'
-                : 'Transaction deleted',
+            message,
             deleted: {
                 id: existing.id,
                 txnType: existing.txnType,
@@ -1622,6 +1702,8 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
                 productName: existing.sku?.variation?.product?.name,
             },
             revertedToQueue: revertedQueueItem ? true : false,
+            revertedProductionBatch,
+            revertedAllocation: revertedAllocation ? true : false,
             newBalance: balance.currentBalance,
             forcedDeletion: !validation.canDelete && force === 'true',
         });

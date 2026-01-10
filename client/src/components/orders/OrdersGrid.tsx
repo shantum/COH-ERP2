@@ -1063,14 +1063,6 @@ export function OrdersGrid({
                     const row = params.data;
                     const stock = params.value ?? 0;
                     const hasStock = stock >= row?.qty;
-                    // For customized lines with no stock, show "Custom" hint
-                    if (row?.isCustomized && stock === 0) {
-                        return (
-                            <span className="text-gray-400" title="Custom item - requires production">
-                                Custom
-                            </span>
-                        );
-                    }
                     return (
                         <span className={hasStock ? 'text-green-600' : 'text-red-500'}>
                             {stock}
@@ -1095,26 +1087,12 @@ export function OrdersGrid({
                     const row = params.data;
                     if (!row || row.lineStatus === 'cancelled') return null;
 
-                    // For customized lines in pending state, show "Custom" indicator
                     const hasStock = row.skuStock >= row.qty;
                     const isAllocated =
                         row.lineStatus === 'allocated' ||
                         row.lineStatus === 'picked' ||
                         row.lineStatus === 'packed';
                     const isPending = row.lineStatus === 'pending';
-
-                    // For customized items: show "C" badge only if pending AND no stock (production pending)
-                    // If stock exists, allow normal allocation flow
-                    if (row.isCustomized && isPending && !hasStock) {
-                        return (
-                            <span
-                                className="text-xs text-orange-500 font-medium"
-                                title="Custom item - waiting for production"
-                            >
-                                C
-                            </span>
-                        );
-                    }
 
                     // Allow allocation for any pending line with stock (including customized)
                     const canAllocate = isPending && hasStock;

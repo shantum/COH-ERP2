@@ -35,6 +35,7 @@ export default function Production() {
 
     const [showComplete, setShowComplete] = useState<any>(null);
     const [qtyCompleted, setQtyCompleted] = useState(0);
+    const [customConfirmed, setCustomConfirmed] = useState(false);
     const [showAddItem, setShowAddItem] = useState<string | null>(null); // date string
     const [newItem, setNewItem] = useState({ skuId: '', qty: 1 });
     const [itemSelection, setItemSelection] = useState({ productId: '', variationId: '' });
@@ -96,7 +97,8 @@ export default function Production() {
         mutationFn: (id: string) => productionApi.uncompleteBatch(id),
         onMutate: async (id) => {
             await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
-            optimisticBatchUpdate(id, { status: 'in_progress', qtyCompleted: 0 });
+            // Backend resets to 'planned' status, not 'in_progress'
+            optimisticBatchUpdate(id, { status: 'planned', qtyCompleted: 0 });
         },
         onSuccess: invalidateAll,
         onError: () => invalidateAll()
@@ -731,6 +733,7 @@ export default function Production() {
                                                                 onClick={() => {
                                                                     setShowComplete(batch);
                                                                     setQtyCompleted(batch.qtyPlanned);
+                                                                    setCustomConfirmed(false);
                                                                 }}
                                                                 className="text-green-600 hover:text-green-800"
                                                                 title="Mark Complete"
@@ -833,16 +836,72 @@ export default function Production() {
                     <div className="bg-white rounded-xl p-6 w-full max-w-sm">
                         <h2 className="text-lg font-semibold mb-2">Complete Batch</h2>
                         <p className="text-sm text-gray-500 mb-4">{showComplete.sku?.skuCode} - Planned: {showComplete.qtyPlanned}</p>
+
+                        {/* Custom SKU details */}
+                        {showComplete.isCustomSku && showComplete.customization && (
+                            <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Scissors size={14} className="text-orange-600" />
+                                    <span className="text-sm font-medium text-orange-700">Custom Item</span>
+                                </div>
+                                {showComplete.customization.type && (
+                                    <p className="text-xs text-orange-600">
+                                        {showComplete.customization.type}: {showComplete.customization.value}
+                                    </p>
+                                )}
+                                {showComplete.customization.notes && (
+                                    <p className="text-xs text-orange-600 mt-1 italic">
+                                        Notes: {showComplete.customization.notes}
+                                    </p>
+                                )}
+                                {showComplete.customization.linkedOrder && (
+                                    <p className="text-xs text-gray-600 mt-1">
+                                        For Order: {showComplete.customization.linkedOrder.orderNumber}
+                                        {showComplete.customization.linkedOrder.customerName && (
+                                            <span> ({showComplete.customization.linkedOrder.customerName})</span>
+                                        )}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <div className="mb-4">
                             <label className="text-xs text-gray-500 mb-1 block">Quantity Completed</label>
                             <input type="number" className="input text-sm" value={qtyCompleted} onChange={(e) => setQtyCompleted(Number(e.target.value))} min={1} max={showComplete.qtyPlanned} />
                         </div>
+
+                        {/* Custom SKU confirmation checkbox */}
+                        {showComplete.isCustomSku && (
+                            <label className="flex items-start gap-3 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    checked={customConfirmed}
+                                    onChange={(e) => setCustomConfirmed(e.target.checked)}
+                                    className="mt-0.5 w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                                />
+                                <span className="text-sm text-amber-800">
+                                    I confirm that the <strong>customization has been completed and checked</strong> before inwarding this item.
+                                </span>
+                            </label>
+                        )}
+
                         <div className="flex gap-3">
                             <button type="button" onClick={() => setShowComplete(null)} className="btn-secondary flex-1 text-sm">Cancel</button>
-                            <button onClick={() => completeBatch.mutate({ id: showComplete.id, data: { qtyCompleted } })} className="btn-primary flex-1 text-sm" disabled={completeBatch.isPending}>
+                            <button
+                                onClick={() => completeBatch.mutate({ id: showComplete.id, data: { qtyCompleted } })}
+                                className="btn-primary flex-1 text-sm"
+                                disabled={completeBatch.isPending || (showComplete.isCustomSku && !customConfirmed)}
+                            >
                                 {completeBatch.isPending ? 'Completing...' : 'Complete'}
                             </button>
                         </div>
+
+                        {/* Warning if checkbox not checked */}
+                        {showComplete.isCustomSku && !customConfirmed && (
+                            <p className="text-xs text-amber-600 mt-2 text-center">
+                                Please confirm customization is complete to proceed
+                            </p>
+                        )}
                     </div>
                 </div>
             )}
