@@ -54,6 +54,7 @@ npm run db:push
 | Purpose | Location |
 |---------|----------|
 | Routes | `server/src/routes/` (orders/ is modular) |
+| Catalog/Costing | `server/src/routes/catalog.js`, `products.js` (cost-config) |
 | Shared patterns | `server/src/utils/queryPatterns.js`, `validation.js` |
 | Frontend | `client/src/services/api.ts`, `types/index.ts`, `hooks/` |
 
@@ -76,6 +77,9 @@ npm run db:push
 15. **AG-Grid shared utilities**: Theme, formatters in `utils/agGridHelpers.ts`; state persistence in `hooks/useGridState.ts`
 16. **Don't over-engineer shared utilities**: Working code with inline patterns often better than abstraction (order grids kept inline)
 17. **Persistent logs**: Logs stored in `server/logs/server.jsonl`, survive restarts, 24-hour retention
+18. **Costing cascades**: SKU → Variation → Product → Global (null = fallback to next level)
+19. **Lining cost**: Only non-null when `hasLining=true`, otherwise always null
+20. **Fabric cost**: Fabric.costPerUnit ?? FabricType.defaultCostPerUnit (cascade)
 
 ## Environment
 

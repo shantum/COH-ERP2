@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 9, 2026** (Exchange orders, line-level addresses)
+> All backend and frontend domains consolidated. **Last updated: January 10, 2026** (Product costing system, catalog domain)
 
 ---
 
@@ -301,6 +301,74 @@ Balance = SUM(inward) - SUM(outward)
 
 ---
 
+## Catalog Domain
+
+Combined product + inventory view with integrated costing. Single endpoint returns SKUs with full product hierarchy, inventory balances, and cost breakdowns.
+
+### Key Endpoints
+| Path | Purpose |
+|------|---------|
+| `GET /sku-inventory` | Flat SKU list with product, inventory, costing (filters: gender, category, productId, status, search) |
+| `GET /filters` | Filter options: genders, categories, products, fabricTypes, fabrics |
+
+### Costing System
+
+**Cascading Cost Fields** (SKU → Variation → Product → Global):
+- `trimsCost`: Trims/accessories cost
+- `liningCost`: Lining cost (only if `hasLining=true`)
+- `packagingCost`: Packaging cost (final fallback: `CostConfig.defaultPackagingCost`)
+- `laborMinutes`: Production time (fallback: `Product.baseProductionTimeMins` → 60)
+
+**Fabric Cost Calculation**:
+```javascript
+fabricCostPerUnit = Fabric.costPerUnit ?? FabricType.defaultCostPerUnit
+fabricCost = SKU.fabricConsumption * fabricCostPerUnit
+```
+
+**Labor Cost Calculation**:
+```javascript
+laborMinutes = SKU.laborMinutes ?? Variation.laborMinutes ?? Product.baseProductionTimeMins ?? 60
+laborCost = laborMinutes * CostConfig.laborRatePerMin
+```
+
+**Total Cost**:
+```javascript
+totalCost = fabricCost + laborCost + trimsCost + liningCost + packagingCost
+```
+
+**GST Calculation** (catalog pricing - MRP inclusive):
+```javascript
+gstRate = mrp >= gstThreshold ? gstRateAbove : gstRateBelow
+exGstPrice = mrp / (1 + gstRate/100)
+gstAmount = mrp - exGstPrice
+costMultiple = mrp / totalCost
+```
+
+### Cost Config
+
+Global costing settings stored in `CostConfig` table (single row):
+- `laborRatePerMin`: Labor cost per minute (default: 2.5)
+- `defaultPackagingCost`: Global packaging default (default: 50)
+- `gstThreshold`: Price threshold for GST rate (default: 2500)
+- `gstRateAbove`: GST % for prices ≥ threshold (default: 18)
+- `gstRateBelow`: GST % for prices < threshold (default: 5)
+
+**Endpoints**: `GET/PUT /products/cost-config`
+
+### View Levels
+| View | Aggregation | Use Case |
+|------|-------------|----------|
+| `sku` | Per SKU | Individual size-level data |
+| `variation` | Per color | Aggregate all sizes of a color |
+| `product` | Per style | Aggregate all colors/sizes |
+| `consumption` | Fabric matrix | Fabric consumption by size |
+
+### Frontend
+- `Catalog.tsx` (2243 lines) - AG-Grid with 4 view levels, inline editing, bulk updates
+- `CostingTab.tsx` - Global cost config in Settings
+
+---
+
 ## Frontend Patterns
 
 ### Page-to-Domain Mapping
@@ -313,6 +381,7 @@ Balance = SUM(inward) - SUM(outward)
 | `Inventory.tsx` | Inventory | 42KB |
 | `Production.tsx` | Production | 50KB |
 | `Products.tsx` | Products | 49KB |
+| `Catalog.tsx` | Catalog | 2243 lines |
 | `Fabrics.tsx` | Fabrics | 37KB |
 
 ### Performance Patterns
@@ -413,3 +482,10 @@ components/
 22. Map caching - use `getInventoryMap()`/`getFabricMap()` for loops
 23. Optimistic updates use context with `skipped` for conditional invalidation
 24. AG-Grid shared utilities in `utils/agGridHelpers.ts` - don't recreate
+
+### Catalog/Costing
+25. **Cascading cost logic**: SKU → Variation → Product → Global (null at any level = fallback)
+26. **Lining cost**: Only applies when `hasLining=true`, otherwise always null
+27. **Fabric cost**: Consumption * (Fabric.costPerUnit ?? FabricType.defaultCostPerUnit)
+28. **GST threshold**: Determines rate (above/below), MRP is GST-inclusive
+29. **Bulk updates**: Variation/Product views aggregate SKU IDs for multi-SKU updates

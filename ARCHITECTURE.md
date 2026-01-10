@@ -102,6 +102,8 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 | `/api/shopify` | Sync endpoints, auto-ship setting |
 | `/api/webhooks` | Shopify webhooks |
 | `/api/tracking` | iThink shipment tracking |
+| `/api/catalog` | SKU inventory with costing data |
+| `/api/products/cost-config` | Global cost settings |
 
 ### Unified Order Views
 Single endpoint `GET /orders?view=<name>` with config-driven architecture:
@@ -146,6 +148,13 @@ Single endpoint `GET /orders?view=<name>` with config-driven architecture:
 ---
 
 ## Changelog
+
+### January 10, 2026
+- **Product Costing System**: Comprehensive costing with cascading trims/lining/packaging costs (SKU → Variation → Product → Global)
+- **Catalog Domain**: New unified catalog endpoint with integrated inventory and costing data
+- **GST Configuration**: Threshold-based GST rates for catalog pricing (above/below 2500 threshold)
+- **Cost Config**: Global settings for labor rate, packaging cost, and GST rates in Settings
+- **Fabric Cost Calculation**: Consumption * (Fabric.costPerUnit ?? FabricType.defaultCostPerUnit)
 
 ### January 9, 2026
 - **Exchange Orders**: Create exchange orders with EXC- prefix, link to original order via `originalOrderId`
