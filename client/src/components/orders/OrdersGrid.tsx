@@ -17,7 +17,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { Check, X, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, ChevronRight, ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 import { OrderActionPanel } from './OrderActionPanel';
@@ -1334,7 +1334,7 @@ export function OrdersGrid({
             {
                 colId: 'ship',
                 headerName: getHeaderName('ship'),
-                width: 40,
+                width: 50,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
                     if (!row || row.lineStatus === 'cancelled' || row.lineStatus === 'shipped') return null;
@@ -1358,10 +1358,10 @@ export function OrdersGrid({
                                     e.stopPropagation();
                                     onUnmarkShippedLine(row.lineId);
                                 }}
-                                className="w-5 h-5 rounded border-2 border-green-500 bg-green-500 text-white flex items-center justify-center mx-auto hover:bg-green-600 hover:border-green-600"
-                                title="Click to unmark shipped"
+                                className="w-6 h-6 rounded border-2 border-green-500 bg-green-500 text-white flex items-center justify-center mx-auto hover:bg-green-600 hover:border-green-600 shadow-sm"
+                                title="Click to undo"
                             >
-                                <Truck size={12} />
+                                <Check size={14} strokeWidth={3} />
                             </button>
                         );
                     }
@@ -1390,21 +1390,23 @@ export function OrdersGrid({
                         return (
                             <button
                                 onClick={handleMarkShipped}
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto cursor-pointer ${
+                                className={`w-6 h-6 rounded-md border-2 flex items-center justify-center mx-auto cursor-pointer transition-all ${
                                     hasWarning
-                                        ? 'border-amber-300 hover:border-amber-400 hover:bg-amber-50'
-                                        : 'border-gray-300 hover:border-green-400 hover:bg-green-50'
+                                        ? 'border-amber-400 bg-amber-50 hover:bg-amber-100 hover:border-amber-500'
+                                        : 'border-blue-400 bg-blue-50 hover:bg-blue-100 hover:border-blue-500'
                                 }`}
-                                title={!hasAwb ? 'No AWB - click to mark shipped' : !awbMatches && expectedAwb ? 'AWB mismatch - click to mark shipped' : 'Mark as shipped'}
+                                title={!hasAwb ? 'No AWB - click to ship' : !awbMatches && expectedAwb ? 'AWB mismatch - click to ship' : 'Click to ship'}
                             >
-                                <Truck size={12} className={hasWarning ? 'text-amber-500' : 'text-gray-400'} />
+                                <Truck size={14} className={hasWarning ? 'text-amber-600' : 'text-blue-600'} />
                             </button>
                         );
                     }
 
-                    // Not ready for shipping (not packed yet)
+                    // Non-packed rows: show subtle disabled indicator
                     return (
-                        <div className="w-5 h-5 rounded border-2 border-gray-200 bg-gray-100 mx-auto opacity-40" title="Pack item first" />
+                        <div className="w-6 h-6 rounded-md border border-gray-200 bg-gray-50 flex items-center justify-center mx-auto opacity-30" title="Pack first">
+                            <Truck size={12} className="text-gray-400" />
+                        </div>
                     );
                 },
                 cellClass: 'text-center',
@@ -1448,7 +1450,7 @@ export function OrdersGrid({
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
                     const awb = params.data.order?.shopifyCache?.trackingNumber;
-                    if (!awb) return <span className="text-gray-300 text-xs">—</span>;
+                    if (!awb) return null; // Clean empty state
                     return (
                         <span className="font-mono text-xs text-gray-600" title={awb}>
                             {awb.length > 14 ? awb.substring(0, 14) + '...' : awb}
@@ -1468,7 +1470,7 @@ export function OrdersGrid({
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
                     const courier = params.data.order?.shopifyCache?.trackingCompany;
-                    if (!courier) return <span className="text-gray-300 text-xs">—</span>;
+                    if (!courier) return null; // Clean empty state
                     return <span className="text-xs text-gray-600">{courier}</span>;
                 },
                 cellClass: 'text-xs',
@@ -1489,7 +1491,20 @@ export function OrdersGrid({
                     return line?.awbNumber || '';
                 },
                 valueSetter: (params: ValueSetterParams) => {
+                    // Double-check status before calling API to prevent stale data issues
+                    const status = params.data?.lineStatus;
+                    if (!['packed', 'marked_shipped'].includes(status)) {
+                        console.warn('Cannot update AWB - line status is:', status);
+                        return false;
+                    }
                     if (params.data?.lineId) {
+                        // Directly update the row data so AG-Grid shows the value immediately
+                        const orderLines = params.data?.order?.orderLines || [];
+                        const line = orderLines.find((l: any) => l.id === params.data.lineId);
+                        if (line) {
+                            line.awbNumber = params.newValue || '';
+                        }
+                        // Call API to persist
                         onUpdateLineTracking(params.data.lineId, { awbNumber: params.newValue || '' });
                     }
                     return true;
@@ -1514,27 +1529,38 @@ export function OrdersGrid({
                     const isMismatch = hasExpected && hasLine && !isMatch;
 
                     if (!hasLine) {
-                        // Show placeholder for editable cells, dash for non-editable
+                        // Show prominent input hint for editable cells
                         if (isEditable) {
-                            return <span className="text-gray-400 text-xs italic">Enter AWB...</span>;
+                            return (
+                                <div className="flex items-center gap-1.5 text-blue-500">
+                                    <span className="text-xs font-medium">Scan AWB</span>
+                                    <div className="w-4 h-4 rounded border-2 border-dashed border-blue-300 flex items-center justify-center">
+                                        <span className="text-[10px]">⌨</span>
+                                    </div>
+                                </div>
+                            );
                         }
-                        return <span className="text-gray-300 text-xs">—</span>;
+                        // Non-editable: show nothing instead of dash
+                        return null;
                     }
 
                     return (
                         <div className="flex items-center gap-1">
-                            <span className={`font-mono text-xs ${isMismatch ? 'text-amber-600' : isMatch ? 'text-green-600' : 'text-gray-600'}`}>
+                            <span
+                                className={`font-mono text-xs ${isMismatch ? 'text-amber-700 font-medium' : isMatch ? 'text-green-700 font-medium' : 'text-gray-700'}`}
+                                title={lineAwb}
+                            >
                                 {lineAwb.length > 12 ? lineAwb.substring(0, 12) + '...' : lineAwb}
                             </span>
-                            {isMatch && <CheckCircle size={10} className="text-green-500" />}
-                            {isMismatch && <span title={`Expected: ${expectedAwb}`}><AlertCircle size={10} className="text-amber-500" /></span>}
+                            {isMatch && <CheckCircle size={12} className="text-green-500 flex-shrink-0" />}
+                            {isMismatch && <span title={`Expected: ${expectedAwb}`}><AlertCircle size={12} className="text-amber-500 flex-shrink-0" /></span>}
                         </div>
                     );
                 },
                 cellClass: (params: CellClassParams) => {
                     const status = params.data?.lineStatus;
                     const editable = ['packed', 'marked_shipped'].includes(status);
-                    return editable ? 'text-xs bg-blue-50' : 'text-xs';
+                    return editable ? 'text-xs cursor-text' : 'text-xs';
                 },
             },
             {
@@ -1556,7 +1582,20 @@ export function OrdersGrid({
                     return line?.courier || '';
                 },
                 valueSetter: (params: ValueSetterParams) => {
+                    // Double-check status before calling API to prevent stale data issues
+                    const status = params.data?.lineStatus;
+                    if (!['packed', 'marked_shipped'].includes(status)) {
+                        console.warn('Cannot update courier - line status is:', status);
+                        return false;
+                    }
                     if (params.data?.lineId) {
+                        // Directly update the row data so AG-Grid shows the value immediately
+                        const orderLines = params.data?.order?.orderLines || [];
+                        const line = orderLines.find((l: any) => l.id === params.data.lineId);
+                        if (line) {
+                            line.courier = params.newValue || '';
+                        }
+                        // Call API to persist
                         onUpdateLineTracking(params.data.lineId, { courier: params.newValue || '' });
                     }
                     return true;
@@ -1569,17 +1608,27 @@ export function OrdersGrid({
                     const orderLines = row.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
                     const courier = line?.courier || '';
+                    const isEditable = ['packed', 'marked_shipped'].includes(row.lineStatus);
 
                     if (!courier) {
-                        return <span className="text-gray-300 text-xs">—</span>;
+                        if (isEditable) {
+                            return (
+                                <div className="flex items-center gap-1 text-gray-400">
+                                    <span className="text-xs">Select</span>
+                                    <ChevronDown size={12} />
+                                </div>
+                            );
+                        }
+                        // Non-editable: show nothing
+                        return null;
                     }
 
-                    return <span className="text-xs text-blue-600">{courier}</span>;
+                    return <span className="text-xs font-medium text-blue-700">{courier}</span>;
                 },
                 cellClass: (params: CellClassParams) => {
                     const status = params.data?.lineStatus;
                     const editable = ['packed', 'marked_shipped'].includes(status);
-                    return editable ? 'text-xs bg-blue-50' : 'text-xs';
+                    return editable ? 'text-xs cursor-pointer' : 'text-xs';
                 },
             },
             {

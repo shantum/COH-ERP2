@@ -454,7 +454,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             if (context?.previousOrders) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
-            alert(err.response?.data?.error || 'Failed to update tracking info');
+            // Log error silently - frontend validation should prevent most cases
+            console.error('Tracking update failed:', err.response?.data?.error || err.message);
         },
         // No invalidation needed - optimistic update is sufficient
     });

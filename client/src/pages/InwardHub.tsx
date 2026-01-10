@@ -482,6 +482,7 @@ export default function InwardHub() {
     const [writeOffReason, setWriteOffReason] = useState('defective');
     const [adjustmentReason, setAdjustmentReason] = useState('adjustment');
     const [notes, setNotes] = useState('');
+    const [customConfirmed, setCustomConfirmed] = useState(false);
 
     // Focus input on mount
     useEffect(() => {
@@ -740,8 +741,13 @@ export default function InwardHub() {
             setSuccessMessage('Transaction undone');
         },
         onSettled: () => {
-            // Sync with server
+            // Sync with server - invalidate all related queries
             queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
+            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
+            // Also invalidate production queries in case batch status was reverted
+            queryClient.invalidateQueries({ queryKey: ['production'] });
+            queryClient.invalidateQueries({ queryKey: ['production-batches'] });
         },
     });
 
@@ -765,6 +771,7 @@ export default function InwardHub() {
             setWriteOffReason('defective');
             setAdjustmentReason('adjustment');
             setNotes('');
+            setCustomConfirmed(false);
         } catch (error: any) {
             setScanError(error.response?.data?.error || 'SKU not found');
         } finally {
@@ -847,6 +854,7 @@ export default function InwardHub() {
             setWriteOffReason('defective');
             setAdjustmentReason('adjustment');
             setNotes('');
+            setCustomConfirmed(false);
         } catch (error: any) {
             setScanError(error.response?.data?.error || 'SKU not found');
         } finally {
@@ -964,6 +972,11 @@ export default function InwardHub() {
         const prodItem = matchedItem as PendingProductionItem | null;
         const maxQty = prodItem?.qtyPending || 999;
 
+        // Check if this is a custom SKU (by flag or pattern)
+        const skuCode = scanResult?.sku?.skuCode || '';
+        const isCustomByPattern = /-C\d{2}$/.test(skuCode);
+        const isCustomSku = (scanResult?.sku as any)?.isCustomSku || (prodItem as any)?.isCustomSku || isCustomByPattern;
+
         return (
             <div className="space-y-4">
                 {prodItem && (
@@ -992,6 +1005,26 @@ export default function InwardHub() {
                     </div>
                 )}
 
+                {/* Custom SKU Confirmation */}
+                {isCustomSku && (
+                    <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
+                        <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={customConfirmed}
+                                onChange={(e) => setCustomConfirmed(e.target.checked)}
+                                className="w-5 h-5 mt-0.5 text-amber-600 border-2 border-amber-400 rounded focus:ring-amber-500"
+                            />
+                            <div>
+                                <p className="font-medium text-amber-800">Custom SKU - Confirm Customisation</p>
+                                <p className="text-sm text-amber-700">
+                                    Please confirm that customisation has been completed and quality checked before inwarding.
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+                )}
+
                 <div className="flex items-center gap-4">
                     <div>
                         <label className="text-sm text-gray-600 block mb-1">Quantity</label>
@@ -1010,8 +1043,12 @@ export default function InwardHub() {
 
                     <button
                         onClick={handleSubmit}
-                        disabled={isSubmitting}
-                        className="btn btn-primary flex items-center gap-2 h-12 flex-1"
+                        disabled={isSubmitting || (isCustomSku && !customConfirmed)}
+                        className={`btn flex items-center gap-2 h-12 flex-1 ${
+                            isCustomSku && !customConfirmed
+                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                : 'btn-primary'
+                        }`}
                     >
                         <Plus size={18} />
                         {isSubmitting ? 'Adding...' : 'Add to Stock'}

@@ -228,7 +228,13 @@ router.post('/lines/:lineId/unpack', authenticateToken, async (req, res) => {
 
         const updated = await req.prisma.orderLine.update({
             where: { id: req.params.lineId },
-            data: { lineStatus: 'picked', packedAt: null },
+            data: {
+                lineStatus: 'picked',
+                packedAt: null,
+                // Clear manual AWB and courier when unpacking
+                awbNumber: null,
+                courier: null,
+            },
         });
 
         res.json(updated);

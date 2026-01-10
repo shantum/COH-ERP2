@@ -1331,11 +1331,27 @@ router.post('/quick-inward', authenticateToken, async (req, res) => {
 
             // Try to match to pending production batch (within same transaction)
             let matchedBatch = null;
+            let updatedTransaction = transaction;
             if (reason === 'production') {
                 matchedBatch = await matchProductionBatchInTransaction(tx, sku.id, qty);
+
+                // Link the transaction to the matched batch for undo support
+                if (matchedBatch) {
+                    updatedTransaction = await tx.inventoryTransaction.update({
+                        where: { id: transaction.id },
+                        data: { referenceId: matchedBatch.id },
+                        include: {
+                            sku: {
+                                include: {
+                                    variation: { include: { product: true } },
+                                },
+                            },
+                        },
+                    });
+                }
             }
 
-            return { transaction, matchedBatch };
+            return { transaction: updatedTransaction, matchedBatch };
         });
 
         const balance = await calculateInventoryBalance(req.prisma, sku.id);
@@ -1613,12 +1629,13 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
                     include: { sku: { include: { variation: true } } }
                 });
 
-                if (productionBatch && productionBatch.status === 'completed') {
+                // Handle both 'completed' and 'in_progress' batches
+                if (productionBatch && (productionBatch.status === 'completed' || productionBatch.status === 'in_progress')) {
                     // Check if this is a custom SKU batch that was auto-allocated
                     const isCustomSkuBatch = productionBatch.sku.isCustomSku && productionBatch.sourceOrderLineId;
 
-                    // If custom SKU, check if order line has progressed beyond allocation
-                    if (isCustomSkuBatch) {
+                    // If custom SKU with completed batch, check if order line has progressed beyond allocation
+                    if (isCustomSkuBatch && productionBatch.status === 'completed') {
                         const orderLine = await tx.orderLine.findUnique({
                             where: { id: productionBatch.sourceOrderLineId }
                         });
@@ -1649,24 +1666,31 @@ router.delete('/transactions/:id', authenticateToken, async (req, res) => {
                         revertedAllocation = productionBatch.sourceOrderLineId;
                     }
 
+                    // Calculate new qtyCompleted after reverting this transaction
+                    const newQtyCompleted = Math.max(0, productionBatch.qtyCompleted - existing.qty);
+                    const newStatus = newQtyCompleted === 0 ? 'planned' : 'in_progress';
+
                     // Revert production batch status
                     await tx.productionBatch.update({
                         where: { id: existing.referenceId },
                         data: {
-                            qtyCompleted: 0,
-                            status: 'planned',
+                            qtyCompleted: newQtyCompleted,
+                            status: newStatus,
                             completedAt: null
                         }
                     });
 
-                    // Delete fabric outward transaction
-                    const deletedFabric = await tx.fabricTransaction.deleteMany({
-                        where: {
-                            referenceId: existing.referenceId,
-                            reason: TXN_REASON.PRODUCTION,
-                            txnType: 'outward'
-                        }
-                    });
+                    // Delete fabric outward transaction (only if batch was completed - fabric is deducted on completion)
+                    let deletedFabric = { count: 0 };
+                    if (productionBatch.status === 'completed') {
+                        deletedFabric = await tx.fabricTransaction.deleteMany({
+                            where: {
+                                referenceId: existing.referenceId,
+                                reason: TXN_REASON.PRODUCTION,
+                                txnType: 'outward'
+                            }
+                        });
+                    }
 
                     revertedProductionBatch = {
                         id: productionBatch.id,
