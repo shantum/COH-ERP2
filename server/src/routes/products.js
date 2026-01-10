@@ -37,6 +37,121 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 });
 
+// ============================================
+// COST CONFIG (must be before /:id routes)
+// ============================================
+
+// Get cost config
+router.get('/cost-config', authenticateToken, async (req, res) => {
+    try {
+        let config = await req.prisma.costConfig.findFirst();
+
+        if (!config) {
+            // Create default config if none exists
+            config = await req.prisma.costConfig.create({
+                data: { laborRatePerMin: 2.5, defaultPackagingCost: 50 },
+            });
+        }
+
+        res.json(config);
+    } catch (error) {
+        console.error('Get cost config error:', error);
+        res.status(500).json({ error: 'Failed to fetch cost config' });
+    }
+});
+
+// Update cost config
+router.put('/cost-config', authenticateToken, async (req, res) => {
+    try {
+        const { laborRatePerMin, defaultPackagingCost, gstThreshold, gstRateAbove, gstRateBelow } = req.body;
+
+        let config = await req.prisma.costConfig.findFirst();
+
+        // Build update data with only provided fields
+        const updateData = { lastUpdated: new Date() };
+        if (laborRatePerMin !== undefined) updateData.laborRatePerMin = laborRatePerMin;
+        if (defaultPackagingCost !== undefined) updateData.defaultPackagingCost = defaultPackagingCost;
+        if (gstThreshold !== undefined) updateData.gstThreshold = gstThreshold;
+        if (gstRateAbove !== undefined) updateData.gstRateAbove = gstRateAbove;
+        if (gstRateBelow !== undefined) updateData.gstRateBelow = gstRateBelow;
+
+        if (config) {
+            config = await req.prisma.costConfig.update({
+                where: { id: config.id },
+                data: updateData,
+            });
+        } else {
+            config = await req.prisma.costConfig.create({
+                data: { laborRatePerMin, defaultPackagingCost, gstThreshold, gstRateAbove, gstRateBelow },
+            });
+        }
+
+        res.json(config);
+    } catch (error) {
+        console.error('Update cost config error:', error);
+        res.status(500).json({ error: 'Failed to update cost config' });
+    }
+});
+
+// Get COGS for all SKUs
+router.get('/cogs', authenticateToken, async (req, res) => {
+    try {
+        const costConfig = await req.prisma.costConfig.findFirst();
+        const laborRatePerMin = costConfig?.laborRatePerMin || 2.5;
+        const defaultPackagingCost = costConfig?.defaultPackagingCost || 50;
+
+        const skus = await req.prisma.sku.findMany({
+            where: { isActive: true },
+            include: {
+                variation: {
+                    include: {
+                        product: true,
+                        fabric: true,
+                    },
+                },
+                skuCosting: true,
+            },
+        });
+
+        const cogsData = skus.map((sku) => {
+            const fabricCost = Number(sku.fabricConsumption) * Number(sku.variation.fabric.costPerUnit);
+            const laborMins = sku.variation.product.baseProductionTimeMins;
+            const laborCost = laborMins * Number(laborRatePerMin);
+            const packagingCost = sku.skuCosting?.packagingCost || defaultPackagingCost;
+            const otherCost = sku.skuCosting?.otherCost || 0;
+            const totalCogs = fabricCost + laborCost + Number(packagingCost) + Number(otherCost);
+            const mrp = Number(sku.mrp);
+            const grossMargin = mrp - totalCogs;
+            const marginPct = mrp > 0 ? ((grossMargin / mrp) * 100).toFixed(1) : 0;
+
+            return {
+                skuId: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation.product.name,
+                colorName: sku.variation.colorName,
+                size: sku.size,
+                fabricConsumption: sku.fabricConsumption,
+                fabricRate: sku.variation.fabric.costPerUnit,
+                fabricCost: fabricCost.toFixed(2),
+                laborMins,
+                laborRatePerMin: laborRatePerMin,
+                laborCost: laborCost.toFixed(2),
+                packagingCost: Number(packagingCost).toFixed(2),
+                otherCost: Number(otherCost).toFixed(2),
+                totalCogs: totalCogs.toFixed(2),
+                mrp: mrp.toFixed(2),
+                grossMargin: grossMargin.toFixed(2),
+                marginPct,
+            };
+        });
+
+        res.json(cogsData);
+    } catch (error) {
+        console.error('Get COGS error:', error);
+        res.status(500).json({ error: 'Failed to fetch COGS data' });
+    }
+});
+
 // Get single product with full details
 router.get('/:id', authenticateToken, async (req, res) => {
     try {
@@ -97,7 +212,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // Update product
 router.put('/:id', authenticateToken, async (req, res) => {
     try {
-        const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, trimsCost, packagingCost, isActive } = req.body;
+        const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, trimsCost, liningCost, packagingCost, isActive } = req.body;
 
         // Get current product with variations to check if fabricTypeId is changing
         const currentProduct = await req.prisma.product.findUnique({
@@ -129,6 +244,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
                 baseProductionTimeMins,
                 defaultFabricConsumption,
                 trimsCost: trimsCost !== undefined ? trimsCost : undefined,
+                liningCost: liningCost !== undefined ? liningCost : undefined,
                 packagingCost: packagingCost !== undefined ? packagingCost : undefined,
                 isActive,
             },
@@ -205,11 +321,11 @@ router.post('/:productId/variations', authenticateToken, async (req, res) => {
 // Update variation
 router.put('/variations/:id', authenticateToken, async (req, res) => {
     try {
-        const { colorName, standardColor, colorHex, fabricId, hasLining, trimsCost, packagingCost, isActive } = req.body;
+        const { colorName, standardColor, colorHex, fabricId, hasLining, trimsCost, liningCost, packagingCost, isActive } = req.body;
 
         const variation = await req.prisma.variation.update({
             where: { id: req.params.id },
-            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, trimsCost: trimsCost !== undefined ? trimsCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
+            data: { colorName, standardColor: standardColor || null, colorHex, fabricId, hasLining, trimsCost: trimsCost !== undefined ? trimsCost : undefined, liningCost: liningCost !== undefined ? liningCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
             include: {
                 fabric: { include: { fabricType: true } },
                 product: { select: { id: true, fabricTypeId: true } },
@@ -301,124 +417,17 @@ router.post('/variations/:variationId/skus', authenticateToken, async (req, res)
 // Update SKU
 router.put('/skus/:id', authenticateToken, async (req, res) => {
     try {
-        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost, packagingCost, isActive } = req.body;
+        const { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost, liningCost, packagingCost, isActive } = req.body;
 
         const sku = await req.prisma.sku.update({
             where: { id: req.params.id },
-            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost: trimsCost !== undefined ? trimsCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
+            data: { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost: trimsCost !== undefined ? trimsCost : undefined, liningCost: liningCost !== undefined ? liningCost : undefined, packagingCost: packagingCost !== undefined ? packagingCost : undefined, isActive },
         });
 
         res.json(sku);
     } catch (error) {
         console.error('Update SKU error:', error);
         res.status(500).json({ error: 'Failed to update SKU' });
-    }
-});
-
-// ============================================
-// COGS
-// ============================================
-
-// Get COGS for all SKUs
-router.get('/cogs', authenticateToken, async (req, res) => {
-    try {
-        const costConfig = await req.prisma.costConfig.findFirst();
-        const laborRatePerMin = costConfig?.laborRatePerMin || 2.5;
-        const defaultPackagingCost = costConfig?.defaultPackagingCost || 50;
-
-        const skus = await req.prisma.sku.findMany({
-            where: { isActive: true },
-            include: {
-                variation: {
-                    include: {
-                        product: true,
-                        fabric: true,
-                    },
-                },
-                skuCosting: true,
-            },
-        });
-
-        const cogsData = skus.map((sku) => {
-            const fabricCost = Number(sku.fabricConsumption) * Number(sku.variation.fabric.costPerUnit);
-            const laborMins = sku.variation.product.baseProductionTimeMins;
-            const laborCost = laborMins * Number(laborRatePerMin);
-            const packagingCost = sku.skuCosting?.packagingCost || defaultPackagingCost;
-            const otherCost = sku.skuCosting?.otherCost || 0;
-            const totalCogs = fabricCost + laborCost + Number(packagingCost) + Number(otherCost);
-            const mrp = Number(sku.mrp);
-            const grossMargin = mrp - totalCogs;
-            const marginPct = mrp > 0 ? ((grossMargin / mrp) * 100).toFixed(1) : 0;
-
-            return {
-                skuId: sku.id,
-                skuCode: sku.skuCode,
-                productName: sku.variation.product.name,
-                colorName: sku.variation.colorName,
-                size: sku.size,
-                fabricConsumption: sku.fabricConsumption,
-                fabricRate: sku.variation.fabric.costPerUnit,
-                fabricCost: fabricCost.toFixed(2),
-                laborMins,
-                laborRatePerMin: laborRatePerMin,
-                laborCost: laborCost.toFixed(2),
-                packagingCost: Number(packagingCost).toFixed(2),
-                otherCost: Number(otherCost).toFixed(2),
-                totalCogs: totalCogs.toFixed(2),
-                mrp: mrp.toFixed(2),
-                grossMargin: grossMargin.toFixed(2),
-                marginPct,
-            };
-        });
-
-        res.json(cogsData);
-    } catch (error) {
-        console.error('Get COGS error:', error);
-        res.status(500).json({ error: 'Failed to fetch COGS data' });
-    }
-});
-
-// Get cost config
-router.get('/cost-config', authenticateToken, async (req, res) => {
-    try {
-        let config = await req.prisma.costConfig.findFirst();
-
-        if (!config) {
-            // Create default config if none exists
-            config = await req.prisma.costConfig.create({
-                data: { laborRatePerMin: 2.5, defaultPackagingCost: 50 },
-            });
-        }
-
-        res.json(config);
-    } catch (error) {
-        console.error('Get cost config error:', error);
-        res.status(500).json({ error: 'Failed to fetch cost config' });
-    }
-});
-
-// Update cost config
-router.put('/cost-config', authenticateToken, async (req, res) => {
-    try {
-        const { laborRatePerMin, defaultPackagingCost } = req.body;
-
-        let config = await req.prisma.costConfig.findFirst();
-
-        if (config) {
-            config = await req.prisma.costConfig.update({
-                where: { id: config.id },
-                data: { laborRatePerMin, defaultPackagingCost, lastUpdated: new Date() },
-            });
-        } else {
-            config = await req.prisma.costConfig.create({
-                data: { laborRatePerMin, defaultPackagingCost },
-            });
-        }
-
-        res.json(config);
-    } catch (error) {
-        console.error('Update cost config error:', error);
-        res.status(500).json({ error: 'Failed to update cost config' });
     }
 });
 

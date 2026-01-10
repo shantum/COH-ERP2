@@ -560,8 +560,8 @@ router.post('/sync/backfill-cache-fields', authenticateToken, async (req, res) =
             total: cacheEntries.length,
         };
 
-        // Process in parallel batches of 100 for speed
-        const parallelBatchSize = 100;
+        // Process in parallel batches of 10 to prevent connection pool exhaustion
+        const parallelBatchSize = 10;
         for (let i = 0; i < cacheEntries.length; i += parallelBatchSize) {
             const batch = cacheEntries.slice(i, i + parallelBatchSize);
 
@@ -660,8 +660,8 @@ router.post('/sync/backfill-tracking-fields', authenticateToken, async (req, res
             total: cacheEntries.length,
         };
 
-        // Process in parallel batches
-        const parallelBatchSize = 100;
+        // Process in parallel batches of 10 to prevent connection pool exhaustion
+        const parallelBatchSize = 10;
         for (let i = 0; i < cacheEntries.length; i += parallelBatchSize) {
             const batch = cacheEntries.slice(i, i + parallelBatchSize);
 

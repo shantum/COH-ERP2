@@ -6,12 +6,15 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productsApi } from '../../../services/api';
-import { Package, DollarSign, Clock, Save, RefreshCw, Info, Sparkles } from 'lucide-react';
+import { Package, DollarSign, Clock, Save, RefreshCw, Info, Sparkles, Percent } from 'lucide-react';
 
 interface CostConfig {
     id: string;
     laborRatePerMin: number;
     defaultPackagingCost: number;
+    gstThreshold: number;
+    gstRateAbove: number;
+    gstRateBelow: number;
     lastUpdated: string;
 }
 
@@ -20,6 +23,9 @@ export function CostingTab() {
     const [formData, setFormData] = useState({
         laborRatePerMin: 2.5,
         defaultPackagingCost: 50,
+        gstThreshold: 2500,
+        gstRateAbove: 18,
+        gstRateBelow: 5,
     });
     const [hasChanges, setHasChanges] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
@@ -34,23 +40,26 @@ export function CostingTab() {
             setFormData({
                 laborRatePerMin: config.laborRatePerMin,
                 defaultPackagingCost: config.defaultPackagingCost,
+                gstThreshold: config.gstThreshold,
+                gstRateAbove: config.gstRateAbove,
+                gstRateBelow: config.gstRateBelow,
             });
         }
     }, [config]);
 
     const updateMutation = useMutation({
-        mutationFn: (data: { laborRatePerMin?: number; defaultPackagingCost?: number }) =>
+        mutationFn: (data: { laborRatePerMin?: number; defaultPackagingCost?: number; gstThreshold?: number; gstRateAbove?: number; gstRateBelow?: number }) =>
             productsApi.updateCostConfig(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['costConfig'] });
-            queryClient.invalidateQueries({ queryKey: ['catalog'] });
+            queryClient.invalidateQueries({ queryKey: ['catalogSkuInventory'] });
             setHasChanges(false);
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 3000);
         },
     });
 
-    const handleChange = (field: 'laborRatePerMin' | 'defaultPackagingCost', value: string) => {
+    const handleChange = (field: keyof typeof formData, value: string) => {
         const numValue = parseFloat(value) || 0;
         setFormData(prev => ({ ...prev, [field]: numValue }));
         setHasChanges(true);
@@ -65,6 +74,9 @@ export function CostingTab() {
             setFormData({
                 laborRatePerMin: config.laborRatePerMin,
                 defaultPackagingCost: config.defaultPackagingCost,
+                gstThreshold: config.gstThreshold,
+                gstRateAbove: config.gstRateAbove,
+                gstRateBelow: config.gstRateBelow,
             });
             setHasChanges(false);
         }
@@ -166,6 +178,108 @@ export function CostingTab() {
                     <p className="mt-3 text-xs text-gray-500">
                         Current: ₹{config?.laborRatePerMin?.toFixed(2) || '2.50'} per minute
                     </p>
+                </div>
+            </div>
+
+            {/* GST Configuration Section */}
+            <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Percent size={20} className="text-indigo-500" />
+                    GST Configuration (Catalog Pricing)
+                </h3>
+                <p className="text-sm text-gray-500 -mt-2">
+                    Configure GST rates for catalog price calculations. Order-level GST will be calculated separately based on actual order prices.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* GST Threshold Card */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center">
+                                <DollarSign size={20} className="text-white" />
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-gray-900 text-sm">Price Threshold</h4>
+                                <p className="text-xs text-gray-500">Cutoff for GST rate</p>
+                            </div>
+                        </div>
+
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium text-sm">₹</span>
+                            <input
+                                type="number"
+                                value={formData.gstThreshold}
+                                onChange={(e) => handleChange('gstThreshold', e.target.value)}
+                                className="w-full pl-8 pr-4 py-2.5 text-xl font-bold text-gray-900 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none transition-all"
+                                min="0"
+                                step="100"
+                            />
+                        </div>
+
+                        <p className="mt-2 text-xs text-gray-500">
+                            Current: ₹{config?.gstThreshold?.toFixed(0) || 2500}
+                        </p>
+                    </div>
+
+                    {/* GST Rate Above Card */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-400 to-rose-500 flex items-center justify-center">
+                                <Percent size={20} className="text-white" />
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-gray-900 text-sm">GST Rate (≥ Threshold)</h4>
+                                <p className="text-xs text-gray-500">For products ≥ ₹{formData.gstThreshold}</p>
+                            </div>
+                        </div>
+
+                        <div className="relative">
+                            <input
+                                type="number"
+                                value={formData.gstRateAbove}
+                                onChange={(e) => handleChange('gstRateAbove', e.target.value)}
+                                className="w-full pl-4 pr-10 py-2.5 text-xl font-bold text-gray-900 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all"
+                                min="0"
+                                max="100"
+                                step="1"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">%</span>
+                        </div>
+
+                        <p className="mt-2 text-xs text-gray-500">
+                            Current: {config?.gstRateAbove || 18}%
+                        </p>
+                    </div>
+
+                    {/* GST Rate Below Card */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center">
+                                <Percent size={20} className="text-white" />
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-gray-900 text-sm">GST Rate (&lt; Threshold)</h4>
+                                <p className="text-xs text-gray-500">For products &lt; ₹{formData.gstThreshold}</p>
+                            </div>
+                        </div>
+
+                        <div className="relative">
+                            <input
+                                type="number"
+                                value={formData.gstRateBelow}
+                                onChange={(e) => handleChange('gstRateBelow', e.target.value)}
+                                className="w-full pl-4 pr-10 py-2.5 text-xl font-bold text-gray-900 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition-all"
+                                min="0"
+                                max="100"
+                                step="1"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">%</span>
+                        </div>
+
+                        <p className="mt-2 text-xs text-gray-500">
+                            Current: {config?.gstRateBelow || 5}%
+                        </p>
+                    </div>
                 </div>
             </div>
 

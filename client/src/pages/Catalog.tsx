@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Plus, Pencil, ChevronDown, Package, AlertTriangle, XCircle, Layers } from 'lucide-react';
+import { Search, Plus, Pencil, ChevronDown, ChevronRight, Package, AlertTriangle, XCircle, X, Layers, ArrowLeft } from 'lucide-react';
 import { catalogApi, productsApi } from '../services/api';
 import { FormModal, ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -29,10 +29,11 @@ const VIEW_OPTIONS: { value: ViewLevel; label: string }[] = [
 ];
 
 // Columns to hide for each view level
+// All views share the same columns for consistency (user request)
 const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
     sku: [],
-    variation: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'shopifyQty', 'targetStockQty'],
-    product: ['skuCode', 'size', 'mrp', 'fabricConsumption', 'colorName', 'hasLining', 'fabricName', 'shopifyQty', 'targetStockQty'],
+    variation: [],
+    product: [],
     consumption: [], // Uses completely different columns
 };
 
@@ -52,32 +53,77 @@ function aggregateByVariation(items: any[]): any[] {
                 ...item,
                 skuCode: `${item.styleCode}-${item.colorName}`,
                 size: '-',
-                mrp: null,
-                fabricConsumption: null,
                 currentBalance: 0,
                 reservedBalance: 0,
                 availableBalance: 0,
                 shopifyQty: null,
                 targetStockQty: null,
                 skuCount: 0,
+                skuIds: [], // Track all SKU IDs for bulk updates
                 // Use variation-level costs for editing
                 trimsCost: item.variationTrimsCost ?? item.productTrimsCost ?? null,
+                liningCost: item.hasLining ? (item.variationLiningCost ?? item.productLiningCost ?? null) : null,
                 packagingCost: item.variationPackagingCost ?? item.productPackagingCost ?? item.globalPackagingCost ?? null,
-                totalCost: null, // Aggregate doesn't have meaningful total
+                // Track sums for averaging
+                _mrpSum: 0,
+                _fabricConsumptionSum: 0,
+                _fabricCostSum: 0,
+                _liningCostSum: 0,
+                _liningCostCount: 0, // Only count items with lining
+                _totalCostSum: 0,
+                _exGstPriceSum: 0,
+                _gstAmountSum: 0,
             });
         }
 
         const group = groups.get(key)!;
+        group.skuIds.push(item.skuId); // Collect SKU IDs
         group.currentBalance += item.currentBalance || 0;
         group.reservedBalance += item.reservedBalance || 0;
         group.availableBalance += item.availableBalance || 0;
         group.skuCount += 1;
+        // Sum values for averaging
+        group._mrpSum += item.mrp || 0;
+        group._fabricConsumptionSum += item.fabricConsumption || 0;
+        group._fabricCostSum += item.fabricCost || 0;
+        if (item.hasLining && item.liningCost != null) {
+            group._liningCostSum += item.liningCost;
+            group._liningCostCount += 1;
+        }
+        group._totalCostSum += item.totalCost || 0;
+        group._exGstPriceSum += item.exGstPrice || 0;
+        group._gstAmountSum += item.gstAmount || 0;
     }
 
-    // Calculate status based on aggregated values
+    // Calculate averages and status
     for (const group of groups.values()) {
         group.status = group.availableBalance === 0 ? 'out_of_stock' :
                        group.availableBalance < 10 ? 'below_target' : 'ok';
+        // Calculate averages
+        if (group.skuCount > 0) {
+            group.mrp = Math.round(group._mrpSum / group.skuCount);
+            group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
+            group.fabricCost = Math.round(group._fabricCostSum / group.skuCount);
+            if (group._liningCostCount > 0) {
+                group.liningCost = Math.round(group._liningCostSum / group._liningCostCount);
+            }
+            group.totalCost = Math.round(group._totalCostSum / group.skuCount);
+            group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
+            group.gstAmount = Math.round(group._gstAmountSum / group.skuCount);
+            // Calculate cost multiple from averaged values
+            group.costMultiple = group.totalCost > 0 ? Math.round((group.mrp / group.totalCost) * 100) / 100 : null;
+            // GST rate based on averaged MRP (threshold-based)
+            group.gstRate = group.mrp >= 2500 ? 18 : 5;
+        }
+        // Clean up temp fields
+        delete group._mrpSum;
+        delete group._fabricConsumptionSum;
+        delete group._fabricCostSum;
+        delete group._liningCostSum;
+        delete group._liningCostCount;
+        delete group._totalCostSum;
+        delete group._exGstPriceSum;
+        delete group._gstAmountSum;
     }
 
     return Array.from(groups.values());
@@ -100,8 +146,6 @@ function aggregateByProduct(items: any[]): any[] {
                 // Keep first image URL for product thumbnail
                 imageUrl: item.imageUrl || null,
                 size: '-',
-                mrp: null,
-                fabricConsumption: null,
                 currentBalance: 0,
                 reservedBalance: 0,
                 availableBalance: 0,
@@ -109,21 +153,46 @@ function aggregateByProduct(items: any[]): any[] {
                 targetStockQty: null,
                 variationCount: 0,
                 skuCount: 0,
+                skuIds: [], // Track all SKU IDs for bulk updates
                 // Use product-level costs for editing
                 trimsCost: item.productTrimsCost ?? null,
+                liningCost: item.productLiningCost ?? null,
                 packagingCost: item.productPackagingCost ?? item.globalPackagingCost ?? null,
-                totalCost: null, // Aggregate doesn't have meaningful total
+                hasLining: false, // Will be set to true if any variation has lining
+                // Track sums for averaging
+                _mrpSum: 0,
+                _fabricConsumptionSum: 0,
+                _fabricCostSum: 0,
+                _liningCostSum: 0,
+                _liningCostCount: 0,
+                _totalCostSum: 0,
+                _exGstPriceSum: 0,
+                _gstAmountSum: 0,
             });
         }
 
         const group = groups.get(key)!;
+        group.skuIds.push(item.skuId); // Collect SKU IDs
         group.currentBalance += item.currentBalance || 0;
         group.reservedBalance += item.reservedBalance || 0;
         group.availableBalance += item.availableBalance || 0;
         group.skuCount += 1;
+        // Track if any variation has lining
+        if (item.hasLining) group.hasLining = true;
+        // Sum values for averaging
+        group._mrpSum += item.mrp || 0;
+        group._fabricConsumptionSum += item.fabricConsumption || 0;
+        group._fabricCostSum += item.fabricCost || 0;
+        if (item.hasLining && item.liningCost != null) {
+            group._liningCostSum += item.liningCost;
+            group._liningCostCount += 1;
+        }
+        group._totalCostSum += item.totalCost || 0;
+        group._exGstPriceSum += item.exGstPrice || 0;
+        group._gstAmountSum += item.gstAmount || 0;
     }
 
-    // Count unique variations per product and calculate status
+    // Count unique variations per product and calculate status/averages
     const variationCounts = new Map<string, Set<string>>();
     for (const item of items) {
         if (!variationCounts.has(item.productId)) {
@@ -136,6 +205,31 @@ function aggregateByProduct(items: any[]): any[] {
         group.variationCount = variationCounts.get(productId)?.size || 0;
         group.status = group.availableBalance === 0 ? 'out_of_stock' :
                        group.availableBalance < 20 ? 'below_target' : 'ok';
+        // Calculate averages
+        if (group.skuCount > 0) {
+            group.mrp = Math.round(group._mrpSum / group.skuCount);
+            group.fabricConsumption = Math.round((group._fabricConsumptionSum / group.skuCount) * 100) / 100;
+            group.fabricCost = Math.round(group._fabricCostSum / group.skuCount);
+            if (group._liningCostCount > 0) {
+                group.liningCost = Math.round(group._liningCostSum / group._liningCostCount);
+            }
+            group.totalCost = Math.round(group._totalCostSum / group.skuCount);
+            group.exGstPrice = Math.round(group._exGstPriceSum / group.skuCount);
+            group.gstAmount = Math.round(group._gstAmountSum / group.skuCount);
+            // Calculate cost multiple from averaged values
+            group.costMultiple = group.totalCost > 0 ? Math.round((group.mrp / group.totalCost) * 100) / 100 : null;
+            // GST rate based on averaged MRP (threshold-based)
+            group.gstRate = group.mrp >= 2500 ? 18 : 5;
+        }
+        // Clean up temp fields
+        delete group._mrpSum;
+        delete group._fabricConsumptionSum;
+        delete group._fabricCostSum;
+        delete group._liningCostSum;
+        delete group._liningCostCount;
+        delete group._totalCostSum;
+        delete group._exGstPriceSum;
+        delete group._gstAmountSum;
     }
 
     return Array.from(groups.values());
@@ -427,7 +521,8 @@ function FabricEditPopover({
 const ALL_COLUMN_IDS = [
     'image', 'productName', 'styleCode', 'category', 'gender', 'productType', 'fabricTypeName',
     'colorName', 'hasLining', 'fabricName',
-    'skuCode', 'size', 'mrp', 'fabricConsumption', 'fabricCost', 'trimsCost', 'packagingCost', 'totalCost',
+    'skuCode', 'size', 'mrp', 'fabricConsumption', 'fabricCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost',
+    'exGstPrice', 'gstAmount', 'costMultiple',
     'currentBalance', 'reservedBalance', 'availableBalance', 'shopifyQty', 'targetStockQty', 'shopifyStatus', 'status',
     'actions'
 ];
@@ -450,8 +545,12 @@ const DEFAULT_HEADERS: Record<string, string> = {
     fabricConsumption: 'Fab (m)',
     fabricCost: 'Fab ₹',
     trimsCost: 'Trims ₹',
+    liningCost: 'Lin ₹',
     packagingCost: 'Pkg ₹',
     totalCost: 'Cost ₹',
+    exGstPrice: 'Ex-GST',
+    gstAmount: 'GST',
+    costMultiple: 'Multiple',
     currentBalance: 'Balance',
     reservedBalance: 'Reserved',
     availableBalance: 'Available',
@@ -482,6 +581,9 @@ export default function Catalog() {
         gridId: 'catalogGrid',
         allColumnIds: ALL_COLUMN_IDS,
         defaultPageSize: 100,
+        // Hide cost calculation columns by default (users can enable via Columns dropdown)
+        // fabricConsumption remains visible as it's a key data field
+        defaultHiddenColumns: ['fabricCost', 'trimsCost', 'liningCost', 'packagingCost', 'totalCost', 'exGstPrice', 'gstAmount', 'costMultiple'],
     });
 
     // View level state
@@ -492,6 +594,8 @@ export default function Catalog() {
         gender: '',
         category: '',
         productId: '',
+        variationId: '', // For drilling down to specific color
+        colorName: '', // Store color name for breadcrumb display
         status: '',
     });
     const [searchInput, setSearchInput] = useState('');
@@ -677,9 +781,9 @@ export default function Catalog() {
         },
     });
 
-    // Inline cost update mutation (trimsCost or packagingCost)
+    // Inline cost update mutation (trimsCost, liningCost, or packagingCost)
     const updateCostMutation = useMutation({
-        mutationFn: ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'packagingCost'; value: number | null }) => {
+        mutationFn: ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'liningCost' | 'packagingCost'; value: number | null }) => {
             const data = { [field]: value };
             if (level === 'product') {
                 return productsApi.update(id, data);
@@ -763,7 +867,13 @@ export default function Catalog() {
 
     // Aggregate data based on view level
     const displayData = useMemo(() => {
-        const items = catalogData?.items || [];
+        let items = catalogData?.items || [];
+
+        // Filter by variationId if set (when drilling down to SKU level for a specific color)
+        if (filter.variationId && viewLevel === 'sku') {
+            items = items.filter((item: any) => item.variationId === filter.variationId);
+        }
+
         switch (viewLevel) {
             case 'variation':
                 return aggregateByVariation(items);
@@ -774,7 +884,7 @@ export default function Catalog() {
             default:
                 return items;
         }
-    }, [catalogData?.items, viewLevel]);
+    }, [catalogData?.items, viewLevel, filter.variationId]);
 
     // Grid column moved handler
     const onColumnMoved = () => {
@@ -839,7 +949,46 @@ export default function Catalog() {
             field: 'productName',
             width: 180,
             pinned: 'left' as const,
-            cellClass: 'font-medium',
+            cellRenderer: (params: ICellRendererParams) => {
+                const row = params.data;
+                if (!row) return null;
+                // Clickable in product view to drill down to colors
+                if (viewLevel === 'product') {
+                    return (
+                        <button
+                            onClick={() => {
+                                setFilter(f => ({ ...f, productId: row.productId, variationId: '', colorName: '' }));
+                                setViewLevel('variation');
+                            }}
+                            className="font-medium text-left text-blue-600 hover:text-blue-800 hover:underline truncate w-full"
+                            title={`View colors for ${row.productName}`}
+                        >
+                            {row.productName}
+                        </button>
+                    );
+                }
+                // In variation view, clicking product name drills to that color's SKUs
+                if (viewLevel === 'variation') {
+                    return (
+                        <button
+                            onClick={() => {
+                                setFilter(f => ({
+                                    ...f,
+                                    productId: row.productId,
+                                    variationId: row.variationId,
+                                    colorName: row.colorName,
+                                }));
+                                setViewLevel('sku');
+                            }}
+                            className="font-medium text-left text-blue-600 hover:text-blue-800 hover:underline truncate w-full"
+                            title={`View SKUs for ${row.productName} - ${row.colorName}`}
+                        >
+                            {row.productName}
+                        </button>
+                    );
+                }
+                return <span className="font-medium truncate">{row.productName}</span>;
+            },
         },
         {
             colId: 'styleCode',
@@ -990,11 +1139,11 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.fabricConsumption,
             field: 'fabricConsumption',
             width: 65,
-            editable: () => viewLevel === 'sku', // Only editable in SKU view
+            editable: () => viewLevel !== 'consumption', // Editable in all views except consumption matrix
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? params.value.toFixed(2) : '-',
-            cellClass: 'text-right text-xs',
-            cellStyle: () => viewLevel === 'sku' ? { backgroundColor: '#f0f9ff' } : undefined,
+            cellClass: 'text-right text-xs cursor-pointer hover:bg-blue-50',
+            cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
         },
         {
             colId: 'fabricCost',
@@ -1017,6 +1166,23 @@ export default function Catalog() {
             cellStyle: { backgroundColor: '#f0f9ff' }, // Light blue for editable
         },
         {
+            colId: 'liningCost',
+            headerName: DEFAULT_HEADERS.liningCost,
+            field: 'liningCost',
+            width: 65,
+            editable: (params: any) => params.data?.hasLining === true, // Only editable if hasLining
+            valueFormatter: (params: ValueFormatterParams) => {
+                // Show "-" if no lining
+                if (!params.data?.hasLining) return '-';
+                return params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-';
+            },
+            cellClass: (params: CellClassParams) => {
+                if (!params.data?.hasLining) return 'text-right text-xs text-gray-300';
+                return 'text-right text-xs cursor-pointer hover:bg-blue-50';
+            },
+            cellStyle: (params: any) => params.data?.hasLining ? { backgroundColor: '#f0f9ff' } : undefined,
+        },
+        {
             colId: 'packagingCost',
             headerName: DEFAULT_HEADERS.packagingCost,
             field: 'packagingCost',
@@ -1035,6 +1201,42 @@ export default function Catalog() {
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs font-medium text-emerald-700',
+        },
+        // GST & Pricing columns
+        {
+            colId: 'exGstPrice',
+            headerName: DEFAULT_HEADERS.exGstPrice,
+            field: 'exGstPrice',
+            width: 75,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
+            cellClass: 'text-right text-xs',
+        },
+        {
+            colId: 'gstAmount',
+            headerName: DEFAULT_HEADERS.gstAmount,
+            field: 'gstAmount',
+            width: 65,
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null) return '-';
+                const rate = params.data?.gstRate || 0;
+                return `₹${Number(params.value).toFixed(0)} (${rate}%)`;
+            },
+            cellClass: 'text-right text-xs text-gray-600',
+        },
+        {
+            colId: 'costMultiple',
+            headerName: DEFAULT_HEADERS.costMultiple,
+            field: 'costMultiple',
+            width: 70,
+            valueFormatter: (params: ValueFormatterParams) =>
+                params.value != null ? `${Number(params.value).toFixed(1)}x` : '-',
+            cellClass: (params: CellClassParams) => {
+                const val = params.value || 0;
+                if (val >= 3) return 'text-right text-xs font-medium text-green-600';
+                if (val >= 2) return 'text-right text-xs font-medium text-amber-600';
+                return 'text-right text-xs font-medium text-red-600';
+            },
         },
         // Inventory columns
         {
@@ -1160,12 +1362,20 @@ export default function Catalog() {
     // Mutation for updating fabric consumption by SKU IDs
     const updateConsumption = useMutation({
         mutationFn: async ({ skuIds, fabricConsumption }: { skuIds: string[]; fabricConsumption: number }) => {
-            // Update each SKU's fabric consumption
-            const results = await Promise.all(
-                skuIds.map(skuId =>
-                    productsApi.updateSku(skuId, { fabricConsumption })
-                )
-            );
+            // Batch updates to prevent server overload (5 concurrent requests at a time)
+            const batchSize = 5;
+            const results: any[] = [];
+
+            for (let i = 0; i < skuIds.length; i += batchSize) {
+                const batch = skuIds.slice(i, i + batchSize);
+                const batchResults = await Promise.all(
+                    batch.map(skuId =>
+                        productsApi.updateSku(skuId, { fabricConsumption })
+                    )
+                );
+                results.push(...batchResults);
+            }
+
             return results;
         },
         onSuccess: () => {
@@ -1190,11 +1400,11 @@ export default function Catalog() {
         }
     }, [updateConsumption]);
 
-    // Handle cost cell value change (trimsCost or packagingCost)
+    // Handle cost cell value change (trimsCost, liningCost, or packagingCost)
     const handleCostChange = useCallback((params: any) => {
         const { data, colDef, newValue } = params;
-        const field = colDef.field as 'trimsCost' | 'packagingCost';
-        if (field !== 'trimsCost' && field !== 'packagingCost') return;
+        const field = colDef.field as 'trimsCost' | 'liningCost' | 'packagingCost';
+        if (field !== 'trimsCost' && field !== 'liningCost' && field !== 'packagingCost') return;
 
         const newCost = newValue === '' || newValue === null ? null : parseFloat(newValue);
         if (newValue !== '' && newValue !== null && isNaN(newCost as number)) return;
@@ -1572,6 +1782,116 @@ export default function Catalog() {
                 </div>
             </div>
 
+            {/* Active Product Filter Breadcrumb - appears when drilling down */}
+            {filter.productId && (
+                <div className="relative overflow-hidden">
+                    {/* Subtle gradient background */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-slate-50 via-blue-50/50 to-slate-50" />
+                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_left,_var(--tw-gradient-stops))] from-blue-100/30 via-transparent to-transparent" />
+
+                    <div className="relative flex items-center justify-between px-4 py-3 border border-blue-100 rounded-xl">
+                        {/* Left: Breadcrumb path */}
+                        <div className="flex items-center gap-2">
+                            {/* Back button - goes back one level */}
+                            <button
+                                onClick={() => {
+                                    if (filter.variationId) {
+                                        // At SKU level with color filter → go back to Color view
+                                        setFilter(f => ({ ...f, variationId: '', colorName: '' }));
+                                        setViewLevel('variation');
+                                    } else {
+                                        // At Color level → go back to Product view
+                                        setFilter(f => ({ ...f, productId: '', variationId: '', colorName: '' }));
+                                        setViewLevel('product');
+                                    }
+                                }}
+                                className="flex items-center justify-center w-8 h-8 rounded-lg bg-white border border-gray-200 text-gray-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 transition-all shadow-sm"
+                                title={filter.variationId ? 'Back to colors' : 'Back to all products'}
+                            >
+                                <ArrowLeft size={16} />
+                            </button>
+
+                            {/* Breadcrumb trail */}
+                            <nav className="flex items-center gap-1.5 text-sm">
+                                {/* All Products - always clickable */}
+                                <button
+                                    onClick={() => {
+                                        setFilter(f => ({ ...f, productId: '', variationId: '', colorName: '' }));
+                                        setViewLevel('product');
+                                    }}
+                                    className="text-gray-500 hover:text-blue-600 transition-colors font-medium"
+                                >
+                                    All Products
+                                </button>
+
+                                <ChevronRight size={14} className="text-gray-300" />
+
+                                {/* Product Name - clickable if we're at SKU level to go back to Color view */}
+                                {filter.variationId ? (
+                                    <button
+                                        onClick={() => {
+                                            setFilter(f => ({ ...f, variationId: '', colorName: '' }));
+                                            setViewLevel('variation');
+                                        }}
+                                        className="text-gray-500 hover:text-blue-600 transition-colors font-medium"
+                                    >
+                                        {filterOptions?.products?.find((p: any) => p.id === filter.productId)?.name || 'Product'}
+                                    </button>
+                                ) : (
+                                    <span className="font-semibold text-gray-900">
+                                        {filterOptions?.products?.find((p: any) => p.id === filter.productId)?.name || 'Selected Product'}
+                                    </span>
+                                )}
+
+                                {/* Color Name - shown when at SKU level */}
+                                {filter.variationId && filter.colorName && (
+                                    <>
+                                        <ChevronRight size={14} className="text-gray-300" />
+                                        <span className="font-semibold text-gray-900">
+                                            {filter.colorName}
+                                        </span>
+                                    </>
+                                )}
+                            </nav>
+
+                            {/* View level indicator */}
+                            <span className="ml-3 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
+                                {viewLevel === 'variation' ? 'Viewing Colors' : viewLevel === 'sku' ? 'Viewing SKUs' : 'Filtered'}
+                            </span>
+                        </div>
+
+                        {/* Right: Clear all / Back button */}
+                        <div className="flex items-center gap-2">
+                            {/* Show "Back" when at SKU level with color filter */}
+                            {filter.variationId && (
+                                <button
+                                    onClick={() => {
+                                        setFilter(f => ({ ...f, variationId: '', colorName: '' }));
+                                        setViewLevel('variation');
+                                    }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all shadow-sm text-sm text-gray-600 hover:text-blue-600"
+                                >
+                                    <ArrowLeft size={14} />
+                                    Back to Colors
+                                </button>
+                            )}
+
+                            {/* Clear all filters */}
+                            <button
+                                onClick={() => {
+                                    setFilter(f => ({ ...f, productId: '', variationId: '', colorName: '' }));
+                                    setViewLevel('product');
+                                }}
+                                className="group flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-gray-200 hover:border-red-300 hover:bg-red-50 transition-all shadow-sm"
+                            >
+                                <span className="text-sm text-gray-600 group-hover:text-red-600 transition-colors">Clear all</span>
+                                <X size={14} className="text-gray-400 group-hover:text-red-500 transition-colors" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* AG-Grid Container */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="table-scroll-container">
@@ -1601,16 +1921,25 @@ export default function Catalog() {
                         onCellValueChanged={(params) => {
                             if (viewLevel === 'consumption') {
                                 handleConsumptionChange(params);
-                            } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'packagingCost') {
+                            } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'liningCost' || params.colDef.field === 'packagingCost') {
                                 handleCostChange(params);
-                            } else if (params.colDef.field === 'fabricConsumption' && viewLevel === 'sku') {
-                                // Handle fabric consumption edit in SKU view
+                            } else if (params.colDef.field === 'fabricConsumption') {
+                                // Handle fabric consumption edit
                                 const newConsumption = parseFloat(params.newValue);
                                 if (!isNaN(newConsumption) && newConsumption > 0) {
-                                    updateSkuMutation.mutate({
-                                        skuId: params.data.skuId,
-                                        data: { fabricConsumption: newConsumption },
-                                    });
+                                    if (viewLevel === 'sku') {
+                                        // Single SKU update
+                                        updateSkuMutation.mutate({
+                                            skuId: params.data.skuId,
+                                            data: { fabricConsumption: newConsumption },
+                                        });
+                                    } else {
+                                        // Bulk update all SKUs in this product/variation
+                                        const skuIds = params.data.skuIds || [];
+                                        if (skuIds.length > 0) {
+                                            updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
+                                        }
+                                    }
                                 }
                             }
                         }}

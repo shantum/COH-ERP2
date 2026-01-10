@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { calculateFabricBalance } from '../utils/queryPatterns.js';
+import { chunkProcess } from '../utils/asyncUtils.js';
 
 const router = Router();
 
@@ -151,9 +152,8 @@ router.get('/flat', authenticateToken, async (req, res) => {
             ],
         });
 
-        // Calculate balances and analysis for all fabrics
-        const items = await Promise.all(
-            fabrics.map(async (fabric) => {
+        // Calculate balances and analysis for all fabrics (batched to prevent connection pool exhaustion)
+        const items = await chunkProcess(fabrics, async (fabric) => {
                 const balance = await calculateFabricBalance(req.prisma, fabric.id);
                 const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
 
@@ -231,8 +231,7 @@ router.get('/flat', authenticateToken, async (req, res) => {
                     // Flag to identify color-level rows
                     isTypeRow: false,
                 };
-            })
-        );
+        }, 5); // Process 5 at a time to prevent connection pool exhaustion
 
         // Filter by status if provided
         let filteredItems = items;
@@ -304,13 +303,11 @@ router.get('/', authenticateToken, async (req, res) => {
             orderBy: { name: 'asc' },
         });
 
-        // Calculate balances
-        const fabricsWithBalance = await Promise.all(
-            fabrics.map(async (fabric) => {
-                const balance = await calculateFabricBalance(req.prisma, fabric.id);
-                return { ...fabric, ...balance };
-            })
-        );
+        // Calculate balances (batched to prevent connection pool exhaustion)
+        const fabricsWithBalance = await chunkProcess(fabrics, async (fabric) => {
+            const balance = await calculateFabricBalance(req.prisma, fabric.id);
+            return { ...fabric, ...balance };
+        }, 5);
 
         res.json(fabricsWithBalance);
     } catch (error) {
@@ -659,46 +656,44 @@ router.get('/dashboard/stock-analysis', authenticateToken, async (req, res) => {
             include: { fabricType: true, supplier: true },
         });
 
-        const analysis = await Promise.all(
-            fabrics.map(async (fabric) => {
-                const balance = await calculateFabricBalance(req.prisma, fabric.id);
-                const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
+        const analysis = await chunkProcess(fabrics, async (fabric) => {
+            const balance = await calculateFabricBalance(req.prisma, fabric.id);
+            const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
 
-                const daysOfStock = avgDailyConsumption > 0
-                    ? balance.currentBalance / avgDailyConsumption
-                    : null;
+            const daysOfStock = avgDailyConsumption > 0
+                ? balance.currentBalance / avgDailyConsumption
+                : null;
 
-                const reorderPoint = avgDailyConsumption * (fabric.leadTimeDays + 7);
+            const reorderPoint = avgDailyConsumption * (fabric.leadTimeDays + 7);
 
-                let status = 'OK';
-                if (balance.currentBalance <= reorderPoint) {
-                    status = 'ORDER NOW';
-                } else if (balance.currentBalance <= avgDailyConsumption * (fabric.leadTimeDays + 14)) {
-                    status = 'ORDER SOON';
-                }
+            let status = 'OK';
+            if (balance.currentBalance <= reorderPoint) {
+                status = 'ORDER NOW';
+            } else if (balance.currentBalance <= avgDailyConsumption * (fabric.leadTimeDays + 14)) {
+                status = 'ORDER SOON';
+            }
 
-                const suggestedOrderQty = Math.max(
-                    Number(fabric.minOrderQty),
-                    (avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * fabric.leadTimeDays)
-                );
+            const suggestedOrderQty = Math.max(
+                Number(fabric.minOrderQty),
+                (avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * fabric.leadTimeDays)
+            );
 
-                return {
-                    fabricId: fabric.id,
-                    fabricName: fabric.name,
-                    colorName: fabric.colorName,
-                    unit: fabric.fabricType.unit,
-                    currentBalance: balance.currentBalance.toFixed(2),
-                    avgDailyConsumption: avgDailyConsumption.toFixed(3),
-                    daysOfStock: daysOfStock ? Math.floor(daysOfStock) : null,
-                    reorderPoint: reorderPoint.toFixed(2),
-                    status,
-                    suggestedOrderQty: Math.ceil(suggestedOrderQty),
-                    leadTimeDays: fabric.leadTimeDays,
-                    costPerUnit: fabric.costPerUnit,
-                    supplier: fabric.supplier?.name || 'No supplier',
-                };
-            })
-        );
+            return {
+                fabricId: fabric.id,
+                fabricName: fabric.name,
+                colorName: fabric.colorName,
+                unit: fabric.fabricType.unit,
+                currentBalance: balance.currentBalance.toFixed(2),
+                avgDailyConsumption: avgDailyConsumption.toFixed(3),
+                daysOfStock: daysOfStock ? Math.floor(daysOfStock) : null,
+                reorderPoint: reorderPoint.toFixed(2),
+                status,
+                suggestedOrderQty: Math.ceil(suggestedOrderQty),
+                leadTimeDays: fabric.leadTimeDays,
+                costPerUnit: fabric.costPerUnit,
+                supplier: fabric.supplier?.name || 'No supplier',
+            };
+        }, 5);
 
         // Sort by status priority
         const statusOrder = { 'ORDER NOW': 0, 'ORDER SOON': 1, 'OK': 2 };
@@ -888,19 +883,17 @@ router.post('/reconciliation/start', authenticateToken, async (req, res) => {
             orderBy: { name: 'asc' },
         });
 
-        // Calculate current balances
-        const fabricsWithBalance = await Promise.all(
-            fabrics.map(async (fabric) => {
-                const balance = await calculateFabricBalance(req.prisma, fabric.id);
-                return {
-                    fabricId: fabric.id,
-                    fabricName: fabric.name,
-                    colorName: fabric.colorName,
-                    unit: fabric.fabricType.unit,
-                    systemQty: balance.currentBalance,
-                };
-            })
-        );
+        // Calculate current balances (batched to prevent connection pool exhaustion)
+        const fabricsWithBalance = await chunkProcess(fabrics, async (fabric) => {
+            const balance = await calculateFabricBalance(req.prisma, fabric.id);
+            return {
+                fabricId: fabric.id,
+                fabricName: fabric.name,
+                colorName: fabric.colorName,
+                unit: fabric.fabricType.unit,
+                systemQty: balance.currentBalance,
+            };
+        }, 5);
 
         // Create reconciliation record
         const reconciliation = await req.prisma.fabricReconciliation.create({

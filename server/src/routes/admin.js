@@ -5,6 +5,7 @@ import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '../utils/validation.js';
 import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
 import logBuffer from '../utils/logBuffer.js';
+import { chunkProcess } from '../utils/asyncUtils.js';
 
 const router = Router();
 
@@ -634,21 +635,19 @@ router.get('/inspect/tables', authenticateToken, async (req, res) => {
             req.prisma[key]?.findMany
         );
 
-        // Convert to display format with counts
-        const tablesWithCounts = await Promise.all(
-            modelNames.map(async (name) => {
-                try {
-                    const count = await req.prisma[name].count();
-                    return {
-                        name,
-                        displayName: name.replace(/([A-Z])/g, ' $1').trim(),
-                        count
-                    };
-                } catch {
-                    return { name, displayName: name.replace(/([A-Z])/g, ' $1').trim(), count: 0 };
-                }
-            })
-        );
+        // Convert to display format with counts (batched to prevent connection pool exhaustion)
+        const tablesWithCounts = await chunkProcess(modelNames, async (name) => {
+            try {
+                const count = await req.prisma[name].count();
+                return {
+                    name,
+                    displayName: name.replace(/([A-Z])/g, ' $1').trim(),
+                    count
+                };
+            } catch {
+                return { name, displayName: name.replace(/([A-Z])/g, ' $1').trim(), count: 0 };
+            }
+        }, 5);
 
         // Sort by name
         tablesWithCounts.sort((a, b) => a.displayName.localeCompare(b.displayName));

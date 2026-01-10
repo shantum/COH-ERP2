@@ -105,9 +105,13 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             excludeCustomSkus: true,
         });
 
-        // Fetch global cost config for default packaging cost
+        // Fetch global cost config for default packaging cost and GST settings
         const costConfig = await req.prisma.costConfig.findFirst();
         const globalPackagingCost = costConfig?.defaultPackagingCost || 50;
+        // GST configuration (for catalog pricing only - order pricing calculated separately)
+        const gstThreshold = costConfig?.gstThreshold || 2500;
+        const gstRateAbove = costConfig?.gstRateAbove || 18;
+        const gstRateBelow = costConfig?.gstRateBelow || 5;
 
         // Batch fetch Shopify product cache for status lookup
         const shopifyProductIds = [...new Set(
@@ -145,13 +149,26 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             // Cascade trims cost: SKU -> Variation -> Product
             const effectiveTrimsCost = sku.trimsCost ?? variation.trimsCost ?? product.trimsCost ?? null;
 
+            // Cascade lining cost: SKU -> Variation -> Product (only applies if hasLining is true)
+            const effectiveLiningCost = variation.hasLining
+                ? (sku.liningCost ?? variation.liningCost ?? product.liningCost ?? null)
+                : null;
+
             // Cascade packaging cost: SKU -> Variation -> Product -> Global default
             const effectivePackagingCost = sku.packagingCost ?? variation.packagingCost ?? product.packagingCost ?? globalPackagingCost;
 
             // Calculate fabric cost and total cost (handle NaN safely)
-            const fabricCostPerUnit = Number(variation.fabric?.costPerUnit) || 0;
+            // Cascade: Fabric.costPerUnit -> FabricType.defaultCostPerUnit
+            const fabricCostPerUnit = Number(variation.fabric?.costPerUnit ?? variation.fabric?.fabricType?.defaultCostPerUnit) || 0;
             const fabricCost = (Number(sku.fabricConsumption) || 0) * fabricCostPerUnit;
-            const totalCost = (fabricCost || 0) + (effectiveTrimsCost || 0) + (effectivePackagingCost || 0);
+            const totalCost = (fabricCost || 0) + (effectiveTrimsCost || 0) + (effectiveLiningCost || 0) + (effectivePackagingCost || 0);
+
+            // GST calculations (catalog pricing - MRP is inclusive of GST)
+            const mrp = Number(sku.mrp) || 0;
+            const gstRate = mrp >= gstThreshold ? gstRateAbove : gstRateBelow;
+            const exGstPrice = mrp > 0 ? Math.round((mrp / (1 + gstRate / 100)) * 100) / 100 : 0;
+            const gstAmount = Math.round((mrp - exGstPrice) * 100) / 100;
+            const costMultiple = totalCost > 0 ? Math.round((mrp / totalCost) * 100) / 100 : null;
 
             return {
                 // SKU identifiers
@@ -161,11 +178,15 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 mrp: sku.mrp,
                 fabricConsumption: sku.fabricConsumption,
                 trimsCost: effectiveTrimsCost,
+                liningCost: effectiveLiningCost,
                 packagingCost: effectivePackagingCost,
                 // Raw values for editing (to know where override exists)
                 skuTrimsCost: sku.trimsCost,
                 variationTrimsCost: variation.trimsCost,
                 productTrimsCost: product.trimsCost,
+                skuLiningCost: sku.liningCost,
+                variationLiningCost: variation.liningCost,
+                productLiningCost: product.liningCost,
                 skuPackagingCost: sku.packagingCost,
                 variationPackagingCost: variation.packagingCost,
                 productPackagingCost: product.packagingCost,
@@ -174,6 +195,11 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
                 fabricCostPerUnit,
                 fabricCost: Math.round(fabricCost * 100) / 100,
                 totalCost: Math.round(totalCost * 100) / 100,
+                // GST & Pricing (catalog-level calculations)
+                gstRate,
+                exGstPrice,
+                gstAmount,
+                costMultiple,
                 isActive: sku.isActive,
 
                 // Variation (color-level)

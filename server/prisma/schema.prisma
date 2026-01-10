@@ -46,6 +46,7 @@ model Product {
   baseProductionTimeMins    Int      @default(60)
   defaultFabricConsumption  Float?   // Default fabric consumption for SKUs (fallback)
   trimsCost                 Float?   // Default trims cost (₹) - cascades to variations/SKUs
+  liningCost                Float?   // Default lining cost (₹) - cascades to variations/SKUs (only applies when hasLining=true)
   packagingCost             Float?   // Default packaging cost (₹) - cascades to variations/SKUs (null = use global default)
   imageUrl                  String?  // Main product image URL (from Shopify)
   isActive                  Boolean  @default(true)
@@ -79,6 +80,7 @@ model Variation {
   imageUrl      String? // Color-specific image URL (from Shopify)
   hasLining     Boolean @default(false) // Whether this color variant has lining
   trimsCost     Float?  // Override trims cost for this variation (null = inherit from Product)
+  liningCost    Float?  // Override lining cost for this variation (null = inherit from Product)
   packagingCost Float?  // Override packaging cost for this variation (null = inherit from Product)
   isActive      Boolean @default(true)
 
@@ -99,6 +101,7 @@ model Sku {
   fabricConsumption Float   @default(1.5)
   mrp               Float
   trimsCost         Float?  // Override trims cost for this SKU (null = inherit from Variation/Product)
+  liningCost        Float?  // Override lining cost for this SKU (null = inherit from Variation/Product)
   packagingCost     Float?  // Override packaging cost for this SKU (null = inherit from Variation/Product)
   targetStockQty    Int     @default(10)
   targetStockMethod String  @default("day14") // day7, day14, day28, manual
@@ -163,6 +166,10 @@ model CostConfig {
   id                   String   @id @default(uuid())
   laborRatePerMin      Float    @default(2.50)
   defaultPackagingCost Float    @default(50)
+  // GST configuration for catalog pricing
+  gstThreshold         Float    @default(2500)  // Price threshold for GST rate change
+  gstRateAbove         Float    @default(18)    // GST % for prices >= threshold (e.g., 18%)
+  gstRateBelow         Float    @default(5)     // GST % for prices < threshold (e.g., 5%)
   lastUpdated          DateTime @default(now())
 }
 

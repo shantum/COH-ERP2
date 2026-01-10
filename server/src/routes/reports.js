@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { chunkProcess } from '../utils/asyncUtils.js';
 
 const router = Router();
 
@@ -43,7 +44,8 @@ router.get('/inventory-turnover', async (req, res) => {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-        const result = await Promise.all(skus.map(async (sku) => {
+        // Batch SKU processing to prevent connection pool exhaustion
+        const result = await chunkProcess(skus, async (sku) => {
             const balance = await req.prisma.inventoryTransaction.groupBy({ by: ['txnType'], where: { skuId: sku.id }, _sum: { qty: true } });
             let inward = 0, outward = 0;
             balance.forEach((b) => { if (b.txnType === 'inward') inward = b._sum.qty || 0; else outward = b._sum.qty || 0; });
@@ -61,7 +63,7 @@ router.get('/inventory-turnover', async (req, res) => {
                 daysOnHand: daysOnHand ? Math.floor(daysOnHand) : 'N/A',
                 status: daysOnHand > 90 ? 'slow_mover' : daysOnHand > 60 ? 'moderate' : 'fast_mover',
             };
-        }));
+        }, 5);
 
         res.json(result.sort((a, b) => (b.daysOnHand === 'N/A' ? -1 : a.daysOnHand === 'N/A' ? 1 : b.daysOnHand - a.daysOnHand)));
     } catch (error) {

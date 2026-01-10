@@ -9,6 +9,7 @@ interface UseGridStateOptions {
     gridId: string;
     allColumnIds: string[];
     defaultPageSize?: number;
+    defaultHiddenColumns?: string[]; // Columns hidden by default when no localStorage state exists
 }
 
 interface UseGridStateReturn {
@@ -27,12 +28,18 @@ export function useGridState({
     gridId,
     allColumnIds,
     defaultPageSize = 100,
+    defaultHiddenColumns = [],
 }: UseGridStateOptions): UseGridStateReturn {
     // Keys for localStorage
     const visibilityKey = `${gridId}VisibleColumns`;
     const orderKey = `${gridId}ColumnOrder`;
     const widthsKey = `${gridId}ColumnWidths`;
     const pageSizeKey = `${gridId}PageSize`;
+
+    // Compute default visible columns (all except defaultHiddenColumns)
+    const defaultVisibleColumns = new Set(
+        allColumnIds.filter(id => !defaultHiddenColumns.includes(id))
+    );
 
     // Column visibility state
     const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
@@ -41,10 +48,10 @@ export function useGridState({
             try {
                 return new Set(JSON.parse(saved));
             } catch {
-                return new Set(allColumnIds);
+                return defaultVisibleColumns;
             }
         }
-        return new Set(allColumnIds);
+        return defaultVisibleColumns;
     });
 
     // Column order state
@@ -124,10 +131,10 @@ export function useGridState({
     }, []);
 
     const handleResetAll = useCallback(() => {
-        setVisibleColumns(new Set(allColumnIds));
+        setVisibleColumns(defaultVisibleColumns);
         setColumnOrder([...allColumnIds]);
         setColumnWidths({});
-    }, [allColumnIds]);
+    }, [allColumnIds, defaultVisibleColumns]);
 
     const handleColumnMoved = useCallback((newOrder: string[]) => {
         if (newOrder.length > 0) {
