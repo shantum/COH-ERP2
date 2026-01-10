@@ -326,9 +326,10 @@ model Customer {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  // Return/exchange stats
+  // Return/exchange/RTO stats
   returnCount   Int @default(0)
   exchangeCount Int @default(0)
+  rtoCount      Int @default(0)
 
   orders         Order[]
   returnRequests ReturnRequest[]
@@ -371,6 +372,11 @@ model Order {
   deliveredAt     DateTime?
   rtoInitiatedAt  DateTime?  // When RTO was initiated (failed delivery)
   rtoReceivedAt   DateTime?  // When RTO package was received back
+
+  // Terminal status tracking (source of truth for archive eligibility)
+  terminalStatus  String?    // delivered, rto_received, cancelled
+  terminalAt      DateTime?  // When order reached terminal status
+
   totalAmount     Float
 
   // iThink Logistics tracking fields
@@ -422,6 +428,11 @@ model Order {
   @@index([customerId, orderDate])  // Compound: customer order history
   @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)
   @@index([status, isArchived, orderDate]) // Compound: open orders with date sort
+  @@index([terminalStatus])         // Terminal status filtering
+  @@index([terminalAt])             // Terminal date filtering for archive
+  @@index([terminalStatus, terminalAt]) // Compound: archive queue queries
+  @@index([shippedAt])              // Shipped orders sorting
+  @@index([status, shippedAt])      // Compound: shipped view filtering
 }
 
 model OrderLine {
