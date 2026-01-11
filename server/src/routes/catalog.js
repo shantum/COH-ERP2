@@ -21,19 +21,45 @@ const getSizeIndex = (size) => {
  * GET /sku-inventory
  * Returns flat array of all SKUs with product hierarchy, inventory, and costing data
  *
- * Supports filtering:
- * - gender, category, productId: Filter products
- * - status: 'below_target' | 'ok' (based on calculated balance vs targetStockQty)
- * - search: SKU code, product name, or color name (case-insensitive)
- * - limit, offset: Pagination
+ * FILTERING:
+ * - gender, category, productId: Filters on product hierarchy
+ * - status: 'below_target' | 'ok' (balance vs targetStockQty)
+ * - search: Matches orderNumber, customerName, awbNumber, email, phone (case-insensitive)
+ * - limit, offset: Pagination (default: 10000, 0)
  *
- * Costing cascade (null at any level = fallback to next):
- * - trimsCost: SKU → Variation → Product → null
- * - liningCost: SKU → Variation → Product → null (only if hasLining=true)
- * - packagingCost: SKU → Variation → Product → CostConfig.defaultPackagingCost
- * - fabricCostPerUnit: Fabric.costPerUnit → FabricType.defaultCostPerUnit → 0
+ * COSTING CASCADE (null at any level = fallback to next):
+ *   trimsCost: SKU → Variation → Product → null
+ *   liningCost: SKU → Variation → Product → null (only if hasLining=true)
+ *   packagingCost: SKU → Variation → Product → CostConfig.defaultPackagingCost (ALWAYS has value)
+ *   laborMinutes: SKU → Variation → Product.baseProductionTimeMins → 60 (ALWAYS has value)
+ *   fabricCost: SKU.fabricConsumption * (Fabric.costPerUnit ?? FabricType.defaultCostPerUnit)
  *
- * Returns raw cascade values for editing (skuTrimsCost, variationTrimsCost, etc.)
+ * RESPONSE INCLUDES:
+ * - Effective costs (best from hierarchy: trimsCost, liningCost, packagingCost, laborMinutes)
+ * - Raw cascade values (all levels: skuTrimsCost, variationTrimsCost, productTrimsCost, globalPackagingCost)
+ * - Computed costs (fabricCost, laborCost, totalCost)
+ * - GST calculation (catalog-level only, MRP inclusive)
+ * - Full product hierarchy (productId, productName, variationId, colorName, fabricName)
+ * - Inventory balances (currentBalance, reservedBalance, availableBalance)
+ * - Shopify sync status
+ *
+ * @param {Object} req - Express request
+ * @param {string} [req.query.gender] - Filter by gender (M/W/U/Kids)
+ * @param {string} [req.query.category] - Filter by category
+ * @param {string} [req.query.productId] - Filter by specific product
+ * @param {string} [req.query.status] - 'below_target' | 'ok'
+ * @param {string} [req.query.search] - SKU code, product name, or color name
+ * @param {number} [req.query.limit=10000] - Records per page
+ * @param {number} [req.query.offset=0] - Records to skip
+ *
+ * @returns {Object} Response
+ * @returns {Array} response.items - SKU records with hierarchy, inventory, and costs
+ * @returns {Object} response.pagination - { total, limit, offset, hasMore }
+ *
+ * @example
+ * GET /catalog/sku-inventory?status=below_target&limit=100
+ * GET /catalog/sku-inventory?gender=M&search=shirt&offset=100
+ * GET /catalog/sku-inventory?productId=abc123&status=ok
  */
 router.get('/sku-inventory', authenticateToken, async (req, res) => {
     try {
@@ -314,7 +340,28 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
 
 /**
  * GET /filters
- * Returns filter options for the catalog (genders, categories, products, fabric types, fabrics)
+ * Returns filter options for catalog page UI (genders, categories, products, fabric types, fabrics)
+ *
+ * Used to populate dropdowns in filter bar. Data sourced from active products only.
+ * Helps users narrow down SKU inventory across multiple dimensions.
+ *
+ * @returns {Object} Response
+ * @returns {Array<string>} response.genders - Unique genders (M, W, U, Kids)
+ * @returns {Array<string>} response.categories - Unique categories
+ * @returns {Array} response.products - Product objects with { id, name, gender, category }
+ * @returns {Array} response.fabricTypes - Fabric types with { id, name }
+ * @returns {Array} response.fabrics - Fabrics with { id, name, colorName, fabricTypeId, displayName }
+ *
+ * @example
+ * GET /catalog/filters
+ * // Response:
+ * {
+ *   genders: ['M','W','U','Kids'],
+ *   categories: ['Shirts','Pants','Jackets'],
+ *   products: [{ id: 'uuid', name: 'Oxford Shirt', gender: 'M', category: 'Shirts' }, ...],
+ *   fabricTypes: [{ id: 'uuid', name: 'Linen 60 Lea' }, ...],
+ *   fabrics: [{ id: 'uuid', name: 'Linen 60 Lea', colorName: 'Blue', fabricTypeId: 'uuid', displayName: 'Linen 60 Lea' }, ...]
+ * }
  */
 router.get('/filters', authenticateToken, async (req, res) => {
     try {

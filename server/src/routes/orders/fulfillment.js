@@ -1,6 +1,29 @@
 /**
  * Fulfillment Router
  * Order line status updates and shipping operations
+ *
+ * ORDER LINE STATUS FLOW:
+ * pending → allocated → picked → packed → [mark-shipped*] → shipped
+ *   ↓ (allocate)     ↓              ↓
+ * [creates reserve]  [unpick]     [unpack, clear AWB]
+ *   ↓ (unallocate)
+ * [releases reserve]
+ *
+ * * mark-shipped: Visual-only status (part of spreadsheet shipping workflow)
+ *   Converted to shipped via process-marked-shipped batch endpoint
+ *
+ * INVENTORY MECHANICS:
+ * - Allocate: Creates RESERVED transaction (holds stock, not deducted from balance)
+ * - Unallocate: Deletes RESERVED transaction
+ * - Ship: Releases RESERVED, creates OUTWARD (deducts from balance)
+ * - Unship: Reverses OUTWARD, recreates RESERVED
+ *
+ * RACE CONDITION PREVENTION:
+ * - Pre-checks before transaction (status, stock, AWB)
+ * - Re-checks inside transaction before updates
+ * - ConflictError if concurrent requests detected
+ *
+ * @module routes/orders/fulfillment
  */
 
 import { Router } from 'express';
@@ -31,7 +54,27 @@ const router = Router();
 // ORDER LINE STATUS UPDATES
 // ============================================
 
-// Allocate order line (reserve inventory)
+/**
+ * POST /lines/:lineId/allocate
+ * Reserve inventory for an order line (pending → allocated)
+ *
+ * WHAT HAPPENS:
+ * - Creates RESERVED transaction (holds stock, available = balance - reserved)
+ * - Updates lineStatus to 'allocated'
+ * - Sets allocatedAt timestamp
+ *
+ * VALIDATION:
+ * - Line must be in 'pending' status
+ * - Available stock must >= qty requested
+ * - Re-checks inside transaction to prevent race conditions
+ *
+ * @param {string} req.params.lineId - Order line ID
+ * @returns {Object} Updated orderLine record
+ *
+ * @example
+ * POST /fulfillment/lines/abc123/allocate
+ * // Returns: { id, lineStatus: 'allocated', allocatedAt: '2025-01-11T...' }
+ */
 router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('orders:allocate'), asyncHandler(async (req, res) => {
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
@@ -89,7 +132,25 @@ router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('ord
     res.json(updated);
 }));
 
-// Unallocate order line (release reserved inventory)
+/**
+ * POST /lines/:lineId/unallocate
+ * Release reserved inventory for an order line (allocated → pending)
+ *
+ * WHAT HAPPENS:
+ * - Deletes RESERVED transaction (releases hold, adds back to available)
+ * - Updates lineStatus to 'pending'
+ * - Clears allocatedAt timestamp
+ *
+ * VALIDATION:
+ * - Line must be in 'allocated' status
+ *
+ * @param {string} req.params.lineId - Order line ID
+ * @returns {Object} Updated orderLine record
+ *
+ * @example
+ * POST /fulfillment/lines/abc123/unallocate
+ * // Returns: { id, lineStatus: 'pending', allocatedAt: null }
+ */
 router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (req, res) => {
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
@@ -122,7 +183,25 @@ router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (
     res.json(updated);
 }));
 
-// Pick order line
+/**
+ * POST /lines/:lineId/pick
+ * Mark order line as picked (allocated → picked)
+ *
+ * WHAT HAPPENS:
+ * - Updates lineStatus to 'picked'
+ * - Sets pickedAt timestamp
+ * - No inventory changes (just status tracking)
+ *
+ * VALIDATION:
+ * - Line must be in 'allocated' status
+ *
+ * @param {string} req.params.lineId - Order line ID
+ * @returns {Object} Updated orderLine record
+ *
+ * @example
+ * POST /fulfillment/lines/abc123/pick
+ * // Returns: { id, lineStatus: 'picked', pickedAt: '2025-01-11T...' }
+ */
 router.post('/lines/:lineId/pick', authenticateToken, asyncHandler(async (req, res) => {
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
@@ -172,7 +251,25 @@ router.post('/lines/:lineId/unpick', authenticateToken, asyncHandler(async (req,
     res.json(updated);
 }));
 
-// Pack order line
+/**
+ * POST /lines/:lineId/pack
+ * Mark order line as packed (picked → packed)
+ *
+ * WHAT HAPPENS:
+ * - Updates lineStatus to 'packed'
+ * - Sets packedAt timestamp
+ * - No inventory changes (just status tracking)
+ *
+ * VALIDATION:
+ * - Line must be in 'picked' status
+ *
+ * @param {string} req.params.lineId - Order line ID
+ * @returns {Object} Updated orderLine record
+ *
+ * @example
+ * POST /fulfillment/lines/abc123/pack
+ * // Returns: { id, lineStatus: 'packed', packedAt: '2025-01-11T...' }
+ */
 router.post('/lines/:lineId/pack', authenticateToken, asyncHandler(async (req, res) => {
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
@@ -363,6 +460,31 @@ router.post('/lines/bulk-update', authenticateToken, asyncHandler(async (req, re
 // SHIP ORDER
 // ============================================
 
+/**
+ * POST /:id/ship
+ * Ship entire order (all lines packed → shipped)
+ *
+ * INVENTORY OPERATIONS (in transaction):
+ * 1. Release RESERVED transactions for all lines
+ * 2. Create OUTWARD (SALE) transactions for all lines
+ * 3. Update order status to 'shipped'
+ * 4. Update all lines to 'shipped' with tracking info
+ *
+ * VALIDATIONS:
+ * - All non-cancelled lines must be 'packed'
+ * - No line can have negative balance (data integrity check)
+ * - AWB uniqueness enforced (no duplicate AWBs across orders)
+ * - Race condition protection via transaction re-check
+ *
+ * @param {string} req.params.id - Order ID
+ * @param {string} req.body.awbNumber - AWB/tracking number (required)
+ * @param {string} req.body.courier - Courier name (required)
+ * @returns {Object} Updated order with orderLines
+ *
+ * @example
+ * POST /fulfillment/123/ship
+ * Body: { awbNumber: "DL12345", courier: "Delhivery" }
+ */
 router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), validate(ShipOrderSchema), asyncHandler(async (req, res) => {
     const { awbNumber, courier } = req.validatedBody;
 

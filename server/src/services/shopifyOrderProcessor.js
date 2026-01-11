@@ -1,13 +1,28 @@
 /**
  * Shopify Order Processor - Single source of truth for order processing
  *
- * This module consolidates order processing logic that was previously
- * duplicated in webhooks.js, shopify.js, and syncWorker.js
+ * CACHE-FIRST PATTERN (critical for reliability):
+ * 1. Always cache raw Shopify data FIRST via cacheShopifyOrder()
+ * 2. Then process to ERP via processShopifyOrderToERP()
+ * 3. If processing fails, order is still cached for retry
+ * 4. Webhook/Sync can re-process from cache later without re-fetching Shopify
  *
- * Key features:
- * - Cache-first approach: always caches raw Shopify data before processing
- * - Idempotent processing: can safely re-process cached orders
- * - Race condition protection: uses in-memory lock for single-instance
+ * PAYMENT METHOD DETECTION (priority order):
+ * a) Check gateway names: shopflo/razorpay = Prepaid, cod/cash/manual = COD
+ * b) Preserve existing COD status: Once COD, always COD even after payment
+ * c) Financial status fallback: pending + no prepaid gateway = likely COD
+ * d) Final fallback: Prepaid
+ *
+ * KEY BEHAVIORS:
+ * - Idempotent: Can safely re-process same order multiple times
+ * - Race condition safe: Uses withOrderLock to prevent concurrent processing
+ * - Fulfillment mapping: Maps Shopify line-level fulfillments to OrderLines via shopifyLineId
+ * - Auto-ship support: Respects auto_ship_fulfilled system setting
+ *
+ * @module services/shopifyOrderProcessor
+ * @requires ./shopify
+ * @requires ../utils/customerUtils
+ * @requires ../utils/orderLock
  */
 
 import shopifyClient from './shopify.js';
@@ -16,12 +31,34 @@ import { withOrderLock } from '../utils/orderLock.js';
 
 /**
  * Cache raw Shopify order data to ShopifyOrderCache table
- * This should be called FIRST before processing to ERP
  *
- * @param {PrismaClient} prisma
- * @param {string} shopifyOrderId
- * @param {object} shopifyOrder - Raw Shopify order object
- * @param {string} webhookTopic - e.g., 'orders/create', 'orders/updated'
+ * IMPORTANT: Called FIRST before processShopifyOrderToERP. Handles:
+ * - Extracting payment method via CACHE-FIRST PATTERN (see module docs)
+ * - Preserving COD status: Once COD, always COD even after payment
+ * - Extracting fulfillment/tracking info from fulfillments array
+ * - Extracting shipping address fields (city, state, country)
+ *
+ * PAYMENT METHOD DETECTION (priority order):
+ * 1. Check payment_gateway_names: shopflo/razorpay = Prepaid, cod/cash/manual = COD
+ * 2. If isCodGateway OR existing cache is COD → preserve COD
+ * 3. If isPrepaidGateway → mark Prepaid
+ * 4. If financial_status='pending' + no prepaid gateway → assume COD (common for new orders)
+ * 5. Fallback: Prepaid
+ *
+ * KEY: Once an order is marked COD, it STAYS COD even after payment is received.
+ * This prevents confusion between payment status and fulfillment method.
+ *
+ * @param {PrismaClient} prisma - Prisma client
+ * @param {string} shopifyOrderId - Shopify order ID (will be stringified)
+ * @param {object} shopifyOrder - Raw Shopify order object from API
+ * @param {string} [webhookTopic='api_sync'] - Source: 'orders/create', 'orders/updated', 'api_sync'
+ *
+ * @returns {Promise<void>}
+ *
+ * @example
+ * const shopifyOrder = await shopify.rest.Order.find({ ...});
+ * await cacheShopifyOrder(prisma, shopifyOrder.id, shopifyOrder, 'orders/create');
+ * // Detects and caches: paymentMethod, trackingNumber, shippingAddress, etc.
  */
 export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, webhookTopic = 'api_sync') {
     const orderId = String(shopifyOrderId);
@@ -231,13 +268,39 @@ export async function syncFulfillmentsToOrderLines(prisma, orderId, shopifyOrder
 
 /**
  * Process a Shopify order to the ERP Order table
- * This is the SINGLE source of truth for order processing logic
  *
- * @param {PrismaClient} prisma
+ * SINGLE SOURCE OF TRUTH for order processing logic. Handles:
+ * - Create new orders with matching SKUs
+ * - Update existing orders (by shopifyOrderId or orderNumber)
+ * - Auto-ship behavior: Respects auto_ship_fulfilled system setting
+ * - Payment method via CACHE-FIRST PATTERN (see module docs)
+ * - Line-level fulfillment sync (partial shipment support)
+ *
+ * STATUS TRANSITIONS:
+ * - ERP-managed statuses (shipped, delivered) are preserved over Shopify
+ * - Auto-ship enabled: open + fulfilled from Shopify → shipped
+ * - Auto-ship disabled: Shopify fulfillment ignored, strict ERP mode
+ *
+ * @param {PrismaClient} prisma - Prisma client
  * @param {object} shopifyOrder - Raw Shopify order object
- * @param {object} options - Processing options
- * @param {boolean} options.skipNoSku - If true, skip orders with no matching SKUs (default: false for webhooks, true for bulk sync)
- * @returns {object} { action: 'created'|'updated'|'skipped'|'cancelled'|'fulfilled', orderId?, linesCreated?, error? }
+ * @param {object} [options={}] - Processing options
+ * @param {boolean} [options.skipNoSku=false] - Skip orders with no matching SKUs (false for webhooks, true for bulk sync)
+ *
+ * @returns {Promise<object>} Result object
+ * @returns {string} result.action - 'created'|'updated'|'skipped'|'cancelled'|'fulfilled'|'cache_only'
+ * @returns {string} [result.orderId] - Created/updated order ID
+ * @returns {number} [result.linesCreated] - Count of lines created
+ * @returns {number} [result.totalLineItems] - Total Shopify line items in order
+ * @returns {object} [result.fulfillmentSync] - Line fulfillment sync results
+ * @returns {string} [result.reason] - Reason for skip if action='skipped'
+ * @returns {string} [result.error] - Error message if action='cache_only'
+ *
+ * @example
+ * // Webhook: fail if no SKUs (order still cached for retry)
+ * const result = await processShopifyOrderToERP(prisma, shopifyOrder);
+ *
+ * // Bulk sync: skip orders with no SKUs
+ * const result = await processShopifyOrderToERP(prisma, shopifyOrder, { skipNoSku: true });
  */
 export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {}) {
     const { skipNoSku = false } = options;
@@ -512,16 +575,36 @@ export async function processFromCache(prisma, cacheEntry, options = {}) {
 }
 
 /**
- * Cache and process a Shopify order (convenience function)
- * Used by webhooks and sync workers
+ * Cache and process a Shopify order (convenience function for webhooks and sync)
  *
- * Uses order lock to prevent race conditions when the same order is processed
- * simultaneously by webhook and sync job.
+ * RECOMMENDED ENTRY POINT for webhooks and background jobs. Implements:
+ * - Order locking: Prevents race conditions when webhook + sync process same order
+ * - Cache-first pattern: Caches before processing
+ * - Error isolation: Processing errors cached but don't lose order data
+ * - Retry-safe: Failed orders can be re-processed via sync
  *
- * @param {PrismaClient} prisma
- * @param {object} shopifyOrder
- * @param {string} webhookTopic
- * @param {object} options
+ * FLOW:
+ * 1. Acquire lock (skip if order already processing)
+ * 2. Cache raw Shopify data
+ * 3. Process to ERP (failures don't lose cached data)
+ * 4. Mark as processed or failed
+ *
+ * @param {PrismaClient} prisma - Prisma client
+ * @param {object} shopifyOrder - Raw Shopify order object
+ * @param {string} [webhookTopic='api_sync'] - Source: 'orders/create', 'orders/updated', 'api_sync'
+ * @param {object} [options={}] - Options passed to processShopifyOrderToERP
+ *
+ * @returns {Promise<object>} Result object
+ * @returns {string} result.action - 'created'|'updated'|'skipped'|'cache_only'|'fulfillment_synced'|'concurrent_processing'
+ * @returns {string} [result.orderId] - Order ID if created/updated
+ * @returns {boolean} [result.cached] - True if cached even though processing failed
+ *
+ * @example
+ * // In webhook
+ * const result = await cacheAndProcessOrder(prisma, shopifyOrder, 'orders/create');
+ *
+ * // In background sync
+ * const result = await cacheAndProcessOrder(prisma, shopifyOrder, 'api_sync', { skipNoSku: true });
  */
 export async function cacheAndProcessOrder(prisma, shopifyOrder, webhookTopic = 'api_sync', options = {}) {
     const shopifyOrderId = String(shopifyOrder.id);

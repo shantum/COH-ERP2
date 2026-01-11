@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 10, 2026** (Product costing system, catalog domain)
+> All backend and frontend domains consolidated. **Last updated: January 11, 2026** (Consolidated ORDER_COLUMNS.md, added Order column sources)
 
 ---
 
@@ -77,6 +77,18 @@ pending → allocated → picked → packed → [ship order] → shipped
 - Schema: `OrderLine.shippingAddress` (nullable JSON string)
 - Fallback: Uses `Order.shippingAddress` when null
 - Use cases: Multi-drop shipments, marketplace orders (Nykaa/Ajio/Myntra)
+
+### Order Column Data Sources
+
+| Category | Key Fields | Source |
+|----------|-----------|--------|
+| Customer | orderNumber, customerName, email, phone | Shopify Sync |
+| Financial | totalAmount, codAmount, codRemittedAt | Shopify/Remittance |
+| Shipping | awbNumber, courier, shippedAt, deliveredAt | Shopify/iThink |
+| Tracking | trackingStatus, lastScanAt, isRto, rtoInitiatedAt | iThink API |
+| Computed | orderAge, deliveryDays, daysInRto, fulfillmentStage | API Enrichment |
+
+**Column visibility**: Users customize via `ColumnVisibilityDropdown`, persisted in localStorage.
 
 ---
 
@@ -298,6 +310,137 @@ Balance = SUM(inward) - SUM(outward)
 
 ### Frontend
 - `Fabrics.tsx` - Flat AG-Grid table with filters
+
+---
+
+## API Examples (Common Curl Patterns)
+
+Quick reference for key API endpoints with real request/response examples. All examples require authentication token.
+
+### Authentication (Setup)
+```bash
+# Store token once, reuse across requests
+export TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@coh.com","password":"XOFiya@34"}' | jq -r '.token')
+```
+
+### Orders Endpoint
+```bash
+# Get open orders (FIFO by date, first 10 records)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/orders?view=open&limit=10' | jq '.orders[0] | {orderNumber, customerName, status, totalAmount}'
+
+# Get shipped orders (last 7 days)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/orders?view=shipped&days=7&limit=50' | jq '.orders | length'
+
+# Search orders by AWB number
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/orders?view=shipped&search=DL12345' | jq '.orders[]'
+
+# Get RTO orders
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/orders?view=rto&limit=20' | jq '.orders[] | {orderNumber, trackingStatus, rtoInitiatedAt}'
+```
+
+### Catalog Endpoint
+```bash
+# Get SKU inventory for catalog (all size variants with costing)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/catalog/sku-inventory?limit=100&offset=0' | jq '.items[0] | {
+    skuCode, productName, colorName, size,
+    currentBalance, availableBalance, targetStockQty,
+    trimsCost, liningCost, packagingCost, laborMinutes, fabricCost, totalCost, mrp,
+    gstRate, exGstPrice, costMultiple
+  }'
+# Response includes full cascade: SKU → Variation → Product → Global defaults
+# trimsCost (null = no override), liningCost (null if !hasLining), packagingCost (ALWAYS has value)
+
+# Filter by gender and status (below_target = availableBalance < targetStockQty)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/catalog/sku-inventory?gender=M&status=below_target&limit=50' | jq '.items[] | {
+    skuCode, productName, gender, category,
+    currentBalance, availableBalance, status,
+    totalCost, costMultiple
+  }'
+
+# Search by product name or color
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/catalog/sku-inventory?search=shirt&limit=100' | jq '.items | map({
+    skuCode, productName, colorName, category,
+    availableBalance, status, totalCost
+  })'
+
+# Get filter options for dropdowns (genders, categories, products, fabricTypes, fabrics)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/catalog/filters' | jq '{
+    genders,
+    categories: .categories[0:3],
+    productCount: (.products | length),
+    fabricTypes: .fabricTypes[0:5]
+  }'
+# Response: { genders: ["M","W","U","Kids"], categories: ["Shirts","Pants",...], productCount: 42, fabricTypes: [...] }
+```
+
+### Inventory Endpoint
+```bash
+# Get all SKU balances (for dashboard)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/inventory/balance?limit=500' | jq '.balances[] | {skuCode, currentBalance, reservedBalance, availableBalance}'
+
+# Create inward transaction (e.g., production received)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "skuId": "sku-uuid",
+    "qty": 50,
+    "reason": "production",
+    "sourceOrderId": "batch-123"
+  }' \
+  'http://localhost:3001/api/inventory/inward' | jq '.transaction | {id, qty, txnType, reason, createdAt}'
+
+# Create RTO inward (return with condition)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "skuId": "sku-uuid",
+    "qty": 1,
+    "condition": "good",
+    "sourceOrderLineId": "line-uuid"
+  }' \
+  'http://localhost:3001/api/inventory/rto-inward-line' | jq '.result | {created, writeOffCount}'
+```
+
+### Fulfillment Endpoint
+```bash
+# Allocate order line (reserve inventory)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/fulfillment/lines/line-uuid/allocate' | jq '{id, lineStatus, allocatedAt}'
+# Response: { id: "uuid", lineStatus: "allocated", allocatedAt: "2025-01-11T10:30:00Z" }
+
+# Pick order line
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/fulfillment/lines/line-uuid/pick' | jq '{id, lineStatus, pickedAt}'
+# Response: { id: "uuid", lineStatus: "picked", pickedAt: "2025-01-11T10:35:00Z" }
+
+# Pack order line
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/fulfillment/lines/line-uuid/pack' | jq '{id, lineStatus, packedAt}'
+# Response: { id: "uuid", lineStatus: "packed", packedAt: "2025-01-11T10:40:00Z" }
+
+# Ship entire order
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "awbNumber": "DL123456789",
+    "courier": "Delhivery"
+  }' \
+  'http://localhost:3001/api/fulfillment/123/ship' | jq '.order | {status, awbNumber, courier, orderLines[].lineStatus}'
+# Response: { status: "shipped", awbNumber: "DL123456789", courier: "Delhivery", orderLines: [ { lineStatus: "shipped" } ] }
+
+# Unallocate (release reserved inventory)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:3001/api/fulfillment/lines/line-uuid/unallocate' | jq '{id, lineStatus, allocatedAt}'
+# Response: { id: "uuid", lineStatus: "pending", allocatedAt: null }
+```
 
 ---
 
