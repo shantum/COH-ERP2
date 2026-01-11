@@ -545,6 +545,8 @@ model OrderLine {
   @@index([rtoInwardedById])
   @@index([customizedById])
   @@index([awbNumber])            // Fast lookup for tracking webhooks
+  @@index([skuId, rtoCondition])  // Performance: scan-lookup RTO checks
+  @@index([orderId, rtoCondition]) // Performance: RTO count queries
 }
 
 // ============================================
@@ -627,6 +629,7 @@ model ReturnRequestLine {
 
   @@index([requestId])
   @@index([skuId])
+  @@index([skuId, itemCondition]) // Performance: scan-lookup return checks
 }
 
 // NEW: Tracks what the customer wants as replacement (for exchanges)
@@ -823,6 +826,7 @@ model RepackingQueueItem {
   @@index([skuId])
   @@index([status])
   @@index([returnRequestId])
+  @@index([skuId, status]) // Performance: scan-lookup repacking checks
 }
 
 model WriteOffLog {

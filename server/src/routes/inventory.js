@@ -176,6 +176,7 @@ router.get('/scan-lookup', authenticateToken, asyncHandler(async (req, res) => {
         }),
 
         // 3. RTO orders (includes both rto_in_transit and rto_delivered)
+        // Optimized: fetch both total count AND processed lines in one query
         req.prisma.orderLine.findFirst({
             where: {
                 skuId: sku.id,
@@ -193,8 +194,13 @@ router.get('/scan-lookup', authenticateToken, asyncHandler(async (req, res) => {
                         customerName: true,
                         trackingStatus: true,
                         rtoInitiatedAt: true,
-                        // Include order line count for progress (aggregated)
-                        _count: { select: { orderLines: true } }
+                        // Total line count
+                        _count: { select: { orderLines: true } },
+                        // Processed lines (just IDs to count, avoids N+1 query)
+                        orderLines: {
+                            where: { rtoCondition: { not: null } },
+                            select: { id: true }
+                        }
                     }
                 }
             }
@@ -249,11 +255,9 @@ router.get('/scan-lookup', authenticateToken, asyncHandler(async (req, res) => {
     }
 
     if (rtoLine) {
-        // Get processed line count for progress (single query instead of fetching all lines)
-        const processedCount = await req.prisma.orderLine.count({
-            where: { orderId: rtoLine.orderId, rtoCondition: { not: null } }
-        });
+        // Counts are now included in the query (no N+1)
         const totalLines = rtoLine.order._count.orderLines;
+        const processedCount = rtoLine.order.orderLines.length; // Filtered IDs from inline query
 
         matches.push({
             source: 'rto',
@@ -1357,6 +1361,7 @@ router.post('/quick-inward', authenticateToken, requirePermission('inventory:inw
     const sku = skuValidation.sku;
 
     // Use transaction for atomic operation to prevent race conditions
+    // Balance calculation moved inside for performance (single DB roundtrip)
     const result = await req.prisma.$transaction(async (tx) => {
         // Create inward transaction
         const transaction = await tx.inventoryTransaction.create({
@@ -1399,14 +1404,15 @@ router.post('/quick-inward', authenticateToken, requirePermission('inventory:inw
             }
         }
 
-        return { transaction: updatedTransaction, matchedBatch };
-    });
+        // Calculate balance inside transaction (avoids extra DB roundtrip)
+        const balance = await calculateInventoryBalance(tx, sku.id);
 
-    const balance = await calculateInventoryBalance(req.prisma, sku.id);
+        return { transaction: updatedTransaction, matchedBatch, balance };
+    });
 
     res.status(201).json({
         transaction: result.transaction,
-        newBalance: balance.currentBalance,
+        newBalance: result.balance.currentBalance,
         matchedBatch: result.matchedBatch ? {
             id: result.matchedBatch.id,
             batchCode: result.matchedBatch.batchCode,
