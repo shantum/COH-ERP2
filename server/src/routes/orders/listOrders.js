@@ -732,9 +732,36 @@ router.get('/analytics', async (req, res) => {
             }
         };
 
-        // Top products by quantity ordered (with images)
+        // Top products by quantity sold in last 30 days (with images and sales value)
+        const last30DaysOrders = await req.prisma.order.findMany({
+            where: {
+                orderDate: { gte: last30DaysStart },
+            },
+            select: {
+                totalAmount: true,
+                orderLines: {
+                    select: {
+                        qty: true,
+                        price: true,
+                        sku: {
+                            select: {
+                                variation: {
+                                    select: {
+                                        imageUrl: true,
+                                        product: {
+                                            select: { id: true, name: true, imageUrl: true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         const productData = {};
-        openOrders.forEach(order => {
+        last30DaysOrders.forEach(order => {
             order.orderLines.forEach(line => {
                 const product = line.sku?.variation?.product;
                 const productId = product?.id;
@@ -749,10 +776,12 @@ router.get('/analytics', async (req, res) => {
                         imageUrl,
                         qty: 0,
                         orderCount: 0,
+                        salesValue: 0,
                     };
                 }
                 productData[productId].qty += line.qty;
                 productData[productId].orderCount += 1;
+                productData[productId].salesValue += (line.price || 0) * line.qty;
             });
         });
 

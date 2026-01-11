@@ -78,6 +78,25 @@ pending → allocated → picked → packed → [ship order] → shipped
 - Fallback: Uses `Order.shippingAddress` when null
 - Use cases: Multi-drop shipments, marketplace orders (Nykaa/Ajio/Myntra)
 
+### Order Analytics
+
+**Endpoint**: `GET /sales-analytics`
+
+| Parameter | Type | Default | Options |
+|-----------|------|---------|---------|
+| `dimension` | string | `summary` | summary, product, category, gender, color, standardColor, fabricType, fabricColor, channel |
+| `startDate` | ISO string | 30 days ago | Any date |
+| `endDate` | ISO string | today | Any date |
+| `orderStatus` | string | all | all, shipped, delivered |
+
+**Response structure**:
+- `summary`: `{ totalRevenue, totalUnits, totalOrders, avgOrderValue }`
+- `timeSeries`: Array of `{ date, revenue, units, orders }` (daily aggregation)
+- `breakdown`: Array of `{ key, keyId, revenue, units, orders, percentOfTotal }` (by dimension)
+- `period`: `{ startDate, endDate }`
+
+**Gotcha**: Analytics includes archived orders (totalAmount > 0). Excludes zero-value exchange/replacement orders and cancelled orders (unless `orderStatus='all'`).
+
 ### Order Column Data Sources
 
 | Category | Key Fields | Source |

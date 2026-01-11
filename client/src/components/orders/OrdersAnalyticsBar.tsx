@@ -18,7 +18,7 @@ interface AnalyticsData {
         cod: { count: number; amount: number };
         prepaid: { count: number; amount: number };
     };
-    topProducts: Array<{ id: string; name: string; imageUrl: string | null; qty: number; orderCount: number }>;
+    topProducts: Array<{ id: string; name: string; imageUrl: string | null; qty: number; orderCount: number; salesValue: number }>;
     revenue: {
         today: { total: number; orderCount: number };
         yesterday: { total: number; orderCount: number };
@@ -191,18 +191,36 @@ export function OrdersAnalyticsBar() {
                             })()}
                         </div>
 
-                        {/* Top Products */}
+                        {/* Top Products - Image Grid (Last 30 Days) */}
                         <div className="flex items-center gap-2">
-                            <span className="text-[10px] uppercase tracking-wide text-gray-400">Top Sellers</span>
-                            <div className="flex gap-1">
-                                {analytics.topProducts.slice(0, 3).map((product, i) => (
+                            <span className="text-[10px] uppercase tracking-wide text-gray-400">Top 30d</span>
+                            <div className="flex gap-0.5">
+                                {analytics.topProducts.slice(0, 10).map((product) => (
                                     <div
-                                        key={product.name}
-                                        className="px-2 py-1 bg-white border border-gray-200 rounded text-xs text-gray-600"
-                                        title={`${product.name}: ${product.qty} units`}
+                                        key={product.id}
+                                        className="relative group"
                                     >
-                                        <span className="font-medium text-gray-400 mr-1">#{i + 1}</span>
-                                        {product.name.length > 12 ? product.name.substring(0, 12) + '…' : product.name}
+                                        {product.imageUrl ? (
+                                            <img
+                                                src={product.imageUrl}
+                                                alt={product.name}
+                                                className="w-8 h-8 object-cover rounded border border-gray-200 hover:border-blue-400 hover:scale-110 transition-all cursor-pointer"
+                                            />
+                                        ) : (
+                                            <div className="w-8 h-8 rounded border border-gray-200 bg-gray-100 flex items-center justify-center text-[10px] text-gray-400 hover:border-blue-400 transition-colors">
+                                                {product.name.charAt(0)}
+                                            </div>
+                                        )}
+                                        {/* Units badge */}
+                                        <span className="absolute -bottom-1 -right-1 min-w-[16px] h-4 px-0.5 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-medium">
+                                            {product.qty}
+                                        </span>
+                                        {/* Hover tooltip */}
+                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                                            <div className="font-medium">{product.name}</div>
+                                            <div className="text-gray-300">{product.qty} units · {product.orderCount} orders</div>
+                                            <div className="text-emerald-400 font-medium">{formatCurrency(product.salesValue)}</div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>

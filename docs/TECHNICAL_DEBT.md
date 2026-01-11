@@ -76,6 +76,9 @@
 - ✓ Consolidated ORDER_COLUMNS.md into DOMAINS.md
 - ✓ Added 4 new gotchas to CLAUDE.md (asyncHandler, permissions)
 - ✓ Deleted CACHING_STRATEGY.md (exploratory, not needed)
+- ✓ Added Order Analytics section to DOMAINS.md (GET /sales-analytics endpoint)
+- ✓ Added query key pattern gotcha to CLAUDE.md (centralized queryKeys.ts)
+- ✓ Added deprecated schema gotcha to CLAUDE.md (User.role removed, PermissionAuditLog/StockAlert tables removed)
 
 ### Previous Updates (January 10, 2026)
 - ✓ Added Catalog domain to DOMAINS.md

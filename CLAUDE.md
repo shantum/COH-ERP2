@@ -86,6 +86,8 @@ npm run db:push
 22. **Permission token invalidation**: Changing user permissions increments `tokenVersion`, forcing re-login
 23. **Permission wildcards**: `products:*` matches all product permissions; checked via `hasPermission()` utility
 24. **Server-side field filtering**: Cost fields filtered at API level via `filterConfidentialFields()`, not just UI
+25. **Query keys centralized**: Use `queryKeys` from `constants/queryKeys.ts`; `invalidateTab()` handles cache clearing
+26. **Deprecated schema**: `User.role` removed (use `roleId`); `PermissionAuditLog`, `StockAlert` tables removed
 
 ## Environment
 
