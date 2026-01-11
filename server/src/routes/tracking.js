@@ -36,11 +36,25 @@ const router = Router();
 // CONFIGURATION
 // ============================================
 
+/**
+ * Get iThink Logistics configuration (credentials masked)
+ * @route GET /api/tracking/config
+ * @returns {Object} config - { accessToken: '***', secretKey: '***', pickupAddressId, returnAddressId, defaultLogistics }
+ */
 router.get('/config', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
     res.json(ithinkLogistics.getConfig());
 }));
 
+/**
+ * Update iThink Logistics credentials (stored in SystemSetting table)
+ * @route PUT /api/tracking/config
+ * @param {Object} body.accessToken - iThink API access token
+ * @param {Object} body.secretKey - iThink API secret key
+ * @param {string} [body.pickupAddressId] - Default pickup location
+ * @param {string} [body.returnAddressId] - Default return location
+ * @param {string} [body.defaultLogistics] - Preferred courier (e.g., 'Delhivery')
+ */
 router.put('/config', authenticateToken, asyncHandler(async (req, res) => {
     const { accessToken, secretKey, pickupAddressId, returnAddressId, defaultLogistics } = req.body;
 
@@ -65,6 +79,11 @@ router.put('/config', authenticateToken, asyncHandler(async (req, res) => {
     });
 }));
 
+/**
+ * Test iThink API credentials (uses dummy AWB to validate auth)
+ * @route POST /api/tracking/test-connection
+ * @returns {Object} { success: boolean, message: string }
+ */
 router.post('/test-connection', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
 
@@ -96,8 +115,11 @@ router.post('/test-connection', authenticateToken, asyncHandler(async (req, res)
 // ============================================
 
 /**
- * Track a single AWB
- * GET /api/tracking/awb/:awbNumber
+ * Track single AWB number with full details
+ * @route GET /api/tracking/awb/:awbNumber
+ * @param {string} awbNumber - AWB to track
+ * @returns {Object} tracking - { awbNumber, courier, currentStatus, statusCode, expectedDeliveryDate, isRto, lastScan, scanHistory }
+ * @example GET /api/tracking/awb/ABC123456789
  */
 router.get('/awb/:awbNumber', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -124,9 +146,11 @@ router.get('/awb/:awbNumber', authenticateToken, asyncHandler(async (req, res) =
 }));
 
 /**
- * Track multiple AWBs (max 10)
- * POST /api/tracking/batch
- * Body: { awbNumbers: ["AWB1", "AWB2", ...] }
+ * Batch track multiple AWBs (max 10 per request, rate-limited by iThink)
+ * @route POST /api/tracking/batch
+ * @param {string[]} body.awbNumbers - Array of AWB numbers (max 10)
+ * @returns {Object} results - Map of awbNumber → { success, courier, currentStatus, statusCode, isRto, lastScan } | { success: false, error }
+ * @example POST /api/tracking/batch { "awbNumbers": ["AWB1", "AWB2"] }
  */
 router.post('/batch', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -182,9 +206,11 @@ router.post('/batch', authenticateToken, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Track orders by order IDs - looks up AWB from order and fetches tracking
- * POST /api/tracking/orders
- * Body: { orderIds: ["uuid1", "uuid2", ...] }
+ * Track orders by order UUIDs (lookup AWB from DB, then fetch tracking)
+ * @route POST /api/tracking/orders
+ * @param {string[]} body.orderIds - Array of order UUIDs
+ * @returns {Object} { results: { orderId → trackingData } }
+ * @example POST /api/tracking/orders { "orderIds": ["uuid1", "uuid2"] }
  */
 router.post('/orders', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -275,8 +301,10 @@ router.post('/orders', authenticateToken, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Get full tracking history for an AWB
- * GET /api/tracking/history/:awbNumber
+ * Get full scan history timeline for AWB
+ * @route GET /api/tracking/history/:awbNumber
+ * @param {string} awbNumber - AWB to fetch history for
+ * @returns {Object} { awbNumber, courier, currentStatus, statusCode, history: [{ status, location, datetime, remark }] }
  */
 router.get('/history/:awbNumber', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -313,8 +341,9 @@ router.get('/history/:awbNumber', authenticateToken, asyncHandler(async (req, re
 // ============================================
 
 /**
- * Get tracking sync status
- * GET /api/tracking/sync/status
+ * Get background tracking sync status
+ * @route GET /api/tracking/sync/status
+ * @returns {Object} { schedulerActive, isRunning, intervalMinutes, lastSyncAt, lastSyncResult }
  */
 router.get('/sync/status', authenticateToken, asyncHandler(async (req, res) => {
     const status = trackingSync.getStatus();
@@ -322,8 +351,9 @@ router.get('/sync/status', authenticateToken, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Trigger tracking sync manually
- * POST /api/tracking/sync/trigger
+ * Manually trigger background sync (updates all shipped orders)
+ * @route POST /api/tracking/sync/trigger
+ * @returns {Object} { ordersProcessed, updated, errors }
  */
 router.post('/sync/trigger', authenticateToken, asyncHandler(async (req, res) => {
     const result = await trackingSync.triggerSync();
@@ -331,9 +361,12 @@ router.post('/sync/trigger', authenticateToken, asyncHandler(async (req, res) =>
 }));
 
 /**
- * Backfill shipped orders with tracking data (one-time)
- * POST /api/tracking/sync/backfill
- * Query: days=30 (optional), limit=100 (optional, max orders to process)
+ * One-time backfill of tracking data for old shipped orders
+ * @route POST /api/tracking/sync/backfill?days=30&limit=100
+ * @param {number} [query.days=30] - How far back to fetch orders
+ * @param {number} [query.limit=100] - Max orders to process
+ * @returns {Object} { ordersFound, updated, errors, apiCalls }
+ * @description Updates trackingStatus, courierStatusCode, deliveredAt, and detects RTOs. Rate-limited (1s delay between batches).
  */
 router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -469,9 +502,14 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) =
 // ============================================
 
 /**
- * Create a shipment with iThink Logistics and get AWB
- * POST /api/tracking/create-shipment
- * Body: { orderId: "uuid" } or direct order data
+ * Create shipment and generate AWB (books order with iThink)
+ * @route POST /api/tracking/create-shipment
+ * @param {string} body.orderId - Order UUID to create shipment for
+ * @param {string} [body.logistics] - Preferred courier (overrides default)
+ * @returns {Object} { success, awbNumber, logistics, orderId }
+ * @description Fetches order data (customer, lines), validates address, calculates COD amount (active lines only), and calls iThink createOrder API.
+ * @throws {ValidationError} If order missing AWB number already exists or address fields missing
+ * @example POST /api/tracking/create-shipment { "orderId": "uuid", "logistics": "Delhivery" }
  */
 router.post('/create-shipment', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -626,9 +664,12 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req, res)
 }));
 
 /**
- * Cancel a shipment by AWB number
- * POST /api/tracking/cancel-shipment
- * Body: { awbNumber: "AWB123" } or { awbNumbers: ["AWB1", "AWB2"] } or { orderId: "uuid" }
+ * Cancel shipment with iThink (sets trackingStatus='cancelled' if successful)
+ * @route POST /api/tracking/cancel-shipment
+ * @param {string} [body.awbNumber] - Single AWB to cancel
+ * @param {string[]} [body.awbNumbers] - Multiple AWBs to cancel
+ * @param {string} [body.orderId] - Order UUID (looks up AWB from DB)
+ * @returns {Object} { success, message, results: { awb → { success, message } } }
  */
 router.post('/cancel-shipment', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -706,10 +747,16 @@ router.post('/cancel-shipment', authenticateToken, asyncHandler(async (req, res)
 // ============================================
 
 /**
- * Get shipping label PDF for AWB number(s)
- * POST /api/tracking/label
- * Body: { awbNumber: "AWB123" } or { awbNumbers: ["AWB1", "AWB2"] } or { orderId: "uuid" }
- * Optional: pageSize ("A4" or "A6"), displayCodPrepaid, displayShipperMobile, displayShipperAddress
+ * Get shipping label PDF URL(s) from iThink
+ * @route POST /api/tracking/label
+ * @param {string} [body.awbNumber] - Single AWB
+ * @param {string[]} [body.awbNumbers] - Multiple AWBs
+ * @param {string} [body.orderId] - Order UUID (looks up AWB)
+ * @param {string} [body.pageSize='A4'] - 'A4' or 'A6'
+ * @param {boolean} [body.displayCodPrepaid] - Show COD/Prepaid on label
+ * @param {boolean} [body.displayShipperMobile] - Show shipper phone
+ * @param {boolean} [body.displayShipperAddress] - Show return address
+ * @returns {Object} { labelUrl: string }
  */
 router.post('/label', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -780,8 +827,10 @@ router.post('/label', authenticateToken, asyncHandler(async (req, res) => {
 // ============================================
 
 /**
- * Check pincode serviceability
- * GET /api/tracking/pincode/:pincode
+ * Check pincode serviceability via iThink API
+ * @route GET /api/tracking/pincode/:pincode
+ * @param {string} pincode - 6-digit Indian pincode
+ * @returns {Object} { serviceable: boolean, city, state, courierList }
  */
 router.get('/pincode/:pincode', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -808,9 +857,17 @@ router.get('/pincode/:pincode', authenticateToken, asyncHandler(async (req, res)
 }));
 
 /**
- * Get shipping rates from logistics providers
- * POST /api/tracking/rates
- * Body: { fromPincode, toPincode, length?, width?, height?, weight?, paymentMethod?, productMrp? }
+ * Get shipping rate quotes from available couriers
+ * @route POST /api/tracking/rates
+ * @param {string} body.fromPincode - Origin pincode
+ * @param {string} body.toPincode - Destination pincode
+ * @param {number} [body.length] - Package length (cm)
+ * @param {number} [body.width] - Package width (cm)
+ * @param {number} [body.height] - Package height (cm)
+ * @param {number} [body.weight] - Package weight (kg)
+ * @param {string} [body.paymentMethod] - 'COD' or 'Prepaid'
+ * @param {number} [body.productMrp] - Product value for insurance
+ * @returns {Object[]} rates - [{ courier, rate, estimatedDays }]
  */
 router.post('/rates', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();
@@ -858,8 +915,11 @@ router.post('/rates', authenticateToken, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Test order creation with sample data (for testing API connection)
- * POST /api/tracking/test-create
+ * Test shipment creation with dummy data (validates API credentials)
+ * @route POST /api/tracking/test-create
+ * @param {string} [body.logistics] - Test with specific courier
+ * @returns {Object} { success, testOrderNumber, awbNumber, logistics, note }
+ * @description Creates TEST-{timestamp} order to Mumbai. Cancel in iThink dashboard after testing.
  */
 router.post('/test-create', authenticateToken, asyncHandler(async (req, res) => {
     await ithinkLogistics.loadFromDatabase();

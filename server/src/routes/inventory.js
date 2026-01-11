@@ -1,3 +1,36 @@
+/**
+ * @fileoverview Inventory Routes - Ledger-based inventory tracking system
+ *
+ * Balance Formulas:
+ * - Balance = SUM(inward) - SUM(outward)
+ * - Available = Balance - SUM(reserved)
+ *
+ * Transaction Types:
+ * - inward: Adds to inventory (production, returns, adjustments)
+ * - outward: Removes from inventory (shipped, damaged, adjustments)
+ * - reserved: Locks inventory for allocated orders (not shipped yet)
+ *
+ * Transaction Reasons (TXN_REASON):
+ * - production: Finished goods from production
+ * - rto_received: Good/unopened items from RTO
+ * - return_receipt: Returns inspection completion
+ * - adjustment: Manual corrections
+ * - order_fulfillment: Shipped orders
+ * - damage: Write-offs
+ *
+ * RTO Condition Logic (Critical):
+ * - 'good' OR 'unopened' → Create inward transaction (adds to inventory)
+ * - 'damaged' OR 'wrong_product' → Create write-off record (NO inventory added)
+ * - Processing updates OrderLine.rtoCondition to prevent duplicate handling
+ *
+ * Key Gotchas:
+ * - /rto-inward-line has idempotency check (prevents duplicate transactions on retry)
+ * - quick-inward auto-matches production batches (links via referenceId)
+ * - Transaction deletion validates dependencies (blocks if order shipped)
+ * - Undo window: 24 hours for inward transactions
+ * - Custom SKUs excluded from /balance by default (includeCustomSkus=true to include)
+ */
+
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -570,8 +603,25 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req,
 
 /**
  * POST /rto-inward-line
- * Process a single RTO order line (mark condition and optionally create inventory inward)
- * Includes idempotency check to prevent duplicate transactions on network retries
+ * Process single RTO order line with condition marking and selective inventory inward.
+ *
+ * Condition Handling:
+ * - 'good' OR 'unopened' → Creates inventory inward transaction
+ * - 'damaged' OR 'wrong_product' → Creates write-off record (no inventory)
+ *
+ * Idempotency:
+ * - Primary: OrderLine.rtoCondition check (prevents reprocessing)
+ * - Secondary: findExistingRtoInward() checks for existing transaction (handles lost responses)
+ *
+ * @param {string} lineId - OrderLine ID to process
+ * @param {string} condition - One of: 'good', 'unopened', 'damaged', 'wrong_product'
+ * @param {string} [notes] - Optional processing notes
+ * @returns {Object} Processing result with inventory balance and order progress
+ *
+ * Side Effects:
+ * - Updates OrderLine.rtoCondition, rtoInwardedAt, rtoInwardedById
+ * - If all lines processed: Sets Order.rtoReceivedAt, terminalStatus='rto_received'
+ * - Creates InventoryTransaction (if good/unopened) OR WriteOffLog (if damaged/wrong)
  */
 router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:inward'), asyncHandler(async (req, res) => {
     const { lineId, condition, notes } = req.body;
@@ -930,9 +980,20 @@ router.delete('/undo-inward/:id', authenticateToken, asyncHandler(async (req, re
 // INVENTORY DASHBOARD
 // ============================================
 
-// Get inventory balance for all SKUs
-// By default excludes custom SKUs from standard inventory view
-// Pass includeCustomSkus=true to include them (e.g., for admin views)
+/**
+ * GET /balance
+ * Retrieve inventory balances for all SKUs with filtering and pagination.
+ *
+ * @param {boolean} [belowTarget] - Filter to SKUs below target stock (applied in memory)
+ * @param {string} [search] - Search SKU code or product name (database-level)
+ * @param {number} [limit=10000] - Max results (default high for complete inventory view)
+ * @param {number} [offset=0] - Pagination offset
+ * @param {boolean} [includeCustomSkus=false] - Include made-to-order custom SKUs
+ * @returns {Object} {items: Array, pagination: Object}
+ *
+ * Default Exclusion: Custom SKUs hidden by default (made-to-order, not stocked)
+ * Performance: Uses calculateAllInventoryBalances() to avoid N+1 queries
+ */
 router.get('/balance', authenticateToken, asyncHandler(async (req, res) => {
     // Default to all SKUs (high limit) since inventory view needs complete picture
     // Use explicit limit param for paginated requests
@@ -1104,8 +1165,21 @@ router.get('/transactions', authenticateToken, asyncHandler(async (req, res) => 
     res.json(transactions);
 }));
 
-// Create inward transaction
-// Fixed: Added audit trail for manual adjustments
+/**
+ * POST /inward
+ * Create inventory inward transaction.
+ *
+ * @param {string} skuId - SKU ID
+ * @param {number} qty - Quantity to add
+ * @param {string} reason - Transaction reason (production, rto_received, adjustment, etc.)
+ * @param {string} [referenceId] - Reference to source record (e.g., ProductionBatch ID)
+ * @param {string} [notes] - Transaction notes
+ * @param {string} [warehouseLocation] - Physical location
+ * @param {string} [adjustmentReason] - Required for 'adjustment' reason (audit trail)
+ * @returns {Object} Created transaction with updated balance
+ *
+ * Audit Trail: For adjustments, notes are auto-enhanced with timestamp and user info
+ */
 router.post('/inward', authenticateToken, requirePermission('inventory:inward'), asyncHandler(async (req, res) => {
     const { skuId, qty, reason, referenceId, notes, warehouseLocation, adjustmentReason } = req.body;
 
@@ -1153,8 +1227,25 @@ router.post('/inward', authenticateToken, requirePermission('inventory:inward'),
     });
 }));
 
-// Create outward transaction
-// Fixed: Added audit trail for manual adjustments
+/**
+ * POST /outward
+ * Create inventory outward transaction with stock validation.
+ *
+ * @param {string} skuId - SKU ID
+ * @param {number} qty - Quantity to remove
+ * @param {string} reason - Transaction reason (order_fulfillment, damage, adjustment, etc.)
+ * @param {string} [referenceId] - Reference to source record
+ * @param {string} [notes] - Transaction notes
+ * @param {string} [warehouseLocation] - Physical location
+ * @param {string} [adjustmentReason] - Required for 'adjustment'/'damage' reasons
+ * @returns {Object} Created transaction with updated balance
+ *
+ * Validation:
+ * - Blocks if balance already negative (data integrity issue)
+ * - Blocks if insufficient available stock (balance - reserved < qty)
+ *
+ * Audit Trail: For adjustments/damage, notes auto-enhanced with timestamp and user
+ */
 router.post('/outward', authenticateToken, requirePermission('inventory:outward'), asyncHandler(async (req, res) => {
     const { skuId, qty, reason, referenceId, notes, warehouseLocation, adjustmentReason } = req.body;
 
@@ -1222,8 +1313,24 @@ router.post('/outward', authenticateToken, requirePermission('inventory:outward'
     });
 }));
 
-// Quick inward (simplified form) - with production batch matching
-// Fixed: Added SKU validation and race condition protection
+/**
+ * POST /quick-inward
+ * Simplified inward for barcode scanning. Auto-matches production batches.
+ *
+ * @param {string} [skuCode] - SKU code (alternative to barcode)
+ * @param {string} [barcode] - Barcode scan (alternative to skuCode)
+ * @param {number} qty - Quantity (must be positive integer)
+ * @param {string} [reason='production'] - Transaction reason
+ * @param {string} [notes] - Transaction notes
+ * @returns {Object} Transaction, new balance, and matched production batch (if any)
+ *
+ * Auto-Matching:
+ * - If reason='production', finds oldest pending/in_progress batch for SKU
+ * - Links transaction via referenceId for undo support
+ * - Updates ProductionBatch.qtyCompleted and status
+ *
+ * Race Condition Protection: Uses $transaction to ensure atomic batch matching
+ */
 router.post('/quick-inward', authenticateToken, requirePermission('inventory:inward'), asyncHandler(async (req, res) => {
     const { skuCode, barcode, qty, reason = 'production', notes } = req.body;
 

@@ -1,6 +1,22 @@
 /**
- * Repacking Queue & Write-Off Routes
- * Handles repacking queue management, processing, and write-offs
+ * @module routes/repacking
+ * @description Repacking queue & write-off management for returned items
+ *
+ * Status Flow:
+ * - pending → inspecting → repacking → ready (adds to inventory) | write_off (logged, no inventory)
+ *
+ * Process Endpoint (/process):
+ * - action='ready': Creates inventory inward txn (reason='return_receipt'), updates status='ready'
+ * - action='write_off': Creates WriteOffLog, increments SKU/Product.writeOffCount, updates status='write_off'
+ * - Both use optimistic locking (re-check status inside transaction to prevent double-processing)
+ *
+ * Write-Off Sources: 'return', 'production', 'inventory_audit', 'damage'
+ * Write-Off Reasons: 'damaged', 'defective', 'expired', 'lost', 'quality_fail', etc.
+ *
+ * Undo Logic: Reverses inventory txn or write-off log, reverts to 'pending'
+ * Delete: Only allowed for pending/inspecting/repacking (not processed items)
+ *
+ * @see routes/inventory.js - RTO inward per-line endpoint uses similar condition-based logic
  */
 
 import { Router } from 'express';
@@ -15,7 +31,13 @@ const router = Router();
 // REPACKING QUEUE
 // ============================================
 
-// Get repacking queue items
+/**
+ * Get repacking queue items
+ * @route GET /api/repacking/queue?status=pending&limit=100
+ * @param {string} [query.status] - Filter by status (default: pending/inspecting/repacking)
+ * @param {number} [query.limit=100] - Max items
+ * @returns {Object[]} items - [{ id, skuId, qty, condition, status, returnRequestId, inspectionNotes, createdAt, sku, returnRequest, processedBy, productName, colorName, size, skuCode, imageUrl }]
+ */
 router.get('/queue', authenticateToken, asyncHandler(async (req, res) => {
     const { status, limit = 100 } = req.query;
 
@@ -93,7 +115,19 @@ router.get('/queue/stats', authenticateToken, asyncHandler(async (req, res) => {
     res.json(result);
 }));
 
-// Add item to repacking queue (from return inward)
+/**
+ * Add item to repacking queue (typically from return inward flow)
+ * @route POST /api/repacking/queue
+ * @param {string} [body.skuId] - SKU UUID
+ * @param {string} [body.skuCode] - SKU code (alternative to skuId)
+ * @param {string} [body.barcode] - Barcode (alternative to skuId/skuCode)
+ * @param {number} [body.qty=1] - Quantity
+ * @param {string} [body.condition] - 'used', 'damaged', 'defective', etc.
+ * @param {string} [body.returnRequestId] - Associated return UUID
+ * @param {string} [body.returnLineId] - Associated return line UUID
+ * @param {string} [body.inspectionNotes] - Notes from inspection
+ * @returns {Object} item - Created queue item
+ */
 router.post('/queue', authenticateToken, asyncHandler(async (req, res) => {
     const { skuId, skuCode, barcode, qty = 1, condition, returnRequestId, returnLineId, inspectionNotes } = req.body;
 
@@ -213,7 +247,17 @@ router.get('/queue/history', authenticateToken, asyncHandler(async (req, res) =>
     res.json(enrichedItems);
 }));
 
-// Process repacking item (move to stock or write-off)
+/**
+ * Process repacking item: add to inventory or write-off
+ * @route POST /api/repacking/process
+ * @param {string} body.itemId - RepackingQueueItem UUID
+ * @param {string} body.action - 'ready' (add to stock) or 'write_off'
+ * @param {string} [body.writeOffReason] - Required if action='write_off' ('damaged', 'defective', 'lost', etc.)
+ * @param {string} [body.qcComments] - QC notes
+ * @param {string} [body.notes] - Additional notes
+ * @returns {Object} { success, action, message, newBalance? }
+ * @description Uses optimistic locking to prevent double-processing. Creates inventory txn or write-off log.
+ */
 router.post('/process', authenticateToken, asyncHandler(async (req, res) => {
     const { itemId, action, writeOffReason, qcComments, notes } = req.body;
     // action: 'ready' (add to stock) or 'write_off'
@@ -376,7 +420,13 @@ router.post('/process', authenticateToken, asyncHandler(async (req, res) => {
     }
 }));
 
-// Undo a processed QC item (revert to pending)
+/**
+ * Undo processed item (revert ready/write_off → pending)
+ * @route POST /api/repacking/queue/:id/undo
+ * @param {string} id - RepackingQueueItem UUID
+ * @returns {Object} { success, message, previousStatus }
+ * @description Deletes inventory txn or write-off log, decrements SKU/Product.writeOffCount if needed.
+ */
 router.post('/queue/:id/undo', authenticateToken, asyncHandler(async (req, res) => {
     const { id } = req.params;
 
@@ -451,7 +501,13 @@ router.post('/queue/:id/undo', authenticateToken, asyncHandler(async (req, res) 
     });
 }));
 
-// Delete repacking queue item (undo receive)
+/**
+ * Delete repacking queue item (only if not processed)
+ * @route DELETE /api/repacking/queue/:id
+ * @param {string} id - RepackingQueueItem UUID
+ * @returns {Object} { success, message }
+ * @description Cannot delete ready/write_off items. If from return, restores return line and ticket status.
+ */
 router.delete('/queue/:id', authenticateToken, asyncHandler(async (req, res) => {
     const { id } = req.params;
 
@@ -518,7 +574,16 @@ router.delete('/queue/:id', authenticateToken, asyncHandler(async (req, res) => 
 // WRITE-OFFS
 // ============================================
 
-// Get write-off history
+/**
+ * Get write-off history
+ * @route GET /api/repacking/write-offs?reason=damaged&sourceType=return&startDate=2024-01-01&endDate=2024-12-31&limit=100
+ * @param {string} [query.reason] - Filter by reason
+ * @param {string} [query.sourceType] - Filter by source ('return', 'production', 'inventory_audit', 'damage')
+ * @param {string} [query.startDate] - Filter by date range (ISO string)
+ * @param {string} [query.endDate] - Filter by date range (ISO string)
+ * @param {number} [query.limit=100] - Max write-offs
+ * @returns {Object[]} writeOffs - [{ id, skuId, qty, reason, sourceType, sourceId, notes, costValue, createdAt, createdBy, sku, productName, colorName, size, skuCode }]
+ */
 router.get('/write-offs', authenticateToken, asyncHandler(async (req, res) => {
     const { reason, sourceType, startDate, endDate, limit = 100 } = req.query;
 
@@ -556,7 +621,13 @@ router.get('/write-offs', authenticateToken, asyncHandler(async (req, res) => {
     res.json(enrichedWriteOffs);
 }));
 
-// Get write-off stats
+/**
+ * Get write-off statistics
+ * @route GET /api/repacking/write-offs/stats?startDate=2024-01-01&endDate=2024-12-31
+ * @param {string} [query.startDate] - Filter by date range (ISO string)
+ * @param {string} [query.endDate] - Filter by date range (ISO string)
+ * @returns {Object} { byReason: [{ reason, count, qty, costValue }], bySource: [{ sourceType, count, qty }], total: { count, qty, costValue } }
+ */
 router.get('/write-offs/stats', authenticateToken, asyncHandler(async (req, res) => {
     const { startDate, endDate } = req.query;
 
@@ -610,7 +681,19 @@ router.get('/write-offs/stats', authenticateToken, asyncHandler(async (req, res)
     });
 }));
 
-// Create direct write-off (not from repacking queue)
+/**
+ * Create direct write-off (bypasses repacking queue)
+ * @route POST /api/repacking/write-offs
+ * @param {string} [body.skuId] - SKU UUID
+ * @param {string} [body.skuCode] - SKU code (alternative to skuId)
+ * @param {number} body.qty - Quantity to write off
+ * @param {string} body.reason - Write-off reason ('damaged', 'defective', 'lost', etc.)
+ * @param {string} [body.sourceType='inventory_audit'] - Source type
+ * @param {string} [body.notes] - Additional notes
+ * @param {number} [body.costValue] - Cost value of write-off
+ * @returns {Object} { success, message }
+ * @description Creates write-off log, increments SKU/Product.writeOffCount, creates inventory outward txn (reason='damage').
+ */
 router.post('/write-offs', authenticateToken, asyncHandler(async (req, res) => {
     const { skuId, skuCode, qty, reason, sourceType = 'inventory_audit', notes, costValue } = req.body;
 

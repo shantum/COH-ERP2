@@ -1,3 +1,27 @@
+/**
+ * @module routes/production
+ * Production batch management and capacity planning.
+ *
+ * Status flow:
+ *   planned → in_progress → completed
+ *   (status auto-updates based on qtyCompleted vs qtyPlanned)
+ *
+ * Key operations:
+ * - Batch completion: Creates inventory inward + fabric outward (cascade: SKU → Product → 1.5m default)
+ * - Custom SKU batches: Auto-allocate to linked order line on completion
+ * - Locked dates: Prevents new batches on locked production dates
+ * - Atomic batch codes: YYYYMMDD-XXX (handles concurrent creation via retry loop)
+ *
+ * Critical gotchas:
+ * - Custom SKU batches auto-allocate on completion (standard batches don't - manual allocation)
+ * - Fabric consumption cascade: SKU.fabricConsumption ?? Product.defaultFabricConsumption ?? 1.5
+ * - Batch codes generated atomically (race condition safe via unique constraint + retry)
+ * - Cannot delete batches with inventory/fabric transactions (use uncomplete first)
+ * - Uncompleting custom SKU batch blocks if order line progressed beyond 'allocated'
+ * - Locked dates stored in SystemSetting table (key: production_locked_dates, JSON array)
+ *
+ * @see getEffectiveFabricConsumption in queryPatterns.js
+ */
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -92,9 +116,17 @@ router.get('/batches', authenticateToken, asyncHandler(async (req, res) => {
  * Generate batch code atomically using database sequence pattern
  * Format: YYYYMMDD-XXX (e.g., 20260107-001)
  *
- * Uses a retry loop with unique constraint to handle race conditions.
- * If concurrent requests try to create batches for the same date,
- * only one will succeed with each code, others will retry with next number.
+ * Race condition safety: Uses retry loop with unique constraint.
+ * If concurrent requests create batches for same date, only one succeeds
+ * per code - others retry with incremented serial (50ms exponential backoff).
+ *
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {Date} targetDate - Date for batch code generation
+ * @returns {Promise<string>} Unique batch code (YYYYMMDD-XXX)
+ *
+ * @example
+ * const code = await generateBatchCode(prisma, new Date('2026-01-07'));
+ * // Returns: "20260107-001" (or higher if others exist)
  */
 const generateBatchCode = async (prisma, targetDate) => {
     const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
@@ -340,10 +372,18 @@ router.delete('/batches/:id', authenticateToken, requirePermission('production:d
 
 /**
  * Get effective fabric consumption for a SKU
- * Standardized priority: SKU.fabricConsumption ?? Product.defaultFabricConsumption ?? 1.5
+ * Cascade priority: SKU.fabricConsumption → Product.defaultFabricConsumption → 1.5 (system default)
  *
- * Note: SKU schema default is 1.5, so we check if it differs from default
- * to determine if it was explicitly set.
+ * GOTCHA: SKU.fabricConsumption defaults to 1.5 in schema, so we check if it differs
+ * from default to detect explicit SKU-level overrides.
+ *
+ * @param {Object} sku - SKU object with fabricConsumption field
+ * @param {Object} product - Product object with defaultFabricConsumption field
+ * @returns {number} Fabric consumption in meters per unit
+ *
+ * @example
+ * const consumption = getEffectiveFabricConsumption(sku, product);
+ * const totalFabric = consumption * qtyCompleted;
  */
 const DEFAULT_FABRIC_CONSUMPTION = 1.5;
 

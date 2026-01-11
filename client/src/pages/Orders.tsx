@@ -41,6 +41,7 @@ import {
     SummaryPanel,
     TrackingModal,
     ProcessShippedModal,
+    OrdersAnalyticsBar,
 } from '../components/orders';
 
 export default function Orders() {
@@ -549,6 +550,9 @@ export default function Orders() {
                     </button>
                 </div>
             </div>
+
+            {/* Analytics Bar */}
+            <OrdersAnalyticsBar />
 
             {/* Tabs */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">

@@ -1,8 +1,24 @@
 /**
- * COD Remittance Routes
+ * @module routes/remittance
+ * @description COD remittance reconciliation with Shopify sync
  *
- * Handles COD remittance CSV upload and order payment status updates
- * With automatic sync to Shopify
+ * CSV Upload Workflow:
+ * 1. Parse CSV (expected columns: Order No., AWB NO., Price, Remittance Date, Remittance UTR)
+ * 2. Match orders by orderNumber, validate amount (5% tolerance)
+ * 3. Update order: codRemittedAt, codRemittanceUtr, codRemittedAmount, codShopifySyncStatus
+ * 4. Auto-sync to Shopify if order has shopifyOrderId (creates transaction via markOrderAsPaid)
+ * 5. Track date range in SystemSetting (earliest/latest remittance dates)
+ *
+ * Sync Statuses: 'pending', 'synced', 'failed', 'manual_review' (>5% amount mismatch)
+ * Shopify Sync: markOrderAsPaid() creates transaction, updates financial_status to 'paid'
+ *
+ * Gotchas:
+ * - CSV BOM handling (0xFEFF)
+ * - Date parsing supports "DD-Mon-YY" format (e.g., "06-Jan-26")
+ * - Amount mismatch >5% flags for manual_review
+ * - Already-paid orders skipped (codRemittedAt not null)
+ *
+ * @see services/shopify.js - markOrderAsPaid method
  */
 
 import express from 'express';
@@ -58,16 +74,17 @@ function parseDate(dateStr) {
 }
 
 /**
- * POST /api/remittance/upload
- * Upload COD remittance CSV and mark orders as paid
- *
- * Expected CSV columns:
- * - AWB NO. (optional, can match by AWB)
- * - Order No. (required, matches orderNumber)
- * - Customer (informational)
- * - Price (COD amount)
- * - Remittance Date
- * - Remittance UTR (bank reference)
+ * Upload COD remittance CSV and reconcile orders
+ * @route POST /api/remittance/upload
+ * @param {File} file - CSV file (multipart/form-data)
+ * @returns {Object} { success, message, results: { total, matched, updated, alreadyPaid, notFound[], errors[], shopifySynced, shopifyFailed, manualReview, dateRange } }
+ * @description Expected CSV columns: Order No., AWB NO., Price, Remittance Date, Remittance UTR. Normalizes column names, handles BOM, parses DD-Mon-YY dates.
+ * @example
+ * FormData:
+ *   file: remittance.csv
+ * CSV:
+ *   Order No.,Price,Remittance Date,Remittance UTR
+ *   64040,1299,06-Jan-26,UTR123456789
  */
 router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
     if (!req.file) {
@@ -342,8 +359,10 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/remittance/pending
- * Get COD orders that haven't been marked as paid yet
+ * Get COD orders awaiting remittance (delivered, COD, not yet remitted)
+ * @route GET /api/remittance/pending?limit=100
+ * @param {number} [query.limit=100] - Max orders
+ * @returns {Object} { orders: [{ id, orderNumber, customerName, totalAmount, deliveredAt, awbNumber, courier }], total, pendingAmount }
  */
 router.get('/pending', asyncHandler(async (req, res) => {
     const { limit = 100 } = req.query;
@@ -385,8 +404,10 @@ router.get('/pending', asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/remittance/summary
- * Get COD remittance summary stats
+ * Get remittance summary stats
+ * @route GET /api/remittance/summary?days=30
+ * @param {number} [query.days=30] - Period for 'paid' stats
+ * @returns {Object} { pending: { count, amount }, paid: { count, amount, periodDays }, processedRange: { earliest, latest } }
  */
 router.get('/summary', asyncHandler(async (req, res) => {
     const { days = 30 } = req.query;
@@ -453,8 +474,10 @@ router.get('/summary', asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/remittance/failed
- * Get orders that failed Shopify sync
+ * Get orders with failed/pending Shopify sync
+ * @route GET /api/remittance/failed?limit=100
+ * @param {number} [query.limit=100] - Max orders
+ * @returns {Object} { orders: [...], counts: { failed, pending, manual_review }, total }
  */
 router.get('/failed', asyncHandler(async (req, res) => {
     const { limit = 100 } = req.query;
@@ -504,8 +527,10 @@ router.get('/failed', asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/remittance/sync-orders
- * Sync specific orders to Shopify by order number (for orders already marked as paid)
+ * Sync specific orders to Shopify (for already-remitted orders)
+ * @route POST /api/remittance/sync-orders
+ * @param {string[]} body.orderNumbers - Order numbers to sync
+ * @returns {Object} { success, message, results: { total, synced, failed, alreadySynced, errors[] } }
  */
 router.post('/sync-orders', asyncHandler(async (req, res) => {
     const { orderNumbers } = req.body;
@@ -617,8 +642,11 @@ router.post('/sync-orders', asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/remittance/retry-sync
- * Retry Shopify sync for failed orders
+ * Retry failed Shopify syncs
+ * @route POST /api/remittance/retry-sync
+ * @param {string[]} [body.orderIds] - Specific order UUIDs to retry
+ * @param {boolean} [body.all=false] - Retry all failed/pending syncs
+ * @returns {Object} { success, message, results: { total, synced, failed, errors[] } }
  */
 router.post('/retry-sync', asyncHandler(async (req, res) => {
     const { orderIds, all = false } = req.body;
@@ -730,8 +758,12 @@ router.post('/retry-sync', asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/remittance/approve-manual
- * Approve manual review orders and sync to Shopify
+ * Approve manual_review order and sync to Shopify
+ * @route POST /api/remittance/approve-manual
+ * @param {string} body.orderId - Order UUID flagged for manual_review
+ * @param {number} [body.approvedAmount] - Override amount (uses codRemittedAmount if omitted)
+ * @returns {Object} { success, message, transaction }
+ * @description For orders with >5% amount mismatch. Syncs to Shopify with approved amount.
  */
 router.post('/approve-manual', asyncHandler(async (req, res) => {
     const { orderId, approvedAmount } = req.body;
@@ -854,9 +886,10 @@ router.post('/reset', asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/remittance/fix-payment-method
- * Fix orders that were incorrectly changed from COD to Prepaid
- * Any order with codRemittedAt set but paymentMethod='Prepaid' was likely COD
+ * Fix payment method for orders with COD remittance but labeled Prepaid
+ * @route POST /api/remittance/fix-payment-method
+ * @returns {Object} { success, message, fixed, cacheFixed, orders[] }
+ * @description Finds orders with codRemittedAt but paymentMethod='Prepaid', sets to 'COD'. Also fixes ShopifyOrderCache.
  */
 router.post('/fix-payment-method', asyncHandler(async (req, res) => {
     // Find orders with COD remittance data but wrong payment method

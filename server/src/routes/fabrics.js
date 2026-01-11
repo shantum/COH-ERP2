@@ -1,3 +1,32 @@
+/**
+ * @fileoverview Fabric Inventory Routes - Ledger-based fabric tracking and procurement
+ *
+ * Fabric Hierarchy:
+ * - FabricType: Material category (e.g., "Cotton", "Silk") with default costs
+ * - Fabric: Specific color (e.g., "Red Cotton") with optional cost overrides
+ *
+ * Balance Calculation:
+ * - Balance = SUM(inward) - SUM(outward)
+ * - Inward: Supplier receipts, reconciliation adjustments
+ * - Outward: Production consumption, reconciliation adjustments
+ *
+ * Cost Cascade (Fabric → FabricType):
+ * - Fabric.costPerUnit ?? FabricType.defaultCostPerUnit
+ * - Null at Fabric level = inherit from FabricType
+ * - Same pattern for leadTimeDays and minOrderQty
+ *
+ * Key Endpoints:
+ * - /flat: AG-Grid optimized endpoint with view='type'|'color'
+ * - /reconciliation/*: Physical count workflow with variance tracking
+ * - /dashboard/stock-analysis: Reorder point calculations
+ *
+ * Gotchas:
+ * - Default fabric type is protected (cannot rename or add colors)
+ * - Deleting fabric reassigns variations to Default fabric
+ * - /flat endpoint uses chunkProcess (batch size 5) to prevent connection pool exhaustion
+ * - Reconciliation creates adjustment transactions (inward for +ve variance, outward for -ve)
+ */
+
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
@@ -77,7 +106,29 @@ router.put('/types/:id', authenticateToken, requirePermission('fabrics:edit:type
 // FABRICS
 // ============================================
 
-// Get all fabrics in flat format (for AG-Grid table)
+/**
+ * GET /flat
+ * AG-Grid optimized endpoint with dual view modes (type vs color).
+ *
+ * @param {string} [view='color'] - 'type' for aggregated FabricType rows, 'color' for Fabric rows
+ * @param {string} [search] - Search fabric/type name (database-level)
+ * @param {string} [status] - Filter by stock status: 'low' (ORDER NOW/SOON) or 'ok'
+ * @param {string} [fabricTypeId] - Filter colors by fabric type (color view only)
+ * @returns {Object} {items: Array, summary: Object}
+ *
+ * Type View:
+ * - Returns aggregated FabricType data (excludes Default type)
+ * - Includes colorCount, default costs
+ * - Flag: isTypeRow=true
+ *
+ * Color View:
+ * - Returns Fabric-level data with inheritance applied
+ * - Calculates stock status (ORDER NOW/SOON/OK) based on reorder points
+ * - Includes effective values (inherited from type) and raw values
+ * - Flag: isTypeRow=false
+ *
+ * Performance: Uses chunkProcess (batch=5) to prevent connection pool exhaustion
+ */
 router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
     const { search, status, fabricTypeId, view } = req.query;
 
@@ -765,7 +816,15 @@ router.get('/reconciliation/history', authenticateToken, asyncHandler(async (req
     res.json(history);
 }));
 
-// Start a new reconciliation
+/**
+ * POST /reconciliation/start
+ * Initialize fabric reconciliation session with current system balances.
+ *
+ * @returns {Object} Reconciliation record with items (fabricId, systemQty)
+ *
+ * Creates draft reconciliation with pre-filled system quantities.
+ * User enters physicalQty for each item, system calculates variance.
+ */
 router.post('/reconciliation/start', authenticateToken, asyncHandler(async (req, res) => {
     // Get all active fabrics with their current balances
     const fabrics = await req.prisma.fabric.findMany({
@@ -867,7 +926,16 @@ router.get('/reconciliation/:id', authenticateToken, asyncHandler(async (req, re
     res.json(response);
 }));
 
-// Update reconciliation items (physical quantities)
+/**
+ * PUT /reconciliation/:id
+ * Update reconciliation items with physical count data.
+ *
+ * @param {Array<Object>} items - Array of {id, physicalQty, adjustmentReason, notes}
+ * @returns {Object} Updated reconciliation with calculated variances
+ *
+ * Variance Calculation: variance = physicalQty - systemQty
+ * Only editable in 'draft' status
+ */
 router.put('/reconciliation/:id', authenticateToken, asyncHandler(async (req, res) => {
     const { items } = req.body;
 
@@ -930,7 +998,22 @@ router.put('/reconciliation/:id', authenticateToken, asyncHandler(async (req, re
     });
 }));
 
-// Submit reconciliation (creates adjustment transactions)
+/**
+ * POST /reconciliation/:id/submit
+ * Finalize reconciliation and create fabric adjustment transactions.
+ *
+ * @returns {Object} {status: 'submitted', adjustmentsMade: number, transactions: Array}
+ *
+ * Transaction Logic:
+ * - variance > 0: Creates 'inward' transaction (found more than expected)
+ * - variance < 0: Creates 'outward' transaction (found less than expected)
+ * - variance = 0: No transaction created
+ *
+ * Validation:
+ * - All items must have physicalQty entered
+ * - Variances require adjustmentReason
+ * - Only 'draft' reconciliations can be submitted
+ */
 router.post('/reconciliation/:id/submit', authenticateToken, asyncHandler(async (req, res) => {
     const reconciliation = await req.prisma.fabricReconciliation.findUnique({
         where: { id: req.params.id },
@@ -1036,6 +1119,14 @@ router.delete('/reconciliation/:id', authenticateToken, asyncHandler(async (req,
 // HELPER FUNCTIONS
 // ============================================
 
+/**
+ * Calculate average daily fabric consumption over 28 days.
+ * Used for reorder point calculations and stock analysis.
+ *
+ * @param {Object} prisma - Prisma client
+ * @param {string} fabricId - Fabric ID
+ * @returns {number} Average daily consumption (units/day)
+ */
 async function calculateAvgDailyConsumption(prisma, fabricId) {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 28);

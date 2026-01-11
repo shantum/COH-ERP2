@@ -604,6 +604,111 @@ router.get('/status/cancelled', async (req, res) => {
     }
 });
 
+// ============================================
+// ORDERS ANALYTICS (for analytics bar)
+// ============================================
+
+/**
+ * GET /orders/analytics
+ * Returns analytics for open orders: pending count, payment split, top products
+ */
+router.get('/analytics', async (req, res) => {
+    try {
+        // Get open orders with their lines for analysis
+        const openOrders = await req.prisma.order.findMany({
+            where: {
+                status: 'open',
+                isArchived: false,
+            },
+            select: {
+                id: true,
+                paymentMethod: true,
+                totalAmount: true,
+                orderLines: {
+                    where: { lineStatus: { not: 'cancelled' } },
+                    select: {
+                        qty: true,
+                        lineStatus: true,
+                        sku: {
+                            select: {
+                                variation: {
+                                    select: {
+                                        product: {
+                                            select: { name: true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Count pending orders (orders with at least one pending line)
+        const pendingOrders = openOrders.filter(o =>
+            o.orderLines.some(l => l.lineStatus === 'pending')
+        ).length;
+
+        // Count allocated orders (orders with all lines allocated or further)
+        const allocatedOrders = openOrders.filter(o =>
+            o.orderLines.length > 0 && o.orderLines.every(l => l.lineStatus !== 'pending')
+        ).length;
+
+        // Count ready to ship (orders with all lines packed)
+        const readyToShip = openOrders.filter(o =>
+            o.orderLines.length > 0 && o.orderLines.every(l => l.lineStatus === 'packed')
+        ).length;
+
+        // Payment method split
+        const codOrders = openOrders.filter(o => o.paymentMethod === 'cod');
+        const prepaidOrders = openOrders.filter(o => o.paymentMethod !== 'cod');
+
+        const paymentSplit = {
+            cod: {
+                count: codOrders.length,
+                amount: codOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0)
+            },
+            prepaid: {
+                count: prepaidOrders.length,
+                amount: prepaidOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0)
+            }
+        };
+
+        // Top products by quantity ordered
+        const productCounts = {};
+        openOrders.forEach(order => {
+            order.orderLines.forEach(line => {
+                const productName = line.sku?.variation?.product?.name || 'Unknown';
+                productCounts[productName] = (productCounts[productName] || 0) + line.qty;
+            });
+        });
+
+        const topProducts = Object.entries(productCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([name, qty]) => ({ name, qty }));
+
+        // Total units in open orders
+        const totalUnits = openOrders.reduce((sum, o) =>
+            sum + o.orderLines.reduce((lineSum, l) => lineSum + l.qty, 0), 0
+        );
+
+        res.json({
+            totalOrders: openOrders.length,
+            pendingOrders,
+            allocatedOrders,
+            readyToShip,
+            totalUnits,
+            paymentSplit,
+            topProducts,
+        });
+    } catch (error) {
+        console.error('Orders analytics error:', error);
+        res.status(500).json({ error: 'Failed to fetch orders analytics' });
+    }
+});
+
 // Get single order
 router.get('/:id', async (req, res) => {
     try {

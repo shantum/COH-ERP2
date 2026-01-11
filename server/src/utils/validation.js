@@ -1,7 +1,19 @@
 /**
- * Validation utilities and Zod schemas
- * - Password validation utility
- * - Zod schemas for order operations
+ * @module validation
+ * Validation utilities, Zod schemas, and input sanitization.
+ *
+ * Key patterns:
+ * - Password validation: validatePassword (8+ chars, uppercase, lowercase, number, special char)
+ * - AWB validation: validateAwbFormat (courier-specific patterns, 8-20 alphanumeric)
+ * - Zod schemas: ShipOrderSchema, CreateOrderSchema, UpdateOrderSchema, CustomizeLineSchema
+ * - Sanitization: sanitizeSearchInput (SQL injection prevention), sanitizeOrderNumber
+ * - Format validators: isValidEmail, isValidPhone (Indian format), isValidUuid, isValidSkuCode
+ *
+ * CRITICAL GOTCHAS:
+ * - AWB validation is permissive (generic pattern fallback) to support new couriers
+ * - Phone validation expects Indian format (+91 prefix optional)
+ * - validate() middleware attaches validated data to req.validatedBody (NOT req.body)
+ * - Zod transforms run after validation (e.g., AWB uppercase normalization)
  */
 
 import { z } from 'zod';
@@ -10,6 +22,21 @@ import { z } from 'zod';
 // PASSWORD VALIDATION
 // ============================================
 
+/**
+ * Validate password strength
+ * Requirements: 8+ chars, uppercase, lowercase, number, special character
+ *
+ * @param {string} password - Password to validate
+ * @returns {Object} Validation result:
+ *   - isValid: true if all requirements met
+ *   - errors: Array of human-readable error messages
+ *
+ * @example
+ * const result = validatePassword('Test@123');
+ * if (!result.isValid) {
+ *   return res.status(400).json({ errors: result.errors });
+ * }
+ */
 export function validatePassword(password) {
     const errors = [];
 
@@ -45,16 +72,18 @@ export function validatePassword(password) {
 
 /**
  * AWB (Air Waybill) number validation patterns by courier
- * Each courier has specific AWB formats
+ * Each courier has specific AWB formats, with generic fallback.
  *
  * Common formats:
- * - iThink Logistics: 12-15 alphanumeric characters (e.g., "IT123456789012")
- * - Delhivery: 10-15 digits or alphanumeric
- * - BlueDart: 11-digit numeric
+ * - iThink Logistics: Optional 1-3 letter prefix + 8-15 digits (e.g., "IT123456789012")
+ * - Delhivery: 10-15 digits
+ * - BlueDart: 11 digits exactly
  * - FedEx: 12-15 digits
- * - DHL: 10-digit numeric
+ * - Ecom Express: 3-5 letter prefix + 9-12 digits
+ * - Generic: 8-20 alphanumeric (allows new couriers without code changes)
  *
- * Generic validation: alphanumeric, 8-20 characters
+ * GOTCHA: Validation is permissive - if courier-specific pattern fails, falls back to generic.
+ * This prevents blocking valid AWBs from new/unknown couriers.
  */
 const AWB_PATTERNS = {
     // Generic pattern for any courier - alphanumeric, 8-20 chars
@@ -70,9 +99,19 @@ const AWB_PATTERNS = {
 
 /**
  * Validate AWB number format
- * @param {string} awbNumber - The AWB number to validate
- * @param {string} courier - Optional courier name for specific validation
- * @returns {{valid: boolean, error?: string}}
+ * Uses courier-specific patterns when courier provided, falls back to generic.
+ *
+ * @param {string} awbNumber - AWB number to validate
+ * @param {string|null} [courier=null] - Courier name for pattern selection (case-insensitive)
+ * @returns {Object} Validation result:
+ *   - valid: true if AWB matches courier pattern or generic pattern
+ *   - error: Human-readable error message if invalid
+ *
+ * @example
+ * const result = validateAwbFormat('IT123456789012', 'iThink Logistics');
+ * if (!result.valid) {
+ *   throw new Error(result.error);
+ * }
  */
 export function validateAwbFormat(awbNumber, courier = null) {
     if (!awbNumber || typeof awbNumber !== 'string') {
@@ -137,7 +176,13 @@ const awbSchema = z.string()
 
 /**
  * Ship order validation schema
- * Validates AWB format and courier name
+ * Validates AWB format against courier-specific patterns.
+ * AWB is auto-uppercased via Zod transform.
+ *
+ * @example
+ * router.post('/ship', validate(ShipOrderSchema), (req, res) => {
+ *   const { awbNumber, courier } = req.validatedBody; // awbNumber is uppercased
+ * });
  */
 export const ShipOrderSchema = z.object({
     awbNumber: awbSchema,
@@ -155,6 +200,22 @@ export const ShipOrderSchema = z.object({
 
 /**
  * Create order validation schema
+ * Supports both regular orders and exchange orders.
+ *
+ * Key fields:
+ * - isExchange: true for exchange orders (allows negative/zero totalAmount)
+ * - originalOrderId: Required for exchange orders (links to original order)
+ * - shipByDate: Optional shipping deadline (ISO datetime string)
+ * - lines[].shippingAddress: Optional line-level address (JSON string)
+ *
+ * GOTCHA: Exchange orders can have negative totalAmount (exchange down = customer gets refund).
+ *
+ * @example
+ * const data = {
+ *   customerName: 'John Doe',
+ *   lines: [{ skuId: 'uuid', qty: 1, unitPrice: 1500 }],
+ *   paymentMethod: 'Prepaid'
+ * };
  */
 export const CreateOrderSchema = z.object({
     orderNumber: z.string().optional(),

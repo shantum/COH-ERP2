@@ -62,7 +62,13 @@ router.get('/', authenticateToken, asyncHandler(async (req, res) => {
 // COST CONFIG (must be before /:id routes)
 // ============================================
 
-// Get cost config
+/**
+ * GET /cost-config
+ * Retrieve global cost configuration (labor rate, packaging, GST thresholds).
+ * Creates default config if none exists.
+ *
+ * @returns {Object} CostConfig with laborRatePerMin, defaultPackagingCost, gstThreshold, etc.
+ */
 router.get('/cost-config', authenticateToken, asyncHandler(async (req, res) => {
     let config = await req.prisma.costConfig.findFirst();
 
@@ -78,7 +84,17 @@ router.get('/cost-config', authenticateToken, asyncHandler(async (req, res) => {
     res.json(filtered);
 }));
 
-// Update cost config
+/**
+ * PUT /cost-config
+ * Update global cost configuration. Only provided fields are updated.
+ *
+ * @param {number} [laborRatePerMin] - Cost per minute of labor
+ * @param {number} [defaultPackagingCost] - Default packaging cost per unit
+ * @param {number} [gstThreshold] - Order value threshold for GST calculation
+ * @param {number} [gstRateAbove] - GST rate for orders above threshold
+ * @param {number} [gstRateBelow] - GST rate for orders below threshold
+ * @returns {Object} Updated CostConfig
+ */
 router.put('/cost-config', authenticateToken, requirePermission('products:edit:cost'), asyncHandler(async (req, res) => {
     const { laborRatePerMin, defaultPackagingCost, gstThreshold, gstRateAbove, gstRateBelow } = req.body;
 
@@ -106,7 +122,22 @@ router.put('/cost-config', authenticateToken, requirePermission('products:edit:c
     res.json(config);
 }));
 
-// Get COGS for all SKUs
+/**
+ * GET /cogs
+ * Calculate Cost of Goods Sold (COGS) for all active SKUs using costing cascade.
+ *
+ * COGS Formula:
+ * - fabricCost = fabricConsumption * fabric.costPerUnit
+ * - laborCost = baseProductionTimeMins * laborRatePerMin
+ * - totalCogs = fabricCost + laborCost + packagingCost + otherCost
+ * - marginPct = ((mrp - totalCogs) / mrp) * 100
+ *
+ * Cascade Logic:
+ * - packagingCost: SKU.skuCosting → CostConfig.defaultPackagingCost (50)
+ * - otherCost: SKU.skuCosting → 0
+ *
+ * @returns {Array<Object>} Array of COGS data with breakdown per SKU
+ */
 router.get('/cogs', authenticateToken, asyncHandler(async (req, res) => {
     const costConfig = await req.prisma.costConfig.findFirst();
     const laborRatePerMin = costConfig?.laborRatePerMin || 2.5;
@@ -286,7 +317,18 @@ router.delete('/:id', authenticateToken, requirePermission('products:delete'), a
 // VARIATIONS
 // ============================================
 
-// Create variation
+/**
+ * POST /:productId/variations
+ * Create color variation for a product.
+ *
+ * @param {string} productId - Parent product ID (route param)
+ * @param {string} colorName - Display name (e.g., "Maroon")
+ * @param {string} [standardColor] - Standardized color name for grouping
+ * @param {string} colorHex - Hex color code
+ * @param {string} fabricId - Fabric ID (must match product's fabricType)
+ * @param {boolean} [hasLining=false] - Whether variation uses lining
+ * @returns {Object} Created variation with fabric relation
+ */
 router.post('/:productId/variations', authenticateToken, asyncHandler(async (req, res) => {
     const { colorName, standardColor, colorHex, fabricId, hasLining } = req.body;
 
@@ -305,7 +347,24 @@ router.post('/:productId/variations', authenticateToken, asyncHandler(async (req
     res.status(201).json(variation);
 }));
 
-// Update variation
+/**
+ * PUT /variations/:id
+ * Update variation details. Auto-syncs Product.fabricTypeId when fabric changes.
+ *
+ * @param {string} [colorName] - Display name
+ * @param {string} [standardColor] - Standardized color name
+ * @param {string} [colorHex] - Hex color code
+ * @param {string} [fabricId] - Fabric ID (triggers Product sync if non-Default)
+ * @param {boolean} [hasLining] - Whether variation uses lining
+ * @param {number} [trimsCost] - Override trims cost (null = inherit from Product)
+ * @param {number} [liningCost] - Override lining cost (null = inherit from Product)
+ * @param {number} [packagingCost] - Override packaging cost
+ * @param {number} [laborMinutes] - Override labor time
+ * @param {boolean} [isActive] - Active status
+ * @returns {Object} Updated variation
+ *
+ * Side Effect: If fabricId changes to non-Default type, Product.fabricTypeId is updated
+ */
 router.put('/variations/:id', authenticateToken, asyncHandler(async (req, res) => {
     const { colorName, standardColor, colorHex, fabricId, hasLining, trimsCost, liningCost, packagingCost, laborMinutes, isActive } = req.body;
 
@@ -380,7 +439,19 @@ router.get('/skus/all', authenticateToken, asyncHandler(async (req, res) => {
     res.json(filtered);
 }));
 
-// Create SKU
+/**
+ * POST /variations/:variationId/skus
+ * Create SKU (size-specific sellable unit) for a variation.
+ *
+ * @param {string} variationId - Parent variation ID (route param)
+ * @param {string} skuCode - Unique SKU code (also used as barcode)
+ * @param {string} size - Size (e.g., "M", "L", "XL")
+ * @param {number} [fabricConsumption=1.5] - Meters of fabric per unit
+ * @param {number} mrp - Maximum Retail Price
+ * @param {number} [targetStockQty=10] - Target inventory level
+ * @param {string} [targetStockMethod='day14'] - Replenishment calculation method
+ * @returns {Object} Created SKU
+ */
 router.post('/variations/:variationId/skus', authenticateToken, asyncHandler(async (req, res) => {
     const { skuCode, size, fabricConsumption, mrp, targetStockQty, targetStockMethod } = req.body;
 
@@ -399,7 +470,21 @@ router.post('/variations/:variationId/skus', authenticateToken, asyncHandler(asy
     res.status(201).json(sku);
 }));
 
-// Update SKU
+/**
+ * PUT /skus/:id
+ * Update SKU details. Cost fields use costing cascade (null = inherit from Variation/Product).
+ *
+ * @param {number} [fabricConsumption] - Meters of fabric per unit
+ * @param {number} [mrp] - Maximum Retail Price
+ * @param {number} [targetStockQty] - Target inventory level
+ * @param {string} [targetStockMethod] - Replenishment method
+ * @param {number} [trimsCost] - Override trims cost (null = inherit)
+ * @param {number} [liningCost] - Override lining cost (null = inherit)
+ * @param {number} [packagingCost] - Override packaging cost (null = inherit)
+ * @param {number} [laborMinutes] - Override labor time (null = inherit)
+ * @param {boolean} [isActive] - Active status
+ * @returns {Object} Updated SKU
+ */
 router.put('/skus/:id', authenticateToken, asyncHandler(async (req, res) => {
     const { fabricConsumption, mrp, targetStockQty, targetStockMethod, trimsCost, liningCost, packagingCost, laborMinutes, isActive } = req.body;
 

@@ -1,3 +1,35 @@
+/**
+ * @module routes/returns
+ * Return request (ticket) management and QC workflow.
+ *
+ * Status flow:
+ *   requested → reverse_initiated → in_transit → received → processing → resolved
+ *   (can jump to cancelled from any non-terminal state)
+ *
+ * Resolution types:
+ *   - refund: Customer gets money back
+ *   - exchange_same: Same product, different size/color
+ *   - exchange_up: Higher value product (customer pays difference)
+ *   - exchange_down: Lower value product (customer gets refund difference)
+ *
+ * Key workflows:
+ * - Return creation: Creates ticket, validates items not customized, checks for duplicates
+ * - Receive item: Marks condition, adds to repacking queue (QC), auto-resolves when all received
+ * - Repacking queue: QC → inventory inward (good/used) OR write-off (damaged/wrong)
+ * - Exchange early-ship: Allow replacement shipment when reverse in-transit (not yet received)
+ *
+ * Critical gotchas:
+ * - Customized items (isNonReturnable=true) cannot be returned (blocked at creation)
+ * - Items already in active tickets cannot be added to new tickets (duplicate check)
+ * - Status transitions validated via state machine (see VALID_STATUS_TRANSITIONS)
+ * - Receive uses optimistic locking (re-fetch line inside transaction to prevent double-receive)
+ * - Reason category locked after first item received (prevents gaming after QC)
+ * - Delete only allowed if no items received AND no processed repacking items
+ * - Exchange auto-resolves when both reverseReceived=true AND forwardDelivered=true
+ *
+ * @see VALID_STATUS_TRANSITIONS for allowed status transitions
+ * @see routes/repacking.js for QC queue processing
+ */
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -16,8 +48,19 @@ const router = Router();
 // ============================================
 
 /**
- * Valid status transitions for return requests
+ * Valid status transitions for return requests (state machine)
  * Key = current status, Value = array of allowed next statuses
+ *
+ * Terminal states (no transitions allowed):
+ * - resolved: Return fully processed
+ * - cancelled: Return cancelled
+ * - completed: Legacy terminal state
+ *
+ * Special transitions:
+ * - received → reverse_initiated: Undo receive (reverts status)
+ * - Any non-terminal → cancelled: Soft cancel (keeps data)
+ *
+ * GOTCHA: 'new' is pseudo-state during creation - allows any first status.
  */
 const VALID_STATUS_TRANSITIONS = {
     'requested': ['reverse_initiated', 'in_transit', 'cancelled'],
@@ -50,9 +93,15 @@ function isValidStatusTransition(fromStatus, toStatus) {
 }
 
 /**
- * Sanitizes search input to prevent SQL injection and special character issues
+ * Sanitize search input to prevent SQL injection
+ * Removes SQL special characters and limits length.
+ *
  * @param {string} input - User input to sanitize
- * @returns {string} - Sanitized input
+ * @returns {string} Sanitized input (max 100 chars)
+ *
+ * @example
+ * const safe = sanitizeSearchInput("SKU'; DROP TABLE--");
+ * // Returns: "SKU DROP TABLE" (quotes, semicolon, dashes removed)
  */
 function sanitizeSearchInput(input) {
     if (!input || typeof input !== 'string') return '';
@@ -2062,8 +2111,18 @@ router.put('/:id/ship-replacement', authenticateToken, asyncHandler(async (req, 
 // ============================================
 
 /**
- * Updates status with state machine validation
- * @throws {Error} If transition is invalid
+ * Update return request status with state machine validation
+ * Creates status history entry in transaction.
+ *
+ * @param {PrismaClient} prisma - Prisma client instance
+ * @param {string} requestId - Return request ID
+ * @param {string} newStatus - Target status
+ * @param {string} userId - User ID for audit trail
+ * @param {string|null} [notes=null] - Optional notes for history
+ * @throws {Error} If return request not found or transition invalid
+ *
+ * @example
+ * await updateStatus(prisma, requestId, 'received', userId, 'All items inspected');
  */
 async function updateStatus(prisma, requestId, newStatus, userId, notes = null) {
     const request = await prisma.returnRequest.findUnique({ where: { id: requestId } });

@@ -20,3 +20,4 @@ export { CustomizationModal } from './CustomizationModal';
 export { SummaryPanel } from './SummaryPanel';
 export { TrackingModal } from './TrackingModal';
 export { ProcessShippedModal } from './ProcessShippedModal';
+export { OrdersAnalyticsBar } from './OrdersAnalyticsBar';

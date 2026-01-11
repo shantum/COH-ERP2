@@ -1,3 +1,23 @@
+/**
+ * @module routes/admin
+ * @description Admin-only operations: user/role management, system settings, DB inspection, logs, and background jobs
+ *
+ * User Management: CRUD for users, password resets, role assignment
+ * Role & Permissions: Assign roles, manage per-user permission overrides (forces re-login via tokenVersion increment)
+ * System Settings: Order channels, tier thresholds (platinum/gold/silver LTV breakpoints)
+ * DB Inspector: Browse any Prisma table with pagination (dev tool)
+ * Logs: View server.jsonl logs (24hr retention), filter by level/search
+ * Background Jobs: Shopify sync (24hr lookback), tracking sync (30min), cache cleanup (daily 2AM), auto-archive (startup)
+ *
+ * Protection Logic:
+ * - Cannot delete/disable last admin user
+ * - Cannot change last Owner role
+ * - Role changes increment tokenVersion (forces re-login to get new permissions)
+ *
+ * @see middleware/permissions.js - Permission checking logic
+ * @see utils/tierUtils.js - Customer tier calculation
+ */
+
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
@@ -16,7 +36,11 @@ import { ValidationError, NotFoundError, ConflictError, BusinessLogicError } fro
 
 const router = Router();
 
-// Get database stats
+/**
+ * Get database entity counts for dashboard
+ * @route GET /api/admin/stats
+ * @returns {Object} { products, variations, skus, orders, customers, fabrics, inventoryTransactions }
+ */
 router.get('/stats', authenticateToken, asyncHandler(async (req, res) => {
     const [
         productCount,
@@ -47,7 +71,14 @@ router.get('/stats', authenticateToken, asyncHandler(async (req, res) => {
     });
 }));
 
-// Clear specific tables (Admin only)
+/**
+ * Bulk delete data from specified tables (requires 'DELETE ALL DATA' phrase)
+ * @route POST /api/admin/clear
+ * @param {string[]} body.tables - Table names to clear (or ['all'])
+ * @param {string} body.confirmPhrase - Must be exactly 'DELETE ALL DATA'
+ * @returns {Object} { message, deleted: { tableName: count } }
+ * @description Respects FK constraints (deletes children first). Uses transaction for atomicity.
+ */
 router.post('/clear', requireAdmin, asyncHandler(async (req, res) => {
     const { tables, confirmPhrase } = req.body;
 
@@ -225,7 +256,11 @@ router.post('/reseed', requireAdmin, asyncHandler(async (req, res) => {
 // ROLE MANAGEMENT (for new permissions system)
 // ============================================
 
-// Get all roles
+/**
+ * List all roles with their permissions
+ * @route GET /api/admin/roles
+ * @returns {Object[]} roles - [{ id, name, displayName, permissions, createdAt }]
+ */
 router.get('/roles', authenticateToken, asyncHandler(async (req, res) => {
     const roles = await req.prisma.role.findMany({
         orderBy: { createdAt: 'asc' },
@@ -249,7 +284,13 @@ router.get('/roles/:id', authenticateToken, asyncHandler(async (req, res) => {
     res.json(role);
 }));
 
-// Assign role to user
+/**
+ * Assign role to user (increments tokenVersion to force re-login)
+ * @route PUT /api/admin/users/:id/role
+ * @param {string} body.roleId - Role UUID to assign
+ * @returns {Object} user - Updated user with roleName
+ * @description Prevents changing last Owner role. Forces re-login to apply new permissions.
+ */
 router.put('/users/:id/role', requireAdmin, asyncHandler(async (req, res) => {
     const { roleId } = req.body;
 
@@ -309,7 +350,11 @@ router.put('/users/:id/role', requireAdmin, asyncHandler(async (req, res) => {
     });
 }));
 
-// Get user permissions with overrides
+/**
+ * Get user's effective permissions (role + overrides)
+ * @route GET /api/admin/users/:id/permissions
+ * @returns {Object} { userId, roleId, roleName, rolePermissions[], overrides: [{ permission, granted }] }
+ */
 router.get('/users/:id/permissions', requireAdmin, asyncHandler(async (req, res) => {
     const user = await req.prisma.user.findUnique({
         where: { id: req.params.id },
@@ -346,7 +391,12 @@ router.get('/users/:id/permissions', requireAdmin, asyncHandler(async (req, res)
     });
 }));
 
-// Update user permission overrides
+/**
+ * Update per-user permission overrides (increments tokenVersion)
+ * @route PUT /api/admin/users/:id/permissions
+ * @param {Object[]} body.overrides - [{ permission: 'orders:read', granted: true }]
+ * @description Only stores overrides that differ from role defaults. Auto-deletes overrides matching role. Forces re-login.
+ */
 router.put('/users/:id/permissions', requireAdmin, asyncHandler(async (req, res) => {
     const { overrides } = req.body;
 
@@ -453,7 +503,11 @@ router.put('/users/:id/permissions', requireAdmin, asyncHandler(async (req, res)
 // USER MANAGEMENT (Admin only)
 // ============================================
 
-// List all users
+/**
+ * List all users with their roles
+ * @route GET /api/admin/users
+ * @returns {Object[]} users - [{ id, email, name, role, roleId, isActive, createdAt, roleName }]
+ */
 router.get('/users', requireAdmin, asyncHandler(async (req, res) => {
     const users = await req.prisma.user.findMany({
         select: {
@@ -505,7 +559,16 @@ router.get('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
     res.json(user);
 }));
 
-// Create new user
+/**
+ * Create new user (validates password strength)
+ * @route POST /api/admin/users
+ * @param {string} body.email - Unique email
+ * @param {string} body.password - Password (min 8 chars, complexity required)
+ * @param {string} body.name - Full name
+ * @param {string} [body.role='staff'] - Legacy role ('admin' or 'staff')
+ * @param {string} [body.roleId] - New permissions system role UUID
+ * @returns {Object} user - Created user
+ */
 router.post('/users', requireAdmin, asyncHandler(async (req, res) => {
     const { email, password, name, role = 'staff', roleId } = req.body;
 
@@ -577,7 +640,16 @@ router.post('/users', requireAdmin, asyncHandler(async (req, res) => {
     });
 }));
 
-// Update user
+/**
+ * Update user details (protects last admin)
+ * @route PUT /api/admin/users/:id
+ * @param {string} [body.email] - New email
+ * @param {string} [body.name] - New name
+ * @param {string} [body.role] - New role
+ * @param {boolean} [body.isActive] - Active status
+ * @param {string} [body.password] - New password (re-hashed)
+ * @description Cannot disable/demote last admin user.
+ */
 router.put('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
     const { email, name, role, isActive, password } = req.body;
 
@@ -660,7 +732,11 @@ router.put('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
     });
 }));
 
-// Delete user
+/**
+ * Delete user (protects last admin and prevents self-deletion)
+ * @route DELETE /api/admin/users/:id
+ * @description Cannot delete last admin or self.
+ */
 router.delete('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
     const user = await req.prisma.user.findUnique({
         where: { id: req.params.id },
@@ -882,7 +958,15 @@ router.get('/inspect/table/:tableName', authenticateToken, asyncHandler(async (r
 // SERVER LOGS VIEWER
 // ============================================
 
-// Get server logs
+/**
+ * Fetch server logs (from server.jsonl, 24hr retention)
+ * @route GET /api/admin/logs?level=error&limit=100&offset=0&search=term
+ * @param {string} [query.level] - Filter by level ('error', 'warn', 'info', 'all')
+ * @param {number} [query.limit=100] - Max logs to return (max 1000)
+ * @param {number} [query.offset=0] - Skip N logs
+ * @param {string} [query.search] - Search term
+ * @returns {Object} { logs: [], total, level, limit, offset }
+ */
 router.get('/logs', authenticateToken, asyncHandler(async (req, res) => {
     const level = req.query.level || 'all';
     const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
@@ -928,8 +1012,10 @@ router.delete('/logs', requireAdmin, asyncHandler(async (req, res) => {
 // ============================================
 
 /**
- * Get status of all background jobs
- * Returns current status, last run time, and configuration
+ * Get status of all background jobs with last run times
+ * @route GET /api/admin/background-jobs
+ * @returns {Object} { jobs: [{ id, name, description, enabled, intervalMinutes?, schedule?, isRunning, lastRunAt, lastResult }] }
+ * @description Jobs: shopify_sync (24hr lookback), tracking_sync (30min updates), cache_cleanup (daily 2AM), auto_archive (on startup).
  */
 router.get('/background-jobs', authenticateToken, asyncHandler(async (req, res) => {
     // Get sync service statuses
@@ -994,7 +1080,11 @@ router.get('/background-jobs', authenticateToken, asyncHandler(async (req, res) 
 }));
 
 /**
- * Trigger a specific background job manually
+ * Manually trigger background job
+ * @route POST /api/admin/background-jobs/:jobId/trigger
+ * @param {string} jobId - 'shopify_sync', 'tracking_sync', 'cache_cleanup'
+ * @returns {Object} { message, result }
+ * @description Saves cache_cleanup result to SystemSetting for persistence.
  */
 router.post('/background-jobs/:jobId/trigger', requireAdmin, asyncHandler(async (req, res) => {
     const { jobId } = req.params;

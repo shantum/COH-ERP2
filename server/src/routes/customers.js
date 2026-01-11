@@ -1,3 +1,20 @@
+/**
+ * @module routes/customers
+ * @description Customer management and analytics
+ *
+ * Features:
+ * - Customer list with LTV, tier, return rate, and order stats
+ * - Tier calculation: platinum/gold/silver based on configurable LTV thresholds
+ * - Address lookup from past orders (ERP + Shopify cache for autofill)
+ * - Product/color/fabric affinity analysis
+ * - Analytics: overview (repeat rate, AOV), high-value customers, at-risk (90+ days no order)
+ *
+ * Tier Logic: calculateTier(LTV, thresholds) where thresholds from SystemSetting or DEFAULT_TIER_THRESHOLDS
+ * LTV Calculation: SUM(order.totalAmount) for non-cancelled orders
+ *
+ * @see utils/tierUtils.js - Tier calculation logic
+ */
+
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
@@ -10,6 +27,15 @@ const router = Router();
 // CUSTOMER LIST
 // ============================================
 
+/**
+ * List customers with metrics (LTV, tier, returns, orders)
+ * @route GET /api/customers?tier=gold&search=name&limit=50&offset=0
+ * @param {string} [query.tier] - Filter by tier ('platinum', 'gold', 'silver')
+ * @param {string} [query.search] - Multi-word search across email/name/phone (AND logic)
+ * @param {number} [query.limit=50] - Max results
+ * @param {number} [query.offset=0] - Skip N results
+ * @returns {Object[]} customers - [{ id, email, firstName, lastName, phone, totalOrders, lifetimeValue, avgOrderValue, returns, exchanges, rtoCount, returnRate, customerTier, firstOrderDate, lastOrderDate }]
+ */
 router.get('/', asyncHandler(async (req, res) => {
     const { tier, search, limit = 50, offset = 0 } = req.query;
 
@@ -109,8 +135,13 @@ router.get('/', asyncHandler(async (req, res) => {
     res.json(result);
 }));
 
-// Get customer's past shipping addresses (for address autofill)
-// Searches both ERP orders and Shopify cache
+/**
+ * Get past shipping addresses for autofill (searches ERP orders + Shopify cache)
+ * @route GET /api/customers/:id/addresses
+ * @param {string} id - Customer UUID
+ * @returns {Object[]} addresses - [{ address1, address2, city, province, zip, country, phone, lastUsed, source: 'order'|'shopify' }]
+ * @description Dedupes by address1-city-zip key, returns max 20 most recent unique addresses.
+ */
 router.get('/:id/addresses', asyncHandler(async (req, res) => {
     // Get customer email for Shopify cache lookup
     const customer = await req.prisma.customer.findUnique({
@@ -205,7 +236,13 @@ router.get('/:id/addresses', asyncHandler(async (req, res) => {
     res.json(addresses);
 }));
 
-// Get single customer with full details
+/**
+ * Get single customer with full order/return/feedback history and affinity analysis
+ * @route GET /api/customers/:id
+ * @param {string} id - Customer UUID
+ * @returns {Object} customer - { ...customer, orders[], returnRequests[], feedback[], totalOrders, lifetimeValue, customerTier, productAffinity[], colorAffinity[], fabricAffinity[] }
+ * @description Affinity = top 5 most-ordered products/colors/fabrics by quantity.
+ */
 router.get('/:id', asyncHandler(async (req, res) => {
     const customer = await req.prisma.customer.findUnique({
         where: { id: req.params.id },
@@ -341,7 +378,13 @@ router.put('/:id', authenticateToken, asyncHandler(async (req, res) => {
 // CUSTOMER ANALYTICS
 // ============================================
 
-// Customer base analytics with time filtering
+/**
+ * Customer base overview with KPIs
+ * @route GET /api/customers/analytics/overview?months=6
+ * @param {number} [query.months] - Filter orders from last N months ('all' for all-time)
+ * @returns {Object} { totalCustomers, customersWithOrders, newCustomers, repeatCustomers, repeatRate, totalOrders, totalRevenue, avgOrderValue, avgOrdersPerCustomer, avgOrderFrequency, avgLTV }
+ * @description Repeat = 2+ orders. Frequency = orders/month since first order.
+ */
 router.get('/analytics/overview', asyncHandler(async (req, res) => {
     const { months } = req.query;
 
@@ -427,7 +470,12 @@ router.get('/analytics/overview', asyncHandler(async (req, res) => {
     });
 }));
 
-// High-value customers (top N by LTV)
+/**
+ * Top customers by LTV
+ * @route GET /api/customers/analytics/high-value?limit=100
+ * @param {number} [query.limit=100] - Max customers (max 5000)
+ * @returns {Object} { customers: [{ id, email, firstName, lastName, lifetimeValue, totalOrders, avgOrderValue, orderFrequency, firstOrderDate, lastOrderDate }], stats: { totalCustomers, totalRevenue, totalOrders, avgLTV, avgAOV, avgOrdersPerCustomer, avgOrderFrequency } }
+ */
 router.get('/analytics/high-value', asyncHandler(async (req, res) => {
     const { limit = 100 } = req.query;
     const topN = Math.min(Number(limit) || 100, 5000);
@@ -500,7 +548,11 @@ router.get('/analytics/high-value', asyncHandler(async (req, res) => {
     });
 }));
 
-// Frequent returners (>20% return rate)
+/**
+ * Customers with >20% return rate (min 2 orders)
+ * @route GET /api/customers/analytics/frequent-returners
+ * @returns {Object[]} customers - [{ id, email, firstName, lastName, totalOrders, returns, returnRate }]
+ */
 router.get('/analytics/frequent-returners', asyncHandler(async (req, res) => {
     const customers = await req.prisma.customer.findMany({
         include: {
@@ -530,7 +582,12 @@ router.get('/analytics/frequent-returners', asyncHandler(async (req, res) => {
     res.json(frequentReturners);
 }));
 
-// At-risk customers (high LTV but no order in 90+ days)
+/**
+ * At-risk customers: Silver+ tier with 90+ days no order
+ * @route GET /api/customers/analytics/at-risk
+ * @returns {Object[]} customers - [{ id, email, firstName, lastName, lifetimeValue, customerTier, lastOrderDate, daysSinceLastOrder }]
+ * @description Targets re-engagement campaigns for valuable inactive customers.
+ */
 router.get('/analytics/at-risk', asyncHandler(async (req, res) => {
     const thresholds = await getTierThresholds(req.prisma);
 

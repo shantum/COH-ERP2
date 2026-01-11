@@ -247,6 +247,8 @@ export const ordersApi = {
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),
     getArchivedAnalytics: (params?: { days?: number }) => api.get('/orders/archived/analytics', { params }),
     getRtoSummary: () => api.get('/orders/rto/summary'),
+    // Orders analytics (for analytics bar)
+    getAnalytics: () => api.get('/orders/analytics'),
     // Dashboard stats (Zen Philosophy - action queue counts)
     getDashboardStats: () => api.get('/orders/dashboard-stats'),
     // RTO actions

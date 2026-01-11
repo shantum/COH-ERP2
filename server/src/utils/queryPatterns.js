@@ -514,12 +514,28 @@ export function enrichOrderLinesWithAddresses(order) {
 
 /**
  * Calculate inventory balance for a SKU
- * Uses aggregation to avoid N+1 queries
+ * Uses aggregation to avoid N+1 queries.
+ *
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string} skuId - SKU ID
  * @param {Object} options - Options for balance calculation
- * @param {boolean} options.allowNegative - If true (default), shows negative balances; if false, floors at 0
- * @returns {Object} Balance information
+ * @param {boolean} [options.allowNegative=true] - If false, floors negative balances at 0 (hides data issues)
+ * @returns {Promise<Object>} Balance object:
+ *   - totalInward: Sum of all inward transactions
+ *   - totalOutward: Sum of all outward transactions
+ *   - totalReserved: Sum of all reserved transactions
+ *   - currentBalance: inward - outward (can be negative if data integrity issue)
+ *   - availableBalance: currentBalance - reserved (stock available for new allocations)
+ *   - hasDataIntegrityIssue: true if balance is negative (outward > inward)
+ *
+ * @example
+ * const balance = await calculateInventoryBalance(prisma, skuId);
+ * if (balance.hasDataIntegrityIssue) {
+ *   console.warn(`SKU has negative balance: ${balance.currentBalance}`);
+ * }
+ * if (balance.availableBalance < orderQty) {
+ *   throw new Error('Insufficient stock');
+ * }
  */
 export async function calculateInventoryBalance(prisma, skuId, options = {}) {
     const { allowNegative = true } = options;
@@ -564,13 +580,20 @@ export async function calculateInventoryBalance(prisma, skuId, options = {}) {
 
 /**
  * Calculate inventory balances for all SKUs efficiently
- * Uses a single aggregation query instead of N+1
+ * Uses single aggregation query - O(1) instead of O(N) with calculateInventoryBalance.
+ *
  * @param {PrismaClient} prisma - Prisma client instance
- * @param {string[]} skuIds - Optional array of SKU IDs to filter
- * @param {Object} options - Options for balance calculation
- * @param {boolean} options.allowNegative - If true (default), shows negative balances; if false, floors at 0
- * @param {boolean} options.excludeCustomSkus - If true, excludes custom SKUs (isCustomSku=true) from results
- * @returns {Map} Map of skuId -> balance info
+ * @param {string[]|null} [skuIds=null] - Filter to specific SKU IDs (null = all SKUs)
+ * @param {Object} [options={}] - Balance calculation options
+ * @param {boolean} [options.allowNegative=true] - If false, floors negative balances at 0
+ * @param {boolean} [options.excludeCustomSkus=false] - If true, excludes custom SKUs (isCustomSku=true)
+ * @returns {Promise<Map<string, Object>>} Map of skuId → balance object (see calculateInventoryBalance)
+ *
+ * @example
+ * // Get balances for specific SKUs (avoids loading all SKUs)
+ * const skuIds = orderLines.map(l => l.skuId);
+ * const balanceMap = await calculateAllInventoryBalances(prisma, skuIds);
+ * const balance = balanceMap.get(skuId) || { currentBalance: 0, availableBalance: 0 };
  */
 export async function calculateAllInventoryBalances(prisma, skuIds = null, options = {}) {
     const { allowNegative = true, excludeCustomSkus = false } = options;
@@ -696,9 +719,14 @@ export async function calculateAllFabricBalances(prisma) {
 
 /**
  * Get effective fabric consumption for a SKU
- * Falls back to product default if SKU-level not set
+ * Cascade priority: SKU.fabricConsumption → Product.defaultFabricConsumption → 1.5 (system default)
+ *
  * @param {Object} sku - SKU object with variation.product relation
- * @returns {number} Fabric consumption value
+ * @returns {number} Fabric consumption in meters per unit
+ *
+ * @example
+ * const consumption = getEffectiveFabricConsumption(sku);
+ * const totalFabricNeeded = consumption * batchQty;
  */
 export function getEffectiveFabricConsumption(sku) {
     // Use SKU-specific consumption if set and reasonable
@@ -722,14 +750,23 @@ export function getEffectiveFabricConsumption(sku) {
 
 /**
  * Validate if an outward transaction is allowed
- * Blocks outward if:
- * - Current balance is already negative (data integrity issue)
- * - Transaction would make balance negative (insufficient stock)
+ * Prevents creating outward transactions that would cause negative balance.
+ * Use before creating sale/damage/write-off transactions.
  *
  * @param {PrismaClient} prisma - Prisma client instance
  * @param {string} skuId - SKU ID
  * @param {number} qty - Quantity to remove
- * @returns {Object} { allowed: boolean, reason?: string, currentBalance: number }
+ * @returns {Promise<Object>} Validation result:
+ *   - allowed: false if balance already negative OR would become negative
+ *   - reason: Human-readable error message if not allowed
+ *   - currentBalance: Current inventory balance
+ *   - availableBalance: Available after reserved quantities
+ *
+ * @example
+ * const validation = await validateOutwardTransaction(prisma, skuId, 5);
+ * if (!validation.allowed) {
+ *   throw new Error(validation.reason);
+ * }
  */
 export async function validateOutwardTransaction(prisma, skuId, qty) {
     const balance = await calculateInventoryBalance(prisma, skuId, { allowNegative: true });
