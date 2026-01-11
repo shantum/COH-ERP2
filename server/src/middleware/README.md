@@ -19,8 +19,8 @@ Wraps async route handlers to automatically catch errors.
 ### 2. `errorHandler.js`
 Centralized error handling with support for custom error types.
 
-### 3. `requestLogger.js`
-Logs all HTTP requests with timing and status information.
+### 3. Request Logging
+Request logging is now handled by `utils/logger.js` which exports a `requestLogger` middleware function.
 
 ---
 
@@ -30,11 +30,11 @@ Logs all HTTP requests with timing and status information.
 
 Add these imports at the top:
 ```javascript
-import requestLogger from './middleware/requestLogger.js';
-import errorHandler from './middleware/errorHandler.js';
+import { requestLogger } from './utils/logger.js';
+import { errorHandler } from './middleware/errorHandler.js';
 ```
 
-Add request logger BEFORE routes:
+Add request logger BEFORE routes (optional - currently not used):
 ```javascript
 // After body parser, before routes
 app.use(requestLogger);
@@ -45,6 +45,8 @@ Add error handler AFTER all routes:
 // After all route definitions
 app.use(errorHandler);
 ```
+
+**Note**: Request logging is currently handled by the Pino logger's automatic console interception. The `requestLogger` middleware is available in `utils/logger.js` if explicit request logging is needed.
 
 ---
 

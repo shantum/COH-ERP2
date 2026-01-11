@@ -1,0 +1,34 @@
+/**
+ * Query key constants for TanStack Query
+ * Centralizes cache keys to prevent typos and ensure consistency
+ */
+
+// Order query keys - one per tab view
+export const orderQueryKeys = {
+  open: ['openOrders'] as const,
+  shipped: ['shippedOrders'] as const,
+  rto: ['rtoOrders'] as const,
+  codPending: ['codPendingOrders'] as const,
+  cancelled: ['cancelledOrders'] as const,
+  archived: ['archivedOrders'] as const,
+  shippedSummary: ['shippedSummary'] as const,
+  rtoSummary: ['rtoSummary'] as const,
+} as const;
+
+// Inventory and product query keys
+export const inventoryQueryKeys = {
+  balance: ['inventoryBalance'] as const,
+  fabric: ['fabricStock'] as const,
+  allSkus: ['allSkus'] as const,
+} as const;
+
+// Maps order tabs to the query keys that should be invalidated when that tab's data changes
+// This allows a single invalidateTab function to handle all related cache invalidations
+export const orderTabInvalidationMap: Record<string, string[]> = {
+  open: ['openOrders', 'inventoryBalance'],
+  shipped: ['shippedOrders', 'shippedSummary'],
+  rto: ['rtoOrders', 'rtoSummary'],
+  cod_pending: ['codPendingOrders'],
+  cancelled: ['cancelledOrders'],
+  archived: ['archivedOrders'],
+};

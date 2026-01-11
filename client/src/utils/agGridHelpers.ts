@@ -49,6 +49,20 @@ export function formatDateWithYear(date: string | Date | null | undefined): stri
 }
 
 /**
+ * Format date with time "DD Mon, HH:MM" (e.g., "15 Jan, 14:30")
+ */
+export function formatDateTime(date: string | Date | null | undefined): string {
+    if (!date) return '-';
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+/**
  * Format relative time (e.g., "5m ago", "2h ago", "3d ago")
  */
 export function formatRelativeTime(date: string | Date | null | undefined): string {

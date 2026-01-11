@@ -5,6 +5,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi, productionApi } from '../services/api';
+import { orderQueryKeys, inventoryQueryKeys, orderTabInvalidationMap } from '../constants/queryKeys';
 
 interface UseOrdersMutationsOptions {
     onShipSuccess?: () => void;
@@ -26,53 +27,45 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Waits for 800ms of inactivity before syncing with server
     const debounceTimerRef = { current: null as ReturnType<typeof setTimeout> | null };
 
-    const debouncedInvalidateOpenOrders = () => {
-        if (debounceTimerRef.current) {
-            clearTimeout(debounceTimerRef.current);
+    // Consolidated invalidation function - invalidates a tab and all its related queries
+    // Uses orderTabInvalidationMap to determine which caches to clear
+    const invalidateTab = (tab: keyof typeof orderTabInvalidationMap, debounce = false) => {
+        const invalidate = () => {
+            const keysToInvalidate = orderTabInvalidationMap[tab];
+            if (keysToInvalidate) {
+                keysToInvalidate.forEach(key => {
+                    queryClient.invalidateQueries({ queryKey: [key] });
+                });
+            }
+        };
+
+        if (debounce) {
+            if (debounceTimerRef.current) {
+                clearTimeout(debounceTimerRef.current);
+            }
+            debounceTimerRef.current = setTimeout(() => {
+                invalidate();
+                debounceTimerRef.current = null;
+            }, 800);
+        } else {
+            invalidate();
         }
-        debounceTimerRef.current = setTimeout(() => {
-            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
-            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
-            debounceTimerRef.current = null;
-        }, 800);
     };
 
-    // Granular invalidation functions - only invalidate what's actually affected
-    const invalidateOpenOrders = () => {
-        queryClient.invalidateQueries({ queryKey: ['openOrders'] });
-        queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
-    };
-
-    const invalidateShippedOrders = () => {
-        queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
-        queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
-    };
-
-    const invalidateRtoOrders = () => {
-        queryClient.invalidateQueries({ queryKey: ['rtoOrders'] });
-        queryClient.invalidateQueries({ queryKey: ['rtoSummary'] });
-    };
-
-    const invalidateCodPendingOrders = () => {
-        queryClient.invalidateQueries({ queryKey: ['codPendingOrders'] });
-    };
-
-    const invalidateCancelledOrders = () => {
-        queryClient.invalidateQueries({ queryKey: ['cancelledOrders'] });
-    };
-
-    const invalidateArchivedOrders = () => {
-        queryClient.invalidateQueries({ queryKey: ['archivedOrders'] });
-    };
+    // Convenience wrappers for backward compatibility and clarity
+    const invalidateOpenOrders = () => invalidateTab('open');
+    const invalidateShippedOrders = () => invalidateTab('shipped');
+    const invalidateRtoOrders = () => invalidateTab('rto');
+    const invalidateCodPendingOrders = () => invalidateTab('cod_pending');
+    const invalidateCancelledOrders = () => invalidateTab('cancelled');
+    const invalidateArchivedOrders = () => invalidateTab('archived');
+    const debouncedInvalidateOpenOrders = () => invalidateTab('open', true);
 
     // Keep invalidateAll for operations that truly affect multiple tabs (creation, deletion)
     const invalidateAll = () => {
-        invalidateOpenOrders();
-        invalidateShippedOrders();
-        invalidateRtoOrders();
-        invalidateCodPendingOrders();
-        invalidateCancelledOrders();
-        invalidateArchivedOrders();
+        Object.keys(orderTabInvalidationMap).forEach(tab => {
+            invalidateTab(tab as keyof typeof orderTabInvalidationMap);
+        });
     };
 
     // Ship order mutation - moves from open to shipped
@@ -119,13 +112,13 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Returns previous data for rollback on error
     const optimisticLineUpdate = async (lineId: string, newStatus: string) => {
         // Cancel any outgoing refetches to avoid overwriting optimistic update
-        await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+        await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
 
         // Snapshot the previous value
-        const previousOrders = queryClient.getQueryData(['openOrders']);
+        const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
 
         // Optimistically update the line status
-        queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+        queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
             if (!old) return old;
             return old.map(order => ({
                 ...order,
@@ -140,7 +133,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     // Helper to get current line status from cache
     const getLineStatus = (lineId: string): string | null => {
-        const orders = queryClient.getQueryData(['openOrders']) as any[] | undefined;
+        const orders = queryClient.getQueryData(orderQueryKeys.open) as any[] | undefined;
         if (!orders) return null;
         for (const order of orders) {
             const line = order.orderLines?.find((l: any) => l.id === lineId);
@@ -152,11 +145,11 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Helper for optimistic inventory balance updates (allocate/unallocate)
     // delta: +1 for allocate (increase reserved), -1 for unallocate (decrease reserved)
     const optimisticInventoryUpdate = async (lineId: string, newStatus: string, delta: number) => {
-        await queryClient.cancelQueries({ queryKey: ['openOrders'] });
-        await queryClient.cancelQueries({ queryKey: ['inventoryBalance'] });
+        await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
+        await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
-        const previousOrders = queryClient.getQueryData(['openOrders']);
-        const previousInventory = queryClient.getQueryData(['inventoryBalance']);
+        const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
+        const previousInventory = queryClient.getQueryData(inventoryQueryKeys.balance);
 
         // Find the line to get skuId and qty
         let skuId: string | null = null;
@@ -174,7 +167,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         }
 
         // Update line status in openOrders
-        queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+        queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
             if (!old) return old;
             return old.map(order => ({
                 ...order,
@@ -186,7 +179,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
         // Update inventory balance for the affected SKU
         if (skuId && previousInventory) {
-            queryClient.setQueryData(['inventoryBalance'], (old: any[] | undefined) => {
+            queryClient.setQueryData(inventoryQueryKeys.balance, (old: any[] | undefined) => {
                 if (!old) return old;
                 return old.map((item: any) => {
                     if (item.skuId === skuId) {
@@ -219,10 +212,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             // ALWAYS rollback first, before any early returns
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             if (context && 'previousInventory' in context) {
-                queryClient.setQueryData(['inventoryBalance'], context.previousInventory);
+                queryClient.setQueryData(inventoryQueryKeys.balance, context.previousInventory);
             }
 
             // Then handle specific error types
@@ -250,10 +243,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             // ALWAYS rollback first, before any early returns
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             if (context && 'previousInventory' in context) {
-                queryClient.setQueryData(['inventoryBalance'], context.previousInventory);
+                queryClient.setQueryData(inventoryQueryKeys.balance, context.previousInventory);
             }
 
             // Then handle specific error types
@@ -287,7 +280,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             alert(errorMsg || 'Failed to pick line');
         },
@@ -313,7 +306,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             alert(errorMsg || 'Failed to unpick line');
         },
@@ -340,7 +333,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             alert(errorMsg || 'Failed to pack line');
         },
@@ -366,7 +359,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             alert(errorMsg || 'Failed to unpack line');
         },
@@ -392,7 +385,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             alert(errorMsg || 'Failed to mark line as shipped');
         },
@@ -417,7 +410,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
             }
             alert(errorMsg || 'Failed to unmark shipped line');
         },
@@ -432,11 +425,11 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         mutationFn: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }) =>
             ordersApi.updateLineTracking(lineId, data),
         onMutate: async ({ lineId, data }) => {
-            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
-            const previousOrders = queryClient.getQueryData(['openOrders']);
+            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
+            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
 
             // Optimistically update tracking info in cache
-            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
                 if (!old) return old;
                 return old.map(order => ({
                     ...order,
@@ -478,10 +471,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         mutationFn: (data: any) => productionApi.createBatch(data),
         onMutate: async (data) => {
             // Cancel outgoing refetches to avoid overwriting optimistic update
-            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
 
             // Snapshot previous value for rollback
-            const previousOrders = queryClient.getQueryData(['openOrders']);
+            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
 
             // Create a temporary batch object for optimistic update
             const tempBatch = {
@@ -494,7 +487,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             };
 
             // Optimistically add the batch to the order line
-            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
                 if (!old) return old;
                 return old.map(order => ({
                     ...order,
@@ -518,8 +511,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onSettled: () => {
             invalidateOpenOrders();
             // Invalidate fabric and inventory since batch affects both
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
-            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.fabric });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });
 
@@ -533,13 +526,13 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         },
         onMutate: async ({ id, data }) => {
             // Cancel outgoing refetches to avoid overwriting optimistic update
-            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
+            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
 
             // Snapshot previous value for rollback
-            const previousOrders = queryClient.getQueryData(['openOrders']);
+            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
 
             // Optimistically update the batch in nested orderLines
-            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
                 if (!old) return old;
                 return old.map(order => ({
                     ...order,
@@ -563,8 +556,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onSettled: () => {
             invalidateOpenOrders();
             // Invalidate fabric and inventory since batch affects both
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
-            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.fabric });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });
 
@@ -577,11 +570,11 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             return productionApi.deleteBatch(id);
         },
         onMutate: async (id) => {
-            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
-            const previousOrders = queryClient.getQueryData(['openOrders']);
+            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
+            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
 
             // Optimistically remove the batch from orderLines
-            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
                 if (!old) return old;
                 return old.map(order => ({
                     ...order,
@@ -604,8 +597,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onSettled: () => {
             invalidateOpenOrders();
             // Invalidate fabric and inventory since batch affects both
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
-            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.fabric });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });
 
@@ -653,11 +646,11 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             ordersApi.updateLine(lineId, { notes }),
         onMutate: async ({ lineId, notes }) => {
             // Cancel outgoing refetches
-            await queryClient.cancelQueries({ queryKey: ['openOrders'] });
-            const previousOrders = queryClient.getQueryData(['openOrders']);
+            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
+            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
 
             // Optimistically update line notes in cache (openOrders is stored as array)
-            queryClient.setQueryData(['openOrders'], (old: any[] | undefined) => {
+            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
                 if (!old) return old;
                 return old.map(order => ({
                     ...order,
@@ -738,7 +731,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             invalidateRtoOrders();
             invalidateOpenOrders();
             // Invalidate inventory balance since RTO creates inward
-            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to receive RTO')
     });

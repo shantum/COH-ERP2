@@ -64,20 +64,6 @@ model UserPermissionOverride {
   @@index([userId])
 }
 
-model PermissionAuditLog {
-  id           String   @id @default(uuid())
-  userId       String
-  action       String   // view, create, update, delete
-  resource     String   // orders, products, etc.
-  resourceId   String?
-  details      Json?    // Additional context
-  ipAddress    String?
-  createdAt    DateTime @default(now())
-
-  @@index([userId])
-  @@index([resource])
-  @@index([createdAt])
-}
 
 // ============================================
 // PRODUCTS HIERARCHY
@@ -883,17 +869,6 @@ model ShopifyProductCache {
   @@index([lastWebhookAt])
 }
 
-model StockAlert {
-  id        String   @id @default(uuid())
-  skuId     String
-  alertType String
-  details   String?
-  createdAt DateTime @default(now())
-  resolved  Boolean  @default(false)
-
-  @@index([skuId])
-  @@index([resolved])
-}
 
 // ============================================
 // SYSTEM SETTINGS

@@ -633,8 +633,9 @@ router.get('/analytics', async (req, res) => {
                             select: {
                                 variation: {
                                     select: {
+                                        imageUrl: true,
                                         product: {
-                                            select: { name: true }
+                                            select: { id: true, name: true, imageUrl: true }
                                         }
                                     }
                                 }
@@ -655,11 +656,13 @@ router.get('/analytics', async (req, res) => {
         const last30DaysStart = new Date(todayStart);
         last30DaysStart.setDate(last30DaysStart.getDate() - 30);
         const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1); // First of current month
 
-        // Get ALL orders from last 30 days for revenue (regardless of status)
+        // Get ALL orders from last month start for revenue (regardless of status)
         const recentOrders = await req.prisma.order.findMany({
             where: {
-                orderDate: { gte: last30DaysStart },
+                orderDate: { gte: lastMonthStart },
             },
             select: {
                 totalAmount: true,
@@ -683,12 +686,20 @@ router.get('/analytics', async (req, res) => {
             orderCount: orders.length,
         });
 
+        // For fair comparison: yesterday at same time of day
+        const yesterdaySameTime = new Date(now);
+        yesterdaySameTime.setDate(yesterdaySameTime.getDate() - 1);
+
         const revenue = {
             today: calcRevenue(filterByDateRange(recentOrders, todayStart)),
+            // Yesterday full day for display
             yesterday: calcRevenue(filterByDateRange(recentOrders, yesterdayStart, todayStart)),
+            // Yesterday at same time for comparison (12am to current time yesterday)
+            yesterdaySameTime: calcRevenue(filterByDateRange(recentOrders, yesterdayStart, yesterdaySameTime)),
             last7Days: calcRevenue(filterByDateRange(recentOrders, last7DaysStart)),
+            last30Days: calcRevenue(filterByDateRange(recentOrders, last30DaysStart)),
+            lastMonth: calcRevenue(filterByDateRange(recentOrders, lastMonthStart, lastMonthEnd)),
             thisMonth: calcRevenue(filterByDateRange(recentOrders, thisMonthStart)),
-            last30Days: calcRevenue(recentOrders), // All orders in the query are from last 30 days
         };
 
         // Count pending orders (orders with at least one pending line)
@@ -721,19 +732,33 @@ router.get('/analytics', async (req, res) => {
             }
         };
 
-        // Top products by quantity ordered
-        const productCounts = {};
+        // Top products by quantity ordered (with images)
+        const productData = {};
         openOrders.forEach(order => {
             order.orderLines.forEach(line => {
-                const productName = line.sku?.variation?.product?.name || 'Unknown';
-                productCounts[productName] = (productCounts[productName] || 0) + line.qty;
+                const product = line.sku?.variation?.product;
+                const productId = product?.id;
+                if (!productId) return;
+
+                if (!productData[productId]) {
+                    // Use variation image if available, otherwise product image
+                    const imageUrl = line.sku?.variation?.imageUrl || product?.imageUrl || null;
+                    productData[productId] = {
+                        id: productId,
+                        name: product.name,
+                        imageUrl,
+                        qty: 0,
+                        orderCount: 0,
+                    };
+                }
+                productData[productId].qty += line.qty;
+                productData[productId].orderCount += 1;
             });
         });
 
-        const topProducts = Object.entries(productCounts)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 5)
-            .map(([name, qty]) => ({ name, qty }));
+        const topProducts = Object.values(productData)
+            .sort((a, b) => b.qty - a.qty)
+            .slice(0, 10);
 
         // Total units in open orders
         const totalUnits = openOrders.reduce((sum, o) =>

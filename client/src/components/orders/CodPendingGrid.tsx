@@ -6,21 +6,14 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Clock, AlertTriangle, CheckCircle, ExternalLink, Radio, Eye, Columns, RotateCcw } from 'lucide-react';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import { Clock, AlertTriangle, CheckCircle, ExternalLink, Radio, Eye } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
+import { compactTheme, formatDateTime, getTrackingUrl } from '../../utils/agGridHelpers';
+import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
-
-// Custom compact theme
-const compactTheme = themeQuartz.withParams({
-    spacing: 4,
-    fontSize: 12,
-    headerFontSize: 12,
-    rowHeight: 32,
-    headerHeight: 36,
-});
 
 // All column IDs for persistence
 const ALL_COLUMN_IDS = [
@@ -34,90 +27,12 @@ const DEFAULT_HEADERS: Record<string, string> = {
     daysSinceDelivery: 'Waiting', shippedAt: 'Shipped', actions: 'Actions'
 };
 
-// Column visibility dropdown
-const ColumnVisibilityDropdown = ({
-    visibleColumns, onToggleColumn, onResetAll,
-}: { visibleColumns: Set<string>; onToggleColumn: (colId: string) => void; onResetAll: () => void; }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsOpen(false);
-        };
-        if (isOpen) document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen]);
-
-    return (
-        <div ref={dropdownRef} className="relative">
-            <button onClick={() => setIsOpen(!isOpen)} className="flex items-center gap-1 text-xs px-2 py-1 border rounded bg-white hover:bg-gray-50">
-                <Columns size={12} /> Columns
-            </button>
-            {isOpen && (
-                <div className="absolute right-0 mt-1 w-48 bg-white border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-                    <div className="p-2 border-b">
-                        <button onClick={onResetAll} className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700">
-                            <RotateCcw size={10} /> Reset All
-                        </button>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {ALL_COLUMN_IDS.filter(id => id !== 'actions').map(colId => (
-                            <label key={colId} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                                <input type="checkbox" checked={visibleColumns.has(colId)} onChange={() => onToggleColumn(colId)} className="w-3 h-3" />
-                                {DEFAULT_HEADERS[colId] || colId}
-                            </label>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-
 interface CodPendingGridProps {
     orders: any[];
     onViewOrder?: (order: any) => void;
     onSelectCustomer?: (customer: any) => void;
     onTrack?: (awbNumber: string, orderNumber: string) => void;
     shopDomain?: string;
-}
-
-// Helper to format date with time
-function formatDateTime(date: string | null | undefined): string {
-    if (!date) return '-';
-    return new Date(date).toLocaleString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-}
-
-// Generate tracking URL based on courier
-function getTrackingUrl(awb: string, courier?: string): string | null {
-    if (!awb) return null;
-    const courierLower = (courier || '').toLowerCase();
-
-    if (courierLower.includes('delhivery')) {
-        return `https://www.delhivery.com/track/package/${awb}`;
-    }
-    if (courierLower.includes('bluedart')) {
-        return `https://www.bluedart.com/tracking/${awb}`;
-    }
-    if (courierLower.includes('ekart')) {
-        return `https://ekartlogistics.com/track/${awb}`;
-    }
-    if (courierLower.includes('xpressbees')) {
-        return `https://www.xpressbees.com/shipment/tracking?awb=${awb}`;
-    }
-    if (courierLower.includes('dtdc')) {
-        return `https://www.dtdc.in/tracking.asp?strCnno=${awb}`;
-    }
-    if (courierLower.includes('ecom')) {
-        return `https://www.ecomexpress.in/tracking/?awb=${awb}`;
-    }
-    return `https://www.ithinklogistics.com/tracking/${awb}`;
 }
 
 // Days waiting badge component with color coding
@@ -460,6 +375,8 @@ export function CodPendingGrid({
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
                     onResetAll={handleResetAll}
+                    columnIds={ALL_COLUMN_IDS}
+                    columnHeaders={DEFAULT_HEADERS}
                 />
             </div>
             <div style={{ height: 'calc(100% - 40px)' }}>

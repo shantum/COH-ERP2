@@ -76,59 +76,17 @@ import type {
     CellClassParams,
     EditableCallbackParams,
 } from 'ag-grid-community';
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import { Check, X, Undo2, Columns, RotateCcw, Package, Truck, CheckCircle, AlertCircle, RotateCw, Settings, Wrench, Calendar, ChevronRight, ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
+import { Check, X, Undo2, Truck, CheckCircle, AlertCircle, Settings, Wrench, Calendar, ChevronRight, ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
+import { compactThemeSmall } from '../../utils/agGridHelpers';
+import { TrackingStatusBadge } from '../common/grid/TrackingStatusBadge';
+import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
 import { OrderActionPanel } from './OrderActionPanel';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
-
-// Custom compact theme based on Quartz
-const compactTheme = themeQuartz.withParams({
-    spacing: 4,
-    fontSize: 12,
-    headerFontSize: 12,
-    rowHeight: 28,
-    headerHeight: 32,
-});
-
-// Tracking status badge component (matches ShippedOrdersGrid)
-function TrackingStatusBadge({ status, daysInTransit, ofdCount }: { status: string; daysInTransit?: number; ofdCount?: number }) {
-    const configs: Record<string, { bg: string; text: string; label: string; icon: any }> = {
-        in_transit: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Transit', icon: Package },
-        manifested: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Manifested', icon: Package },
-        out_for_delivery: { bg: 'bg-cyan-100', text: 'text-cyan-700', label: 'Out for Delivery', icon: Truck },
-        delivered: { bg: 'bg-green-100', text: 'text-green-700', label: 'Delivered', icon: CheckCircle },
-        delivery_delayed: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Delayed', icon: AlertCircle },
-        rto_initiated: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO', icon: RotateCw },
-        rto_in_transit: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO Transit', icon: RotateCw },
-        rto_received: { bg: 'bg-red-200', text: 'text-red-800', label: 'RTO Received', icon: RotateCw },
-    };
-
-    const config = configs[status] || configs.in_transit;
-    const Icon = config.icon;
-
-    // Warning indicators
-    const isDelayed = daysInTransit && daysInTransit > 7;
-    const hasMultipleOfd = ofdCount && ofdCount >= 2;
-
-    return (
-        <div className="flex items-center gap-1">
-            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text}`}>
-                <Icon size={10} />
-                {config.label}
-            </span>
-            {isDelayed && !['delivered', 'rto_received'].includes(status) && (
-                <span className="text-amber-500" title={`${daysInTransit} days in transit`}>⚠️</span>
-            )}
-            {hasMultipleOfd && (
-                <span className="text-red-500 text-xs" title={`${ofdCount} delivery attempts`}>({ofdCount})</span>
-            )}
-        </div>
-    );
-}
 
 // Production date popover component
 function ProductionDatePopover({
@@ -364,86 +322,6 @@ const StatusLegend = () => {
                                     <div className="text-[10px] text-gray-500">{status.desc}</div>
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-
-// Column visibility dropdown component
-const ColumnVisibilityDropdown = ({
-    visibleColumns,
-    onToggleColumn,
-    onResetAll,
-    getHeaderName,
-}: {
-    visibleColumns: Set<string>;
-    onToggleColumn: (colId: string) => void;
-    onResetAll: () => void;
-    getHeaderName: (colId: string) => string;
-}) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
-
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-            return () => document.removeEventListener('mousedown', handleClickOutside);
-        }
-    }, [isOpen]);
-
-    return (
-        <div className="relative" ref={dropdownRef}>
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-300"
-                title="Show/hide columns"
-            >
-                <Columns size={14} />
-                <span>Columns</span>
-            </button>
-            {isOpen && (
-                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[180px] max-h-[400px] overflow-y-auto">
-                    <div className="p-2 border-b border-gray-100 flex items-center justify-between">
-                        <span className="text-xs font-medium text-gray-600">Columns</span>
-                        <button
-                            onClick={() => {
-                                onResetAll();
-                                setIsOpen(false);
-                            }}
-                            className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
-                            title="Reset visibility and order"
-                        >
-                            <RotateCcw size={10} />
-                            Reset All
-                        </button>
-                    </div>
-                    <div className="px-2 py-1 text-xs text-gray-400 border-b border-gray-100">
-                        Drag column headers to reorder
-                    </div>
-                    <div className="p-1">
-                        {ALL_COLUMN_IDS.map((colId) => (
-                            <label
-                                key={colId}
-                                className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer"
-                            >
-                                <input
-                                    type="checkbox"
-                                    checked={visibleColumns.has(colId)}
-                                    onChange={() => onToggleColumn(colId)}
-                                    className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                <span className="text-xs text-gray-700">{getHeaderName(colId)}</span>
-                            </label>
                         ))}
                     </div>
                 </div>
@@ -2070,7 +1948,7 @@ export function OrdersGrid({
                             getRowId={getRowId}
                             getRowStyle={getRowStyle}
                             getRowClass={getRowClass}
-                            theme={compactTheme}
+                            theme={compactThemeSmall}
                             rowSelection={{
                                 mode: 'multiRow',
                                 checkboxes: true,
@@ -2117,7 +1995,8 @@ export function OrdersGrid({
                     resetColumnVisibility();
                     resetColumnOrder();
                 }}
-                getHeaderName={getHeaderName}
+                columnIds={ALL_COLUMN_IDS}
+                columnHeaders={{ ...DEFAULT_HEADERS, ...customHeaders }}
             />
         ),
         statusLegend: <StatusLegend />,
