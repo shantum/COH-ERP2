@@ -55,10 +55,13 @@ router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Find user with role
+        // Find user with role and permission overrides
         const user = await req.prisma.user.findUnique({
             where: { email },
-            include: { userRole: true },
+            include: {
+                userRole: true,
+                permissionOverrides: true,
+            },
         });
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -88,6 +91,21 @@ router.post('/login', async (req, res) => {
             { expiresIn: process.env.JWT_EXPIRY || '7d' }
         );
 
+        // Calculate effective permissions (role + overrides)
+        const rolePermissions = new Set(
+            Array.isArray(user.userRole?.permissions)
+                ? user.userRole.permissions
+                : []
+        );
+
+        for (const override of user.permissionOverrides || []) {
+            if (override.granted) {
+                rolePermissions.add(override.permission);
+            } else {
+                rolePermissions.delete(override.permission);
+            }
+        }
+
         res.json({
             user: {
                 id: user.id,
@@ -98,8 +116,8 @@ router.post('/login', async (req, res) => {
                 roleName: user.userRole?.displayName || null,
                 mustChangePassword: user.mustChangePassword,
             },
-            // Include permissions for frontend authorization
-            permissions: user.userRole?.permissions || [],
+            // Include effective permissions (role + overrides) for frontend authorization
+            permissions: Array.from(rolePermissions),
             token,
         });
     } catch (error) {
