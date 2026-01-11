@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 import { validatePassword } from '../utils/validation.js';
 import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
 import logBuffer from '../utils/logBuffer.js';
@@ -9,6 +10,7 @@ import { chunkProcess } from '../utils/asyncUtils.js';
 import scheduledSync from '../services/scheduledSync.js';
 import trackingSync from '../services/trackingSync.js';
 import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
+import { invalidateUserTokens } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -255,6 +257,109 @@ router.post('/reseed', requireAdmin, async (req, res) => {
 });
 
 // ============================================
+// ROLE MANAGEMENT (for new permissions system)
+// ============================================
+
+// Get all roles
+router.get('/roles', authenticateToken, async (req, res) => {
+    try {
+        const roles = await req.prisma.role.findMany({
+            orderBy: { createdAt: 'asc' },
+        });
+        res.json(roles);
+    } catch (error) {
+        console.error('Get roles error:', error);
+        res.status(500).json({ error: 'Failed to get roles' });
+    }
+});
+
+// Get single role with user count
+router.get('/roles/:id', authenticateToken, async (req, res) => {
+    try {
+        const role = await req.prisma.role.findUnique({
+            where: { id: req.params.id },
+            include: {
+                _count: { select: { users: true } },
+            },
+        });
+
+        if (!role) {
+            return res.status(404).json({ error: 'Role not found' });
+        }
+
+        res.json(role);
+    } catch (error) {
+        console.error('Get role error:', error);
+        res.status(500).json({ error: 'Failed to get role' });
+    }
+});
+
+// Assign role to user
+router.put('/users/:id/role', requireAdmin, async (req, res) => {
+    try {
+        const { roleId } = req.body;
+
+        if (!roleId) {
+            return res.status(400).json({ error: 'roleId is required' });
+        }
+
+        const user = await req.prisma.user.findUnique({
+            where: { id: req.params.id },
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const role = await req.prisma.role.findUnique({
+            where: { id: roleId },
+        });
+
+        if (!role) {
+            return res.status(404).json({ error: 'Role not found' });
+        }
+
+        // Prevent changing the last Owner's role
+        if (user.userRole?.name === 'owner') {
+            const ownerRole = await req.prisma.role.findFirst({ where: { name: 'owner' } });
+            if (ownerRole) {
+                const ownerCount = await req.prisma.user.count({
+                    where: { roleId: ownerRole.id, isActive: true },
+                });
+                if (ownerCount <= 1 && roleId !== ownerRole.id) {
+                    return res.status(400).json({ error: 'Cannot change role of the last Owner' });
+                }
+            }
+        }
+
+        // Update user role and invalidate their tokens
+        const updated = await req.prisma.$transaction(async (tx) => {
+            const result = await tx.user.update({
+                where: { id: req.params.id },
+                data: {
+                    roleId,
+                    tokenVersion: { increment: 1 }, // Force re-login
+                },
+                include: {
+                    userRole: { select: { id: true, name: true, displayName: true } },
+                },
+            });
+            return result;
+        });
+
+        console.log(`[Admin] Role changed for user ${user.email}: ${role.displayName}`);
+
+        res.json({
+            ...updated,
+            roleName: updated.userRole?.displayName,
+        });
+    } catch (error) {
+        console.error('Assign role error:', error);
+        res.status(500).json({ error: 'Failed to assign role' });
+    }
+});
+
+// ============================================
 // USER MANAGEMENT (Admin only)
 // ============================================
 
@@ -267,12 +372,27 @@ router.get('/users', requireAdmin, async (req, res) => {
                 email: true,
                 name: true,
                 role: true,
+                roleId: true,
                 isActive: true,
                 createdAt: true,
+                userRole: {
+                    select: {
+                        id: true,
+                        name: true,
+                        displayName: true,
+                    }
+                },
             },
             orderBy: { createdAt: 'desc' },
         });
-        res.json(users);
+
+        // Transform to include roleName for frontend
+        const usersWithRoleName = users.map(u => ({
+            ...u,
+            roleName: u.userRole?.displayName || u.role,
+        }));
+
+        res.json(usersWithRoleName);
     } catch (error) {
         console.error('List users error:', error);
         res.status(500).json({ error: 'Failed to list users' });

@@ -516,12 +516,17 @@ export const adminApi = {
     getChannels: () => api.get('/admin/channels'),
     updateChannels: (channels: { id: string; name: string }[]) =>
         api.put('/admin/channels', { channels }),
+    // Roles
+    getRoles: () => api.get('/admin/roles'),
+    getRole: (id: string) => api.get(`/admin/roles/${id}`),
     // User management
     getUsers: () => api.get('/admin/users'),
-    createUser: (data: { email: string; password: string; name: string; role: string }) =>
+    createUser: (data: { email: string; password: string; name: string; roleId?: string }) =>
         api.post('/admin/users', data),
-    updateUser: (id: string, data: { email?: string; name?: string; role?: string; isActive?: boolean; password?: string }) =>
+    updateUser: (id: string, data: { email?: string; name?: string; isActive?: boolean; password?: string }) =>
         api.put(`/admin/users/${id}`, data),
+    assignUserRole: (userId: string, roleId: string) =>
+        api.put(`/admin/users/${userId}/role`, { roleId }),
     deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
     // Database inspector
     getTables: () => api.get('/admin/inspect/tables'),
