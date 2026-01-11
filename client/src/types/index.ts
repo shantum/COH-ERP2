@@ -103,11 +103,11 @@ export interface Sku {
   variation?: Variation;
   skuCosting?: SkuCosting;
   // Custom SKU fields
-  isCustomSku?: boolean;
-  parentSkuId?: string;
-  customizationType?: string;
-  customizationValue?: string;
-  customizationNotes?: string;
+  isCustomSku?: boolean; // True only for SKU created via order customization (not regular catalog SKUs)
+  parentSkuId?: string; // Points to original catalog SKU if this is a custom SKU
+  customizationType?: string; // 'length'|'size'|'measurements'|'other' - only populated for custom SKUs
+  customizationValue?: string; // User-specified value (e.g., "32 inches" for length adjustment)
+  customizationNotes?: string; // Additional notes about customization
 }
 
 export interface SkuCosting {
@@ -189,15 +189,18 @@ export type OrderStatus = 'open' | 'shipped' | 'delivered' | 'cancelled' | 'retu
 export type LineStatus = 'pending' | 'allocated' | 'picked' | 'packed' | 'shipped' | 'cancelled';
 export type FulfillmentStage = 'pending' | 'allocated' | 'in_progress' | 'ready_to_ship';
 
-// Shopify order cache - single source of truth for Shopify data
+/**
+ * Shopify order cache - immutable snapshot of order data from Shopify API.
+ * Populated during sync, never modified locally. Used to avoid stale field references.
+ */
 export interface ShopifyOrderCache {
-  discountCodes: string | null;
-  customerNotes: string | null;
-  paymentMethod: string | null;
-  tags: string | null;
-  trackingNumber: string | null;
-  trackingCompany: string | null;
-  shippedAt: string | null;
+  discountCodes: string | null; // Comma-separated list of discount codes applied
+  customerNotes: string | null; // Customer's special instructions at checkout
+  paymentMethod: string | null; // "COD"|"Prepaid"|etc. - determines fulfillment flow
+  tags: string | null; // Shopify order tags (e.g., "wholesale", "repeat_customer")
+  trackingNumber: string | null; // Shopify's tracked tracking number from fulfillment
+  trackingCompany: string | null; // Courier name from Shopify fulfillment
+  shippedAt: string | null; // When Shopify marked as fulfilled
 }
 
 export interface Order {
@@ -229,20 +232,20 @@ export interface Order {
   syncedAt: string | null;
   shopifyFulfillmentStatus: string | null;
   // Exchange order tracking
-  isExchange: boolean;
-  originalOrderId: string | null;
+  isExchange: boolean; // Order created to replace another (paired via originalOrderId)
+  originalOrderId: string | null; // References order being exchanged (if isExchange=true)
   originalOrder?: Order;
-  exchangeOrders?: Order[];
+  exchangeOrders?: Order[]; // All exchanges created for this order
   // Partial cancellation tracking
-  partiallyCancelled: boolean;
+  partiallyCancelled: boolean; // One or more lines cancelled but order not fully cancelled
   customer?: Customer;
   orderLines?: OrderLine[];
   // Shopify cache data (single source of truth)
-  shopifyCache?: ShopifyOrderCache | null;
+  shopifyCache?: ShopifyOrderCache | null; // Immutable snapshot of Shopify order data, updated on sync
   // Enriched fields
   fulfillmentStage?: FulfillmentStage;
-  totalLines?: number;
-  pendingLines?: number;
+  totalLines?: number; // Active (non-cancelled) line count
+  pendingLines?: number; // Lines in pending status
   allocatedLines?: number;
   pickedLines?: number;
   packedLines?: number;
@@ -264,15 +267,15 @@ export interface OrderLine {
   productionBatchId: string | null;
   notes: string | null;
   // RTO Inward fields
-  rtoCondition: string | null;
-  rtoInwardedAt: string | null;
-  rtoInwardedById: string | null;
-  rtoNotes: string | null;
+  rtoCondition: string | null; // 'unopened'|'good'|'damaged'|'wrong_product' - only set on inward
+  rtoInwardedAt: string | null; // Timestamp when RTO was processed inward
+  rtoInwardedById: string | null; // User who processed the RTO inward
+  rtoNotes: string | null; // Comments during RTO inward (damage notes, etc.)
   // Customization fields
-  isCustomized?: boolean;
-  isNonReturnable?: boolean;
-  originalSkuId?: string;
-  customizedAt?: string;
+  isCustomized?: boolean; // Line has custom SKU (size/measurements/other modification)
+  isNonReturnable?: boolean; // Cannot be returned after order shipped
+  originalSkuId?: string; // Reference to base SKU before customization applied
+  customizedAt?: string; // Timestamp when customization created
   sku?: Sku;
   productionBatch?: ProductionBatch;
 }
@@ -296,13 +299,17 @@ export interface InventoryTransaction {
   createdAt: string;
 }
 
+/**
+ * Inventory balance calculation: currentBalance = SUM(inward) - SUM(outward)
+ * availableBalance = currentBalance - SUM(reserved for pending orders)
+ */
 export interface InventoryBalance {
   skuId: string;
-  totalInward: number;
-  totalOutward: number;
-  totalReserved: number;
-  currentBalance: number;
-  availableBalance: number;
+  totalInward: number; // Cumulative inward transactions
+  totalOutward: number; // Cumulative outward transactions (orders, damages, etc.)
+  totalReserved: number; // Quantity reserved for orders in pending/allocated/picked states
+  currentBalance: number; // SUM(inward) - SUM(outward): physical inventory
+  availableBalance: number; // currentBalance - reserved: can allocate to new orders
   sku?: Sku;
 }
 

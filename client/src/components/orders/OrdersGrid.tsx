@@ -1,6 +1,66 @@
 /**
- * OrdersGrid component
- * AG Grid implementation for orders with all column definitions and row styling
+ * OrdersGrid Component
+ * AG-Grid spreadsheet UI for orders with 30+ columns, inline editing, and status tracking
+ *
+ * COLUMN ORGANIZATION (by responsibility):
+ * - Order Info: orderDate, orderAge, shipByDate, orderNumber, customerName, city, orderValue
+ * - Payment: discountCode, paymentMethod, customerNotes, customerOrderCount, customerLtv
+ * - Line Items: skuCode, productName, customize, qty, skuStock, fabricBalance
+ * - Fulfillment Actions: allocate, production, notes, pick, pack, ship, trackingStatus
+ * - Tracking: shopifyStatus, shopifyAwb, shopifyCourier, awb, courier
+ * - Management: actions (view, manage, cancel)
+ *
+ * KEY HELPER FUNCTIONS:
+ * - TrackingStatusBadge: Color-coded shipment status (in_transit, delivered, rto, etc.)
+ * - ProductionDatePopover: Calendar picker for batch production scheduling
+ * - ColumnVisibilityDropdown: Toggle/reorder columns with localStorage persistence
+ * - StatusLegend: Visual guide to row colors (pending, allocated, packed, etc.)
+ *
+ * ROW STYLING:
+ * - Each row = one order line with order-level header row
+ * - isFirstLine distinguishes header (aggregated order info) vs continuation (line items)
+ * - Color-coded by lineStatus: green=marked_shipped, blue=packed, teal=picked, etc.
+ * - Border left indicators for urgency (red >5 days, amber 3-5 days)
+ * - Struck-through for cancelled lines
+ *
+ * STATE PERSISTENCE:
+ * - Column visibility: localStorage['ordersGridVisibleColumns']
+ * - Column order: localStorage['ordersGridColumnOrder']
+ * - Column widths: localStorage['ordersGridColumnWidths']
+ * - Custom headers: localStorage['ordersGridHeaders']
+ * - Reset all via ColumnVisibilityDropdown
+ *
+ * @component
+ * @param {Object} props - Component props
+ * @param {Array} props.rows - Flattened order rows with lineId, orderId, lineStatus, etc.
+ * @param {Array<string>} props.lockedDates - Production dates that cannot be edited
+ * @param {Function} props.onAllocate - (lineId) => allocate inventory
+ * @param {Function} props.onPick - (lineId) => pick from stock
+ * @param {Function} props.onPack - (lineId) => pack order
+ * @param {Function} props.onMarkShippedLine - (lineId, data) => mark line as shipped visually
+ * @param {Function} props.onUpdateLineTracking - (lineId, {awbNumber, courier}) => update tracking
+ * @param {Function} props.onShip - (order) => ship order with full workflow
+ * @param {Function} props.onViewOrder - (orderId) => open order detail panel
+ * @param {Function} props.onCancelLine - (lineId) => cancel line
+ * @param {Function} props.onCancelOrder - (orderId, reason) => cancel entire order
+ * @returns {Object} { gridComponent, actionPanel, columnVisibilityDropdown, statusLegend, ... }
+ *
+ * @example
+ * const {
+ *   gridComponent,
+ *   actionPanel,
+ *   columnVisibilityDropdown,
+ *   statusLegend
+ * } = OrdersGrid({
+ *   rows: flattenedOrderData,
+ *   lockedDates,
+ *   onAllocate,
+ *   onPick,
+ *   onPack,
+ *   onShip,
+ *   // ... 20+ handlers
+ * });
+ * return <>{gridComponent}{actionPanel}</>;
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
@@ -454,6 +514,13 @@ const COURIER_OPTIONS = [
     'Other',
 ];
 
+/**
+ * Props for OrdersGrid. Handles 20+ action handlers for order fulfillment workflow.
+ * - rows: Flattened order data (order header row + multiple line rows per order)
+ * - lockedDates: Production dates that cannot be edited in date picker
+ * - allocatingLines: Set of lineIds currently being toggled (prevent double-click)
+ * - All on* handlers support both fulfilled and unfulfilled line states
+ */
 interface OrdersGridProps {
     rows: FlattenedOrderRow[];
     lockedDates: string[];

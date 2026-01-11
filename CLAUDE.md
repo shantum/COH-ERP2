@@ -56,6 +56,8 @@ npm run db:push
 | Routes | `server/src/routes/` (orders/ is modular) |
 | Catalog/Costing | `server/src/routes/catalog.js`, `products.js` (cost-config) |
 | Shared patterns | `server/src/utils/queryPatterns.js`, `validation.js` |
+| Error handling | `server/src/middleware/asyncHandler.js`, `server/src/utils/errors.js` |
+| Permissions | `server/src/middleware/permissions.js`, `client/src/hooks/usePermissions.ts` |
 | Frontend | `client/src/services/api.ts`, `types/index.ts`, `hooks/` |
 
 ## Common Gotchas
@@ -80,6 +82,10 @@ npm run db:push
 18. **Costing cascades**: SKU → Variation → Product → Global (null = fallback to next level)
 19. **Lining cost**: Only non-null when `hasLining=true`, otherwise always null
 20. **Fabric cost**: Fabric.costPerUnit ?? FabricType.defaultCostPerUnit (cascade)
+21. **AsyncHandler**: Wrap async routes with `asyncHandler()` to auto-catch errors; don't use with streaming/res.pipe()
+22. **Permission token invalidation**: Changing user permissions increments `tokenVersion`, forcing re-login
+23. **Permission wildcards**: `products:*` matches all product permissions; checked via `hasPermission()` utility
+24. **Server-side field filtering**: Cost fields filtered at API level via `filterConfidentialFields()`, not just UI
 
 ## Environment
 
@@ -90,6 +96,20 @@ npm run db:push
 ## Session Cleanup
 
 Run `.claude/agents/session-cleanup.md` after: 3+ features, 5+ files modified, major refactors, or before ending long sessions. Captures learnings and triggers doc optimizer.
+
+## Recommended Agents
+
+| Task Type | Agent | When to Use |
+|-----------|-------|-------------|
+| New features | `fullstack-erp-engineer` | Multi-layer changes (DB + API + UI) |
+| Bug fixes | `error-solver` | Runtime errors, failing tests |
+| Errors after coding | `error-solver` | Diagnose and fix errors quickly |
+| Code review | `code-simplifier` | After completing a feature |
+| Logic verification | `logic-auditor` | Complex business logic validation |
+| Planning | `feature-planner` | Before implementing new features |
+| Refactoring | `systems-simplifier` | Reduce complexity, consolidate |
+| Documentation | `doc-optimizer` | Keep docs concise and current |
+| Cleanup | `code-cleanup-auditor` | Find dead code, unused imports |
 
 ## Shell Tips
 

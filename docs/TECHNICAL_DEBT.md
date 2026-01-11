@@ -1,6 +1,6 @@
 # Technical Debt & Maintenance Notes
 
-> Tracked technical debt and areas for future improvement. **Last updated: January 10, 2026**
+> Tracked technical debt and areas for future improvement. **Last updated: January 11, 2026**
 
 ---
 
@@ -68,7 +68,16 @@
 
 ## Documentation Maintenance
 
-### Recent Updates (January 10, 2026)
+### Recent Updates (January 11, 2026)
+- ✓ Permissions System Phase 6 completed (97 tests, AG-Grid integration)
+- ✓ AsyncHandler pattern rolled out to all routes (products, admin, shopify, tracking, remittance, repacking, customers, returns)
+- ✓ Created docs/PERMISSIONS_IMPLEMENTATION.md (quick reference)
+- ✓ Created docs/ERROR_HANDLING.md (error patterns)
+- ✓ Consolidated ORDER_COLUMNS.md into DOMAINS.md
+- ✓ Added 4 new gotchas to CLAUDE.md (asyncHandler, permissions)
+- ✓ Deleted CACHING_STRATEGY.md (exploratory, not needed)
+
+### Previous Updates (January 10, 2026)
 - ✓ Added Catalog domain to DOMAINS.md
 - ✓ Updated ARCHITECTURE.md changelog
 - ✓ Added costing gotchas to CLAUDE.md

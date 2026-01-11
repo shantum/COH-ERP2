@@ -534,12 +534,15 @@ For each user:
 - [ ] Add user invitation flow (deferred - direct user creation for now)
 - [ ] Add password reset flow (admin-initiated) (deferred - admins can update password via user edit)
 
-**Phase 6: Testing & Polish (Week 4) - NOT STARTED**
-- [ ] Unit tests for permission utilities
-- [ ] Integration tests for protected endpoints
-- [ ] E2E tests for permission flows (including AG-Grid column visibility)
-- [ ] Security audit for edge cases
-- [ ] Documentation update
+**Phase 6: Testing & Polish (Week 4) - COMPLETED**
+- [x] Unit tests for permission utilities (97 tests, 1294 lines in permissions.test.js)
+- [x] Integration tests for protected endpoints
+- [x] E2E tests for permission flows (including AG-Grid column visibility)
+- [x] Security audit for edge cases
+- [x] Documentation update
+- [x] ColumnVisibilityDropdown enhancements with visual indicators
+- [x] Interactive permission overrides in UserManagement
+- Commit: `6479f82`
 
 ## 10. Verification Plan
 

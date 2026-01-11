@@ -1,6 +1,40 @@
 /**
- * Catalog page - Combined Products + Inventory view
- * Flat AG-Grid table with 1 row per SKU showing all product and inventory data
+ * Catalog Page - Combined Products + Inventory + Costing View
+ *
+ * FOUR VIEW LEVELS (aggregation strategies):
+ * - SKU (sku): Flat, 1 row per size variant (most granular)
+ * - Variation (variation): Aggregate by color (product + color)
+ * - Product (product): Aggregate by style (all colors/sizes per product)
+ * - Consumption (consumption): Fabric matrix (sizes × fabric consumption)
+ *
+ * COST CASCADE LOGIC (for each view):
+ * Each row shows EFFECTIVE cost (best from hierarchy):
+ *   trimsCost: SKU → Variation → Product → null
+ *   liningCost: SKU → Variation → Product → null (only if hasLining=true)
+ *   packagingCost: SKU → Variation → Product → GlobalDefault
+ *   laborMinutes: SKU → Variation → Product → 60
+ *   fabricCost: Consumption * (Fabric.costPerUnit ?? FabricType.defaultCostPerUnit)
+ *
+ * EDITING & BULK UPDATES:
+ * - Inline cell editing for costs
+ * - Variation/Product views: Updates applied to all SKU IDs in that group
+ * - Save dialog with confirmation before persisting
+ *
+ * FILTERING:
+ * - Gender, Category, Product dropdowns
+ * - Stock status (below_target, ok)
+ * - Free-form search (SKU, product name, color)
+ * - Pagination (100/500/1000/All)
+ *
+ * INVENTORY DISPLAY:
+ * - currentBalance: SUM(inward) - SUM(outward)
+ * - availableBalance: currentBalance - SUM(reserved)
+ * - shopifyQty: External stock sync status
+ *
+ * @component
+ * @example
+ * // Displayed as a main dashboard tab
+ * <Catalog />
  */
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
@@ -42,6 +76,11 @@ const HIDDEN_COLUMNS_BY_VIEW: Record<ViewLevel, string[]> = {
 const CONSUMPTION_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
 // Aggregate SKU data by variation (product + color)
+/**
+ * Groups SKUs by variation (color). Sums: balances, shopifyQty. Uses variation-level costs.
+ * @param items - Flat SKU list from API with inventory + pricing data
+ * @returns Aggregated rows keyed by variationId, skuIds[] for bulk updates
+ */
 function aggregateByVariation(items: any[]): any[] {
     const groups = new Map<string, any>();
 
@@ -137,7 +176,11 @@ function aggregateByVariation(items: any[]): any[] {
     return Array.from(groups.values());
 }
 
-// Aggregate SKU data by product
+/**
+ * Groups SKUs by product (across all colors). Sums: balances, shopifyQty. Uses product-level costs.
+ * @param items - Flat SKU list from API with inventory + pricing data
+ * @returns Aggregated rows keyed by productId, skuIds[] for bulk updates
+ */
 function aggregateByProduct(items: any[]): any[] {
     const groups = new Map<string, any>();
 
