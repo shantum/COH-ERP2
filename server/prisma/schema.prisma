@@ -940,11 +940,19 @@ model ShopifyOrderCache {
   customerNotes     String?   // Shopify order.note
   tags              String?   // Comma-separated order tags
 
-  // Tracking info from Shopify fulfillments (read-only snapshot, NOT source of truth)
-  // NOTE: Order table owns tracking data (awbNumber, courier, shippedAt, deliveredAt)
-  // These fields show Shopify's view, which may differ from ERP workflow
+  // Tracking info from Shopify fulfillments (read-only snapshot from Shopify)
+  // NOTE: These show Shopify's view, which may differ from ERP workflow
+  // Order table owns the ERP tracking data (awbNumber, courier, trackingStatus)
+  trackingNumber    String?   // AWB from Shopify fulfillment (compare with Order.awbNumber)
+  trackingCompany   String?   // Courier from Shopify (compare with Order.courier)
   trackingUrl       String?   // Tracking URL from Shopify fulfillment
+  shippedAt         DateTime? // Ship date from Shopify (compare with Order.shippedAt)
+  deliveredAt       DateTime? // Delivery date from Shopify (compare with Order.deliveredAt)
+  shipmentStatus    String?   // Shopify shipment status
   fulfillmentUpdatedAt DateTime? // Last fulfillment status update from Shopify
+
+  // Payment info from Shopify (read-only)
+  paymentMethod     String?   // COD/Prepaid at time of order (compare with Order.paymentMethod)
 
   // Shipping address (flattened for common queries)
   shippingCity      String?

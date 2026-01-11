@@ -69,10 +69,29 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
         .map(d => d.code).join(', ') || '';
 
     // Extract tracking info from fulfillments (for reference only, not source of truth)
+    // NOTE: Order table owns tracking data (awbNumber, courier), these are Shopify's view
     const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
         || shopifyOrder.fulfillments?.[0];
+    const trackingNumber = fulfillment?.tracking_number || null;
+    const trackingCompany = fulfillment?.tracking_company || null;
     const trackingUrl = fulfillment?.tracking_url || fulfillment?.tracking_urls?.[0] || null;
+    const shippedAt = fulfillment?.created_at ? new Date(fulfillment.created_at) : null;
+    const shipmentStatus = fulfillment?.shipment_status || null;
     const fulfillmentUpdatedAt = fulfillment?.updated_at ? new Date(fulfillment.updated_at) : null;
+
+    // Check for delivered status from fulfillment events
+    const deliveredEvent = fulfillment?.line_items?.[0]?.fulfillment_status === 'fulfilled'
+        && shipmentStatus === 'delivered';
+    const deliveredAt = deliveredEvent && fulfillment?.updated_at
+        ? new Date(fulfillment.updated_at) : null;
+
+    // Detect payment method using shared utility
+    // Check existing cache to preserve COD status
+    const existingCache = await prisma.shopifyOrderCache.findUnique({
+        where: { id: orderId },
+        select: { paymentMethod: true }
+    });
+    const paymentMethod = detectPaymentMethod(shopifyOrder, existingCache?.paymentMethod);
 
     // Extract shipping address fields
     const addr = shopifyOrder.shipping_address;
@@ -89,8 +108,16 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
         discountCodes,
         customerNotes: shopifyOrder.note || null,
         tags: shopifyOrder.tags || null,
+        paymentMethod,
+        // Tracking info from Shopify (may differ from ERP)
+        trackingNumber,
+        trackingCompany,
         trackingUrl,
+        shippedAt,
+        deliveredAt,
+        shipmentStatus,
         fulfillmentUpdatedAt,
+        // Address
         shippingCity,
         shippingState,
         shippingCountry,

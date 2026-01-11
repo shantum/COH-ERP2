@@ -502,8 +502,7 @@ router.get('/status/archived', async (req, res) => {
 
             let deliveryDays = null;
             const shippedDate = order.shippedAt ? new Date(order.shippedAt) : null;
-            const deliveredDate = order.deliveredAt ? new Date(order.deliveredAt) :
-                cache.deliveredAt ? new Date(cache.deliveredAt) : null;
+            const deliveredDate = order.deliveredAt ? new Date(order.deliveredAt) : null;
             if (shippedDate && deliveredDate) {
                 deliveryDays = Math.round((deliveredDate.getTime() - shippedDate.getTime()) / (1000 * 60 * 60 * 24));
             }

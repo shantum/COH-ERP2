@@ -491,7 +491,11 @@ export const ORDER_UNIFIED_SELECT = {
         select: {
             discountCodes: true,
             customerNotes: true,
+            paymentMethod: true,
             tags: true,
+            trackingNumber: true,
+            trackingCompany: true,
+            shippedAt: true,
             fulfillmentStatus: true,
             financialStatus: true,
             rawData: true, // For tracking extraction
