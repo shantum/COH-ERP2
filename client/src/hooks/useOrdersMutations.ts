@@ -217,21 +217,21 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             return optimisticInventoryUpdate(lineId, 'allocated', 1);
         },
         onError: (err: any, _lineId, context) => {
-            if (context?.skipped) return;
-            const errorMsg = err.response?.data?.error || '';
-            // Suppress state-mismatch errors from rapid clicking - just sync with server
-            if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
-                debouncedInvalidateOpenOrders();
-                return;
-            }
-            // Rollback for other errors
+            // ALWAYS rollback first, before any early returns
             if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
             if (context && 'previousInventory' in context) {
                 queryClient.setQueryData(['inventoryBalance'], context.previousInventory);
             }
-            alert(errorMsg || 'Failed to allocate line');
+
+            // Then handle specific error types
+            if (context?.skipped) return;
+
+            const errorMsg = err.response?.data?.error || '';
+            if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
+                debouncedInvalidateOpenOrders();
+            }
         },
         onSettled: (_data, _err, _lineId, context) => {
             if (context?.skipped) return;
@@ -248,21 +248,21 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             return optimisticInventoryUpdate(lineId, 'pending', -1);
         },
         onError: (err: any, _lineId, context) => {
-            if (context?.skipped) return;
-            const errorMsg = err.response?.data?.error || '';
-            // Suppress state-mismatch errors from rapid clicking - just sync with server
-            if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
-                debouncedInvalidateOpenOrders();
-                return;
-            }
-            // Rollback for other errors
+            // ALWAYS rollback first, before any early returns
             if (context && 'previousOrders' in context) {
                 queryClient.setQueryData(['openOrders'], context.previousOrders);
             }
             if (context && 'previousInventory' in context) {
                 queryClient.setQueryData(['inventoryBalance'], context.previousInventory);
             }
-            alert(errorMsg || 'Failed to unallocate line');
+
+            // Then handle specific error types
+            if (context?.skipped) return;
+
+            const errorMsg = err.response?.data?.error || '';
+            if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
+                debouncedInvalidateOpenOrders();
+            }
         },
         onSettled: (_data, _err, _lineId, context) => {
             if (context?.skipped) return;
@@ -515,7 +515,12 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             }
             alert(err.response?.data?.error || 'Failed to add to production');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: () => {
+            invalidateOpenOrders();
+            // Invalidate fabric and inventory since batch affects both
+            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+        }
     });
 
     const updateBatch = useMutation({
@@ -555,7 +560,12 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             }
             alert(err.response?.data?.error || 'Failed to update batch');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: () => {
+            invalidateOpenOrders();
+            // Invalidate fabric and inventory since batch affects both
+            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+        }
     });
 
     const deleteBatch = useMutation({
@@ -591,7 +601,12 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             }
             alert(err.response?.data?.error || 'Failed to delete batch');
         },
-        onSettled: () => invalidateOpenOrders()
+        onSettled: () => {
+            invalidateOpenOrders();
+            // Invalidate fabric and inventory since batch affects both
+            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
+        }
     });
 
     // Order CRUD mutations - these affect multiple tabs
@@ -721,7 +736,9 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         mutationFn: (id: string) => ordersApi.receiveRto(id),
         onSuccess: () => {
             invalidateRtoOrders();
-            invalidateOpenOrders(); // Inventory may come back
+            invalidateOpenOrders();
+            // Invalidate inventory balance since RTO creates inward
+            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
         },
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to receive RTO')
     });

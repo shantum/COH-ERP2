@@ -38,7 +38,13 @@ function verifyShopifyWebhook(req, secret) {
     const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
     if (!hmacHeader) return false;
 
-    const body = req.rawBody || JSON.stringify(req.body);
+    // Validate that rawBody exists
+    if (!req.rawBody) {
+        log.error('Webhook rawBody not captured - signature verification will fail');
+        return false;
+    }
+
+    const body = req.rawBody;
     const hash = crypto
         .createHmac('sha256', secret)
         .update(body, 'utf8')

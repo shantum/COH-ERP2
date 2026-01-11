@@ -5,7 +5,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi } from '../../services/api';
-import { Package, CreditCard, Banknote, TrendingUp, ShoppingBag, Truck } from 'lucide-react';
+import { Package, CreditCard, Banknote, TrendingUp, ShoppingBag, Truck, IndianRupee } from 'lucide-react';
 
 interface AnalyticsData {
     totalOrders: number;
@@ -18,6 +18,12 @@ interface AnalyticsData {
         prepaid: { count: number; amount: number };
     };
     topProducts: Array<{ name: string; qty: number }>;
+    revenue24h: {
+        total: number;
+        orderCount: number;
+        cod: number;
+        prepaid: number;
+    };
 }
 
 export function OrdersAnalyticsBar() {
@@ -115,12 +121,24 @@ export function OrdersAnalyticsBar() {
                     </div>
                 </div>
 
+                {/* Revenue 24h */}
+                <div className="flex items-center gap-2 px-4 border-r border-gray-200">
+                    <IndianRupee size={14} className="text-emerald-500" />
+                    <div>
+                        <div className="text-xs text-gray-500">Last 24h</div>
+                        <div className="text-sm font-semibold text-emerald-600">
+                            {formatCurrency(analytics.revenue24h?.total || 0)}
+                            <span className="text-xs text-gray-400 ml-1">({analytics.revenue24h?.orderCount || 0})</span>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Top Products */}
                 <div className="flex items-center gap-3 px-4 flex-1 min-w-0">
                     <TrendingUp size={14} className="text-gray-400 flex-shrink-0" />
                     <div className="flex items-center gap-2 overflow-x-auto">
                         <span className="text-xs text-gray-500 whitespace-nowrap">Top:</span>
-                        {analytics.topProducts.slice(0, 3).map((product, i) => (
+                        {analytics.topProducts.slice(0, 3).map((product) => (
                             <span
                                 key={product.name}
                                 className="text-xs px-2 py-1 bg-gray-100 rounded-full text-gray-700 whitespace-nowrap"

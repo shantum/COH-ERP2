@@ -78,16 +78,17 @@ export const optionalAuth = async (req, res, next) => {
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-            // Validate token version if present
             if (decoded.tokenVersion !== undefined) {
                 const isValid = await validateTokenVersion(req.prisma, decoded.id, decoded.tokenVersion);
-                if (isValid) {
-                    req.user = decoded;
-                    req.userPermissions = await getUserPermissions(req.prisma, decoded.id);
+                if (!isValid) {
+                    // Token invalidated - continue without auth
+                    return next();
                 }
-            } else {
-                req.user = decoded;
             }
+
+            // Always set both user AND permissions
+            req.user = decoded;
+            req.userPermissions = await getUserPermissions(req.prisma, decoded.id);
         } catch (err) {
             // Invalid token - continue without auth
         }

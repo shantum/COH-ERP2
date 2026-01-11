@@ -312,25 +312,32 @@ class IThinkLogisticsClient {
         // Success response - extract AWB from response
         // Response structure: { status: "success", status_code: 200, data: { "1": { waybill: "AWB123", status: "success", ... } } }
         // Note: data is an object with numeric string keys, not an array
-        const dataObj = response.data.data;
-        let result = null;
+        const dataObj = response.data?.data;
 
-        if (dataObj) {
-            // Get first entry from the data object
-            const firstKey = Object.keys(dataObj)[0];
-            result = dataObj[firstKey];
+        // Defensive null checks for API response
+        if (!dataObj || typeof dataObj !== 'object') {
+            throw new Error(`Invalid response format from iThink API: ${JSON.stringify(response.data)}`);
+        }
+
+        const keys = Object.keys(dataObj);
+        if (keys.length === 0) {
+            throw new Error('Empty response data from iThink API');
+        }
+
+        const firstKey = keys[0];
+        const result = dataObj[firstKey];
+
+        if (!result) {
+            throw new Error(`No result data in iThink response for key: ${firstKey}`);
         }
 
         // Check if the logistics provider returned an error
-        if (result?.status === 'error') {
-            const errorMsg = result.remark || result.reason || 'Logistics provider rejected the order';
-            console.error(`[iThink] Logistics error:`, errorMsg);
-            throw new Error(`Logistics error: ${errorMsg}`);
+        if (result.status === 'error') {
+            throw new Error(result.remark || result.reason || 'Logistics provider rejected the order');
         }
 
-        if (!result || !result.waybill) {
-            console.error('[iThink] Unexpected response:', JSON.stringify(response.data));
-            throw new Error('No AWB number returned from iThink');
+        if (!result.waybill) {
+            throw new Error(`No AWB number in iThink response: ${JSON.stringify(result)}`);
         }
 
         console.log(`[iThink] Order ${orderNumber} created successfully. AWB: ${result.waybill}`);

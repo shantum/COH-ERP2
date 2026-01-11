@@ -2,6 +2,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Validate required environment variables
+if (!process.env.JWT_SECRET) {
+    console.error('FATAL: JWT_SECRET environment variable is required');
+    process.exit(1);
+}
+
 // Import logger EARLY to capture console.log/warn/error from all subsequent imports
 import logger from './utils/logger.js';
 

@@ -95,17 +95,17 @@ function ShippedActionMenu({
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
-            if (
+            if (isOpen &&
                 menuRef.current && !menuRef.current.contains(e.target as Node) &&
                 buttonRef.current && !buttonRef.current.contains(e.target as Node)
             ) {
                 setIsOpen(false);
             }
         };
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-            return () => document.removeEventListener('mousedown', handleClickOutside);
-        }
+
+        // Always attach listener, check isOpen inside handler
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isOpen]);
 
     const handleOpen = (e: React.MouseEvent) => {

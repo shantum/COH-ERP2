@@ -227,69 +227,82 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
             }
         }
 
-        // Update order with remittance details
+        // Update order with remittance details using transaction for atomic check
         try {
-            await req.prisma.order.update({
-                where: { id: order.id },
-                data: {
-                    codRemittedAt: remittanceDate || new Date(),
-                    codRemittanceUtr: utr,
-                    codRemittedAmount: amount,
-                    codShopifySyncStatus: syncStatus,
-                    codShopifySyncError: syncError,
+            await req.prisma.$transaction(async (tx) => {
+                // Atomic check + update - only update if NOT already remitted
+                const updated = await tx.order.updateMany({
+                    where: {
+                        id: order.id,
+                        codRemittedAt: null  // Only if NOT already remitted
+                    },
+                    data: {
+                        codRemittedAt: remittanceDate || new Date(),
+                        codRemittanceUtr: utr,
+                        codRemittedAmount: amount,
+                        codShopifySyncStatus: syncStatus,
+                        codShopifySyncError: syncError,
+                    }
+                });
+
+                if (updated.count === 0) {
+                    // Order was already remitted by concurrent request
+                    results.skipped = (results.skipped || 0) + 1;
+                    return; // Exit transaction early
+                }
+
+                results.updated++;
+
+                // Attempt Shopify sync if order has shopifyOrderId and not flagged for manual review
+                if (order.shopifyOrderId && syncStatus === 'pending') {
+                    try {
+                        // Ensure Shopify client is loaded
+                        await shopifyClient.loadFromDatabase();
+
+                        if (shopifyClient.isConfigured()) {
+                            const syncResult = await shopifyClient.markOrderAsPaid(
+                                order.shopifyOrderId,
+                                amount || order.totalAmount,
+                                utr,
+                                remittanceDate || new Date()
+                            );
+
+                            if (syncResult.success) {
+                                await tx.order.update({
+                                    where: { id: order.id },
+                                    data: {
+                                        codShopifySyncStatus: 'synced',
+                                        codShopifySyncedAt: new Date(),
+                                        codShopifySyncError: null,
+                                    }
+                                });
+                                results.shopifySynced = (results.shopifySynced || 0) + 1;
+                            } else {
+                                await tx.order.update({
+                                    where: { id: order.id },
+                                    data: {
+                                        codShopifySyncStatus: 'failed',
+                                        codShopifySyncError: syncResult.error,
+                                    }
+                                });
+                                results.shopifyFailed = (results.shopifyFailed || 0) + 1;
+                            }
+                        }
+                    } catch (shopifyError) {
+                        // Don't fail the whole upload if Shopify sync fails
+                        await tx.order.update({
+                            where: { id: order.id },
+                            data: {
+                                codShopifySyncStatus: 'failed',
+                                codShopifySyncError: shopifyError.message,
+                            }
+                        });
+                        results.shopifyFailed = (results.shopifyFailed || 0) + 1;
+                    }
+                } else if (syncStatus === 'manual_review') {
+                    results.manualReview = (results.manualReview || 0) + 1;
                 }
             });
-            results.updated++;
-
-            // Attempt Shopify sync if order has shopifyOrderId and not flagged for manual review
-            if (order.shopifyOrderId && syncStatus === 'pending') {
-                try {
-                    // Ensure Shopify client is loaded
-                    await shopifyClient.loadFromDatabase();
-
-                    if (shopifyClient.isConfigured()) {
-                        const syncResult = await shopifyClient.markOrderAsPaid(
-                            order.shopifyOrderId,
-                            amount || order.totalAmount,
-                            utr,
-                            remittanceDate || new Date()
-                        );
-
-                        if (syncResult.success) {
-                            await req.prisma.order.update({
-                                where: { id: order.id },
-                                data: {
-                                    codShopifySyncStatus: 'synced',
-                                    codShopifySyncedAt: new Date(),
-                                    codShopifySyncError: null,
-                                }
-                            });
-                            results.shopifySynced = (results.shopifySynced || 0) + 1;
-                        } else {
-                            await req.prisma.order.update({
-                                where: { id: order.id },
-                                data: {
-                                    codShopifySyncStatus: 'failed',
-                                    codShopifySyncError: syncResult.error,
-                                }
-                            });
-                            results.shopifyFailed = (results.shopifyFailed || 0) + 1;
-                        }
-                    }
-                } catch (shopifyError) {
-                    // Don't fail the whole upload if Shopify sync fails
-                    await req.prisma.order.update({
-                        where: { id: order.id },
-                        data: {
-                            codShopifySyncStatus: 'failed',
-                            codShopifySyncError: shopifyError.message,
-                        }
-                    });
-                    results.shopifyFailed = (results.shopifyFailed || 0) + 1;
-                }
-            } else if (syncStatus === 'manual_review') {
-                results.manualReview = (results.manualReview || 0) + 1;
-            }
 
         } catch (updateError) {
             results.errors.push({

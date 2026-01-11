@@ -773,8 +773,11 @@ export default function Production() {
                                                                 <button
                                                                     onClick={() => {
                                                                         if (confirm('Delete this completed batch? This will also reverse inventory changes.')) {
-                                                                            uncompleteBatch.mutate(batch.id);
-                                                                            setTimeout(() => deleteBatch.mutate(batch.id), 500);
+                                                                            uncompleteBatch.mutate(batch.id, {
+                                                                                onSuccess: () => {
+                                                                                    deleteBatch.mutate(batch.id);
+                                                                                }
+                                                                            });
                                                                         }
                                                                     }}
                                                                     className="text-gray-400 hover:text-red-500"

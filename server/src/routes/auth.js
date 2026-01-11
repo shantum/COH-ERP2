@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '../utils/validation.js';
+import { validateTokenVersion } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -137,6 +138,15 @@ router.get('/me', async (req, res) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        // Validate token version for immediate session invalidation
+        if (decoded.tokenVersion !== undefined) {
+            const isValid = await validateTokenVersion(req.prisma, decoded.id, decoded.tokenVersion);
+            if (!isValid) {
+                return res.status(403).json({ error: 'Session invalidated. Please login again.' });
+            }
+        }
+
         const user = await req.prisma.user.findUnique({
             where: { id: decoded.id },
             include: {
@@ -190,6 +200,15 @@ router.post('/change-password', async (req, res) => {
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        // Validate token version for immediate session invalidation
+        if (decoded.tokenVersion !== undefined) {
+            const isValid = await validateTokenVersion(req.prisma, decoded.id, decoded.tokenVersion);
+            if (!isValid) {
+                return res.status(403).json({ error: 'Session invalidated. Please login again.' });
+            }
+        }
+
         const { currentPassword, newPassword } = req.body;
 
         // Validate input
@@ -222,7 +241,10 @@ router.post('/change-password', async (req, res) => {
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await req.prisma.user.update({
             where: { id: user.id },
-            data: { password: hashedPassword },
+            data: {
+                password: hashedPassword,
+                mustChangePassword: false  // Clear forced password change flag
+            },
         });
 
         res.json({ message: 'Password changed successfully' });

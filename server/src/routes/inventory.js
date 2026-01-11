@@ -667,17 +667,27 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
         });
     }
 
-    // Secondary idempotency check: Look for existing inventory transaction
+    // Secondary idempotency check: Look for existing inventory transaction or write-off
     // This catches race conditions where the order line update succeeded but response was lost
     const existingTxn = await findExistingRtoInward(req.prisma, lineId);
-    if (existingTxn) {
-        // Transaction already exists - return success without creating duplicate
+    const existingWriteOff = await req.prisma.writeOffLog.findFirst({
+        where: {
+            sourceId: lineId,
+            sourceType: 'rto'
+        }
+    });
+
+    if (existingTxn || existingWriteOff) {
+        // Return idempotent response
         const balance = await calculateInventoryBalance(req.prisma, orderLine.skuId);
         return res.json({
             success: true,
-            message: 'RTO line already processed (idempotent response)',
             idempotent: true,
-            existingTransactionId: existingTxn.id,
+            message: 'RTO line already processed',
+            inventoryAdded: !!existingTxn,
+            writtenOff: !!existingWriteOff,
+            condition: orderLine.rtoCondition,
+            processedAt: orderLine.rtoInwardedAt,
             line: {
                 lineId: orderLine.id,
                 orderId: orderLine.orderId,
@@ -686,7 +696,6 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
                 qty: orderLine.qty,
                 condition: orderLine.rtoCondition || condition
             },
-            inventoryAdded: true,
             newBalance: balance.currentBalance
         });
     }

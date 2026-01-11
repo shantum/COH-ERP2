@@ -645,6 +645,28 @@ router.get('/analytics', async (req, res) => {
             }
         });
 
+        // Get orders from last 24 hours for revenue calculation
+        const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentOrders = await req.prisma.order.findMany({
+            where: {
+                orderDate: { gte: last24Hours },
+                isArchived: false,
+            },
+            select: {
+                totalAmount: true,
+                paymentMethod: true,
+            }
+        });
+
+        const revenue24h = {
+            total: recentOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
+            orderCount: recentOrders.length,
+            cod: recentOrders.filter(o => o.paymentMethod?.toLowerCase() === 'cod')
+                .reduce((sum, o) => sum + (o.totalAmount || 0), 0),
+            prepaid: recentOrders.filter(o => o.paymentMethod?.toLowerCase() !== 'cod')
+                .reduce((sum, o) => sum + (o.totalAmount || 0), 0),
+        };
+
         // Count pending orders (orders with at least one pending line)
         const pendingOrders = openOrders.filter(o =>
             o.orderLines.some(l => l.lineStatus === 'pending')
@@ -660,9 +682,9 @@ router.get('/analytics', async (req, res) => {
             o.orderLines.length > 0 && o.orderLines.every(l => l.lineStatus === 'packed')
         ).length;
 
-        // Payment method split
-        const codOrders = openOrders.filter(o => o.paymentMethod === 'cod');
-        const prepaidOrders = openOrders.filter(o => o.paymentMethod !== 'cod');
+        // Payment method split (case-insensitive check)
+        const codOrders = openOrders.filter(o => o.paymentMethod?.toLowerCase() === 'cod');
+        const prepaidOrders = openOrders.filter(o => o.paymentMethod?.toLowerCase() !== 'cod');
 
         const paymentSplit = {
             cod: {
@@ -702,6 +724,7 @@ router.get('/analytics', async (req, res) => {
             totalUnits,
             paymentSplit,
             topProducts,
+            revenue24h,
         });
     } catch (error) {
         console.error('Orders analytics error:', error);

@@ -153,8 +153,8 @@ export async function checkWebhookDuplicate(prisma, webhookId) {
         }
 
         // If currently processing (webhook in-flight), skip to prevent race
-        // Processing timeout: if still 'processing' after 5 mins, allow retry
-        const processingTimeout = 5 * 60 * 1000; // 5 minutes
+        // Processing timeout: if still 'processing' after 30 mins, allow retry
+        const processingTimeout = 30 * 60 * 1000; // 30 minutes (increased from 5)
         const isStale = existing.receivedAt &&
             (Date.now() - new Date(existing.receivedAt).getTime()) > processingTimeout;
 
@@ -242,12 +242,24 @@ export async function updateWebhookLog(prisma, webhookId, status, error = null, 
 // ============================================
 
 /**
- * Add item to dead letter queue for retry
+ * Add item to dead letter queue for retry with exponential backoff
  */
 export async function addToFailedQueue(prisma, itemType, resourceId, rawData, error) {
     try {
-        // Calculate next retry with exponential backoff
-        const nextRetry = new Date(Date.now() + 60000); // First retry in 1 minute
+        // Get existing item to calculate proper backoff
+        const existingItem = await prisma.failedSyncItem.findUnique({
+            where: {
+                itemType_resourceId: { itemType, resourceId: String(resourceId) }
+            },
+            select: { retryCount: true }
+        });
+
+        const retryCount = (existingItem?.retryCount || 0) + 1;
+
+        // Exponential backoff: 1min, 2min, 4min, 8min, 16min, ... up to 24 hours max
+        const maxBackoffMs = 24 * 60 * 60 * 1000; // 24 hours max
+        const backoffMs = Math.min(60000 * Math.pow(2, retryCount - 1), maxBackoffMs);
+        const nextRetry = new Date(Date.now() + backoffMs);
 
         await prisma.failedSyncItem.upsert({
             where: {
@@ -259,12 +271,14 @@ export async function addToFailedQueue(prisma, itemType, resourceId, rawData, er
                 rawData: typeof rawData === 'string' ? rawData : JSON.stringify(rawData),
                 error: error?.substring(0, 2000) || 'Unknown error',
                 nextRetryAt: nextRetry,
+                retryCount: 1,
                 status: 'pending',
             },
             update: {
                 rawData: typeof rawData === 'string' ? rawData : JSON.stringify(rawData),
                 error: error?.substring(0, 2000) || 'Unknown error',
-                retryCount: { increment: 1 },
+                retryCount: retryCount,
+                nextRetryAt: nextRetry,
                 status: 'pending',
                 updatedAt: new Date(),
             }

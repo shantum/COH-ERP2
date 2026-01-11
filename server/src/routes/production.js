@@ -31,7 +31,7 @@ import {
     ValidationError,
     BusinessLogicError,
 } from '../utils/errors.js';
-import { calculateAllInventoryBalances, calculateFabricBalance, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
+import { calculateAllInventoryBalances, calculateFabricBalance, getEffectiveFabricConsumption, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
 import { getLockedDates, saveLockedDates } from '../utils/productionUtils.js';
 
 const router = Router();
@@ -288,10 +288,19 @@ router.put('/batches/:id', authenticateToken, asyncHandler(async (req, res) => {
 
     const updateData = {};
     if (batchDate) updateData.batchDate = new Date(batchDate);
-    if (qtyPlanned) updateData.qtyPlanned = qtyPlanned;
     if (tailorId) updateData.tailorId = tailorId;
     if (priority) updateData.priority = priority;
     if (notes !== undefined) updateData.notes = notes;
+
+    // Validate qtyPlanned doesn't go below already completed quantity
+    if (qtyPlanned !== undefined) {
+        if (qtyPlanned < currentBatch.qtyCompleted) {
+            throw new ValidationError(
+                `Cannot reduce qtyPlanned (${qtyPlanned}) below already completed quantity (${currentBatch.qtyCompleted})`
+            );
+        }
+        updateData.qtyPlanned = qtyPlanned;
+    }
 
     // AUTO-UPDATE STATUS: If qtyPlanned changes, check if status needs update
     const newQtyPlanned = qtyPlanned ?? currentBatch.qtyPlanned;
@@ -370,39 +379,8 @@ router.delete('/batches/:id', authenticateToken, requirePermission('production:d
     res.json({ success: true });
 }));
 
-/**
- * Get effective fabric consumption for a SKU
- * Cascade priority: SKU.fabricConsumption → Product.defaultFabricConsumption → 1.5 (system default)
- *
- * GOTCHA: SKU.fabricConsumption defaults to 1.5 in schema, so we check if it differs
- * from default to detect explicit SKU-level overrides.
- *
- * @param {Object} sku - SKU object with fabricConsumption field
- * @param {Object} product - Product object with defaultFabricConsumption field
- * @returns {number} Fabric consumption in meters per unit
- *
- * @example
- * const consumption = getEffectiveFabricConsumption(sku, product);
- * const totalFabric = consumption * qtyCompleted;
- */
-const DEFAULT_FABRIC_CONSUMPTION = 1.5;
-
-const getEffectiveFabricConsumption = (sku, product) => {
-    // Priority 1: SKU-specific consumption (if explicitly set, not default)
-    const skuConsumption = Number(sku.fabricConsumption);
-    if (skuConsumption && skuConsumption !== DEFAULT_FABRIC_CONSUMPTION && skuConsumption > 0) {
-        return skuConsumption;
-    }
-
-    // Priority 2: Product-level default
-    const productDefault = product?.defaultFabricConsumption;
-    if (productDefault && Number(productDefault) > 0) {
-        return Number(productDefault);
-    }
-
-    // Priority 3: System default
-    return DEFAULT_FABRIC_CONSUMPTION;
-};
+// NOTE: getEffectiveFabricConsumption is now imported from queryPatterns.js
+// This ensures consistent fabric consumption logic across production and COGS calculations
 
 // Complete batch (creates inventory inward + fabric outward)
 // Custom SKUs auto-allocate to their linked order line
@@ -413,6 +391,7 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
         throw new ValidationError('qtyCompleted must be a positive number');
     }
 
+    // Fetch batch details needed for transaction
     const batch = await req.prisma.productionBatch.findUnique({
         where: { id: req.params.id },
         include: { sku: { include: { variation: { include: { product: true } } } } }
@@ -422,38 +401,52 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
         throw new NotFoundError('Batch not found', 'ProductionBatch', req.params.id);
     }
 
-    // IDEMPOTENCY CHECK: Prevent double completion
-    if (batch.completedAt) {
-        throw new BusinessLogicError('Batch already completed', 'ALREADY_COMPLETED');
-    }
-
-    // Calculate required fabric consumption
-    const consumptionPerUnit = getEffectiveFabricConsumption(
-        batch.sku,
-        batch.sku.variation.product
-    );
-    const fabricConsumption = consumptionPerUnit * qtyCompleted;
-
-    // FABRIC BALANCE CHECK: Validate sufficient fabric before completion
+    // Pre-calculate fabric consumption for use in transaction
+    // Now uses shared utility from queryPatterns.js for consistency
+    const consumptionPerUnit = getEffectiveFabricConsumption(batch.sku);
+    const totalFabricConsumption = consumptionPerUnit * qtyCompleted;
     const fabricId = batch.sku.variation.fabricId;
-    const fabricBalance = await calculateFabricBalance(req.prisma, fabricId);
-
-    if (fabricBalance.currentBalance < fabricConsumption) {
-        throw new BusinessLogicError(
-            `Insufficient fabric balance: required ${fabricConsumption}, available ${fabricBalance.currentBalance}`,
-            'INSUFFICIENT_FABRIC'
-        );
-    }
 
     // Check if this is a custom SKU batch that should auto-allocate
     const isCustomSkuBatch = batch.sku.isCustomSku && batch.sourceOrderLineId;
 
     let autoAllocated = false;
     await req.prisma.$transaction(async (tx) => {
+        // Re-fetch and check inside transaction to prevent race condition
+        const currentBatch = await tx.productionBatch.findUnique({
+            where: { id: req.params.id },
+            select: { completedAt: true, qtyCompleted: true, qtyPlanned: true }
+        });
+
+        if (currentBatch.completedAt) {
+            throw new BusinessLogicError('Batch already completed', 'ALREADY_COMPLETED');
+        }
+
+        // Validate qty doesn't exceed planned
+        const totalCompleted = currentBatch.qtyCompleted + qtyCompleted;
+        if (totalCompleted > currentBatch.qtyPlanned) {
+            throw new ValidationError(
+                `Cannot complete ${qtyCompleted} units - would exceed planned quantity of ${currentBatch.qtyPlanned} (already completed: ${currentBatch.qtyCompleted})`
+            );
+        }
+
+        // Check fabric balance inside transaction
+        const fabricBalance = await calculateFabricBalance(tx, fabricId);
+        if (fabricBalance.currentBalance < totalFabricConsumption) {
+            throw new BusinessLogicError(
+                `Insufficient fabric balance. Required: ${totalFabricConsumption}, Available: ${fabricBalance.currentBalance}`,
+                'INSUFFICIENT_FABRIC'
+            );
+        }
+
         // Update batch
         await tx.productionBatch.update({
             where: { id: req.params.id },
-            data: { qtyCompleted, status: 'completed', completedAt: new Date() }
+            data: {
+                qtyCompleted: totalCompleted,
+                status: 'completed',
+                completedAt: new Date()
+            }
         });
 
         // Create inventory inward with batch code for tracking
@@ -477,7 +470,7 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
             data: {
                 fabricId: fabricId,
                 txnType: 'outward',
-                qty: fabricConsumption,
+                qty: totalFabricConsumption,
                 unit: 'meter',
                 reason: 'production',
                 referenceId: batch.id,
@@ -553,22 +546,23 @@ router.post('/batches/:id/uncomplete', authenticateToken, requirePermission('pro
     // Check if this is a custom SKU batch that was auto-allocated
     const isCustomSkuBatch = batch.sku.isCustomSku && batch.sourceOrderLineId;
 
-    // If custom SKU, check if order line has progressed beyond allocation
-    if (isCustomSkuBatch) {
-        const orderLine = await req.prisma.orderLine.findUnique({
-            where: { id: batch.sourceOrderLineId }
-        });
-
-        if (orderLine && ['picked', 'packed', 'shipped'].includes(orderLine.lineStatus)) {
-            throw new BusinessLogicError(
-                `Cannot uncomplete - order line has progressed to ${orderLine.lineStatus}. Unship or unpick first.`,
-                'ORDER_LINE_PROGRESSED'
-            );
-        }
-    }
-
     let allocationReversed = false;
     await req.prisma.$transaction(async (tx) => {
+        // Check order line status INSIDE transaction to prevent race condition
+        if (isCustomSkuBatch && batch.sourceOrderLineId) {
+            const currentLine = await tx.orderLine.findUnique({
+                where: { id: batch.sourceOrderLineId },
+                select: { lineStatus: true }
+            });
+
+            if (currentLine && ['picked', 'packed', 'shipped'].includes(currentLine.lineStatus)) {
+                throw new BusinessLogicError(
+                    'Cannot uncomplete batch - order line has already progressed beyond allocation',
+                    'ORDER_LINE_PROGRESSED'
+                );
+            }
+        }
+
         // Update batch status back to planned
         await tx.productionBatch.update({
             where: { id: req.params.id },

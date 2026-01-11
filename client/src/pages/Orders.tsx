@@ -3,7 +3,7 @@
  * Uses extracted hooks, utilities, and components for maintainability
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Search, RefreshCw, Archive, Truck } from 'lucide-react';
@@ -181,6 +181,18 @@ export default function Orders() {
         errors: number;
     } | null>(null);
 
+    // Timer ref for sync result cleanup
+    const syncResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Cleanup timer on unmount
+    useEffect(() => {
+        return () => {
+            if (syncResultTimerRef.current) {
+                clearTimeout(syncResultTimerRef.current);
+            }
+        };
+    }, []);
+
     // Tracking sync mutation - uses the main triggerSync endpoint
     const trackingSyncMutation = useMutation({
         mutationFn: () => trackingApi.triggerSync(),
@@ -199,7 +211,8 @@ export default function Orders() {
             queryClient.invalidateQueries({ queryKey: ['rtoOrders'] });
             queryClient.invalidateQueries({ queryKey: ['codPendingOrders'] });
             // Clear result after 5 seconds
-            setTimeout(() => setSyncResult(null), 5000);
+            if (syncResultTimerRef.current) clearTimeout(syncResultTimerRef.current);
+            syncResultTimerRef.current = setTimeout(() => setSyncResult(null), 5000);
         },
         onError: () => {
             setSyncResult({
@@ -209,7 +222,8 @@ export default function Orders() {
                 rto: 0,
                 errors: 1,
             });
-            setTimeout(() => setSyncResult(null), 5000);
+            if (syncResultTimerRef.current) clearTimeout(syncResultTimerRef.current);
+            syncResultTimerRef.current = setTimeout(() => setSyncResult(null), 5000);
         },
     });
 

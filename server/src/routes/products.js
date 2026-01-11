@@ -149,7 +149,9 @@ router.get('/cogs', authenticateToken, asyncHandler(async (req, res) => {
             variation: {
                 include: {
                     product: true,
-                    fabric: true,
+                    fabric: {
+                        include: { fabricType: true }
+                    },
                 },
             },
             skuCosting: true,
@@ -157,15 +159,44 @@ router.get('/cogs', authenticateToken, asyncHandler(async (req, res) => {
     });
 
     const cogsData = skus.map((sku) => {
-        const fabricCost = Number(sku.fabricConsumption) * Number(sku.variation.fabric.costPerUnit);
-        const laborMins = sku.variation.product.baseProductionTimeMins;
-        const laborCost = laborMins * Number(laborRatePerMin);
-        const packagingCost = sku.skuCosting?.packagingCost || defaultPackagingCost;
+        // Fix: Add null-safe cascade for fabric cost (Fabric.costPerUnit → FabricType.defaultCostPerUnit → 0)
+        const fabricCostPerUnit = Number(
+            sku.variation.fabric?.costPerUnit ??
+            sku.variation.fabric?.fabricType?.defaultCostPerUnit ??
+            0
+        );
+        const fabricConsumption = Number(sku.fabricConsumption) || 0;
+        const fabricCost = fabricConsumption * fabricCostPerUnit;
+
+        // Fix: Add proper cascade for labor, trims, lining, packaging
+        const effectiveLaborMinutes =
+            sku.laborMinutes ??
+            sku.variation.laborMinutes ??
+            sku.variation.product.baseProductionTimeMins ??
+            60;
+
+        const effectiveTrimsCost =
+            sku.trimsCost ??
+            sku.variation.trimsCost ??
+            sku.variation.product.trimsCost ??
+            0;
+
+        const effectiveLiningCost = sku.variation.hasLining
+            ? (sku.liningCost ?? sku.variation.liningCost ?? sku.variation.product.liningCost ?? 0)
+            : 0;
+
+        const effectivePackagingCost =
+            sku.packagingCost ??
+            sku.variation.packagingCost ??
+            sku.variation.product.packagingCost ??
+            defaultPackagingCost;
+
+        const laborCost = effectiveLaborMinutes * Number(laborRatePerMin);
         const otherCost = sku.skuCosting?.otherCost || 0;
-        const totalCogs = fabricCost + laborCost + Number(packagingCost) + Number(otherCost);
+        const totalCogs = fabricCost + laborCost + effectiveTrimsCost + effectiveLiningCost + Number(effectivePackagingCost) + Number(otherCost);
         const mrp = Number(sku.mrp);
         const grossMargin = mrp - totalCogs;
-        const marginPct = mrp > 0 ? ((grossMargin / mrp) * 100).toFixed(1) : 0;
+        const marginPct = mrp > 0 ? Math.round((grossMargin / mrp) * 1000) / 10 : 0;
 
         return {
             skuId: sku.id,
@@ -174,16 +205,18 @@ router.get('/cogs', authenticateToken, asyncHandler(async (req, res) => {
             colorName: sku.variation.colorName,
             size: sku.size,
             fabricConsumption: sku.fabricConsumption,
-            fabricRate: sku.variation.fabric.costPerUnit,
-            fabricCost: fabricCost.toFixed(2),
-            laborMins,
+            fabricRate: fabricCostPerUnit,
+            fabricCost: Math.round(fabricCost * 100) / 100,
+            laborMins: effectiveLaborMinutes,
             laborRatePerMin: laborRatePerMin,
-            laborCost: laborCost.toFixed(2),
-            packagingCost: Number(packagingCost).toFixed(2),
-            otherCost: Number(otherCost).toFixed(2),
-            totalCogs: totalCogs.toFixed(2),
-            mrp: mrp.toFixed(2),
-            grossMargin: grossMargin.toFixed(2),
+            laborCost: Math.round(laborCost * 100) / 100,
+            trimsCost: Math.round(effectiveTrimsCost * 100) / 100,
+            liningCost: Math.round(effectiveLiningCost * 100) / 100,
+            packagingCost: Math.round(effectivePackagingCost * 100) / 100,
+            otherCost: Math.round(otherCost * 100) / 100,
+            totalCogs: Math.round(totalCogs * 100) / 100,
+            mrp: Math.round(mrp * 100) / 100,
+            grossMargin: Math.round(grossMargin * 100) / 100,
             marginPct,
         };
     });

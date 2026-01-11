@@ -35,6 +35,7 @@ import {
     ValidationError,
     ConflictError,
     BusinessLogicError,
+    ForbiddenError,
 } from '../../utils/errors.js';
 import {
     calculateInventoryBalance,
@@ -507,27 +508,29 @@ router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), va
 
     // Check for duplicate AWB number (if AWB provided)
     if (awbNumber) {
-        const existingAwb = await req.prisma.order.findFirst({
+        const existingAwb = await req.prisma.orderLine.findFirst({
             where: {
                 awbNumber,
-                id: { not: req.params.id },
+                orderId: { not: req.params.id },
             },
-            select: { id: true, orderNumber: true },
+            select: { id: true, order: { select: { orderNumber: true } } },
         });
 
         if (existingAwb) {
             throw new ConflictError(
-                `AWB number already assigned to order ${existingAwb.orderNumber}`,
+                `AWB number already assigned to order ${existingAwb.order?.orderNumber}`,
                 'DUPLICATE_AWB'
             );
         }
     }
 
-    // Validate all lines are packed before shipping
-    const notPacked = order.orderLines.filter((l) => l.lineStatus !== 'packed');
-    if (notPacked.length > 0) {
+    // Validate all non-cancelled lines are packed before shipping
+    const unshippableLines = order.orderLines.filter(
+        l => l.lineStatus !== 'packed' && l.lineStatus !== 'cancelled'
+    );
+    if (unshippableLines.length > 0) {
         throw new BusinessLogicError(
-            `All lines must be packed before shipping (${notPacked.length} not packed)`,
+            `All non-cancelled lines must be packed before shipping (${unshippableLines.length} not packed)`,
             'LINES_NOT_PACKED'
         );
     }
@@ -565,10 +568,10 @@ router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), va
 
         // Re-check AWB inside transaction
         if (awbNumber) {
-            const existingAwb = await tx.order.findFirst({
+            const existingAwb = await tx.orderLine.findFirst({
                 where: {
                     awbNumber,
-                    id: { not: req.params.id },
+                    orderId: { not: req.params.id },
                 },
                 select: { id: true },
             });
@@ -655,6 +658,15 @@ router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship
     if (linesToShip.length !== lineIds.length) {
         throw new ValidationError(
             `Some lineIds not found in this order (found ${linesToShip.length} of ${lineIds.length})`
+        );
+    }
+
+    // Add cancelled line validation
+    const cancelledLines = linesToShip.filter(l => l.lineStatus === 'cancelled');
+    if (cancelledLines.length > 0) {
+        throw new BusinessLogicError(
+            `Cannot ship cancelled lines (${cancelledLines.length} cancelled)`,
+            'LINES_CANCELLED'
         );
     }
 
@@ -921,6 +933,9 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req, res) => {
 
         // Then create reserved transactions atomically
         for (const line of order.orderLines) {
+            // Skip cancelled lines - they shouldn't get reserved inventory
+            if (line.lineStatus === 'cancelled') continue;
+
             await createReservedTransaction(tx, {
                 skuId: line.skuId,
                 qty: line.qty,
@@ -1087,6 +1102,15 @@ router.post('/:id/receive-rto', authenticateToken, asyncHandler(async (req, res)
 // ============================================
 
 router.post('/:id/quick-ship', authenticateToken, asyncHandler(async (req, res) => {
+    // WARNING: This endpoint bypasses normal inventory validation
+    // Should only be used in testing/emergency scenarios
+    if (process.env.NODE_ENV === 'production') {
+        // Add strict admin check in production
+        if (!req.user?.role === 'admin') {
+            throw new ForbiddenError('Quick-ship is restricted to admin users in production');
+        }
+    }
+
     const order = await req.prisma.order.findUnique({
         where: { id: req.params.id },
         include: { orderLines: true },

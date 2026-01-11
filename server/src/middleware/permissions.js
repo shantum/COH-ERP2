@@ -48,9 +48,12 @@ export function hasPermission(userPermissions, permission) {
     // Direct match
     if (userPermissions.includes(permission)) return true;
 
-    // Wildcard support: products:* matches products:view, products:edit, etc.
-    const [domain, action] = permission.split(':');
-    if (userPermissions.includes(`${domain}:*`)) return true;
+    // Wildcard support with format validation: products:* matches products:view, products:edit, etc.
+    const parts = permission.split(':');
+    if (parts.length >= 2) {
+        const domain = parts[0];
+        if (userPermissions.includes(`${domain}:*`)) return true;
+    }
 
     // Global admin wildcard
     if (userPermissions.includes('*')) return true;
@@ -198,6 +201,22 @@ export function filterConfidentialFields(data, userPermissions) {
             delete result.costMultiple;
             delete result.costPerUnit;
             delete result.laborRatePerMin;
+
+            // Cascade cost fields (SKU -> Variation -> Product -> Global)
+            delete result.skuTrimsCost;
+            delete result.variationTrimsCost;
+            delete result.productTrimsCost;
+            delete result.skuLiningCost;
+            delete result.variationLiningCost;
+            delete result.productLiningCost;
+            delete result.skuPackagingCost;
+            delete result.variationPackagingCost;
+            delete result.productPackagingCost;
+            delete result.globalPackagingCost;
+            delete result.skuLaborMinutes;
+            delete result.variationLaborMinutes;
+            delete result.productLaborMinutes;
+            delete result.fabricCostPerUnit;
         }
 
         // Consumption fields - require products:view:consumption
