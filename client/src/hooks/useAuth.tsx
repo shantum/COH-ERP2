@@ -6,6 +6,10 @@ interface User {
     email: string;
     name: string;
     role: string;
+    roleId?: string;
+    roleName?: string;
+    permissions?: string[];
+    mustChangePassword?: boolean;
 }
 
 interface AuthContextType {

@@ -98,6 +98,8 @@ router.post('/login', async (req, res) => {
                 roleName: user.userRole?.displayName || null,
                 mustChangePassword: user.mustChangePassword,
             },
+            // Include permissions for frontend authorization
+            permissions: user.userRole?.permissions || [],
             token,
         });
     } catch (error) {
@@ -119,11 +121,9 @@ router.get('/me', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await req.prisma.user.findUnique({
             where: { id: decoded.id },
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
+            include: {
+                userRole: true,
+                permissionOverrides: true,
             },
         });
 
@@ -131,7 +131,31 @@ router.get('/me', async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        res.json(user);
+        // Calculate effective permissions (role + overrides)
+        const rolePermissions = new Set(
+            Array.isArray(user.userRole?.permissions)
+                ? user.userRole.permissions
+                : []
+        );
+
+        for (const override of user.permissionOverrides || []) {
+            if (override.granted) {
+                rolePermissions.add(override.permission);
+            } else {
+                rolePermissions.delete(override.permission);
+            }
+        }
+
+        res.json({
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            roleId: user.roleId,
+            roleName: user.userRole?.displayName || null,
+            permissions: Array.from(rolePermissions),
+            mustChangePassword: user.mustChangePassword,
+        });
     } catch (error) {
         res.status(401).json({ error: 'Invalid token' });
     }
