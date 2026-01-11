@@ -742,7 +742,7 @@ router.get('/analytics', async (req, res) => {
                 orderLines: {
                     select: {
                         qty: true,
-                        price: true,
+                        unitPrice: true,
                         sku: {
                             select: {
                                 variation: {
@@ -781,7 +781,7 @@ router.get('/analytics', async (req, res) => {
                 }
                 productData[productId].qty += line.qty;
                 productData[productId].orderCount += 1;
-                productData[productId].salesValue += (line.price || 0) * line.qty;
+                productData[productId].salesValue += (line.unitPrice || 0) * line.qty;
             });
         });
 
