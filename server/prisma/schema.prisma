@@ -12,16 +12,34 @@ datasource db {
 // USERS & AUTH
 // ============================================
 
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique  // owner, manager, operations, warehouse, etc.
+  displayName String
+  description String?
+  permissions Json     // Array of permission strings
+  isBuiltIn   Boolean  @default(false)  // Prevents deletion of system roles
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
   password  String
   name      String
-  role      String   @default("staff")
+  roleId    String?
+  role      String   @default("staff")  // DEPRECATED: Kept for migration, use roleId
   isActive  Boolean  @default(true)
+  tokenVersion Int    @default(0)  // Increment to invalidate all user tokens
+  mustChangePassword Boolean @default(false)  // Force password change after admin reset
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  userRole               Role?                     @relation(fields: [roleId], references: [id])
+  permissionOverrides    UserPermissionOverride[]
   inventoryTransactions  InventoryTransaction[]
   fabricTransactions     FabricTransaction[]
   returnStatusHistory    ReturnStatusHistory[]
@@ -29,6 +47,36 @@ model User {
   createdWriteOffs       WriteOffLog[]          @relation("WriteOffCreator")
   rtoInwardedLines       OrderLine[]            @relation("RtoInwardedBy")
   customizedLines        OrderLine[]            @relation("CustomizedBy")
+
+  @@index([roleId])
+}
+
+model UserPermissionOverride {
+  id           String   @id @default(uuid())
+  userId       String
+  permission   String   // e.g., "products:view:cost"
+  granted      Boolean  // true = explicitly grant, false = explicitly deny
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permission])
+  @@index([userId])
+}
+
+model PermissionAuditLog {
+  id           String   @id @default(uuid())
+  userId       String
+  action       String   // view, create, update, delete
+  resource     String   // orders, products, etc.
+  resourceId   String?
+  details      Json?    // Additional context
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([resource])
+  @@index([createdAt])
 }
 
 // ============================================

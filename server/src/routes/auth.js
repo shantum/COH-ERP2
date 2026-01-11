@@ -55,8 +55,11 @@ router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Find user
-        const user = await req.prisma.user.findUnique({ where: { email } });
+        // Find user with role
+        const user = await req.prisma.user.findUnique({
+            where: { email },
+            include: { userRole: true },
+        });
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
@@ -72,9 +75,15 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Account is disabled' });
         }
 
-        // Generate token (expiry configurable via JWT_EXPIRY env var)
+        // Generate token with tokenVersion for immediate invalidation
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role },
+            {
+                id: user.id,
+                email: user.email,
+                role: user.role,  // Keep for backward compatibility
+                roleId: user.roleId,
+                tokenVersion: user.tokenVersion,  // For instant logout on permission change
+            },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_EXPIRY || '7d' }
         );
@@ -85,6 +94,9 @@ router.post('/login', async (req, res) => {
                 email: user.email,
                 name: user.name,
                 role: user.role,
+                roleId: user.roleId,
+                roleName: user.userRole?.displayName || null,
+                mustChangePassword: user.mustChangePassword,
             },
             token,
         });
