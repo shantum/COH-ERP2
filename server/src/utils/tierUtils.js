@@ -149,53 +149,76 @@ export async function updateCustomerTier(prisma, customerId) {
 /**
  * Batch update tiers for all customers
  * Run this as a maintenance job or after bulk imports
+ * Processes in chunks to avoid PostgreSQL bind variable limits
  * @param {object} prisma - Prisma client instance
  * @returns {Promise<{total: number, updated: number, upgrades: Array}>}
  */
 export async function updateAllCustomerTiers(prisma) {
     const thresholds = await getTierThresholds(prisma);
+    const CHUNK_SIZE = 5000; // Process 5000 customers at a time
 
-    // Get all customers with their order totals
-    const customers = await prisma.customer.findMany({
-        select: { id: true, tier: true }
-    });
+    // Get total count
+    const totalCount = await prisma.customer.count();
+    console.log(`[Tier] Processing ${totalCount} customers in chunks of ${CHUNK_SIZE}`);
 
-    const customerIds = customers.map(c => c.id);
-    const statsMap = await getCustomerStatsMap(prisma, customerIds);
+    let processed = 0;
+    let totalUpdated = 0;
+    const allUpgrades = [];
 
-    const upgrades = [];
-    const updates = [];
+    while (processed < totalCount) {
+        // Get chunk of customers
+        const customers = await prisma.customer.findMany({
+            select: { id: true, tier: true },
+            skip: processed,
+            take: CHUNK_SIZE
+        });
 
-    for (const customer of customers) {
-        const stats = statsMap[customer.id] || { ltv: 0 };
-        const newTier = calculateTier(stats.ltv, thresholds);
-        const oldTier = customer.tier || 'bronze';
+        if (customers.length === 0) break;
 
-        if (newTier !== oldTier) {
-            updates.push({
-                where: { id: customer.id },
-                data: { tier: newTier }
-            });
-            upgrades.push({
-                customerId: customer.id,
-                oldTier,
-                newTier,
-                ltv: stats.ltv
-            });
+        const customerIds = customers.map(c => c.id);
+        const statsMap = await getCustomerStatsMap(prisma, customerIds);
+
+        const updates = [];
+        const upgrades = [];
+
+        for (const customer of customers) {
+            const stats = statsMap[customer.id] || { ltv: 0 };
+            const newTier = calculateTier(stats.ltv, thresholds);
+            const oldTier = customer.tier || 'bronze';
+
+            if (newTier !== oldTier) {
+                updates.push({
+                    where: { id: customer.id },
+                    data: { tier: newTier }
+                });
+                upgrades.push({
+                    customerId: customer.id,
+                    oldTier,
+                    newTier,
+                    ltv: stats.ltv
+                });
+            }
         }
+
+        // Batch update this chunk
+        if (updates.length > 0) {
+            await prisma.$transaction(
+                updates.map(u => prisma.customer.update(u))
+            );
+        }
+
+        processed += customers.length;
+        totalUpdated += updates.length;
+        allUpgrades.push(...upgrades);
+
+        console.log(`[Tier] Processed ${processed}/${totalCount}, updated ${updates.length} in this chunk`);
     }
 
-    // Batch update in transaction
-    if (updates.length > 0) {
-        await prisma.$transaction(
-            updates.map(u => prisma.customer.update(u))
-        );
-        console.log(`[Tier] Batch updated ${updates.length} customer tiers`);
-    }
+    console.log(`[Tier] Batch complete: ${totalUpdated} of ${totalCount} tiers updated`);
 
     return {
-        total: customers.length,
-        updated: updates.length,
-        upgrades
+        total: totalCount,
+        updated: totalUpdated,
+        upgrades: allUpgrades.slice(0, 100) // Return first 100 upgrades to avoid huge response
     };
 }

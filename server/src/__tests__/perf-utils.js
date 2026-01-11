@@ -254,6 +254,7 @@ export async function seedTestData(prisma, scale) {
             password: 'hashed-password',
             name: 'Performance Test User',
             role: 'staff',
+            updatedAt: new Date(),
         },
     });
 
