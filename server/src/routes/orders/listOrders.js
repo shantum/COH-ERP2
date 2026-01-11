@@ -645,16 +645,21 @@ router.get('/analytics', async (req, res) => {
             }
         });
 
-        // Get orders for today and yesterday revenue calculation
+        // Get orders for revenue calculations across multiple time periods
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const yesterdayStart = new Date(todayStart);
         yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+        const last7DaysStart = new Date(todayStart);
+        last7DaysStart.setDate(last7DaysStart.getDate() - 7);
+        const last30DaysStart = new Date(todayStart);
+        last30DaysStart.setDate(last30DaysStart.getDate() - 30);
+        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        // Get ALL orders from today/yesterday for revenue (regardless of status)
+        // Get ALL orders from last 30 days for revenue (regardless of status)
         const recentOrders = await req.prisma.order.findMany({
             where: {
-                orderDate: { gte: yesterdayStart },
+                orderDate: { gte: last30DaysStart },
             },
             select: {
                 totalAmount: true,
@@ -663,23 +668,27 @@ router.get('/analytics', async (req, res) => {
             }
         });
 
-        const todayOrders = recentOrders.filter(o => new Date(o.orderDate) >= todayStart);
-        const yesterdayOrders = recentOrders.filter(o =>
-            new Date(o.orderDate) >= yesterdayStart && new Date(o.orderDate) < todayStart
-        );
+        const filterByDateRange = (orders, start, end = null) => {
+            return orders.filter(o => {
+                const date = new Date(o.orderDate);
+                if (end) {
+                    return date >= start && date < end;
+                }
+                return date >= start;
+            });
+        };
 
         const calcRevenue = (orders) => ({
             total: orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
             orderCount: orders.length,
-            cod: orders.filter(o => o.paymentMethod?.toLowerCase() === 'cod')
-                .reduce((sum, o) => sum + (o.totalAmount || 0), 0),
-            prepaid: orders.filter(o => o.paymentMethod?.toLowerCase() !== 'cod')
-                .reduce((sum, o) => sum + (o.totalAmount || 0), 0),
         });
 
         const revenue = {
-            today: calcRevenue(todayOrders),
-            yesterday: calcRevenue(yesterdayOrders),
+            today: calcRevenue(filterByDateRange(recentOrders, todayStart)),
+            yesterday: calcRevenue(filterByDateRange(recentOrders, yesterdayStart, todayStart)),
+            last7Days: calcRevenue(filterByDateRange(recentOrders, last7DaysStart)),
+            thisMonth: calcRevenue(filterByDateRange(recentOrders, thisMonthStart)),
+            last30Days: calcRevenue(recentOrders), // All orders in the query are from last 30 days
         };
 
         // Count pending orders (orders with at least one pending line)

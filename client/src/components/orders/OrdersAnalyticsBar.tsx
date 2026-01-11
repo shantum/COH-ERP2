@@ -19,8 +19,11 @@ interface AnalyticsData {
     };
     topProducts: Array<{ name: string; qty: number }>;
     revenue: {
-        today: { total: number; orderCount: number; cod: number; prepaid: number };
-        yesterday: { total: number; orderCount: number; cod: number; prepaid: number };
+        today: { total: number; orderCount: number };
+        yesterday: { total: number; orderCount: number };
+        last7Days: { total: number; orderCount: number };
+        thisMonth: { total: number; orderCount: number };
+        last30Days: { total: number; orderCount: number };
     };
 }
 
@@ -50,7 +53,9 @@ export function OrdersAnalyticsBar() {
     if (!analytics) return null;
 
     const formatCurrency = (amount: number) => {
-        return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (amount >= 100000) return `${(amount / 100000).toFixed(2)}L`;
+        if (amount >= 1000) return `${(amount / 1000).toFixed(2)}K`;
+        return amount.toFixed(2);
     };
 
     const codPercent = analytics.totalOrders > 0
@@ -117,24 +122,43 @@ export function OrdersAnalyticsBar() {
                     </div>
                 </div>
 
-                {/* Revenue Today & Yesterday */}
-                <div className="flex items-center gap-3 px-4 border-r border-gray-200">
-                    <div className="flex items-center gap-2">
-                        <IndianRupee size={14} className="text-emerald-500" />
-                        <div>
+                {/* Revenue by Time Period */}
+                <div className="flex items-center gap-4 px-4 border-r border-gray-200">
+                    <IndianRupee size={14} className="text-emerald-500 flex-shrink-0" />
+                    <div className="flex items-center gap-3">
+                        <div title="Today's orders">
                             <div className="text-xs text-gray-500">Today</div>
                             <div className="text-sm font-semibold text-emerald-600">
                                 {formatCurrency(analytics.revenue?.today?.total || 0)}
-                                <span className="text-xs text-gray-400 ml-1">({analytics.revenue?.today?.orderCount || 0})</span>
+                                <span className="text-xs text-gray-400 ml-0.5">({analytics.revenue?.today?.orderCount || 0})</span>
                             </div>
                         </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div>
+                        <div title="Yesterday's orders">
                             <div className="text-xs text-gray-500">Yesterday</div>
                             <div className="text-sm font-semibold text-gray-600">
                                 {formatCurrency(analytics.revenue?.yesterday?.total || 0)}
-                                <span className="text-xs text-gray-400 ml-1">({analytics.revenue?.yesterday?.orderCount || 0})</span>
+                                <span className="text-xs text-gray-400 ml-0.5">({analytics.revenue?.yesterday?.orderCount || 0})</span>
+                            </div>
+                        </div>
+                        <div title="Last 7 days">
+                            <div className="text-xs text-gray-500">7 Days</div>
+                            <div className="text-sm font-semibold text-gray-600">
+                                {formatCurrency(analytics.revenue?.last7Days?.total || 0)}
+                                <span className="text-xs text-gray-400 ml-0.5">({analytics.revenue?.last7Days?.orderCount || 0})</span>
+                            </div>
+                        </div>
+                        <div title="This month">
+                            <div className="text-xs text-gray-500">Month</div>
+                            <div className="text-sm font-semibold text-gray-600">
+                                {formatCurrency(analytics.revenue?.thisMonth?.total || 0)}
+                                <span className="text-xs text-gray-400 ml-0.5">({analytics.revenue?.thisMonth?.orderCount || 0})</span>
+                            </div>
+                        </div>
+                        <div title="Last 30 days">
+                            <div className="text-xs text-gray-500">30 Days</div>
+                            <div className="text-sm font-semibold text-gray-600">
+                                {formatCurrency(analytics.revenue?.last30Days?.total || 0)}
+                                <span className="text-xs text-gray-400 ml-0.5">({analytics.revenue?.last30Days?.orderCount || 0})</span>
                             </div>
                         </div>
                     </div>
