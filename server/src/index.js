@@ -45,6 +45,7 @@ import catalogRoutes from './routes/catalog.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
 
@@ -151,67 +152,9 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  // Determine error type and status code
-  let statusCode = err.statusCode || err.status || 500;
-  let errorType = 'UnknownError';
-
-  // Categorize error types
-  if (err.name === 'PrismaClientKnownRequestError') {
-    errorType = 'DatabaseError';
-    // Map Prisma error codes to HTTP status codes
-    if (err.code === 'P2002') statusCode = 409; // Unique constraint violation
-    if (err.code === 'P2025') statusCode = 404; // Record not found
-  } else if (err.name === 'PrismaClientValidationError') {
-    errorType = 'ValidationError';
-    statusCode = 400;
-  } else if (err.name === 'ValidationError' || err.name === 'ZodError') {
-    errorType = 'ValidationError';
-    statusCode = 400;
-  } else if (err.name === 'UnauthorizedError' || err.name === 'JsonWebTokenError') {
-    errorType = 'AuthError';
-    statusCode = 401;
-  } else if (err.name === 'ForbiddenError') {
-    errorType = 'AuthError';
-    statusCode = 403;
-  }
-
-  // Build error context for logging
-  const errorContext = {
-    type: errorType,
-    name: err.name,
-    code: err.code,
-    method: req.method,
-    url: req.url,
-    statusCode,
-    userId: req.user?.id,
-    ip: req.ip || req.connection?.remoteAddress,
-  };
-
-  // Add Prisma-specific context
-  if (err.meta) {
-    errorContext.meta = err.meta;
-  }
-
-  // Log with stack trace
-  logger.error({
-    ...errorContext,
-    stack: err.stack,
-  }, `Request error: ${err.message}`);
-
-  // Send response (don't expose stack trace to client in production)
-  const response = {
-    error: err.message || 'Something went wrong!',
-    type: errorType,
-  };
-
-  if (process.env.NODE_ENV !== 'production') {
-    response.stack = err.stack;
-  }
-
-  res.status(statusCode).json(response);
-});
+// Centralized error handling middleware
+// Handles custom errors (ValidationError, NotFoundError, etc.), Prisma errors, and Zod errors
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 3001;
 

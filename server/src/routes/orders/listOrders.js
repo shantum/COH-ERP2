@@ -8,18 +8,6 @@
 
 import { Router } from 'express';
 import {
-    ORDER_LIST_SELECT_OPEN,
-    ORDER_LIST_SELECT_SHIPPED,
-    ORDER_LIST_SELECT_RTO,
-    ORDER_LIST_SELECT_COD_PENDING,
-    enrichOrdersWithCustomerStats,
-    extractShopifyTrackingFields,
-    calculateDaysSince,
-    determineTrackingStatus,
-    enrichOrderLinesWithAddresses,
-} from '../../utils/queryPatterns.js';
-import {
-    ORDER_VIEWS,
     buildViewWhereClause,
     enrichOrdersForView,
     ORDER_UNIFIED_SELECT,
@@ -116,8 +104,21 @@ router.get('/', async (req, res) => {
             viewConfig.enrichment
         );
 
+        // For open/ready_to_ship views, filter out cancelled lines
+        // (cancelled lines appear in the cancelled tab instead)
+        let finalOrders = enriched;
+        if (view === 'open' || view === 'ready_to_ship') {
+            finalOrders = enriched
+                .map(order => ({
+                    ...order,
+                    orderLines: (order.orderLines || []).filter(line => line.lineStatus !== 'cancelled'),
+                }))
+                // Also filter out orders with zero active lines (all cancelled)
+                .filter(order => order.orderLines.length > 0);
+        }
+
         const response = {
-            orders: enriched,
+            orders: finalOrders,
             view,
             viewName: viewConfig.name,
             pagination: {
@@ -142,118 +143,6 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Get open orders with fulfillment status
-router.get('/open', async (req, res) => {
-    try {
-        const { limit = 10000, offset = 0 } = req.query;
-        const take = Number(limit);
-        const skip = Number(offset);
-
-        const whereClause = { status: 'open', isArchived: false };
-
-        const totalCount = await req.prisma.order.count({ where: whereClause });
-
-        const orders = await req.prisma.order.findMany({
-            where: whereClause,
-            take,
-            skip,
-            select: ORDER_LIST_SELECT_OPEN,
-            orderBy: { orderDate: 'asc' },
-        });
-
-        const enrichedOrders = await enrichOrdersWithCustomerStats(req.prisma, orders, {
-            includeFulfillmentStage: true,
-            includeLineStatusCounts: true,
-        });
-
-        // Add resolved shipping addresses to order lines
-        const ordersWithAddresses = enrichedOrders.map(enrichOrderLinesWithAddresses);
-
-        res.json({
-            orders: ordersWithAddresses,
-            pagination: {
-                total: totalCount,
-                limit: take,
-                offset: skip,
-                hasMore: skip + enrichedOrders.length < totalCount,
-            }
-        });
-    } catch (error) {
-        console.error('Get open orders error:', error);
-        res.status(500).json({ error: 'Failed to fetch open orders' });
-    }
-});
-
-// Get shipped orders
-router.get('/shipped', async (req, res) => {
-    try {
-        const { limit = 100, offset = 0, days = 30 } = req.query;
-        const take = Number(limit);
-        const skip = Number(offset);
-
-        const sinceDate = new Date();
-        sinceDate.setDate(sinceDate.getDate() - Number(days));
-
-        const whereClause = {
-            status: { in: ['shipped', 'delivered'] },
-            shippedAt: { gte: sinceDate },
-            isArchived: false,
-            // Exclude RTO orders (use OR to handle null trackingStatus correctly)
-            OR: [
-                { trackingStatus: null },
-                { trackingStatus: { notIn: ['rto_in_transit', 'rto_delivered'] } }
-            ],
-            // Exclude delivered COD orders awaiting payment
-            NOT: {
-                AND: [
-                    { paymentMethod: 'COD' },
-                    { trackingStatus: 'delivered' },
-                    { codRemittedAt: null }
-                ]
-            }
-        };
-
-        const totalCount = await req.prisma.order.count({ where: whereClause });
-
-        const orders = await req.prisma.order.findMany({
-            where: whereClause,
-            select: ORDER_LIST_SELECT_SHIPPED,
-            orderBy: { shippedAt: 'desc' },
-            take,
-            skip,
-        });
-
-        const enrichedWithCustomer = await enrichOrdersWithCustomerStats(req.prisma, orders);
-
-        const enriched = enrichedWithCustomer.map((order) => {
-            const daysInTransit = calculateDaysSince(order.shippedAt);
-            const trackingStatus = determineTrackingStatus(order, daysInTransit);
-            const shopifyCache = extractShopifyTrackingFields(order.shopifyCache);
-
-            return {
-                ...order,
-                shopifyCache,
-                daysInTransit,
-                trackingStatus,
-            };
-        });
-
-        res.json({
-            orders: enriched,
-            pagination: {
-                total: totalCount,
-                limit: take,
-                offset: skip,
-                hasMore: skip + orders.length < totalCount,
-                page: Math.floor(skip / take) + 1,
-                totalPages: Math.ceil(totalCount / take)
-            }
-        });
-    } catch (error) {
-        console.error('Get shipped orders error:', error);
-        res.status(500).json({ error: 'Failed to fetch shipped orders' });
-    }
-});
 
 // Get RTO orders summary
 router.get('/rto/summary', async (req, res) => {
@@ -339,106 +228,6 @@ router.get('/rto/summary', async (req, res) => {
     } catch (error) {
         console.error('Get RTO summary error:', error);
         res.status(500).json({ error: 'Failed to fetch RTO summary' });
-    }
-});
-
-// Get RTO orders (Return to Origin)
-router.get('/rto', async (req, res) => {
-    try {
-        const { limit = 200, offset = 0 } = req.query;
-        const take = Number(limit);
-        const skip = Number(offset);
-
-        const whereClause = {
-            trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-            isArchived: false,
-        };
-
-        const totalCount = await req.prisma.order.count({ where: whereClause });
-
-        const orders = await req.prisma.order.findMany({
-            where: whereClause,
-            select: ORDER_LIST_SELECT_RTO,
-            orderBy: { rtoInitiatedAt: 'desc' },
-            take,
-            skip,
-        });
-
-        const enrichedWithCustomer = await enrichOrdersWithCustomerStats(req.prisma, orders);
-
-        const enriched = enrichedWithCustomer.map((order) => ({
-            ...order,
-            daysInRto: calculateDaysSince(order.rtoInitiatedAt),
-        }));
-
-        res.json({
-            orders: enriched,
-            total: totalCount,
-            pagination: {
-                total: totalCount,
-                limit: take,
-                offset: skip,
-                hasMore: skip + orders.length < totalCount,
-                page: Math.floor(skip / take) + 1,
-                totalPages: Math.ceil(totalCount / take)
-            }
-        });
-    } catch (error) {
-        console.error('Get RTO orders error:', error);
-        res.status(500).json({ error: 'Failed to fetch RTO orders' });
-    }
-});
-
-// Get COD pending orders (delivered but awaiting payment)
-router.get('/cod-pending', async (req, res) => {
-    try {
-        const { limit = 200, offset = 0 } = req.query;
-        const take = Number(limit);
-        const skip = Number(offset);
-
-        const whereClause = {
-            paymentMethod: 'COD',
-            trackingStatus: 'delivered',
-            codRemittedAt: null,
-            isArchived: false,
-        };
-
-        const [totalCount, totalPendingAmount] = await Promise.all([
-            req.prisma.order.count({ where: whereClause }),
-            req.prisma.order.aggregate({ where: whereClause, _sum: { totalAmount: true } }),
-        ]);
-
-        const orders = await req.prisma.order.findMany({
-            where: whereClause,
-            select: ORDER_LIST_SELECT_COD_PENDING,
-            orderBy: { deliveredAt: 'desc' },
-            take,
-            skip,
-        });
-
-        const enrichedWithCustomer = await enrichOrdersWithCustomerStats(req.prisma, orders);
-
-        const enriched = enrichedWithCustomer.map((order) => ({
-            ...order,
-            daysSinceDelivery: calculateDaysSince(order.deliveredAt),
-        }));
-
-        res.json({
-            orders: enriched,
-            total: totalCount,
-            totalPendingAmount: totalPendingAmount._sum.totalAmount || 0,
-            pagination: {
-                total: totalCount,
-                limit: take,
-                offset: skip,
-                hasMore: skip + orders.length < totalCount,
-                page: Math.floor(skip / take) + 1,
-                totalPages: Math.ceil(totalCount / take)
-            }
-        });
-    } catch (error) {
-        console.error('Get COD pending orders error:', error);
-        res.status(500).json({ error: 'Failed to fetch COD pending orders' });
     }
 });
 
@@ -758,7 +547,7 @@ router.get('/status/cancelled', async (req, res) => {
                     },
                 },
             },
-            orderBy: { updatedAt: 'desc' },
+            orderBy: { order: { createdAt: 'desc' } },
         });
 
         // Transform to order-like structure for frontend compatibility
