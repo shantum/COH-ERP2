@@ -132,6 +132,8 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 26. **Deprecated schema**: `User.role` removed (use `roleId`); `PermissionAuditLog`, `StockAlert` tables removed
 27. **Shipping via service**: All shipping must go through `ShipOrderService` - cannot set lineStatus='shipped' via bulk-update
 28. **Migration-ship**: Use `POST /fulfillment/:id/migration-ship` for onboarding orders (admin only, skips inventory)
+29. **RTO orders excluded from LTV**: Customer tier upgrades exclude RTO (returned) orders. Use `OR[trackingStatus=null OR NOT IN rto_*]` not just `!=null` because unshipped orders must count
+30. **Batch update limits**: Updating 5000+ customers at once hits PostgreSQL bind variable limits; use `chunkProcess()` helper in batches of 5000
 
 ## Environment
 
