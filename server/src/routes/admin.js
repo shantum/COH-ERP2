@@ -309,6 +309,146 @@ router.put('/users/:id/role', requireAdmin, asyncHandler(async (req, res) => {
     });
 }));
 
+// Get user permissions with overrides
+router.get('/users/:id/permissions', requireAdmin, asyncHandler(async (req, res) => {
+    const user = await req.prisma.user.findUnique({
+        where: { id: req.params.id },
+        include: {
+            userRole: { select: { id: true, name: true, displayName: true, permissions: true } },
+            permissionOverrides: true,
+        },
+    });
+
+    if (!user) {
+        throw new NotFoundError('User not found', 'User', req.params.id);
+    }
+
+    // Get role permissions as array
+    const rolePermissions = Array.isArray(user.userRole?.permissions)
+        ? user.userRole.permissions
+        : [];
+
+    // Build map of overrides: permission -> granted
+    const overrideMap = new Map();
+    for (const override of user.permissionOverrides) {
+        overrideMap.set(override.permission, override.granted);
+    }
+
+    res.json({
+        userId: user.id,
+        roleId: user.userRole?.id || null,
+        roleName: user.userRole?.displayName || null,
+        rolePermissions,
+        overrides: user.permissionOverrides.map(o => ({
+            permission: o.permission,
+            granted: o.granted,
+        })),
+    });
+}));
+
+// Update user permission overrides
+router.put('/users/:id/permissions', requireAdmin, asyncHandler(async (req, res) => {
+    const { overrides } = req.body;
+
+    if (!Array.isArray(overrides)) {
+        throw new ValidationError('overrides must be an array');
+    }
+
+    // Validate each override
+    for (const override of overrides) {
+        if (!override.permission || typeof override.permission !== 'string') {
+            throw new ValidationError('Each override must have a permission string');
+        }
+        if (typeof override.granted !== 'boolean') {
+            throw new ValidationError('Each override must have a granted boolean');
+        }
+    }
+
+    const user = await req.prisma.user.findUnique({
+        where: { id: req.params.id },
+        include: {
+            userRole: { select: { id: true, permissions: true } },
+        },
+    });
+
+    if (!user) {
+        throw new NotFoundError('User not found', 'User', req.params.id);
+    }
+
+    // Get role permissions for comparison
+    const rolePermissions = new Set(
+        Array.isArray(user.userRole?.permissions) ? user.userRole.permissions : []
+    );
+
+    // Determine which overrides to create/update and which to delete
+    const toUpsert = [];
+    const toDelete = [];
+
+    for (const override of overrides) {
+        const roleHasPermission = rolePermissions.has(override.permission);
+
+        // If override matches role default, we should delete it (no need to store)
+        if ((override.granted && roleHasPermission) || (!override.granted && !roleHasPermission)) {
+            toDelete.push(override.permission);
+        } else {
+            // Override differs from role default, store it
+            toUpsert.push(override);
+        }
+    }
+
+    // Execute in transaction
+    await req.prisma.$transaction(async (tx) => {
+        // Delete overrides that now match role defaults
+        if (toDelete.length > 0) {
+            await tx.userPermissionOverride.deleteMany({
+                where: {
+                    userId: req.params.id,
+                    permission: { in: toDelete },
+                },
+            });
+        }
+
+        // Upsert overrides that differ from role defaults
+        for (const override of toUpsert) {
+            await tx.userPermissionOverride.upsert({
+                where: {
+                    userId_permission: {
+                        userId: req.params.id,
+                        permission: override.permission,
+                    },
+                },
+                update: { granted: override.granted },
+                create: {
+                    userId: req.params.id,
+                    permission: override.permission,
+                    granted: override.granted,
+                },
+            });
+        }
+
+        // Increment token version to force re-login with new permissions
+        await tx.user.update({
+            where: { id: req.params.id },
+            data: { tokenVersion: { increment: 1 } },
+        });
+    });
+
+    // Fetch updated overrides
+    const updatedOverrides = await req.prisma.userPermissionOverride.findMany({
+        where: { userId: req.params.id },
+    });
+
+    console.log(`[Admin] Permission overrides updated for user ${user.email}: ${toUpsert.length} set, ${toDelete.length} cleared`);
+
+    res.json({
+        message: 'Permission overrides updated successfully',
+        overrides: updatedOverrides.map(o => ({
+            permission: o.permission,
+            granted: o.granted,
+        })),
+    });
+}));
+
 // ============================================
 // USER MANAGEMENT (Admin only)
 // ============================================

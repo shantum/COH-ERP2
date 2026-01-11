@@ -528,6 +528,10 @@ export const adminApi = {
     assignUserRole: (userId: string, roleId: string) =>
         api.put(`/admin/users/${userId}/role`, { roleId }),
     deleteUser: (id: string) => api.delete(`/admin/users/${id}`),
+    // Permission overrides
+    getUserPermissions: (userId: string) => api.get(`/admin/users/${userId}/permissions`),
+    updateUserPermissions: (userId: string, overrides: { permission: string; granted: boolean }[]) =>
+        api.put(`/admin/users/${userId}/permissions`, { overrides }),
     // Database inspector
     getTables: () => api.get('/admin/inspect/tables'),
     inspectTable: (tableName: string, limit?: number, offset?: number) =>

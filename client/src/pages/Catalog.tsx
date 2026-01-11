@@ -15,6 +15,7 @@ import { FormModal, ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { ColumnVisibilityDropdown, InventoryStatusBadge } from '../components/common/grid';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
+import { usePermissionColumns, type PermissionColDef } from '../hooks/usePermissionColumns';
 
 // Page size options
 const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const; // 0 = All
@@ -945,8 +946,8 @@ export default function Catalog() {
         }
     }, [viewLevel]);
 
-    // Column definitions
-    const columnDefs: ColDef[] = useMemo(() => [
+    // Column definitions with permission-aware cost columns
+    const columnDefs: PermissionColDef[] = useMemo(() => [
         // Image column - first for visual identification
         {
             colId: 'image',
@@ -1162,6 +1163,8 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.fabricConsumption,
             field: 'fabricConsumption',
             width: 65,
+            viewPermission: 'products:view:consumption',
+            editPermission: 'products:edit:consumption',
             editable: () => viewLevel !== 'consumption', // Editable in all views except consumption matrix
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? params.value.toFixed(2) : '-',
@@ -1173,6 +1176,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.fabricCost,
             field: 'fabricCost',
             width: 70,
+            viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs text-blue-600',
@@ -1182,6 +1186,8 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.laborMinutes,
             field: 'laborMinutes',
             width: 75,
+            viewPermission: 'products:view:cost',
+            editPermission: 'products:edit:cost',
             editable: true,
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? params.value.toFixed(0) : '-',
@@ -1193,6 +1199,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.laborCost,
             field: 'laborCost',
             width: 70,
+            viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs text-purple-600',
@@ -1202,6 +1209,8 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.trimsCost,
             field: 'trimsCost',
             width: 70,
+            viewPermission: 'products:view:cost',
+            editPermission: 'products:edit:cost',
             editable: true,
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
@@ -1213,6 +1222,8 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.liningCost,
             field: 'liningCost',
             width: 65,
+            viewPermission: 'products:view:cost',
+            editPermission: 'products:edit:cost',
             editable: (params: any) => params.data?.hasLining === true, // Only editable if hasLining
             valueFormatter: (params: ValueFormatterParams) => {
                 // Show "-" if no lining
@@ -1230,6 +1241,8 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.packagingCost,
             field: 'packagingCost',
             width: 65,
+            viewPermission: 'products:view:cost',
+            editPermission: 'products:edit:cost',
             editable: true,
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
@@ -1241,6 +1254,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.totalCost,
             field: 'totalCost',
             width: 70,
+            viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs font-medium text-emerald-700',
@@ -1251,6 +1265,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.exGstPrice,
             field: 'exGstPrice',
             width: 75,
+            viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `₹${Number(params.value).toFixed(0)}` : '-',
             cellClass: 'text-right text-xs',
@@ -1260,6 +1275,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.gstAmount,
             field: 'gstAmount',
             width: 65,
+            viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) => {
                 if (params.value == null) return '-';
                 const rate = params.data?.gstRate || 0;
@@ -1272,6 +1288,7 @@ export default function Catalog() {
             headerName: DEFAULT_HEADERS.costMultiple,
             field: 'costMultiple',
             width: 70,
+            viewPermission: 'products:view:cost',
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value != null ? `${Number(params.value).toFixed(1)}x` : '-',
             cellClass: (params: CellClassParams) => {
@@ -1519,6 +1536,9 @@ export default function Catalog() {
         })),
     ], []);
 
+    // Filter columns based on user permissions
+    const permissionFilteredColumns = usePermissionColumns(columnDefs);
+
     // Apply visibility and ordering using helper functions
     const orderedColumnDefs = useMemo(() => {
         // Use consumption-specific columns for consumption view
@@ -1527,7 +1547,7 @@ export default function Catalog() {
         }
 
         // First apply user's column visibility preferences
-        const withVisibility = applyColumnVisibility(columnDefs, visibleColumns);
+        const withVisibility = applyColumnVisibility(permissionFilteredColumns, visibleColumns);
         // Then hide columns based on view level
         const hiddenByView = HIDDEN_COLUMNS_BY_VIEW[viewLevel];
         const withViewVisibility = withVisibility.map(col => ({
@@ -1537,7 +1557,12 @@ export default function Catalog() {
         // Apply saved column widths
         const withWidths = applyColumnWidths(withViewVisibility, columnWidths);
         return orderColumns(withWidths, columnOrder);
-    }, [columnDefs, consumptionColumnDefs, visibleColumns, columnOrder, columnWidths, viewLevel]);
+    }, [permissionFilteredColumns, consumptionColumnDefs, visibleColumns, columnOrder, columnWidths, viewLevel]);
+
+    // Column IDs available after permission filtering (for ColumnVisibilityDropdown)
+    const availableColumnIds = useMemo(() => {
+        return permissionFilteredColumns.map(col => col.colId || col.field || '').filter(Boolean);
+    }, [permissionFilteredColumns]);
 
     // Summary stats based on view level
     const stats = useMemo(() => {
@@ -1813,12 +1838,12 @@ export default function Catalog() {
                             </select>
                         </div>
 
-                        {/* Column Visibility - filter out columns hidden by view level */}
+                        {/* Column Visibility - filter out columns hidden by view level and permissions */}
                         <ColumnVisibilityDropdown
                             visibleColumns={visibleColumns}
                             onToggleColumn={handleToggleColumn}
                             onResetAll={handleResetAll}
-                            columnIds={ALL_COLUMN_IDS.filter(id => !HIDDEN_COLUMNS_BY_VIEW[viewLevel].includes(id))}
+                            columnIds={availableColumnIds.filter(id => !HIDDEN_COLUMNS_BY_VIEW[viewLevel].includes(id))}
                             columnHeaders={DEFAULT_HEADERS}
                         />
                     </div>
