@@ -425,6 +425,6 @@ export const DEFAULT_HEADERS: Record<string, string> = {
 
 // Columns shown by default (cleaner initial view)
 export const DEFAULT_VISIBLE_COLUMNS = [
-    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'productName',
+    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'paymentMethod', 'productName',
     'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'actions'
 ];
