@@ -18,21 +18,10 @@ const getDefaultDateRange = () => {
 
 export default function Production() {
     const queryClient = useQueryClient();
+
+    // UI state - declared first so queries can reference them
     const [tab, setTab] = useState<'schedule' | 'capacity' | 'tailors'>('schedule');
-    const [showPlanner, setShowPlanner] = useState(true);
-
-    // Memoize date range to prevent query key changes on every render
-    const dateRange = useMemo(() => getDefaultDateRange(), []);
-    const { data: batches, isLoading } = useQuery({
-        queryKey: ['productionBatches', dateRange.startDate, dateRange.endDate],
-        queryFn: () => productionApi.getBatches({ startDate: dateRange.startDate, endDate: dateRange.endDate }).then(r => r.data)
-    });
-    const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
-    const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
-    const { data: allSkus } = useQuery({ queryKey: ['allSkus'], queryFn: () => productsApi.getAllSkus().then(r => r.data) });
-    const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
-    const { data: requirements } = useQuery({ queryKey: ['productionRequirements'], queryFn: () => productionApi.getRequirements().then(r => r.data) });
-
+    const [showPlanner, setShowPlanner] = useState(false); // Start collapsed for performance
     const [showComplete, setShowComplete] = useState<any>(null);
     const [qtyCompleted, setQtyCompleted] = useState(0);
     const [customConfirmed, setCustomConfirmed] = useState(false);
@@ -42,6 +31,28 @@ export default function Production() {
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
     const [copiedDate, setCopiedDate] = useState<string | null>(null);
     const [requirementsLimit, setRequirementsLimit] = useState(20);
+
+    // Memoize date range to prevent query key changes on every render
+    const dateRange = useMemo(() => getDefaultDateRange(), []);
+
+    // Queries - some are lazy loaded based on UI state
+    const { data: batches, isLoading } = useQuery({
+        queryKey: ['productionBatches', dateRange.startDate, dateRange.endDate],
+        queryFn: () => productionApi.getBatches({ startDate: dateRange.startDate, endDate: dateRange.endDate }).then(r => r.data)
+    });
+    const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
+    const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
+    const { data: allSkus } = useQuery({
+        queryKey: ['allSkus'],
+        queryFn: () => productsApi.getAllSkus().then(r => r.data),
+        enabled: !!showAddItem, // Lazy load - only fetch when Add Item modal is open
+    });
+    const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
+    const { data: requirements, isLoading: requirementsLoading } = useQuery({
+        queryKey: ['productionRequirements'],
+        queryFn: () => productionApi.getRequirements().then(r => r.data),
+        enabled: showPlanner, // Lazy load - only fetch when section is expanded
+    });
 
     const invalidateAll = () => {
         queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
@@ -414,26 +425,43 @@ export default function Production() {
             {/* Schedule Tab with Planner Section */}
             {tab === 'schedule' && (
                 <div className="space-y-4">
-                    {/* Production Requirements Section (Collapsible) - Order-wise */}
-                    {requirements?.requirements?.length > 0 && (
-                        <div className="border border-red-200 rounded-lg overflow-hidden">
-                            <div
-                                className="flex items-center justify-between px-4 py-3 bg-red-50 cursor-pointer"
-                                onClick={() => setShowPlanner(!showPlanner)}
-                            >
-                                <div className="flex items-center gap-3">
-                                    {showPlanner ? <ChevronDown size={16} className="text-red-400" /> : <ChevronRight size={16} className="text-red-400" />}
-                                    <span className="font-medium text-red-800">Production Requirements</span>
+                    {/* Production Requirements Section (Collapsible, Lazy Loaded) - Order-wise */}
+                    <div className="border border-red-200 rounded-lg overflow-hidden">
+                        <div
+                            className="flex items-center justify-between px-4 py-3 bg-red-50 cursor-pointer"
+                            onClick={() => setShowPlanner(!showPlanner)}
+                        >
+                            <div className="flex items-center gap-3">
+                                {showPlanner ? <ChevronDown size={16} className="text-red-400" /> : <ChevronRight size={16} className="text-red-400" />}
+                                <span className="font-medium text-red-800">Production Queue</span>
+                                {requirementsLoading ? (
+                                    <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs">Loading...</span>
+                                ) : requirements?.summary ? (
                                     <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
                                         {requirements.summary.totalLinesNeedingProduction} items • {requirements.summary.totalUnitsNeeded} units
                                     </span>
-                                </div>
-                                <span className="text-xs text-red-600">{requirements.summary.totalOrdersAffected} orders</span>
+                                ) : !showPlanner ? (
+                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">Click to load</span>
+                                ) : null}
                             </div>
+                            {requirements?.summary && (
+                                <span className="text-xs text-red-600">{requirements.summary.totalOrdersAffected} orders</span>
+                            )}
+                        </div>
 
-                            {showPlanner && (
-                                <div className="bg-white table-scroll-container">
-                                    <table className="w-full text-sm" style={{ minWidth: '700px' }}>
+                        {showPlanner && (
+                            requirementsLoading ? (
+                                <div className="flex justify-center p-6 bg-white">
+                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-red-400"></div>
+                                </div>
+                            ) : requirements?.requirements?.length === 0 ? (
+                                <div className="flex items-center gap-3 px-4 py-3 bg-green-50">
+                                    <CheckCircle size={20} className="text-green-500" />
+                                    <span className="text-sm text-green-700">All caught up! No pending production requirements from open orders.</span>
+                                </div>
+                            ) : requirements?.requirements?.length > 0 ? (
+                            <div className="bg-white table-scroll-container">
+                                <table className="w-full text-sm" style={{ minWidth: '700px' }}>
                                         <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
                                             <tr>
                                                 <th className="px-3 py-2">Order</th>
@@ -535,18 +563,10 @@ export default function Production() {
                                             </div>
                                         </div>
                                     )}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* All caught up message */}
-                    {requirements?.requirements?.length === 0 && (
-                        <div className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-lg">
-                            <CheckCircle size={20} className="text-green-500" />
-                            <span className="text-sm text-green-700">All caught up! No pending production requirements from open orders.</span>
-                        </div>
-                    )}
+                            </div>
+                            ) : null
+                        )}
+                    </div>
 
                     {/* Date-wise Schedule */}
                     <div className="space-y-2">
