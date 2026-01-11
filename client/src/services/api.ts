@@ -236,12 +236,12 @@ export const ordersApi = {
     updateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) =>
         api.patch(`/orders/lines/${lineId}/tracking`, data),
     processMarkedShipped: (data?: { comment?: string }) => api.post('/orders/process-marked-shipped', data),
+    // Migration (onboarding - no inventory, uses Shopify fulfillment data)
+    migrateShopifyFulfilled: () => api.post('/orders/migrate-shopify-fulfilled'),
     // Ship (with inventory release)
     ship: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/ship`, data),
     shipLines: (id: string, data: ShipLinesData) => api.post(`/orders/${id}/ship-lines`, data),
     unship: (id: string) => api.post(`/orders/${id}/unship`),
-    quickShip: (id: string) => api.post(`/orders/${id}/quick-ship`),
-    bulkQuickShip: () => api.post('/orders/bulk-quick-ship'),
     deliver: (id: string) => api.post(`/orders/${id}/deliver`),
     // Summary and analytics endpoints
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),
@@ -439,9 +439,6 @@ export const shopifyApi = {
     getConfig: () => api.get('/shopify/config'),
     updateConfig: (data: { shopDomain: string; accessToken: string }) => api.put('/shopify/config', data),
     testConnection: () => api.post('/shopify/test-connection'),
-    // Auto-ship setting
-    getAutoShipSetting: () => api.get('/shopify/settings/auto-ship'),
-    updateAutoShipSetting: (enabled: boolean) => api.put('/shopify/settings/auto-ship', { enabled }),
     getStatus: () => api.get('/shopify/status'),
     getSyncHistory: () => api.get('/shopify/sync/history'),
     // Preview endpoints

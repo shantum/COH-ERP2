@@ -466,6 +466,18 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to process marked shipped lines')
     });
 
+    // Migrate Shopify fulfilled orders (onboarding - no inventory)
+    const migrateShopifyFulfilled = useMutation({
+        mutationFn: () => ordersApi.migrateShopifyFulfilled(),
+        onSuccess: (response: any) => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+            const { skipped, message } = response.data;
+            alert(message + (skipped > 0 ? ` (${skipped} already shipped)` : ''));
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to migrate fulfilled orders')
+    });
+
     // Production batch mutations - only affects open orders (with optimistic updates)
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
@@ -683,29 +695,6 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to unship order')
     });
 
-    // Quick ship - force ship without allocate/pick/pack (testing only)
-    const quickShip = useMutation({
-        mutationFn: (id: string) => ordersApi.quickShip(id),
-        onSuccess: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to quick ship order')
-    });
-
-    // Bulk quick ship - ship all eligible orders at once
-    const bulkQuickShip = useMutation({
-        mutationFn: () => ordersApi.bulkQuickShip(),
-        onSuccess: (response: any) => {
-            const { shipped, failed, message } = response.data;
-            invalidateOpenOrders();
-            invalidateShippedOrders();
-            const failedMsg = failed?.length ? `, ${failed.length} failed` : '';
-            alert(message || `Shipped ${shipped?.length || 0} orders${failedMsg}`);
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to bulk quick ship')
-    });
-
     // Delivery tracking mutations - affects shipped tab and potentially COD pending
     const markDelivered = useMutation({
         mutationFn: (id: string) => ordersApi.markDelivered(id),
@@ -861,8 +850,6 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         ship,
         shipLines,
         unship,
-        quickShip,
-        bulkQuickShip,
 
         // Delivery tracking
         markDelivered,
@@ -882,6 +869,9 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         unmarkShippedLine,
         updateLineTracking,
         processMarkedShipped,
+
+        // Migration (onboarding)
+        migrateShopifyFulfilled,
 
         // Production
         createBatch,

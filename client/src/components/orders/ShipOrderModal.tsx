@@ -1,4 +1,7 @@
 /**
+ * @deprecated This modal is deprecated. Use UnifiedOrderModal with mode='ship' instead.
+ * This component is kept for backward compatibility but will be removed in a future release.
+ *
  * ShipOrderModal component
  * Modal for verifying AWB and marking order lines as shipped
  * Supports partial shipments - can ship selected lines with different AWBs

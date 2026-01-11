@@ -17,7 +17,7 @@
  * - Idempotent: Can safely re-process same order multiple times
  * - Race condition safe: Uses withOrderLock to prevent concurrent processing
  * - Fulfillment mapping: Maps Shopify line-level fulfillments to OrderLines via shopifyLineId
- * - Auto-ship support: Respects auto_ship_fulfilled system setting
+ * - ERP is source of truth for shipping: Shopify fulfillment captures tracking data but does NOT auto-ship
  *
  * @module services/shopifyOrderProcessor
  * @requires ./shopify
@@ -229,7 +229,8 @@ export async function syncFulfillmentsToOrderLines(prisma, orderId, shopifyOrder
         // Get Shopify line IDs from this fulfillment
         const shopifyLineIds = fulfillment.line_items.map(li => String(li.id));
 
-        // Update matching OrderLines that aren't already shipped
+        // Update matching OrderLines with tracking data from Shopify fulfillment
+        // NOTE: Does NOT change lineStatus - ERP is source of truth for shipping status
         // Skip cancelled lines and lines already shipped (to preserve existing tracking)
         const result = await prisma.orderLine.updateMany({
             where: {
@@ -240,19 +241,17 @@ export async function syncFulfillmentsToOrderLines(prisma, orderId, shopifyOrder
             data: {
                 awbNumber,
                 courier,
-                shippedAt,
-                lineStatus: 'shipped',
                 trackingStatus,
+                // NOT setting lineStatus to 'shipped' - user must explicitly ship through ERP
+                // NOT setting shippedAt - this is set when ERP ships the order
             }
         });
 
         syncedCount += result.count;
     }
 
-    // Update order status if all non-cancelled lines are now shipped
-    if (syncedCount > 0) {
-        await updateOrderStatusFromLines(prisma, orderId);
-    }
+    // NOTE: Not updating order status automatically - ERP is source of truth for shipping
+    // Tracking data is captured but order/line status remains unchanged
 
     return { synced: syncedCount, fulfillments: fulfillments.length };
 }
@@ -263,14 +262,12 @@ export async function syncFulfillmentsToOrderLines(prisma, orderId, shopifyOrder
  * SINGLE SOURCE OF TRUTH for order processing logic. Handles:
  * - Create new orders with matching SKUs
  * - Update existing orders (by shopifyOrderId or orderNumber)
- * - Auto-ship behavior: Respects auto_ship_fulfilled system setting
  * - Payment method via CACHE-FIRST PATTERN (see module docs)
- * - Line-level fulfillment sync (partial shipment support)
+ * - Line-level fulfillment sync (partial shipment support) - captures tracking data only
  *
  * STATUS TRANSITIONS:
  * - ERP-managed statuses (shipped, delivered) are preserved over Shopify
- * - Auto-ship enabled: open + fulfilled from Shopify → shipped
- * - Auto-ship disabled: Shopify fulfillment ignored, strict ERP mode
+ * - ERP is source of truth: Shopify fulfillment captures tracking but does NOT auto-ship
  *
  * @param {PrismaClient} prisma - Prisma client
  * @param {object} shopifyOrder - Raw Shopify order object
@@ -331,13 +328,8 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     const customerId = dbCustomer?.id || null;
 
     // Determine order status
+    // ERP is source of truth - Shopify fulfillment does NOT auto-ship orders
     let status = shopifyClient.mapOrderStatus(shopifyOrder);
-
-    // Check auto-ship setting (default: true = auto-ship enabled)
-    // When enabled, open orders automatically ship when Shopify marks them fulfilled
-    // When disabled (strict ERP mode), Shopify fulfillment is ignored
-    const autoShipSetting = await prisma.systemSetting.findUnique({ where: { key: 'auto_ship_fulfilled' } });
-    const autoShipEnabled = autoShipSetting?.value !== 'false';
 
     if (existingOrder) {
         const erpManagedStatuses = ['shipped', 'delivered'];
@@ -345,11 +337,11 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
             // Preserve ERP-managed statuses (shipped, delivered)
             status = existingOrder.status;
-        } else if (!autoShipEnabled && existingOrder.status === 'open' && status === 'shipped') {
-            // Strict ERP mode: ignore Shopify fulfillment for open orders
+        } else if (existingOrder.status === 'open' && status === 'shipped') {
+            // ERP is source of truth: ignore Shopify fulfillment status for open orders
+            // User must explicitly ship through ERP
             status = 'open';
         }
-        // When auto-ship enabled: open + fulfilled → stays 'shipped' (from mapOrderStatus)
     }
 
     // Determine payment method using shared utility

@@ -1,4 +1,7 @@
 /**
+ * @deprecated This modal is deprecated. Use UnifiedOrderModal with mode='view' instead.
+ * This component is kept for backward compatibility but will be removed in a future release.
+ *
  * OrderViewModal - Shows complete order details including items, prices, taxes, discounts
  */
 

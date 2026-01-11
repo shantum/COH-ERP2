@@ -1006,6 +1006,12 @@ router.get('/:id', async (req, res) => {
                     discountCodes: raw.discount_codes || [],
                     tags: raw.tags || null,
                     customerNote: raw.note || null,
+                    // Customer contact info from Shopify
+                    customerEmail: raw.email || raw.contact_email || null,
+                    customerPhone: raw.phone || raw.shipping_address?.phone || null,
+                    // Include shipping and billing addresses from Shopify
+                    shippingAddress: raw.shipping_address || null,
+                    billingAddress: raw.billing_address || null,
                     shippingLines: (raw.shipping_lines || []).map(s => ({
                         title: s.title,
                         price: s.price,

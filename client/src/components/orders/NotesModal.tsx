@@ -1,4 +1,7 @@
 /**
+ * @deprecated This modal is deprecated. Use UnifiedOrderModal which includes notes editing.
+ * This component is kept for backward compatibility but will be removed in a future release.
+ *
  * NotesModal component
  * Modal for editing internal order notes
  */

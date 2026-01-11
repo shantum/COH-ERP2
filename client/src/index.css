@@ -209,3 +209,22 @@ body {
     @apply bg-gray-100 text-gray-500;
   }
 }
+
+/* Customer Modal Animations */
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.7; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.7; }
+}
+
+@keyframes score-fill {
+  0% { stroke-dashoffset: 283; }
+}
+
+.health-score-ring {
+  animation: score-fill 1s ease-out forwards;
+}
+
+.avatar-pulse {
+  animation: pulse-ring 2s ease-in-out infinite;
+}

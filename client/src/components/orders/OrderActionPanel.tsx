@@ -21,10 +21,8 @@ interface OrderActionPanelProps {
     onArchive: () => void;
     onDelete: () => void;
     onShip?: () => void;
-    onQuickShip?: () => void;
     onBookShipment?: () => void;
     canDelete: boolean;
-    canQuickShip: boolean;
     isCancelling: boolean;
     isArchiving: boolean;
     isDeleting: boolean;
@@ -136,10 +134,8 @@ export function OrderActionPanel({
     onArchive,
     onDelete,
     onShip,
-    onQuickShip,
     onBookShipment,
     canDelete,
-    canQuickShip,
     isCancelling,
     isArchiving,
     isDeleting,
@@ -373,22 +369,6 @@ export function OrderActionPanel({
                         >
                             <Truck size={18} />
                             Book Shipment
-                        </button>
-                    )}
-
-                    {/* Quick Ship - for orders without verification needed */}
-                    {!isReadyToShip && canQuickShip && onQuickShip && (
-                        <button
-                            onClick={() => {
-                                if (confirm(`Quick ship ${order.orderNumber}?`)) {
-                                    onQuickShip();
-                                    onClose();
-                                }
-                            }}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gray-600 text-white hover:bg-gray-700 transition-all text-sm font-medium shadow-sm"
-                        >
-                            <Truck size={16} />
-                            Quick Ship (skip verification)
                         </button>
                     )}
 

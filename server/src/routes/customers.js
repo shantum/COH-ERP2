@@ -299,8 +299,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
         // Product affinity
         const productCounts = {};
-        // Color affinity (using standardColor if available, else colorName)
-        const colorCounts = {};
+        // Color affinity (using standardColor if available, else colorName) - includes hex from fabric
+        const colorData = {}; // { colorName: { qty: number, hex: string | null } }
         // Fabric affinity (by fabric type)
         const fabricCounts = {};
 
@@ -310,10 +310,20 @@ router.get('/:id', asyncHandler(async (req, res) => {
                 if (!variation) return;
                 const productName = variation.product?.name;
                 const colorKey = variation.standardColor || variation.colorName;
+                const colorHex = variation.fabric?.colorHex || null;
                 const fabricType = variation.fabric?.fabricType?.name;
 
                 if (productName) productCounts[productName] = (productCounts[productName] || 0) + line.qty;
-                if (colorKey) colorCounts[colorKey] = (colorCounts[colorKey] || 0) + line.qty;
+                if (colorKey) {
+                    if (!colorData[colorKey]) {
+                        colorData[colorKey] = { qty: 0, hex: colorHex };
+                    }
+                    colorData[colorKey].qty += line.qty;
+                    // Update hex if we find one (prefer non-null)
+                    if (colorHex && !colorData[colorKey].hex) {
+                        colorData[colorKey].hex = colorHex;
+                    }
+                }
                 if (fabricType) fabricCounts[fabricType] = (fabricCounts[fabricType] || 0) + line.qty;
             });
         });
@@ -323,8 +333,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
             .sort((a, b) => b.qty - a.qty)
             .slice(0, 5);
 
-        const colorAffinity = Object.entries(colorCounts)
-            .map(([color, qty]) => ({ color, qty }))
+        const colorAffinity = Object.entries(colorData)
+            .map(([color, data]) => ({ color, qty: data.qty, hex: data.hex }))
             .sort((a, b) => b.qty - a.qty)
             .slice(0, 5);
 

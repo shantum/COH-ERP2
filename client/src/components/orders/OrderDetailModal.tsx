@@ -1,4 +1,7 @@
 /**
+ * @deprecated This modal is deprecated. Use UnifiedOrderModal instead.
+ * This component is kept for backward compatibility but will be removed in a future release.
+ *
  * OrderDetailModal component
  * Displays order details with line items and shipping form
  */

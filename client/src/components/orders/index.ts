@@ -15,6 +15,7 @@ export { CreateOrderModal } from './CreateOrderModal';
 export { EditOrderModal } from './EditOrderModal';
 export { ShipOrderModal } from './ShipOrderModal';
 export { NotesModal } from './NotesModal';
+export { UnifiedOrderModal } from './UnifiedOrderModal';
 export { CustomerDetailModal } from './CustomerDetailModal';
 export { CustomizationModal } from './CustomizationModal';
 export { SummaryPanel } from './SummaryPanel';

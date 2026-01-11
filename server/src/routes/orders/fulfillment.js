@@ -48,6 +48,7 @@ import {
     validateOutwardTransaction,
 } from '../../utils/queryPatterns.js';
 import { validate, ShipOrderSchema } from '../../utils/validation.js';
+import { shipOrderLines, shipOrder } from '../../services/shipOrderService.js';
 
 const router = Router();
 
@@ -438,6 +439,14 @@ router.post('/lines/bulk-update', authenticateToken, asyncHandler(async (req, re
         throw new ValidationError('status is required');
     }
 
+    // Block direct shipping via bulk update - must use ship endpoints
+    if (status === 'shipped') {
+        throw new BusinessLogicError(
+            'Cannot set status to shipped directly. Use ship endpoint.',
+            'INVALID_STATUS_CHANGE'
+        );
+    }
+
     // Deduplicate lineIds to prevent double-counting
     const uniqueLineIds = [...new Set(lineIds)];
 
@@ -465,17 +474,15 @@ router.post('/lines/bulk-update', authenticateToken, asyncHandler(async (req, re
  * POST /:id/ship
  * Ship entire order (all lines packed → shipped)
  *
- * INVENTORY OPERATIONS (in transaction):
- * 1. Release RESERVED transactions for all lines
- * 2. Create OUTWARD (SALE) transactions for all lines
- * 3. Update order status to 'shipped'
- * 4. Update all lines to 'shipped' with tracking info
+ * Uses ShipOrderService which handles:
+ * - Release RESERVED transactions for all lines
+ * - Create OUTWARD (SALE) transactions for all lines
+ * - Update order status to 'shipped'
+ * - Update all lines to 'shipped' with tracking info
  *
  * VALIDATIONS:
- * - All non-cancelled lines must be 'packed'
- * - No line can have negative balance (data integrity check)
- * - AWB uniqueness enforced (no duplicate AWBs across orders)
- * - Race condition protection via transaction re-check
+ * - AWB and courier are required
+ * - Service validates packed status and handles race conditions
  *
  * @param {string} req.params.id - Order ID
  * @param {string} req.body.awbNumber - AWB/tracking number (required)
@@ -488,6 +495,14 @@ router.post('/lines/bulk-update', authenticateToken, asyncHandler(async (req, re
  */
 router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), validate(ShipOrderSchema), asyncHandler(async (req, res) => {
     const { awbNumber, courier } = req.validatedBody;
+
+    // Validate required fields
+    if (!awbNumber?.trim()) {
+        throw new ValidationError('awbNumber is required');
+    }
+    if (!courier?.trim()) {
+        throw new ValidationError('courier is required');
+    }
 
     const order = await req.prisma.order.findUnique({
         where: { id: req.params.id },
@@ -506,111 +521,40 @@ router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), va
         });
     }
 
-    // Check for duplicate AWB number (if AWB provided)
-    if (awbNumber) {
-        const existingAwb = await req.prisma.orderLine.findFirst({
-            where: {
-                awbNumber,
-                orderId: { not: req.params.id },
-            },
-            select: { id: true, order: { select: { orderNumber: true } } },
+    // Ship using the service
+    const result = await req.prisma.$transaction(async (tx) => {
+        return await shipOrder(tx, {
+            orderId: req.params.id,
+            awbNumber: awbNumber.trim(),
+            courier: courier.trim(),
+            userId: req.user.id,
         });
+    });
 
-        if (existingAwb) {
+    // Check for errors in the result
+    if (result.errors && result.errors.length > 0) {
+        const errorCodes = result.errors.map(e => e.code);
+
+        // Throw appropriate error based on the error codes
+        if (errorCodes.includes('INVALID_STATUS')) {
+            throw new BusinessLogicError(
+                result.errors[0].error,
+                'INVALID_STATUS'
+            );
+        } else if (errorCodes.includes('DUPLICATE_AWB')) {
             throw new ConflictError(
-                `AWB number already assigned to order ${existingAwb.order?.orderNumber}`,
+                result.errors[0].error,
                 'DUPLICATE_AWB'
+            );
+        } else {
+            throw new BusinessLogicError(
+                result.errors[0].error,
+                result.errors[0].code
             );
         }
     }
 
-    // Validate all non-cancelled lines are packed before shipping
-    const unshippableLines = order.orderLines.filter(
-        l => l.lineStatus !== 'packed' && l.lineStatus !== 'cancelled'
-    );
-    if (unshippableLines.length > 0) {
-        throw new BusinessLogicError(
-            `All non-cancelled lines must be packed before shipping (${unshippableLines.length} not packed)`,
-            'LINES_NOT_PACKED'
-        );
-    }
-
-    // Validate no lines have negative inventory (data integrity check)
-    const negativeBalanceLines = [];
-    for (const line of order.orderLines) {
-        const balance = await calculateInventoryBalance(req.prisma, line.skuId);
-        if (balance.currentBalance < 0) {
-            negativeBalanceLines.push({
-                lineId: line.id,
-                skuCode: line.sku?.skuCode,
-                currentBalance: balance.currentBalance,
-            });
-        }
-    }
-
-    if (negativeBalanceLines.length > 0) {
-        throw new BusinessLogicError(
-            'Cannot ship: some items have negative inventory balance. Fix data integrity issues first.',
-            'NEGATIVE_INVENTORY'
-        );
-    }
-
-    await req.prisma.$transaction(async (tx) => {
-        // Re-check order status inside transaction to prevent race condition
-        const currentOrder = await tx.order.findUnique({
-            where: { id: req.params.id },
-            select: { status: true },
-        });
-
-        if (currentOrder.status === 'shipped') {
-            throw new ConflictError('Order was already shipped by another request', 'RACE_CONDITION');
-        }
-
-        // Re-check AWB inside transaction
-        if (awbNumber) {
-            const existingAwb = await tx.orderLine.findFirst({
-                where: {
-                    awbNumber,
-                    orderId: { not: req.params.id },
-                },
-                select: { id: true },
-            });
-
-            if (existingAwb) {
-                throw new ConflictError('AWB number was assigned to another order', 'DUPLICATE_AWB');
-            }
-        }
-
-        await tx.order.update({
-            where: { id: req.params.id },
-            data: {
-                status: 'shipped',
-            },
-        });
-
-        await tx.orderLine.updateMany({
-            where: { orderId: req.params.id },
-            data: {
-                lineStatus: 'shipped',
-                shippedAt: new Date(),
-                awbNumber,
-                courier,
-                trackingStatus: 'in_transit',
-            },
-        });
-
-        for (const line of order.orderLines) {
-            await releaseReservedInventory(tx, line.id);
-
-            await createSaleTransaction(tx, {
-                skuId: line.skuId,
-                qty: line.qty,
-                orderLineId: line.id,
-                userId: req.user.id,
-            });
-        }
-    });
-
+    // Fetch updated order
     const updated = await req.prisma.order.findUnique({
         where: { id: req.params.id },
         include: { orderLines: true },
@@ -626,6 +570,8 @@ router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), va
 /**
  * Ship specific order lines with a given AWB
  * Enables partial shipments - different lines can ship at different times with different AWBs
+ *
+ * Uses ShipOrderService which handles inventory transactions and status updates.
  *
  * POST /orders/:id/ship-lines
  * Body: { lineIds: string[], awbNumber: string, courier: string }
@@ -661,81 +607,45 @@ router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship
         );
     }
 
-    // Add cancelled line validation
-    const cancelledLines = linesToShip.filter(l => l.lineStatus === 'cancelled');
-    if (cancelledLines.length > 0) {
-        throw new BusinessLogicError(
-            `Cannot ship cancelled lines (${cancelledLines.length} cancelled)`,
-            'LINES_CANCELLED'
-        );
-    }
-
-    // Validate all lines are packed (ready to ship)
-    const notPacked = linesToShip.filter(l => l.lineStatus !== 'packed');
-    if (notPacked.length > 0) {
-        throw new BusinessLogicError(
-            `All lines must be packed before shipping (${notPacked.length} not packed)`,
-            'LINES_NOT_PACKED'
-        );
-    }
-
-    // Check for duplicate AWB on other orders
-    const existingAwb = await req.prisma.orderLine.findFirst({
-        where: {
+    // Ship using the service
+    const result = await req.prisma.$transaction(async (tx) => {
+        return await shipOrderLines(tx, {
+            orderLineIds: lineIds,
             awbNumber: awbNumber.trim(),
-            orderId: { not: req.params.id },
-        },
-        select: { id: true, orderId: true, order: { select: { orderNumber: true } } },
+            courier: courier.trim(),
+            userId: req.user.id,
+        });
     });
 
-    if (existingAwb) {
-        throw new ConflictError(
-            `AWB number already used on order ${existingAwb.order?.orderNumber}`,
-            'DUPLICATE_AWB'
-        );
+    // Check for errors in the result
+    if (result.errors && result.errors.length > 0) {
+        const errorCodes = result.errors.map(e => e.code);
+
+        // Throw appropriate error based on the error codes
+        if (errorCodes.includes('LINE_CANCELLED')) {
+            throw new BusinessLogicError(
+                result.errors[0].error,
+                'LINES_CANCELLED'
+            );
+        } else if (errorCodes.includes('INVALID_STATUS')) {
+            throw new BusinessLogicError(
+                result.errors[0].error,
+                'LINES_NOT_PACKED'
+            );
+        } else if (errorCodes.includes('DUPLICATE_AWB')) {
+            throw new ConflictError(
+                result.errors[0].error,
+                'DUPLICATE_AWB'
+            );
+        } else {
+            throw new BusinessLogicError(
+                result.errors[0].error,
+                result.errors[0].code
+            );
+        }
     }
 
-    await req.prisma.$transaction(async (tx) => {
-        // Update selected lines with shipping info
-        await tx.orderLine.updateMany({
-            where: { id: { in: lineIds } },
-            data: {
-                lineStatus: 'shipped',
-                shippedAt: new Date(),
-                awbNumber: awbNumber.trim(),
-                courier: courier.trim(),
-                trackingStatus: 'in_transit',
-            },
-        });
-
-        // Release inventory and create sale transactions for shipped lines
-        for (const line of linesToShip) {
-            await releaseReservedInventory(tx, line.id);
-            await createSaleTransaction(tx, {
-                skuId: line.skuId,
-                qty: line.qty,
-                orderLineId: line.id,
-                userId: req.user.id,
-            });
-        }
-
-        // Check if ALL non-cancelled lines are now shipped
-        const remainingLines = await tx.orderLine.findMany({
-            where: {
-                orderId: req.params.id,
-                lineStatus: { notIn: ['cancelled', 'shipped'] },
-            },
-        });
-
-        // Update order status only when all lines are shipped
-        if (remainingLines.length === 0) {
-            await tx.order.update({
-                where: { id: req.params.id },
-                data: { status: 'shipped' },
-            });
-        }
-    });
-
+    // Fetch updated order
     const updated = await req.prisma.order.findUnique({
         where: { id: req.params.id },
         include: { orderLines: true },
@@ -743,7 +653,7 @@ router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship
 
     res.json({
         ...updated,
-        linesShipped: linesToShip.length,
+        linesShipped: result.shipped.length,
         allShipped: updated.status === 'shipped',
     });
 }));
@@ -825,58 +735,33 @@ router.post('/process-marked-shipped', authenticateToken, requirePermission('ord
         }
     }
 
-    const now = new Date();
+    // Group lines by order for batch processing
+    const linesByOrder = new Map();
+    for (const item of linesToProcess) {
+        if (!linesByOrder.has(item.orderId)) {
+            linesByOrder.set(item.orderId, []);
+        }
+        linesByOrder.get(item.orderId).push(item.line);
+    }
 
-    // Process all lines in a transaction
+    // Process each order's lines using the service
     await req.prisma.$transaction(async (tx) => {
-        const lineIds = linesToProcess.map(l => l.line.id);
+        for (const [orderId, lines] of linesByOrder.entries()) {
+            // Get AWB and courier from the first line (all lines in same order should have same AWB)
+            const firstLine = lines[0];
+            const awbNumber = firstLine.awbNumber || 'MISSING_AWB';
+            const courier = firstLine.courier || 'MISSING_COURIER';
 
-        // 1. Release reserved inventory
-        await tx.inventoryTransaction.deleteMany({
-            where: {
-                referenceId: { in: lineIds },
-                txnType: TXN_TYPE.RESERVED,
-                reason: TXN_REASON.ORDER_ALLOCATION,
-            },
-        });
+            const lineIds = lines.map(l => l.id);
 
-        // 2. Create sale transactions
-        const saleTransactions = linesToProcess.map(l => ({
-            skuId: l.line.skuId,
-            txnType: TXN_TYPE.OUTWARD,
-            qty: l.line.qty,
-            reason: TXN_REASON.SALE,
-            referenceId: l.line.id,
-            createdById: req.user.id,
-            notes: comment || null,
-        }));
-        await tx.inventoryTransaction.createMany({ data: saleTransactions });
-
-        // 3. Update all lines to shipped status
-        await tx.orderLine.updateMany({
-            where: { id: { in: lineIds } },
-            data: {
-                lineStatus: 'shipped',
-                shippedAt: now,
-                trackingStatus: 'in_transit',
-            },
-        });
-
-        // 4. Update order status where all lines are shipped
-        for (const order of ordersWithMarkedLines) {
-            const remainingLines = await tx.orderLine.findMany({
-                where: {
-                    orderId: order.id,
-                    lineStatus: { notIn: ['cancelled', 'shipped'] },
-                },
+            // Use shipOrderLines service to ship these lines
+            await shipOrderLines(tx, {
+                orderLineIds: lineIds,
+                awbNumber,
+                courier,
+                userId: req.user.id,
+                skipStatusValidation: true, // Accept marked_shipped status
             });
-
-            if (remainingLines.length === 0) {
-                await tx.order.update({
-                    where: { id: order.id },
-                    data: { status: 'shipped' },
-                });
-            }
         }
     });
 
@@ -893,6 +778,111 @@ router.post('/process-marked-shipped', authenticateToken, requirePermission('ord
         orders: orderSummary,
         validationIssues: validationIssues.length > 0 ? validationIssues : undefined,
         message: `Processed ${linesToProcess.length} lines across ${ordersWithMarkedLines.length} orders`,
+    });
+}));
+
+// ============================================
+// MIGRATE SHOPIFY FULFILLED (Onboarding)
+// One-click migration for orders fulfilled on Shopify
+// Marks as shipped without inventory transactions
+// ============================================
+
+router.post('/migrate-shopify-fulfilled', authenticateToken, requirePermission('orders:ship'), asyncHandler(async (req, res) => {
+    // Admin only for safety
+    if (req.user.role !== 'admin') {
+        throw new ForbiddenError('Migration requires admin role');
+    }
+
+    // Batch limit - process in chunks to avoid timeout (default 50, max 500)
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+
+    // Only migrate OPEN orders (not delivered, archived, etc.)
+    const whereClause = {
+        status: 'open',
+        shopifyCache: {
+            fulfillmentStatus: 'fulfilled',
+            trackingNumber: { not: null },
+            trackingCompany: { not: null },
+        },
+    };
+
+    // Count total eligible first
+    const totalEligible = await req.prisma.order.count({ where: whereClause });
+
+    if (totalEligible === 0) {
+        return res.json({
+            migrated: 0,
+            remaining: 0,
+            message: 'No eligible open orders found - migration complete!',
+        });
+    }
+
+    console.log(`[Migrate Shopify Fulfilled] Starting batch: ${limit} of ${totalEligible} eligible open orders`);
+
+    // Fetch batch of eligible orders (oldest first for consistent ordering)
+    const eligibleOrders = await req.prisma.order.findMany({
+        where: whereClause,
+        include: {
+            orderLines: { select: { id: true } },
+            shopifyCache: {
+                select: { trackingNumber: true, trackingCompany: true },
+            },
+        },
+        orderBy: { orderDate: 'asc' },
+        take: limit,
+    });
+
+    // Process each order in its own transaction (avoids timeout)
+    const results = { migrated: [], skipped: [], errors: [] };
+
+    for (const order of eligibleOrders) {
+        try {
+            const lineIds = order.orderLines.map(l => l.id);
+            const awb = order.shopifyCache.trackingNumber;
+            const courier = order.shopifyCache.trackingCompany;
+
+            // Each order gets its own transaction
+            const result = await req.prisma.$transaction(async (tx) => {
+                return await shipOrderLines(tx, {
+                    orderLineIds: lineIds,
+                    awbNumber: awb,
+                    courier: courier,
+                    userId: req.user.id,
+                    skipStatusValidation: true,
+                    skipInventory: true,
+                });
+            });
+
+            if (result.shipped.length > 0) {
+                results.migrated.push({
+                    orderNumber: order.orderNumber,
+                    linesShipped: result.shipped.length,
+                });
+            } else if (result.skipped.length > 0) {
+                results.skipped.push({
+                    orderNumber: order.orderNumber,
+                    reason: result.skipped[0]?.reason || 'Already shipped',
+                });
+            }
+        } catch (error) {
+            results.errors.push({
+                orderNumber: order.orderNumber,
+                error: error.message,
+            });
+        }
+    }
+
+    const remaining = totalEligible - results.migrated.length;
+    console.log(`[Migrate Shopify Fulfilled] Batch complete: migrated ${results.migrated.length}, skipped ${results.skipped.length}, errors ${results.errors.length}, remaining ~${remaining}`);
+
+    res.json({
+        migrated: results.migrated.length,
+        skipped: results.skipped.length,
+        remaining: remaining,
+        errors: results.errors.length > 0 ? results.errors : undefined,
+        message: remaining > 0
+            ? `Migrated ${results.migrated.length} orders. ${remaining} remaining - click again to continue.`
+            : `Migrated ${results.migrated.length} orders. Migration complete!`,
     });
 }));
 
@@ -971,6 +961,82 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req, res) => {
 
     res.json(updated);
 }));
+
+/**
+ * POST /:id/migration-ship
+ * Migration endpoint: Mark order as shipped WITHOUT inventory transactions
+ *
+ * USE CASE:
+ * When migrating from an old system where orders were already physically shipped,
+ * this endpoint updates the ERP status without affecting inventory (since items
+ * were already shipped in the old system).
+ *
+ * RESTRICTIONS:
+ * - Admin only (sensitive operation that bypasses inventory controls)
+ * - Skips status validation (can ship from any status)
+ * - Skips inventory transactions (no RESERVED release, no OUTWARD creation)
+ *
+ * WHAT IT DOES:
+ * - Updates all order lines to 'shipped' status
+ * - Sets AWB, courier, shippedAt, trackingStatus
+ * - Updates order status to 'shipped' when all lines processed
+ * - NO inventory changes
+ *
+ * @param {string} req.params.id - Order ID
+ * @param {string} req.body.awbNumber - AWB/tracking number (required)
+ * @param {string} req.body.courier - Courier name (required)
+ * @returns {Object} Shipping result from shipOrderLines service
+ *
+ * @example
+ * POST /fulfillment/123/migration-ship
+ * Body: { awbNumber: "OLD123", courier: "Manual" }
+ */
+router.post('/:id/migration-ship',
+    authenticateToken,
+    requirePermission('orders:ship'),
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const { awbNumber, courier } = req.body;
+
+        // Admin only for migration operations
+        if (req.user.role !== 'admin') {
+            throw new ForbiddenError('Migration ship requires admin role');
+        }
+
+        // Validate required fields
+        if (!awbNumber?.trim()) {
+            throw new ValidationError('awbNumber is required');
+        }
+        if (!courier?.trim()) {
+            throw new ValidationError('courier is required');
+        }
+
+        // Get order and all its lines
+        const order = await req.prisma.order.findUnique({
+            where: { id },
+            include: { orderLines: { select: { id: true } } },
+        });
+
+        if (!order) {
+            throw new NotFoundError('Order not found', 'Order', id);
+        }
+
+        // Use shipOrderLines service with migration flags
+        const result = await req.prisma.$transaction(async (tx) => {
+            const lineIds = order.orderLines.map(l => l.id);
+            return await shipOrderLines(tx, {
+                orderLineIds: lineIds,
+                awbNumber: awbNumber.trim(),
+                courier: courier.trim(),
+                userId: req.user.id,
+                skipStatusValidation: true,  // Allow shipping from any status
+                skipInventory: true,         // Skip inventory transactions
+            });
+        });
+
+        res.json(result);
+    })
+);
 
 // Mark delivered (simple version)
 router.post('/:id/deliver', authenticateToken, asyncHandler(async (req, res) => {
@@ -1094,241 +1160,6 @@ router.post('/:id/receive-rto', authenticateToken, asyncHandler(async (req, res)
     });
 
     res.json(updated);
-}));
-
-// ============================================
-// QUICK SHIP: Force ship order (skip allocate/pick/pack checks)
-// TEMPORARY - For testing phase only
-// ============================================
-
-router.post('/:id/quick-ship', authenticateToken, asyncHandler(async (req, res) => {
-    // WARNING: This endpoint bypasses normal inventory validation
-    // Should only be used in testing/emergency scenarios
-    if (process.env.NODE_ENV === 'production') {
-        // Add strict admin check in production
-        if (!req.user?.role === 'admin') {
-            throw new ForbiddenError('Quick-ship is restricted to admin users in production');
-        }
-    }
-
-    const order = await req.prisma.order.findUnique({
-        where: { id: req.params.id },
-        include: { orderLines: true },
-    });
-
-    if (!order) {
-        throw new NotFoundError('Order not found', 'Order', req.params.id);
-    }
-
-    // Idempotency check
-    if (order.status === 'shipped') {
-        return res.json({ ...order, message: 'Order is already shipped' });
-    }
-
-    if (order.status !== 'open') {
-        throw new BusinessLogicError(
-            `Cannot ship order with status: ${order.status}`,
-            'INVALID_STATUS'
-        );
-    }
-
-    // Require AWB and courier
-    if (!order.awbNumber || !order.courier) {
-        throw new ValidationError('AWB number and courier are required');
-    }
-
-    const now = new Date();
-
-    // Wrap all operations in a transaction to ensure atomicity
-    await req.prisma.$transaction(async (tx) => {
-        // Re-check order status inside transaction to prevent race conditions
-        const currentOrder = await tx.order.findUnique({
-            where: { id: req.params.id },
-            select: { status: true },
-        });
-
-        if (currentOrder.status === 'shipped') {
-            throw new ConflictError('Order was already shipped by another request', 'RACE_CONDITION');
-        }
-
-        // Process each line - auto allocate/pick/pack/ship
-        for (const line of order.orderLines) {
-            if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
-
-            // If pending, try to allocate (create reserved then release)
-            if (line.lineStatus === 'pending') {
-                const balance = await calculateInventoryBalance(tx, line.skuId);
-                if (balance.available >= line.qty) {
-                    await createReservedTransaction(tx, {
-                        skuId: line.skuId,
-                        qty: line.qty,
-                        orderLineId: line.id,
-                        userId: req.user.id,
-                    });
-                }
-            }
-
-            // Release any reserved inventory and create sale
-            await releaseReservedInventory(tx, line.id);
-            await createSaleTransaction(tx, {
-                skuId: line.skuId,
-                qty: line.qty,
-                orderLineId: line.id,
-                userId: req.user.id,
-            });
-
-            // Update line to shipped with tracking
-            await tx.orderLine.update({
-                where: { id: line.id },
-                data: {
-                    lineStatus: 'shipped',
-                    allocatedAt: line.allocatedAt || now,
-                    pickedAt: line.pickedAt || now,
-                    packedAt: line.packedAt || now,
-                    shippedAt: now,
-                    awbNumber: order.awbNumber,
-                    courier: order.courier,
-                    trackingStatus: 'in_transit',
-                },
-            });
-        }
-
-        await tx.order.update({
-            where: { id: order.id },
-            data: {
-                status: 'shipped',
-            },
-        });
-    });
-
-    const updated = await req.prisma.order.findUnique({
-        where: { id: req.params.id },
-        include: { orderLines: true },
-    });
-
-    console.log(`[Quick Ship] Order ${order.orderNumber} shipped`);
-    res.json(updated);
-}));
-
-// ============================================
-// BULK QUICK SHIP: Ship all eligible orders at once
-// Optimized with batched database operations
-// ============================================
-
-router.post('/bulk-quick-ship', authenticateToken, asyncHandler(async (req, res) => {
-    // Find all open orders with AWB and courier set
-    const eligibleOrders = await req.prisma.order.findMany({
-        where: {
-            status: 'open',
-            isArchived: false,
-            awbNumber: { not: null },
-            courier: { not: null },
-        },
-        include: { orderLines: true },
-    });
-
-    if (eligibleOrders.length === 0) {
-        return res.json({ shipped: [], failed: [], message: 'No eligible orders to quick ship' });
-    }
-
-    const now = new Date();
-
-    // Collect all data for batch operations
-    const orderIds = [];
-    const lineIdsToShip = [];
-    const saleTransactions = [];
-    const orderLineMap = new Map();
-
-    for (const order of eligibleOrders) {
-        orderIds.push(order.id);
-        const orderLineIds = [];
-        for (const line of order.orderLines) {
-            if (line.lineStatus === 'shipped' || line.lineStatus === 'cancelled') continue;
-            lineIdsToShip.push(line.id);
-            orderLineIds.push(line.id);
-            saleTransactions.push({
-                skuId: line.skuId,
-                txnType: TXN_TYPE.OUTWARD,
-                qty: line.qty,
-                reason: TXN_REASON.SALE,
-                referenceId: line.id,
-                createdById: req.user.id,
-            });
-        }
-        if (orderLineIds.length > 0) {
-            orderLineMap.set(order.id, {
-                awbNumber: order.awbNumber,
-                courier: order.courier,
-                lineIds: orderLineIds
-            });
-        }
-    }
-
-    // Execute all operations in a transaction for atomicity
-    await req.prisma.$transaction(async (tx) => {
-        // 1. Release all reserved inventory in one batch
-        if (lineIdsToShip.length > 0) {
-            await tx.inventoryTransaction.deleteMany({
-                where: {
-                    referenceId: { in: lineIdsToShip },
-                    txnType: TXN_TYPE.RESERVED,
-                    reason: TXN_REASON.ORDER_ALLOCATION,
-                },
-            });
-        }
-
-        // 2. Create all sale transactions in one batch
-        if (saleTransactions.length > 0) {
-            await tx.inventoryTransaction.createMany({
-                data: saleTransactions,
-            });
-        }
-
-        // 3. Update order lines to shipped per order
-        for (const [orderId, orderData] of orderLineMap) {
-            await tx.orderLine.updateMany({
-                where: { id: { in: orderData.lineIds } },
-                data: {
-                    lineStatus: 'shipped',
-                    shippedAt: now,
-                    awbNumber: orderData.awbNumber,
-                    courier: orderData.courier,
-                    trackingStatus: 'in_transit',
-                },
-            });
-        }
-
-        // Set timestamps for lines that don't have them
-        if (lineIdsToShip.length > 0) {
-            await tx.orderLine.updateMany({
-                where: { id: { in: lineIdsToShip }, allocatedAt: null },
-                data: { allocatedAt: now },
-            });
-            await tx.orderLine.updateMany({
-                where: { id: { in: lineIdsToShip }, pickedAt: null },
-                data: { pickedAt: now },
-            });
-            await tx.orderLine.updateMany({
-                where: { id: { in: lineIdsToShip }, packedAt: null },
-                data: { packedAt: now },
-            });
-        }
-
-        // 4. Update order statuses
-        await tx.order.updateMany({
-            where: { id: { in: orderIds } },
-            data: { status: 'shipped' },
-        });
-    });
-
-    const shippedOrders = eligibleOrders.map(o => ({ id: o.id, orderNumber: o.orderNumber }));
-    console.log(`[Bulk Quick Ship] Shipped ${shippedOrders.length} orders in batch`);
-
-    res.json({
-        shipped: shippedOrders,
-        failed: [],
-        message: `Shipped ${shippedOrders.length} orders`,
-    });
 }));
 
 export default router;

@@ -1,4 +1,7 @@
 /**
+ * @deprecated This modal is deprecated. Use UnifiedOrderModal with mode='edit' instead.
+ * This component is kept for backward compatibility but will be removed in a future release.
+ *
  * EditOrderModal component
  * Comprehensive modal for editing order details, customer info, and line items
  */

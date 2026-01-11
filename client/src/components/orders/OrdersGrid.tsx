@@ -413,7 +413,6 @@ interface OrdersGridProps {
     onUnmarkShippedLine: (lineId: string) => void;
     onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
     onShip?: (order: any) => void;
-    onQuickShip?: (orderId: string) => void;
     onCreateBatch: (data: any) => void;
     onUpdateBatch: (id: string, data: any) => void;
     onDeleteBatch: (id: string) => void;
@@ -467,7 +466,6 @@ export function OrdersGrid({
     onUnmarkShippedLine,
     onUpdateLineTracking,
     onShip,
-    onQuickShip,
     onCreateBatch,
     onUpdateBatch,
     onDeleteBatch,
@@ -1978,10 +1976,8 @@ export function OrdersGrid({
                 onArchive={() => onArchiveOrder(actionPanelOrder?.id)}
                 onDelete={() => onDeleteOrder(actionPanelOrder?.id)}
                 onShip={onShip ? () => onShip(actionPanelOrder) : undefined}
-                onQuickShip={onQuickShip ? () => onQuickShip(actionPanelOrder?.id) : undefined}
                 onBookShipment={() => onEditOrder(actionPanelOrder)}
                 canDelete={actionPanelOrder?.orderLines?.length === 0}
-                canQuickShip={!!(actionPanelOrder?.awbNumber && actionPanelOrder?.courier)}
                 isCancelling={isCancellingOrder}
                 isArchiving={isArchiving}
                 isDeleting={isDeletingOrder}

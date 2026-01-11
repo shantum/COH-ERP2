@@ -49,33 +49,6 @@ router.put('/config', authenticateToken, asyncHandler(async (req, res) => {
     });
 }));
 
-// Get auto-ship setting
-router.get('/settings/auto-ship', authenticateToken, asyncHandler(async (req, res) => {
-    const setting = await req.prisma.systemSetting.findUnique({
-        where: { key: 'auto_ship_fulfilled' }
-    });
-    // Default to true if not set
-    const enabled = setting?.value !== 'false';
-    res.json({ enabled });
-}));
-
-// Update auto-ship setting
-router.put('/settings/auto-ship', authenticateToken, asyncHandler(async (req, res) => {
-    const { enabled } = req.body;
-
-    if (typeof enabled !== 'boolean') {
-        throw new ValidationError('enabled must be a boolean');
-    }
-
-    await req.prisma.systemSetting.upsert({
-        where: { key: 'auto_ship_fulfilled' },
-        update: { value: enabled ? 'true' : 'false' },
-        create: { key: 'auto_ship_fulfilled', value: enabled ? 'true' : 'false' }
-    });
-
-    res.json({ success: true, enabled });
-}));
-
 router.post('/test-connection', authenticateToken, asyncHandler(async (req, res) => {
     // Reload config from database
     await shopifyClient.loadFromDatabase();

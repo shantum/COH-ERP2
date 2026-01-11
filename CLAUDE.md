@@ -72,11 +72,30 @@ Defines which system owns each field and where data lives. Critical for understa
 
 **Backfill endpoint**: `POST /api/shopify/sync/backfill` with `{ fields: ['all'] }` to populate missing fields from cache.
 
+## Shipping (Unified Service)
+
+All shipping operations go through `ShipOrderService` (`server/src/services/shipOrderService.js`).
+
+| Endpoint | Purpose | Options |
+|----------|---------|---------|
+| `POST /fulfillment/:id/ship` | Ship entire order | Standard (all lines must be packed) |
+| `POST /fulfillment/:id/ship-lines` | Ship specific lines | Partial shipment |
+| `POST /fulfillment/process-marked-shipped` | Batch spreadsheet commit | Lines with status=marked_shipped |
+| `POST /fulfillment/:id/migration-ship` | Onboarding (admin only) | skipInventory=true, skipStatusValidation=true |
+
+**Service API**:
+- `shipOrderLines(tx, { orderLineIds, awbNumber, courier, userId, skipStatusValidation?, skipInventory? })`
+- `shipOrder(tx, { orderId, ...options })` - convenience wrapper
+- `validateShipment(prisma, orderLineIds, options)` - pre-check without transaction
+
+**Removed systems**: Quick-ship, auto-ship, bulk-update to shipped status (all bypass proper inventory handling).
+
 ## Key Files
 
 | Purpose | Location |
 |---------|----------|
 | Routes | `server/src/routes/` (orders/ is modular) |
+| Shipping service | `server/src/services/shipOrderService.js` |
 | Catalog/Costing | `server/src/routes/catalog.js`, `products.js` (cost-config) |
 | Shared patterns | `server/src/utils/queryPatterns.js`, `validation.js` |
 | Error handling | `server/src/middleware/asyncHandler.js`, `server/src/utils/errors.js` |
@@ -111,6 +130,8 @@ Defines which system owns each field and where data lives. Critical for understa
 24. **Server-side field filtering**: Cost fields filtered at API level via `filterConfidentialFields()`, not just UI
 25. **Query keys centralized**: Use `queryKeys` from `constants/queryKeys.ts`; `invalidateTab()` handles cache clearing
 26. **Deprecated schema**: `User.role` removed (use `roleId`); `PermissionAuditLog`, `StockAlert` tables removed
+27. **Shipping via service**: All shipping must go through `ShipOrderService` - cannot set lineStatus='shipped' via bulk-update
+28. **Migration-ship**: Use `POST /fulfillment/:id/migration-ship` for onboarding orders (admin only, skips inventory)
 
 ## Environment
 

@@ -14,6 +14,7 @@ import { useOrdersData } from '../hooks/useOrdersData';
 import type { OrderTab } from '../hooks/useOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useDebounce } from '../hooks/useDebounce';
+import { useAuth } from '../hooks/useAuth';
 
 // Utilities
 import {
@@ -42,10 +43,13 @@ import {
     TrackingModal,
     ProcessShippedModal,
     OrdersAnalyticsBar,
+    UnifiedOrderModal,
 } from '../components/orders';
+import type { Order } from '../types';
 
 export default function Orders() {
     const queryClient = useQueryClient();
+    const { user } = useAuth();
 
     // Tab state - persisted in URL for back/forward navigation and refresh
     const [searchParams, setSearchParams] = useSearchParams();
@@ -77,15 +81,22 @@ export default function Orders() {
     const [archivedSortBy, setArchivedSortBy] = useState<'orderDate' | 'archivedAt'>('archivedAt');
 
     // Modal state
+    // @deprecated - Use unifiedModalOrder instead. Kept for backward compatibility.
     const [selectedOrder, setSelectedOrder] = useState<any>(null);
+    // @deprecated - Use unifiedModalOrder with 'view' mode instead. Kept for backward compatibility.
     const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
     const [showCreateOrder, setShowCreateOrder] = useState(false);
+    // @deprecated - Use unifiedModalOrder with 'edit' mode instead. Kept for backward compatibility.
     const [editingOrder, setEditingOrder] = useState<any>(null);
     const [notesOrder, setNotesOrder] = useState<any>(null);
     const [notesText, setNotesText] = useState('');
+    // @deprecated - Use unifiedModalOrder with 'ship' mode instead. Kept for backward compatibility.
     const [pendingShipOrder, setPendingShipOrder] = useState<any>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [showProcessShippedModal, setShowProcessShippedModal] = useState(false);
+    // New unified modal state
+    const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
+    const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
 
     // Shipping form state
     const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
@@ -139,6 +150,35 @@ export default function Orders() {
         isLoading,
     } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedLimit, archivedSortBy });
 
+    // Unified modal handlers (must be after openOrders is available)
+    const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' = 'view') => {
+        setUnifiedModalOrder(order);
+        setUnifiedModalMode(mode);
+    }, []);
+
+    // Handler for OrdersGrid which passes orderId (not full order)
+    const handleViewOrderById = useCallback((orderId: string) => {
+        const order = openOrders?.find((o: Order) => o.id === orderId);
+        if (order) {
+            openUnifiedModal(order, 'view');
+        }
+    }, [openOrders, openUnifiedModal]);
+
+    // Handler for grids that pass full order
+    const handleViewOrder = useCallback((order: Order) => {
+        openUnifiedModal(order, 'view');
+    }, [openUnifiedModal]);
+
+    // Handler to open in edit mode
+    const handleEditOrderUnified = useCallback((order: Order) => {
+        openUnifiedModal(order, 'edit');
+    }, [openUnifiedModal]);
+
+    // Handler to open in ship mode
+    const handleShipOrderUnified = useCallback((order: Order) => {
+        openUnifiedModal(order, 'ship');
+    }, [openUnifiedModal]);
+
     // Shopify config for external links (needed for shipped, rto, cod-pending, and archived tabs)
     const { data: shopifyConfig } = useQuery({
         queryKey: ['shopifyConfig'],
@@ -150,18 +190,23 @@ export default function Orders() {
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
         onShipSuccess: () => {
+            // Clear legacy modal state (backward compatibility)
             setSelectedOrder(null);
             setPendingShipOrder(null);
             setShipForm({ awbNumber: '', courier: '' });
+            // Clear unified modal state
+            setUnifiedModalOrder(null);
         },
         onCreateSuccess: () => {
             setShowCreateOrder(false);
         },
         onDeleteSuccess: () => {
             setSelectedOrder(null);
+            setUnifiedModalOrder(null);
         },
         onEditSuccess: () => {
             setEditingOrder(null);
+            setUnifiedModalOrder(null);
         },
         onNotesSuccess: () => {
             setNotesOrder(null);
@@ -307,12 +352,6 @@ export default function Orders() {
     }, [shippedOrders, searchQuery]);
 
     const uniqueOpenOrderCount = new Set(filteredOpenRows.map((r) => r.orderId)).size;
-
-    // Count orders eligible for quick ship (have AWB and courier)
-    const quickShipEligibleCount = useMemo(() => {
-        if (!openOrders) return 0;
-        return openOrders.filter((order: any) => order.awbNumber && order.courier).length;
-    }, [openOrders]);
 
     // Count lines marked as shipped (ready for batch processing)
     const markedShippedCount = useMemo(() => {
@@ -496,14 +535,13 @@ export default function Orders() {
         onMarkShippedLine: handleMarkShippedLine,
         onUnmarkShippedLine: handleUnmarkShippedLine,
         onUpdateLineTracking: handleUpdateLineTracking,
-        onShip: (order) => setPendingShipOrder(order),
-        onQuickShip: (id) => mutations.quickShip.mutate(id),
+        onShip: handleShipOrderUnified,
         onCreateBatch: (data) => mutations.createBatch.mutate(data),
         onUpdateBatch: (id, data) => mutations.updateBatch.mutate({ id, data }),
         onDeleteBatch: (id) => mutations.deleteBatch.mutate(id),
         onUpdateLineNotes: (lineId, notes) => mutations.updateLineNotes.mutate({ lineId, notes }),
-        onViewOrder: setViewingOrderId,
-        onEditOrder: setEditingOrder,
+        onViewOrder: handleViewOrderById,
+        onEditOrder: handleEditOrderUnified,
         onCancelOrder: (id, reason) => mutations.cancelOrder.mutate({ id, reason }),
         onArchiveOrder: (id) => mutations.archiveOrder.mutate(id),
         onDeleteOrder: (id) => mutations.deleteOrder.mutate(id),
@@ -658,20 +696,6 @@ export default function Orders() {
                                 <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
                                 {trackingSyncMutation.isPending ? 'Syncing' : syncResult?.success ? `${syncResult.updated} synced` : 'Sync'}
                             </button>
-                            {quickShipEligibleCount > 0 && (
-                                <button
-                                    onClick={() => {
-                                        if (confirm(`Quick ship ${quickShipEligibleCount} order(s) with AWB?`)) {
-                                            mutations.bulkQuickShip.mutate();
-                                        }
-                                    }}
-                                    disabled={mutations.bulkQuickShip.isPending}
-                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-medium"
-                                >
-                                    <Truck size={12} />
-                                    Ship {quickShipEligibleCount}
-                                </button>
-                            )}
                             {markedShippedCount > 0 && (
                                 <button
                                     onClick={() => setShowProcessShippedModal(true)}
@@ -680,6 +704,17 @@ export default function Orders() {
                                 >
                                     <Truck size={12} />
                                     Clear {markedShippedCount} Shipped
+                                </button>
+                            )}
+                            {user?.role === 'admin' && (
+                                <button
+                                    onClick={() => mutations.migrateShopifyFulfilled.mutate()}
+                                    disabled={mutations.migrateShopifyFulfilled.isPending}
+                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
+                                    title="Migrate orders fulfilled on Shopify (no inventory)"
+                                >
+                                    <Archive size={12} />
+                                    {mutations.migrateShopifyFulfilled.isPending ? 'Migrating...' : 'Migrate Fulfilled'}
                                 </button>
                             )}
                             <div className="w-px h-4 bg-gray-200" />
@@ -771,7 +806,7 @@ export default function Orders() {
                         onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
                         onMarkRto={(id) => mutations.markRto.mutate(id)}
                         onArchive={(id) => mutations.archiveOrder.mutate(id)}
-                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onViewOrder={handleViewOrder}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onTrack={(awb, orderNumber) => {
                             setTrackingAwb(awb);
@@ -837,7 +872,7 @@ export default function Orders() {
                     />
                     <RtoOrdersGrid
                         orders={rtoOrders}
-                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onViewOrder={handleViewOrder}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onTrack={(awb, orderNumber) => {
                             setTrackingAwb(awb);
@@ -860,7 +895,7 @@ export default function Orders() {
                     )}
                     <CodPendingGrid
                         orders={codPendingOrders}
-                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onViewOrder={handleViewOrder}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onTrack={(awb, orderNumber) => {
                             setTrackingAwb(awb);
@@ -876,7 +911,7 @@ export default function Orders() {
                 <div className="p-4">
                     <CancelledOrdersGrid
                         orders={cancelledOrders || []}
-                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onViewOrder={handleViewOrder}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onRestore={(id) => mutations.uncancelOrder.mutate(id)}
                         isRestoring={mutations.uncancelOrder.isPending}
@@ -918,7 +953,7 @@ export default function Orders() {
                         orders={archivedOrders}
                         totalCount={archivedTotalCount}
                         onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
-                        onViewOrder={(order) => setViewingOrderId(order.id)}
+                        onViewOrder={handleViewOrder}
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         isRestoring={mutations.unarchiveOrder.isPending}
                         shopDomain={shopifyConfig?.shopDomain}
@@ -1051,6 +1086,20 @@ export default function Orders() {
                     isSubmitting={mutations.customizeLine.isPending || mutations.removeCustomization.isPending}
                     isEditMode={isEditingCustomization}
                     initialData={customizationInitialData}
+                />
+            )}
+
+            {/* New Unified Order Modal */}
+            {unifiedModalOrder && (
+                <UnifiedOrderModal
+                    order={unifiedModalOrder}
+                    initialMode={unifiedModalMode}
+                    onClose={() => setUnifiedModalOrder(null)}
+                    onSuccess={() => {
+                        setUnifiedModalOrder(null);
+                        // Invalidate queries to refresh data
+                        queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+                    }}
                 />
             )}
         </div>
