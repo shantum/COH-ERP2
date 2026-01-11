@@ -388,9 +388,9 @@ model Order {
   shippingAddress String?   // JSON stored as string
   orderDate       DateTime  @default(now())
   shipByDate      DateTime?  // Optional deadline for shipping
-  customerNotes   String?
+  // customerNotes: Read from shopifyCache.customerNotes (Shopify-owned field)
   internalNotes   String?
-  paymentMethod   String?   // COD, Prepaid, etc.
+  paymentMethod   String?   // ERP-owned: COD, Prepaid, etc. (can be edited after order creation)
   status          String    @default("open") // open, on_hold, partially_on_hold, partially_shipped, shipped, delivered, cancelled, archived
   isArchived      Boolean   @default(false)
   archivedAt      DateTime?
@@ -400,10 +400,10 @@ model Order {
   holdReason      String?   // fraud_review, address_issue, payment_issue, customer_request, other
   holdNotes       String?
   holdAt          DateTime?
-  awbNumber       String?
-  courier         String?
-  shippedAt       DateTime?
-  deliveredAt     DateTime?
+  awbNumber       String?   // ERP-owned: Tracking number for shipment
+  courier         String?   // ERP-owned: Courier/logistics partner
+  shippedAt       DateTime? // ERP-owned: When order was shipped
+  deliveredAt     DateTime? // ERP-owned: When order was delivered
   rtoInitiatedAt  DateTime?  // When RTO was initiated (failed delivery)
   rtoReceivedAt   DateTime?  // When RTO package was received back
 
@@ -433,11 +433,11 @@ model Order {
   codShopifySyncError  String?   // Error message if sync failed
   codShopifySyncedAt   DateTime? // When payment was synced to Shopify
 
-  discountCode    String?   // Discount/coupon code used on the order
+  // discountCode: REMOVED - Read from shopifyCache.discountCodes (Shopify-owned field)
   createdAt       DateTime  @default(now())
   syncedAt        DateTime?
-  shopifyFulfillmentStatus String? // unfulfilled, partial, fulfilled
-  shopifyData     String?   // DEPRECATED: Use ShopifyOrderCache instead. Kept for Railway migration compatibility.
+  // shopifyFulfillmentStatus: REMOVED - Read from shopifyCache.fulfillmentStatus (Shopify-owned field)
+  // shopifyData: REMOVED - Use shopifyCache.rawData instead (Shopify-owned field)
 
   // Partial cancellation tracking
   partiallyCancelled Boolean @default(false)  // True if any line is cancelled but order has active lines
@@ -935,20 +935,16 @@ model ShopifyOrderCache {
   financialStatus   String?   // paid, pending, refunded, etc.
   fulfillmentStatus String?   // unfulfilled, partial, fulfilled
 
-  // Commonly-needed Shopify fields (extracted at cache time)
+  // Shopify-owned fields (extracted at cache time, read-only from Shopify)
   discountCodes     String?   // Comma-separated discount codes
   customerNotes     String?   // Shopify order.note
-  paymentMethod     String?   // Calculated: COD or Prepaid
   tags              String?   // Comma-separated order tags
 
-  // Tracking info from fulfillments
-  trackingNumber    String?   // AWB number
-  trackingCompany   String?   // Courier name
-  trackingUrl       String?   // Tracking URL from Shopify
-  shippedAt         DateTime? // When fulfilled
-  shipmentStatus    String?   // in_transit, out_for_delivery, delivered, etc.
-  deliveredAt       DateTime? // When delivered (from Shopify)
-  fulfillmentUpdatedAt DateTime? // Last fulfillment status update
+  // Tracking info from Shopify fulfillments (read-only snapshot, NOT source of truth)
+  // NOTE: Order table owns tracking data (awbNumber, courier, shippedAt, deliveredAt)
+  // These fields show Shopify's view, which may differ from ERP workflow
+  trackingUrl       String?   // Tracking URL from Shopify fulfillment
+  fulfillmentUpdatedAt DateTime? // Last fulfillment status update from Shopify
 
   // Shipping address (flattened for common queries)
   shippingCity      String?
@@ -961,6 +957,9 @@ model ShopifyOrderCache {
   processedAt       DateTime? // When synced to Order table
   processingError   String?   // If sync failed, store error
   createdAt         DateTime  @default(now())
+
+  // Multi-instance processing lock
+  processingLock    DateTime? // Expires after 30s to prevent deadlocks
 
   // Relation to Order
   order             Order?

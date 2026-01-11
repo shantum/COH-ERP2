@@ -10,6 +10,7 @@ import { findOrCreateCustomer } from '../utils/customerUtils.js';
 import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder } from '../services/shopifyOrderProcessor.js';
 import scheduledSync from '../services/scheduledSync.js';
 import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
+import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
 
 
 const router = Router();
@@ -433,13 +434,25 @@ router.post('/sync/customers/all', authenticateToken, asyncHandler(async (req, r
 //   POST /sync/jobs/:id/cancel - Cancel running job
 //
 // For backfilling, use:
-//   POST /sync/backfill-from-cache - Uses cached Shopify data (no API calls)
+//   POST /sync/backfill { fields: ['all'] } - Unified backfill endpoint (RECOMMENDED)
+//   POST /sync/backfill-from-cache - DEPRECATED: Use /sync/backfill with fields: ['paymentMethod']
+//   POST /sync/backfill-cache-fields - DEPRECATED: Use /sync/backfill with fields: ['cacheFields']
+//   POST /sync/backfill-tracking-fields - DEPRECATED: Use /sync/backfill with fields: ['trackingFields']
 //   POST /sync/reprocess-cache - Retry failed cache entries
 
-// Backfill payment method from ShopifyOrderCache (no API calls!)
-router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (req, res) => {
+// ============================================
+// BACKFILL HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Backfill payment method for orders from ShopifyOrderCache
+ * @param {Object} prisma - Prisma client
+ * @param {number} batchSize - Maximum number of orders to process
+ * @returns {Object} Results summary
+ */
+async function backfillPaymentMethod(prisma, batchSize = 5000) {
     // Find orders missing payment method that have cached Shopify data
-    const ordersToBackfill = await req.prisma.order.findMany({
+    const ordersToBackfill = await prisma.order.findMany({
         where: {
             shopifyOrderId: { not: null },
             OR: [
@@ -448,9 +461,10 @@ router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (
             ],
         },
         select: { id: true, shopifyOrderId: true, orderNumber: true },
+        take: batchSize
     });
 
-    console.log(`Found ${ordersToBackfill.length} orders missing payment method`);
+    console.log(`[Backfill PaymentMethod] Found ${ordersToBackfill.length} orders to process`);
 
     const results = {
         updated: 0,
@@ -463,7 +477,7 @@ router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (
     for (const order of ordersToBackfill) {
         try {
             // Get data from ShopifyOrderCache
-            const cachedOrder = await req.prisma.shopifyOrderCache.findUnique({
+            const cachedOrder = await prisma.shopifyOrderCache.findUnique({
                 where: { id: order.shopifyOrderId },
             });
 
@@ -475,20 +489,17 @@ router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (
 
             const shopifyOrder = JSON.parse(cachedOrder.rawData);
 
-            // Calculate payment method
-            const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-            const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-            const paymentMethod = isPrepaidGateway ? 'Prepaid' :
-                (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+            // Calculate payment method using shared utility
+            const paymentMethod = detectPaymentMethod(shopifyOrder);
 
-            console.log(`  Order ${order.orderNumber}: Gateway="${gatewayNames}", Financial=${shopifyOrder.financial_status} => ${paymentMethod}`);
+            console.log(`  Order ${order.orderNumber}: Financial=${shopifyOrder.financial_status} => ${paymentMethod}`);
 
-            // Update order
-            await req.prisma.order.update({
+            // Update order (ERP-owned fields only)
+            await prisma.order.update({
                 where: { id: order.id },
                 data: {
                     paymentMethod,
-                    customerNotes: shopifyOrder.note || null,
+                    // customerNotes removed - now in ShopifyOrderCache
                 },
             });
             results.updated++;
@@ -498,20 +509,19 @@ router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (
         }
     }
 
-    res.json({
-        success: true,
-        message: `Backfilled ${results.updated} orders from cache`,
-        results,
-    });
-}));
+    return results;
+}
 
-// Backfill extracted fields in ShopifyOrderCache from rawData
-// This extracts fields like discountCodes, paymentMethod, tags, etc. for existing cache entries
-router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async (req, res) => {
-    const batchSize = parseInt(req.query.batchSize) || 5000;
-
-    // Find cache entries missing the new extracted fields
-    const cacheEntries = await req.prisma.shopifyOrderCache.findMany({
+/**
+ * Backfill extracted fields in ShopifyOrderCache from rawData
+ * Extracts discountCodes, paymentMethod, tags, etc. for existing cache entries
+ * @param {Object} prisma - Prisma client
+ * @param {number} batchSize - Maximum number of cache entries to process
+ * @returns {Object} Results summary
+ */
+async function backfillCacheFields(prisma, batchSize = 5000) {
+    // Find cache entries missing the extracted fields
+    const cacheEntries = await prisma.shopifyOrderCache.findMany({
         where: {
             // Find entries where extracted fields are null (not yet populated)
             discountCodes: null,
@@ -520,14 +530,10 @@ router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async
         take: batchSize
     });
 
-    console.log(`Found ${cacheEntries.length} cache entries to backfill`);
+    console.log(`[Backfill CacheFields] Found ${cacheEntries.length} cache entries to process`);
 
     if (cacheEntries.length === 0) {
-        return res.json({
-            success: true,
-            message: 'No more entries to backfill',
-            results: { updated: 0, errors: [], total: 0, remaining: 0 },
-        });
+        return { updated: 0, errors: [], total: 0, remaining: 0 };
     }
 
     const results = {
@@ -549,11 +555,8 @@ router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async
                 const discountCodes = (shopifyOrder.discount_codes || [])
                     .map(d => d.code).join(', ') || '';
 
-                // Calculate payment method
-                const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-                const isPrepaid = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-                const paymentMethod = isPrepaid ? 'Prepaid' :
-                    (shopifyOrder.financial_status === 'pending' ? 'COD' : 'Prepaid');
+                // Detect payment method using shared utility
+                const paymentMethod = detectPaymentMethod(shopifyOrder);
 
                 // Extract tracking from fulfillments
                 const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
@@ -562,16 +565,14 @@ router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async
                 // Extract shipping address
                 const addr = shopifyOrder.shipping_address;
 
-                await req.prisma.shopifyOrderCache.update({
+                await prisma.shopifyOrderCache.update({
                     where: { id: entry.id },
                     data: {
                         discountCodes,
                         customerNotes: shopifyOrder.note || null,
-                        paymentMethod,
                         tags: shopifyOrder.tags || null,
-                        trackingNumber: fulfillment?.tracking_number || null,
-                        trackingCompany: fulfillment?.tracking_company || null,
-                        shippedAt: fulfillment?.created_at ? new Date(fulfillment.created_at) : null,
+                        // Removed duplicate fields (owned by Order table):
+                        // paymentMethod, trackingNumber, trackingCompany, shippedAt
                         shippingCity: addr?.city || null,
                         shippingState: addr?.province || null,
                         shippingCountry: addr?.country || null,
@@ -588,102 +589,136 @@ router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async
         console.log(`Backfill progress: ${Math.min(i + parallelBatchSize, cacheEntries.length)}/${cacheEntries.length}`);
     }
 
-    // Check how many remaining
-    const remainingCount = await req.prisma.shopifyOrderCache.count({
+    // Check remaining
+    const remainingCount = await prisma.shopifyOrderCache.count({
         where: { discountCodes: null }
     });
+
+    results.remaining = remainingCount;
+    return results;
+}
+
+/**
+ * Backfill tracking fields from existing rawData (for newly added schema fields)
+ * DEPRECATED: trackingNumber, shipmentStatus, deliveredAt removed from ShopifyOrderCache
+ * These fields are now owned by Order table (awbNumber, trackingStatus, deliveredAt)
+ * @param {Object} prisma - Prisma client
+ * @param {number} batchSize - Maximum number of cache entries to process
+ * @returns {Object} Results summary
+ */
+async function backfillTrackingFields(prisma, batchSize = 5000) {
+    console.log('[Backfill TrackingFields] DEPRECATED - Tracking fields removed from cache schema');
+    console.log('Tracking data is now managed in Order table (awbNumber, trackingStatus, deliveredAt)');
+    return { updated: 0, errors: [], total: 0, remaining: 0, deprecated: true };
+}
+
+// ============================================
+// UNIFIED BACKFILL ENDPOINT
+// ============================================
+
+/**
+ * Unified backfill endpoint
+ *
+ * POST /api/shopify/sync/backfill
+ *
+ * Body:
+ * - fields: string[] - Array of field types to backfill. Options: 'all', 'paymentMethod', 'cacheFields', 'trackingFields'
+ *   Default: ['all']
+ * - batchSize: number - Maximum records to process per field type. Default: 5000
+ *
+ * Examples:
+ *   { "fields": ["all"] }  // Backfill everything
+ *   { "fields": ["paymentMethod"] }  // Only backfill payment method in Order table
+ *   { "fields": ["cacheFields", "trackingFields"], "batchSize": 1000 }  // Cache fields only
+ */
+router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) => {
+    const { fields = ['all'], batchSize = 5000 } = req.body;
+
+    console.log(`[Unified Backfill] Starting with fields: ${fields.join(', ')}, batchSize: ${batchSize}`);
+
+    const results = {};
+    const shouldBackfillAll = fields.includes('all');
+
+    // Backfill payment method in Order table
+    if (shouldBackfillAll || fields.includes('paymentMethod')) {
+        console.log('[Unified Backfill] Running paymentMethod backfill...');
+        results.paymentMethod = await backfillPaymentMethod(req.prisma, batchSize);
+    }
+
+    // Backfill extracted fields in ShopifyOrderCache
+    if (shouldBackfillAll || fields.includes('cacheFields')) {
+        console.log('[Unified Backfill] Running cacheFields backfill...');
+        results.cacheFields = await backfillCacheFields(req.prisma, batchSize);
+    }
+
+    // Backfill tracking fields in ShopifyOrderCache
+    if (shouldBackfillAll || fields.includes('trackingFields')) {
+        console.log('[Unified Backfill] Running trackingFields backfill...');
+        results.trackingFields = await backfillTrackingFields(req.prisma, batchSize);
+    }
+
+    const totalUpdated = Object.values(results).reduce((sum, r) => sum + (r.updated || 0), 0);
+
+    console.log(`[Unified Backfill] Complete. Total updated: ${totalUpdated}`);
+
+    res.json({
+        success: true,
+        message: `Backfilled ${totalUpdated} total records`,
+        results,
+    });
+}));
+
+// ============================================
+// LEGACY BACKFILL ENDPOINTS (DEPRECATED)
+// ============================================
+
+// DEPRECATED: Use POST /sync/backfill with { fields: ['paymentMethod'] }
+// Backfill payment method from ShopifyOrderCache (no API calls!)
+router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (req, res) => {
+    console.warn('[DEPRECATED] /sync/backfill-from-cache is deprecated. Use /sync/backfill with { fields: ["paymentMethod"] }');
+
+    const results = await backfillPaymentMethod(req.prisma, 5000);
+
+    res.json({
+        success: true,
+        message: `Backfilled ${results.updated} orders from cache`,
+        results,
+        deprecated: true,
+        migration: 'Use POST /sync/backfill with { fields: ["paymentMethod"] }',
+    });
+}));
+
+// DEPRECATED: Use POST /sync/backfill with { fields: ['cacheFields'] }
+// Backfill extracted fields in ShopifyOrderCache from rawData
+router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async (req, res) => {
+    console.warn('[DEPRECATED] /sync/backfill-cache-fields is deprecated. Use /sync/backfill with { fields: ["cacheFields"] }');
+
+    const batchSize = parseInt(req.query.batchSize) || 5000;
+    const results = await backfillCacheFields(req.prisma, batchSize);
 
     res.json({
         success: true,
         message: `Backfilled ${results.updated} cache entries`,
-        results: { ...results, remaining: remainingCount },
+        results,
+        deprecated: true,
+        migration: 'Use POST /sync/backfill with { fields: ["cacheFields"] }',
     });
 }));
 
+// DEPRECATED: Use POST /sync/backfill with { fields: ['trackingFields'] }
 // Backfill tracking fields from existing rawData (for newly added schema fields)
 router.post('/sync/backfill-tracking-fields', authenticateToken, asyncHandler(async (req, res) => {
+    console.warn('[DEPRECATED] /sync/backfill-tracking-fields is deprecated. Use /sync/backfill with { fields: ["trackingFields"] }');
+
     const batchSize = parseInt(req.query.batchSize) || 5000;
-
-        // Find cache entries that have fulfillment data but missing new tracking fields
-        // We check for entries with trackingNumber but no trackingUrl (indicates old cache format)
-        const cacheEntries = await req.prisma.shopifyOrderCache.findMany({
-            where: {
-                trackingNumber: { not: null },
-                trackingUrl: null,
-            },
-            orderBy: { createdAt: 'desc' },
-            take: batchSize
-        });
-
-        console.log(`Found ${cacheEntries.length} cache entries to backfill tracking fields`);
-
-        if (cacheEntries.length === 0) {
-            return res.json({
-                success: true,
-                message: 'No more entries to backfill tracking fields',
-                results: { updated: 0, errors: [], total: 0, remaining: 0 },
-            });
-        }
-
-        const results = {
-            updated: 0,
-            errors: [],
-            total: cacheEntries.length,
-        };
-
-        // Process in parallel batches of 10 to prevent connection pool exhaustion
-        const parallelBatchSize = 10;
-        for (let i = 0; i < cacheEntries.length; i += parallelBatchSize) {
-            const batch = cacheEntries.slice(i, i + parallelBatchSize);
-
-            await Promise.all(batch.map(async (entry) => {
-                try {
-                    const shopifyOrder = JSON.parse(entry.rawData);
-
-                    // Extract tracking info from fulfillments
-                    const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
-                        || shopifyOrder.fulfillments?.[0];
-
-                    if (!fulfillment) {
-                        return; // Skip if no fulfillment
-                    }
-
-                    const trackingUrl = fulfillment.tracking_url || fulfillment.tracking_urls?.[0] || null;
-                    const shipmentStatus = fulfillment.shipment_status || null;
-                    const fulfillmentUpdatedAt = fulfillment.updated_at ? new Date(fulfillment.updated_at) : null;
-                    const deliveredAt = shipmentStatus === 'delivered' && fulfillmentUpdatedAt ? fulfillmentUpdatedAt : null;
-
-                    await req.prisma.shopifyOrderCache.update({
-                        where: { id: entry.id },
-                        data: {
-                            trackingUrl,
-                            shipmentStatus,
-                            deliveredAt,
-                            fulfillmentUpdatedAt,
-                        },
-                    });
-                    results.updated++;
-                } catch (entryError) {
-                    console.error(`Error processing cache ${entry.id}: ${entryError.message}`);
-                    results.errors.push(`Cache ${entry.id}: ${entryError.message}`);
-                }
-            }));
-
-            console.log(`Tracking backfill progress: ${Math.min(i + parallelBatchSize, cacheEntries.length)}/${cacheEntries.length}`);
-        }
-
-        // Check remaining
-        const remainingCount = await req.prisma.shopifyOrderCache.count({
-            where: {
-                trackingNumber: { not: null },
-                trackingUrl: null,
-            }
-        });
+    const results = await backfillTrackingFields(req.prisma, batchSize);
 
     res.json({
         success: true,
         message: `Backfilled tracking fields for ${results.updated} cache entries`,
-        results: { ...results, remaining: remainingCount },
+        results,
+        deprecated: true,
+        migration: 'Use POST /sync/backfill with { fields: ["trackingFields"] }',
     });
 }));
 

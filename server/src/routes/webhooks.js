@@ -79,9 +79,17 @@ const verifyWebhook = async (req, res, next) => {
 // ============================================
 
 /**
- * UNIFIED ORDER WEBHOOK (Recommended)
+ * UNIFIED ORDER WEBHOOK
  * Single endpoint that handles all order events: create, update, cancel, fulfill
- * Configure this in Shopify: orders/updated topic
+ * The X-Shopify-Topic header determines the event type automatically.
+ *
+ * Shopify Configuration:
+ * - Configure this endpoint for ALL order webhook topics in Shopify Admin
+ * - Endpoint: POST /api/webhooks/shopify/orders
+ * - Supported topics: orders/create, orders/updated, orders/cancelled, orders/fulfilled
+ *
+ * Legacy endpoints (orders/create, orders/updated, orders/cancelled, orders/fulfilled)
+ * have been consolidated into this single unified endpoint for simpler maintenance.
  */
 router.post('/shopify/orders', verifyWebhook, async (req, res) => {
     const startTime = Date.now();
@@ -122,111 +130,6 @@ router.post('/shopify/orders', verifyWebhook, async (req, res) => {
         // Add to dead letter queue for retry
         await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
         res.status(200).json({ received: true, error: error.message }); // Always return 200 to prevent Shopify retries
-    }
-});
-
-// ============================================
-// LEGACY ENDPOINTS (for backward compatibility)
-// All route to the same unified handler
-// ============================================
-
-// Orders - Create (legacy)
-router.post('/shopify/orders/create', verifyWebhook, async (req, res) => {
-    const startTime = Date.now();
-    const webhookId = req.get('X-Shopify-Webhook-Id');
-    try {
-        const dedupeResult = await checkWebhookDuplicate(req.prisma, webhookId);
-        if (dedupeResult.duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
-
-        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
-        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
-
-        const shopifyOrder = validation.data;
-        console.log(`Webhook: orders/create (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        await logWebhookReceived(req.prisma, webhookId, 'orders/create', shopifyOrder.id, dedupeResult.isRetry);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/create');
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
-        res.status(200).json({ received: true, ...result });
-    } catch (error) {
-        console.error('Webhook orders/create error:', error);
-        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
-        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
-        res.status(200).json({ received: true, error: error.message });
-    }
-});
-
-// Orders - Updated (legacy)
-router.post('/shopify/orders/updated', verifyWebhook, async (req, res) => {
-    const startTime = Date.now();
-    const webhookId = req.get('X-Shopify-Webhook-Id');
-    try {
-        const dedupeResult = await checkWebhookDuplicate(req.prisma, webhookId);
-        if (dedupeResult.duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
-
-        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
-        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
-
-        const shopifyOrder = validation.data;
-        console.log(`Webhook: orders/updated (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        await logWebhookReceived(req.prisma, webhookId, 'orders/updated', shopifyOrder.id, dedupeResult.isRetry);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/updated');
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
-        res.status(200).json({ received: true, ...result });
-    } catch (error) {
-        console.error('Webhook orders/updated error:', error);
-        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
-        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
-        res.status(200).json({ received: true, error: error.message });
-    }
-});
-
-// Orders - Cancelled (legacy)
-router.post('/shopify/orders/cancelled', verifyWebhook, async (req, res) => {
-    const startTime = Date.now();
-    const webhookId = req.get('X-Shopify-Webhook-Id');
-    try {
-        const dedupeResult = await checkWebhookDuplicate(req.prisma, webhookId);
-        if (dedupeResult.duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
-
-        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
-        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
-
-        const shopifyOrder = validation.data;
-        console.log(`Webhook: orders/cancelled (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        await logWebhookReceived(req.prisma, webhookId, 'orders/cancelled', shopifyOrder.id, dedupeResult.isRetry);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/cancelled');
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
-        res.status(200).json({ received: true, ...result });
-    } catch (error) {
-        console.error('Webhook orders/cancelled error:', error);
-        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
-        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
-        res.status(200).json({ received: true, error: error.message });
-    }
-});
-
-// Orders - Fulfilled (legacy)
-router.post('/shopify/orders/fulfilled', verifyWebhook, async (req, res) => {
-    const startTime = Date.now();
-    const webhookId = req.get('X-Shopify-Webhook-Id');
-    try {
-        const dedupeResult = await checkWebhookDuplicate(req.prisma, webhookId);
-        if (dedupeResult.duplicate) return res.status(200).json({ received: true, skipped: true, reason: 'duplicate' });
-
-        const validation = validateWebhookPayload(shopifyOrderSchema, req.body);
-        if (!validation.success) return res.status(200).json({ received: true, error: `Validation: ${validation.error}` });
-
-        const shopifyOrder = validation.data;
-        console.log(`Webhook: orders/fulfilled (legacy) - Order #${shopifyOrder.order_number || shopifyOrder.name}`);
-        await logWebhookReceived(req.prisma, webhookId, 'orders/fulfilled', shopifyOrder.id, dedupeResult.isRetry);
-        const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, 'orders/fulfilled');
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
-        res.status(200).json({ received: true, ...result });
-    } catch (error) {
-        console.error('Webhook orders/fulfilled error:', error);
-        await updateWebhookLog(req.prisma, webhookId, 'failed', error.message, Date.now() - startTime);
-        await addToFailedQueue(req.prisma, 'order', req.body?.id, req.body, error.message);
-        res.status(200).json({ received: true, error: error.message });
     }
 });
 
@@ -430,13 +333,8 @@ router.get('/status', async (req, res) => {
         res.json({
             configured: !!webhookSecret,
             endpoints: {
-                // Recommended: Single unified endpoint for all order events
-                orders_unified: '/api/webhooks/shopify/orders',
-                // Legacy order endpoints (still supported, all use same handler)
-                orders_create: '/api/webhooks/shopify/orders/create',
-                orders_updated: '/api/webhooks/shopify/orders/updated',
-                orders_cancelled: '/api/webhooks/shopify/orders/cancelled',
-                orders_fulfilled: '/api/webhooks/shopify/orders/fulfilled',
+                // Order endpoint - handles all order topics via X-Shopify-Topic header
+                orders: '/api/webhooks/shopify/orders',
                 // Product endpoints
                 products_create: '/api/webhooks/shopify/products/create',
                 products_update: '/api/webhooks/shopify/products/update',
@@ -447,7 +345,7 @@ router.get('/status', async (req, res) => {
                 // Inventory endpoints
                 inventory_levels_update: '/api/webhooks/shopify/inventory_levels/update',
             },
-            recommendation: 'Use orders_unified endpoint with Shopify orders/updated topic for all order events',
+            note: 'The unified /shopify/orders endpoint handles all order topics (create, updated, cancelled, fulfilled). Configure it for any order-related webhook topic in Shopify.',
             recentLogs: logs
         });
     } catch (error) {

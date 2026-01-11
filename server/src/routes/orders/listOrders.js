@@ -518,11 +518,8 @@ router.get('/status/archived', async (req, res) => {
                 deliveryDays,
                 customerTier: order.customer?.tier,
                 customerLtv: order.customer?.lifetimeValue,
-                shopifyPaymentMethod: cache.paymentMethod || order.paymentMethod,
                 shopifyFinancialStatus: cache.financialStatus,
                 shopifyFulfillmentStatus: cache.fulfillmentStatus,
-                shopifyShipmentStatus: cache.shipmentStatus,
-                shopifyDeliveredAt: cache.deliveredAt,
             };
         });
 
@@ -649,6 +646,8 @@ router.get('/analytics', async (req, res) => {
         // Get orders for revenue calculations across multiple time periods
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        // Current periods
         const yesterdayStart = new Date(todayStart);
         yesterdayStart.setDate(yesterdayStart.getDate() - 1);
         const last7DaysStart = new Date(todayStart);
@@ -657,17 +656,54 @@ router.get('/analytics', async (req, res) => {
         last30DaysStart.setDate(last30DaysStart.getDate() - 30);
         const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1); // First of current month
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        // Get ALL orders from last month start for revenue (regardless of status)
+        // Comparison periods
+        const dayBeforeYesterdayStart = new Date(todayStart);
+        dayBeforeYesterdayStart.setDate(dayBeforeYesterdayStart.getDate() - 2);
+        const prior7DaysStart = new Date(todayStart);
+        prior7DaysStart.setDate(prior7DaysStart.getDate() - 14);
+        const prior7DaysEnd = new Date(todayStart);
+        prior7DaysEnd.setDate(prior7DaysEnd.getDate() - 7);
+        const prior30DaysStart = new Date(todayStart);
+        prior30DaysStart.setDate(prior30DaysStart.getDate() - 60);
+        const prior30DaysEnd = new Date(todayStart);
+        prior30DaysEnd.setDate(prior30DaysEnd.getDate() - 30);
+        const monthBeforeLastStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const monthBeforeLastEnd = lastMonthStart;
+
+        // For same-time comparisons
+        const yesterdaySameTime = new Date(now);
+        yesterdaySameTime.setDate(yesterdaySameTime.getDate() - 1);
+        const dayBeforeYesterdaySameTime = new Date(now);
+        dayBeforeYesterdaySameTime.setDate(dayBeforeYesterdaySameTime.getDate() - 2);
+        // Last month same date/time for this month comparison
+        const lastMonthSameDateTime = new Date(now);
+        lastMonthSameDateTime.setMonth(lastMonthSameDateTime.getMonth() - 1);
+
+        // Get ALL orders from 60+ days ago for all comparisons (include customerId for new/returning)
         const recentOrders = await req.prisma.order.findMany({
             where: {
-                orderDate: { gte: lastMonthStart },
+                orderDate: { gte: monthBeforeLastStart },
             },
             select: {
                 totalAmount: true,
                 paymentMethod: true,
                 orderDate: true,
+                customerId: true,
+            }
+        });
+
+        // Get first order date for each customer to determine new vs returning
+        const customerFirstOrders = await req.prisma.order.groupBy({
+            by: ['customerId'],
+            _min: { orderDate: true },
+            where: { customerId: { not: null } },
+        });
+        const customerFirstOrderMap = new Map();
+        customerFirstOrders.forEach(c => {
+            if (c.customerId && c._min.orderDate) {
+                customerFirstOrderMap.set(c.customerId, new Date(c._min.orderDate));
             }
         });
 
@@ -686,20 +722,75 @@ router.get('/analytics', async (req, res) => {
             orderCount: orders.length,
         });
 
-        // For fair comparison: yesterday at same time of day
-        const yesterdaySameTime = new Date(now);
-        yesterdaySameTime.setDate(yesterdaySameTime.getDate() - 1);
+        // Calculate new vs returning customer stats for a set of orders
+        const calcCustomerStats = (orders, periodStart) => {
+            let newCustomers = 0;
+            let returningCustomers = 0;
+            const seenCustomers = new Set();
+
+            orders.forEach(o => {
+                if (!o.customerId || seenCustomers.has(o.customerId)) return;
+                seenCustomers.add(o.customerId);
+
+                const firstOrderDate = customerFirstOrderMap.get(o.customerId);
+                if (firstOrderDate && firstOrderDate >= periodStart) {
+                    newCustomers++;
+                } else {
+                    returningCustomers++;
+                }
+            });
+
+            const total = newCustomers + returningCustomers;
+            return {
+                newCustomers,
+                returningCustomers,
+                newPercent: total > 0 ? Math.round((newCustomers / total) * 100) : 0,
+                returningPercent: total > 0 ? Math.round((returningCustomers / total) * 100) : 0,
+            };
+        };
+
+        const calcChange = (current, previous) => {
+            if (!previous || previous === 0) return null;
+            return ((current - previous) / previous) * 100;
+        };
+
+        // Calculate all revenue periods
+        const todayOrders = filterByDateRange(recentOrders, todayStart);
+        const yesterdayOrders = filterByDateRange(recentOrders, yesterdayStart, todayStart);
+        const last7DaysOrders = filterByDateRange(recentOrders, last7DaysStart);
+        const last30DaysOrdersFiltered = filterByDateRange(recentOrders, last30DaysStart);
+        const lastMonthOrders = filterByDateRange(recentOrders, lastMonthStart, lastMonthEnd);
+        const thisMonthOrders = filterByDateRange(recentOrders, thisMonthStart);
+
+        const todayRevenue = calcRevenue(todayOrders);
+        const yesterdaySameTimeRevenue = calcRevenue(filterByDateRange(recentOrders, yesterdayStart, yesterdaySameTime));
+        const yesterdayRevenue = calcRevenue(yesterdayOrders);
+        const dayBeforeYesterdayRevenue = calcRevenue(filterByDateRange(recentOrders, dayBeforeYesterdayStart, yesterdayStart));
+        const last7DaysRevenue = calcRevenue(last7DaysOrders);
+        const prior7DaysRevenue = calcRevenue(filterByDateRange(recentOrders, prior7DaysStart, prior7DaysEnd));
+        const last30DaysRevenue = calcRevenue(last30DaysOrdersFiltered);
+        const prior30DaysRevenue = calcRevenue(filterByDateRange(recentOrders, prior30DaysStart, prior30DaysEnd));
+        const lastMonthRevenue = calcRevenue(lastMonthOrders);
+        const monthBeforeLastRevenue = calcRevenue(filterByDateRange(recentOrders, monthBeforeLastStart, monthBeforeLastEnd));
+        const thisMonthRevenue = calcRevenue(thisMonthOrders);
+        // Last month till same date/time
+        const lastMonthSamePeriodRevenue = calcRevenue(filterByDateRange(recentOrders, lastMonthStart, lastMonthSameDateTime));
+
+        // Calculate customer stats for each period
+        const todayCustomers = calcCustomerStats(todayOrders, todayStart);
+        const yesterdayCustomers = calcCustomerStats(yesterdayOrders, yesterdayStart);
+        const last7DaysCustomers = calcCustomerStats(last7DaysOrders, last7DaysStart);
+        const last30DaysCustomers = calcCustomerStats(last30DaysOrdersFiltered, last30DaysStart);
+        const lastMonthCustomers = calcCustomerStats(lastMonthOrders, lastMonthStart);
+        const thisMonthCustomers = calcCustomerStats(thisMonthOrders, thisMonthStart);
 
         const revenue = {
-            today: calcRevenue(filterByDateRange(recentOrders, todayStart)),
-            // Yesterday full day for display
-            yesterday: calcRevenue(filterByDateRange(recentOrders, yesterdayStart, todayStart)),
-            // Yesterday at same time for comparison (12am to current time yesterday)
-            yesterdaySameTime: calcRevenue(filterByDateRange(recentOrders, yesterdayStart, yesterdaySameTime)),
-            last7Days: calcRevenue(filterByDateRange(recentOrders, last7DaysStart)),
-            last30Days: calcRevenue(filterByDateRange(recentOrders, last30DaysStart)),
-            lastMonth: calcRevenue(filterByDateRange(recentOrders, lastMonthStart, lastMonthEnd)),
-            thisMonth: calcRevenue(filterByDateRange(recentOrders, thisMonthStart)),
+            today: { ...todayRevenue, change: calcChange(todayRevenue.total, yesterdaySameTimeRevenue.total), customers: todayCustomers },
+            yesterday: { ...yesterdayRevenue, change: calcChange(yesterdayRevenue.total, dayBeforeYesterdayRevenue.total), customers: yesterdayCustomers },
+            last7Days: { ...last7DaysRevenue, change: calcChange(last7DaysRevenue.total, prior7DaysRevenue.total), customers: last7DaysCustomers },
+            last30Days: { ...last30DaysRevenue, change: calcChange(last30DaysRevenue.total, prior30DaysRevenue.total), customers: last30DaysCustomers },
+            lastMonth: { ...lastMonthRevenue, change: calcChange(lastMonthRevenue.total, monthBeforeLastRevenue.total), customers: lastMonthCustomers },
+            thisMonth: { ...thisMonthRevenue, change: calcChange(thisMonthRevenue.total, lastMonthSamePeriodRevenue.total), customers: thisMonthCustomers },
         };
 
         // Count pending orders (orders with at least one pending line)
@@ -747,6 +838,8 @@ router.get('/analytics', async (req, res) => {
                             select: {
                                 variation: {
                                     select: {
+                                        id: true,
+                                        colorName: true,
                                         imageUrl: true,
                                         product: {
                                             select: { id: true, name: true, imageUrl: true }
@@ -763,13 +856,14 @@ router.get('/analytics', async (req, res) => {
         const productData = {};
         last30DaysOrders.forEach(order => {
             order.orderLines.forEach(line => {
-                const product = line.sku?.variation?.product;
+                const variation = line.sku?.variation;
+                const product = variation?.product;
                 const productId = product?.id;
                 if (!productId) return;
 
                 if (!productData[productId]) {
                     // Use variation image if available, otherwise product image
-                    const imageUrl = line.sku?.variation?.imageUrl || product?.imageUrl || null;
+                    const imageUrl = variation?.imageUrl || product?.imageUrl || null;
                     productData[productId] = {
                         id: productId,
                         name: product.name,
@@ -777,12 +871,33 @@ router.get('/analytics', async (req, res) => {
                         qty: 0,
                         orderCount: 0,
                         salesValue: 0,
+                        variants: {}, // Track by variation/color
                     };
                 }
                 productData[productId].qty += line.qty;
                 productData[productId].orderCount += 1;
                 productData[productId].salesValue += (line.unitPrice || 0) * line.qty;
+
+                // Track variant breakdown
+                const variantId = variation?.id;
+                const variantName = variation?.colorName || 'Unknown';
+                if (variantId) {
+                    if (!productData[productId].variants[variantId]) {
+                        productData[productId].variants[variantId] = {
+                            name: variantName,
+                            qty: 0,
+                        };
+                    }
+                    productData[productId].variants[variantId].qty += line.qty;
+                }
             });
+        });
+
+        // Convert variants object to sorted array
+        Object.values(productData).forEach(product => {
+            product.variants = Object.values(product.variants)
+                .sort((a, b) => b.qty - a.qty)
+                .slice(0, 5); // Top 5 variants
         });
 
         const topProducts = Object.values(productData)

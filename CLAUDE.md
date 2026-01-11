@@ -49,6 +49,29 @@ npm run db:push
 
 **Key files**: `server/src/utils/orderViews.js` (view configs), `server/src/routes/orders/listOrders.js`
 
+## Shopify Data Field Ownership
+
+Defines which system owns each field and where data lives. Critical for understanding data flow.
+
+| Field | Owner | Location | Notes |
+|-------|-------|----------|-------|
+| `discountCodes` | Shopify | ShopifyOrderCache | Read-only from Shopify, comma-separated |
+| `customerNotes` | Shopify | ShopifyOrderCache | Shopify order.note field |
+| `tags` | Shopify | ShopifyOrderCache | Comma-separated tags from Shopify |
+| `financialStatus` | Shopify | ShopifyOrderCache | paid/pending/refunded/etc |
+| `fulfillmentStatus` | Shopify | ShopifyOrderCache | unfulfilled/partial/fulfilled/null |
+| `paymentMethod` | ERP | Order | COD/Prepaid, editable in ERP |
+| `awbNumber` | ERP | Order | Tracking number assigned by ERP |
+| `courier` | ERP | Order | Shipping provider (iThink, etc) |
+| `trackingStatus` | ERP | Order | From iThink Logistics API |
+| `status` | ERP | Order | open/allocated/picked/packed/shipped/delivered |
+| `shippedAt` | Both | Order & Cache | ERP controls, synced to Shopify |
+| `deliveredAt` | Both | Order & Cache | Set by ERP, may sync from Shopify fulfillment |
+
+**Access pattern**: Query `Order` with `include: { shopifyCache: true }` to get both ERP and Shopify fields.
+
+**Backfill endpoint**: `POST /api/shopify/sync/backfill` with `{ fields: ['all'] }` to populate missing fields from cache.
+
 ## Key Files
 
 | Purpose | Location |

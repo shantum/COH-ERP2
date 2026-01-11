@@ -19,7 +19,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 const ALL_COLUMN_IDS = [
     'orderNumber', 'customerName', 'city', 'itemCount', 'totalAmount',
     'orderDate', 'shippedAt', 'deliveredAt', 'deliveryDays', 'archivedAt',
-    'shopifyPaymentMethod', 'shopifyFinancialStatus', 'codRemittedAt', 'shopifyLink',
+    'paymentMethod', 'shopifyFinancialStatus', 'codRemittedAt', 'shopifyLink',
     'courier', 'awbNumber', 'trackingStatus', 'courierStatusCode',
     'status', 'channel', 'actions'
 ];
@@ -27,7 +27,7 @@ const ALL_COLUMN_IDS = [
 const DEFAULT_HEADERS: Record<string, string> = {
     orderNumber: 'Order', customerName: 'Customer', city: 'City', itemCount: 'Items',
     totalAmount: 'Total', orderDate: 'Ordered', shippedAt: 'Shipped', deliveredAt: 'Delivered',
-    deliveryDays: 'Del Days', archivedAt: 'Archived', shopifyPaymentMethod: 'Payment',
+    deliveryDays: 'Del Days', archivedAt: 'Archived', paymentMethod: 'Payment',
     shopifyFinancialStatus: 'Paid', codRemittedAt: 'COD Paid', shopifyLink: 'Link',
     courier: 'Courier', awbNumber: 'AWB', trackingStatus: 'Status', courierStatusCode: 'Code',
     status: 'Final Status', channel: 'Channel', actions: 'Actions'
@@ -345,7 +345,7 @@ export function ArchivedOrdersGrid({
             headerClass: 'bg-green-50 font-semibold text-green-700',
             children: [
                 {
-                    field: 'shopifyPaymentMethod',
+                    field: 'paymentMethod',
                     headerName: 'Payment',
                     width: 65,
                     cellRenderer: (params: ICellRendererParams) => {
@@ -394,7 +394,7 @@ export function ArchivedOrdersGrid({
                     cellRenderer: (params: ICellRendererParams) => {
                         const order = params.data;
                         if (!order) return null;
-                        const isCod = (order.shopifyPaymentMethod || order.paymentMethod || '').toLowerCase() === 'cod';
+                        const isCod = (order.paymentMethod || '').toLowerCase() === 'cod';
                         if (!isCod) return <span className="text-gray-300 text-xs">-</span>;
                         if (order.codRemittedAt) {
                             const date = new Date(order.codRemittedAt);

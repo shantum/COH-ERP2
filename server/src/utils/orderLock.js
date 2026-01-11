@@ -59,27 +59,106 @@ export function releaseOrderLock(shopifyOrderId) {
  * Execute a function with order lock protection
  * Automatically acquires and releases the lock
  *
+ * Database-level locking for multi-instance deployment support.
+ * Uses processingLock timestamp on ShopifyOrderCache.
+ * Lock auto-expires after 30 seconds to prevent deadlocks.
+ *
+ * Two-tier locking strategy:
+ * 1. In-memory lock (fast-path): Prevents duplicate work in same instance
+ * 2. Database lock (distributed): Ensures mutual exclusion across instances
+ *
  * @param {string} shopifyOrderId - The Shopify order ID to lock
- * @param {string} source - The source of the operation
- * @param {Function} fn - The function to execute
- * @returns {Promise<{locked: boolean, result?: any, skipped?: boolean}>}
+ * @param {string} source - The source of the operation ('webhook' or 'sync')
+ * @param {Function} fn - The async function to execute (receives no params)
+ * @returns {Promise<{locked: boolean, result?: any, skipped?: boolean, reason?: string}>}
+ *
+ * @example
+ * const result = await withOrderLock('6234567890', 'webhook', async () => {
+ *   // Your processing logic here
+ *   return { success: true };
+ * });
+ * if (result.skipped) {
+ *   console.log('Order locked by another process:', result.reason);
+ * }
  */
 export async function withOrderLock(shopifyOrderId, source, fn) {
+    // Fast-path: Check in-memory lock first (cheap operation)
     if (!acquireOrderLock(shopifyOrderId, source)) {
-        return { locked: false, skipped: true, reason: 'already_processing' };
+        return { locked: false, skipped: true, reason: 'in_memory_lock' };
     }
 
     try {
-        const result = await fn();
-        return { locked: true, result };
+        // Database lock: Import prisma client dynamically to avoid circular dependency
+        // This works because fn() will have access to prisma via closure
+        const { default: prisma } = await import('../db.js');
+
+        const lockTimeout = 30000; // 30 seconds
+        const lockExpiry = new Date(Date.now() + lockTimeout);
+
+        // Try to acquire database lock using transaction for atomicity
+        const lockResult = await prisma.$transaction(async (tx) => {
+            // Check if cache entry exists
+            const cache = await tx.shopifyOrderCache.findUnique({
+                where: { id: shopifyOrderId },
+                select: { id: true, processingLock: true }
+            });
+
+            // If no cache entry exists yet, allow processing (will be created by cacheShopifyOrder)
+            if (!cache) {
+                return { acquired: true, isNew: true };
+            }
+
+            // Check if lock is held and not expired
+            if (cache.processingLock) {
+                const lockAge = Date.now() - new Date(cache.processingLock).getTime();
+                if (lockAge < lockTimeout) {
+                    return { acquired: false, reason: 'locked', lockAge };
+                }
+                // Lock expired, we can take it
+                console.log(`[OrderLock] Expired database lock released for ${shopifyOrderId}`);
+            }
+
+            // Acquire lock
+            await tx.shopifyOrderCache.update({
+                where: { id: shopifyOrderId },
+                data: { processingLock: lockExpiry }
+            });
+
+            return { acquired: true };
+        });
+
+        if (!lockResult.acquired) {
+            // Another instance holds the lock
+            console.log(`[OrderLock] Database lock held for order ${shopifyOrderId}`);
+            return { locked: false, skipped: true, reason: 'database_lock' };
+        }
+
+        // Lock acquired - execute operation
+        try {
+            const result = await fn();
+            return { locked: true, result };
+        } finally {
+            // Release database lock (only if cache exists - might not for new orders)
+            if (!lockResult.isNew) {
+                await prisma.shopifyOrderCache.updateMany({
+                    where: { id: shopifyOrderId },
+                    data: { processingLock: null }
+                }).catch((err) => {
+                    console.error(`[OrderLock] Failed to release database lock for ${shopifyOrderId}:`, err.message);
+                });
+            }
+        }
     } finally {
+        // Always release in-memory lock
         releaseOrderLock(shopifyOrderId);
     }
 }
 
 /**
  * Database-level order lock using Prisma transaction
- * Use this for multi-instance deployments
+ *
+ * @deprecated Use `withOrderLock()` instead, which now includes database locking.
+ * This function is kept for backward compatibility but is no longer needed.
  *
  * This uses a "processing lock" pattern:
  * 1. Try to update ShopifyOrderCache.processingLock to current timestamp

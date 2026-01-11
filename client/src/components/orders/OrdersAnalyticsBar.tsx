@@ -1,12 +1,26 @@
 /**
- * OrdersAnalyticsBar - Clean, modern dashboard metrics
- * Two-row layout: Order pipeline on top, Revenue timeline below
+ * OrdersAnalyticsBar - Clean, responsive dashboard metrics
+ * Mobile-first design with collapsible sections
  */
 
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi } from '../../services/api';
 import { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Users, UserPlus } from 'lucide-react';
+
+interface CustomerStats {
+    newCustomers: number;
+    returningCustomers: number;
+    newPercent: number;
+    returningPercent: number;
+}
+
+interface RevenueData {
+    total: number;
+    orderCount: number;
+    change: number | null;
+    customers?: CustomerStats;
+}
 
 interface AnalyticsData {
     totalOrders: number;
@@ -18,15 +32,22 @@ interface AnalyticsData {
         cod: { count: number; amount: number };
         prepaid: { count: number; amount: number };
     };
-    topProducts: Array<{ id: string; name: string; imageUrl: string | null; qty: number; orderCount: number; salesValue: number }>;
+    topProducts: Array<{
+        id: string;
+        name: string;
+        imageUrl: string | null;
+        qty: number;
+        orderCount: number;
+        salesValue: number;
+        variants: Array<{ name: string; qty: number }>;
+    }>;
     revenue: {
-        today: { total: number; orderCount: number };
-        yesterday: { total: number; orderCount: number };
-        yesterdaySameTime: { total: number; orderCount: number };
-        last7Days: { total: number; orderCount: number };
-        last30Days: { total: number; orderCount: number };
-        lastMonth: { total: number; orderCount: number };
-        thisMonth: { total: number; orderCount: number };
+        today: RevenueData;
+        yesterday: RevenueData;
+        last7Days: RevenueData;
+        last30Days: RevenueData;
+        lastMonth: RevenueData;
+        thisMonth: RevenueData;
     };
 }
 
@@ -41,8 +62,12 @@ export function OrdersAnalyticsBar() {
 
     if (isLoading) {
         return (
-            <div className="bg-white border border-gray-200 rounded-lg p-3 animate-pulse">
-                <div className="h-12 bg-gray-100 rounded"></div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <div className="flex gap-4 animate-pulse">
+                    <div className="h-10 bg-gray-100 rounded flex-1"></div>
+                    <div className="h-10 bg-gray-100 rounded flex-1"></div>
+                    <div className="h-10 bg-gray-100 rounded flex-1"></div>
+                </div>
             </div>
         );
     }
@@ -59,177 +84,211 @@ export function OrdersAnalyticsBar() {
         ? Math.round((analytics.paymentSplit.cod.count / analytics.totalOrders) * 100)
         : 0;
 
-    // Current time formatted for display
-    const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    // Calculate days for averages
+    const now = new Date();
+    const daysInThisMonth = now.getDate();
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth(), 0);
+    const daysInLastMonth = lastMonthDate.getDate();
 
-    // Compare today with yesterday at same time (fair comparison)
-    const todayVsYesterday = analytics.revenue?.yesterdaySameTime?.total > 0
-        ? ((analytics.revenue?.today?.total - analytics.revenue?.yesterdaySameTime?.total) / analytics.revenue?.yesterdaySameTime?.total * 100)
-        : 0;
+    const ChangeIndicator = ({ change }: { change: number | null | undefined }) => {
+        if (change === null || change === undefined) return null;
+        const isPositive = change > 0;
+        const isNegative = change < 0;
+        return (
+            <span className={`inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded ${
+                isPositive ? 'bg-emerald-50 text-emerald-600' :
+                isNegative ? 'bg-red-50 text-red-600' :
+                'bg-gray-50 text-gray-500'
+            }`}>
+                {isPositive ? <TrendingUp size={10} /> : isNegative ? <TrendingDown size={10} /> : <Minus size={10} />}
+                {Math.abs(change).toFixed(0)}%
+            </span>
+        );
+    };
+
+    const PipelineStep = ({ color, label, count }: { color: string; label: string; count: number }) => (
+        <div className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${color}`}></div>
+            <div>
+                <div className="text-xs text-gray-500 leading-none">{label}</div>
+                <div className="text-base font-semibold text-gray-900 leading-tight">{count}</div>
+            </div>
+        </div>
+    );
+
+    const RevenueCard = ({
+        label,
+        total,
+        orderCount,
+        change,
+        avgDays,
+        customers
+    }: {
+        label: string;
+        total: number;
+        orderCount: number;
+        change: number | null | undefined;
+        avgDays?: number;
+        customers?: CustomerStats;
+    }) => (
+        <div className="bg-white rounded-lg border border-gray-100 p-3 min-w-[100px] flex-shrink-0">
+            <div className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mb-1">{label}</div>
+            <div className="flex items-baseline gap-2">
+                <span className="text-lg font-semibold text-gray-900">{formatCurrency(total)}</span>
+                <ChangeIndicator change={change} />
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+                {orderCount} orders
+                {avgDays && avgDays > 0 && (
+                    <span className="text-gray-300 ml-1">
+                        ({formatCurrency(total / avgDays)}/d)
+                    </span>
+                )}
+            </div>
+            {/* New vs Returning Customers */}
+            {customers && (customers.newCustomers > 0 || customers.returningCustomers > 0) && (
+                <div className="flex items-center gap-2 mt-1.5 text-[10px]">
+                    <span className="inline-flex items-center gap-0.5 text-emerald-600">
+                        <UserPlus size={9} />
+                        {customers.newPercent}%
+                    </span>
+                    <span className="text-gray-300">|</span>
+                    <span className="inline-flex items-center gap-0.5 text-blue-600">
+                        <Users size={9} />
+                        {customers.returningPercent}%
+                    </span>
+                </div>
+            )}
+        </div>
+    );
 
     return (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            {/* Compact Header Row - Always Visible */}
+        <div className="bg-gradient-to-b from-gray-50 to-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            {/* Header Row - Always Visible */}
             <div
-                className="flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-gray-50/50 transition-colors"
+                className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 cursor-pointer hover:bg-gray-50/80 transition-colors"
                 onClick={() => setIsExpanded(!isExpanded)}
             >
-                {/* Left: Order Pipeline */}
-                <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full bg-amber-400"></div>
-                            <span className="text-xs text-gray-500">Pending</span>
-                            <span className="text-sm font-semibold text-gray-900">{analytics.pendingOrders}</span>
-                        </div>
-                        <div className="text-gray-300">→</div>
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full bg-blue-400"></div>
-                            <span className="text-xs text-gray-500">Allocated</span>
-                            <span className="text-sm font-semibold text-gray-900">{analytics.allocatedOrders}</span>
-                        </div>
-                        <div className="text-gray-300">→</div>
-                        <div className="flex items-center gap-1.5">
-                            <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
-                            <span className="text-xs text-gray-500">Ready</span>
-                            <span className="text-sm font-semibold text-gray-900">{analytics.readyToShip}</span>
-                        </div>
-                    </div>
+                {/* Order Pipeline */}
+                <div className="flex items-center gap-4 sm:gap-6">
+                    <PipelineStep color="bg-amber-400" label="Pending" count={analytics.pendingOrders} />
+                    <div className="text-gray-300 hidden sm:block">→</div>
+                    <PipelineStep color="bg-blue-400" label="Allocated" count={analytics.allocatedOrders} />
+                    <div className="text-gray-300 hidden sm:block">→</div>
+                    <PipelineStep color="bg-emerald-400" label="Ready" count={analytics.readyToShip} />
+                </div>
 
-                    <div className="h-4 w-px bg-gray-200"></div>
-
-                    {/* Payment Split - Compact */}
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1">
-                            <span className="text-xs text-orange-600 font-medium">COD</span>
-                            <span className="text-xs text-gray-400">{analytics.paymentSplit.cod.count}</span>
+                {/* Payment Split */}
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
+                        <div className="text-right">
+                            <span className="text-xs font-medium text-orange-600">COD</span>
+                            <span className="text-xs text-gray-400 ml-1">{analytics.paymentSplit.cod.count}</span>
                         </div>
-                        <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full"
+                                className="h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full transition-all duration-500"
                                 style={{ width: `${codPercent}%` }}
                             />
                         </div>
-                        <div className="flex items-center gap-1">
-                            <span className="text-xs text-gray-400">{analytics.paymentSplit.prepaid.count}</span>
-                            <span className="text-xs text-indigo-600 font-medium">Prepaid</span>
+                        <div className="text-left">
+                            <span className="text-xs text-gray-400 mr-1">{analytics.paymentSplit.prepaid.count}</span>
+                            <span className="text-xs font-medium text-indigo-600">Prepaid</span>
                         </div>
                     </div>
                 </div>
 
-                {/* Right: Today's Revenue + Toggle */}
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="text-right">
-                            <div className="text-xs text-gray-400">Today <span className="text-gray-300">till {currentTime}</span></div>
-                            <div className="text-sm font-semibold text-gray-900">
-                                {formatCurrency(analytics.revenue?.today?.total || 0)}
-                                <span className="text-xs text-gray-400 ml-1">
-                                    ({analytics.revenue?.today?.orderCount || 0})
-                                </span>
-                            </div>
-                        </div>
-                        {todayVsYesterday !== 0 && (
-                            <div className={`text-xs px-1.5 py-0.5 rounded ${
-                                todayVsYesterday > 0
-                                    ? 'bg-emerald-50 text-emerald-600'
-                                    : 'bg-red-50 text-red-600'
-                            }`}
-                            title={`Compared to yesterday at ${currentTime}: ${formatCurrency(analytics.revenue?.yesterdaySameTime?.total || 0)}`}
-                            >
-                                {todayVsYesterday > 0 ? '↑' : '↓'} {Math.abs(todayVsYesterday).toFixed(0)}%
-                            </div>
-                        )}
-                    </div>
-                    <button className="p-1 hover:bg-gray-100 rounded transition-colors">
-                        {isExpanded ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
-                    </button>
-                </div>
+                {/* Toggle Button */}
+                <button className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors ml-auto sm:ml-0">
+                    {isExpanded ? (
+                        <ChevronUp size={18} className="text-gray-400" />
+                    ) : (
+                        <ChevronDown size={18} className="text-gray-400" />
+                    )}
+                </button>
             </div>
 
-            {/* Expanded Details */}
+            {/* Expanded Section */}
             {isExpanded && (
-                <div className="px-4 pb-3 pt-1 border-t border-gray-100 bg-gray-50/30">
-                    <div className="flex items-center justify-between">
-                        {/* Revenue Timeline */}
-                        <div className="flex items-center gap-1">
-                            {(() => {
-                                // Calculate days for averages
-                                const now = new Date();
-                                const daysInThisMonth = now.getDate(); // Days elapsed in current month
-                                const lastMonthDate = new Date(now.getFullYear(), now.getMonth(), 0);
-                                const daysInLastMonth = lastMonthDate.getDate(); // Total days in last month
-
-                                return [
-                                    { label: 'Yesterday', data: analytics.revenue?.yesterday, days: 0 },
-                                    { label: '7 Days', data: analytics.revenue?.last7Days, days: 7 },
-                                    { label: '30 Days', data: analytics.revenue?.last30Days, days: 30 },
-                                    { label: 'Last Month', data: analytics.revenue?.lastMonth, days: daysInLastMonth },
-                                    { label: `This Month (${daysInThisMonth}d)`, data: analytics.revenue?.thisMonth, days: daysInThisMonth },
-                                ].map((period, i) => (
-                                    <div
-                                        key={period.label}
-                                        className="flex items-center"
-                                    >
-                                        {i > 0 && <div className="w-px h-8 bg-gray-200 mx-3"></div>}
-                                        <div className="text-center min-w-[70px]">
-                                            <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">{period.label}</div>
-                                            <div className="text-sm font-medium text-gray-700">
-                                                {formatCurrency(period.data?.total || 0)}
-                                            </div>
-                                            <div className="text-[10px] text-gray-400">
-                                                {period.data?.orderCount || 0} orders
-                                                {period.days > 0 && (
-                                                    <span className="ml-1 text-gray-300">
-                                                        ({formatCurrency((period.data?.total || 0) / period.days)}/d)
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ));
-                            })()}
+                <div className="border-t border-gray-100 bg-gray-50/50">
+                    {/* Revenue Timeline */}
+                    <div className="px-4 py-3">
+                        <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-thin scrollbar-thumb-gray-200">
+                            <RevenueCard
+                                label="Today"
+                                total={analytics.revenue?.today?.total || 0}
+                                orderCount={analytics.revenue?.today?.orderCount || 0}
+                                change={analytics.revenue?.today?.change}
+                                customers={analytics.revenue?.today?.customers}
+                            />
+                            <RevenueCard
+                                label="Yesterday"
+                                total={analytics.revenue?.yesterday?.total || 0}
+                                orderCount={analytics.revenue?.yesterday?.orderCount || 0}
+                                change={analytics.revenue?.yesterday?.change}
+                                customers={analytics.revenue?.yesterday?.customers}
+                            />
+                            <RevenueCard
+                                label="7 Days"
+                                total={analytics.revenue?.last7Days?.total || 0}
+                                orderCount={analytics.revenue?.last7Days?.orderCount || 0}
+                                change={analytics.revenue?.last7Days?.change}
+                                avgDays={7}
+                                customers={analytics.revenue?.last7Days?.customers}
+                            />
+                            <RevenueCard
+                                label="30 Days"
+                                total={analytics.revenue?.last30Days?.total || 0}
+                                orderCount={analytics.revenue?.last30Days?.orderCount || 0}
+                                change={analytics.revenue?.last30Days?.change}
+                                avgDays={30}
+                                customers={analytics.revenue?.last30Days?.customers}
+                            />
+                            <RevenueCard
+                                label="Last Month"
+                                total={analytics.revenue?.lastMonth?.total || 0}
+                                orderCount={analytics.revenue?.lastMonth?.orderCount || 0}
+                                change={analytics.revenue?.lastMonth?.change}
+                                avgDays={daysInLastMonth}
+                                customers={analytics.revenue?.lastMonth?.customers}
+                            />
+                            <RevenueCard
+                                label={`This Month (${daysInThisMonth}d)`}
+                                total={analytics.revenue?.thisMonth?.total || 0}
+                                orderCount={analytics.revenue?.thisMonth?.orderCount || 0}
+                                change={analytics.revenue?.thisMonth?.change}
+                                avgDays={daysInThisMonth}
+                                customers={analytics.revenue?.thisMonth?.customers}
+                            />
                         </div>
+                    </div>
 
-                        {/* Top Products - Image Grid (Last 30 Days) */}
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] uppercase tracking-wide text-gray-400">Top 30d</span>
-                            <div className="flex gap-0.5">
-                                {analytics.topProducts.slice(0, 10).map((product) => (
-                                    <div
+                    {/* Bottom Row: Top Products + Units */}
+                    <div className="px-4 pb-3 flex flex-wrap items-center justify-between gap-4">
+                        {/* Top Products - Text Tags */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-medium whitespace-nowrap">
+                                Top 30d
+                            </span>
+                            <div className="flex gap-1.5 flex-wrap">
+                                {analytics.topProducts.slice(0, 8).map((product) => (
+                                    <span
                                         key={product.id}
-                                        className="relative group"
+                                        className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-gray-200 rounded-md text-xs text-gray-700 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-default"
                                     >
-                                        {product.imageUrl ? (
-                                            <img
-                                                src={product.imageUrl}
-                                                alt={product.name}
-                                                className="w-8 h-8 object-cover rounded border border-gray-200 hover:border-blue-400 hover:scale-110 transition-all cursor-pointer"
-                                            />
-                                        ) : (
-                                            <div className="w-8 h-8 rounded border border-gray-200 bg-gray-100 flex items-center justify-center text-[10px] text-gray-400 hover:border-blue-400 transition-colors">
-                                                {product.name.charAt(0)}
-                                            </div>
-                                        )}
-                                        {/* Units badge */}
-                                        <span className="absolute -bottom-1 -right-1 min-w-[16px] h-4 px-0.5 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-medium">
-                                            {product.qty}
-                                        </span>
-                                        {/* Hover tooltip */}
-                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
-                                            <div className="font-medium">{product.name}</div>
-                                            <div className="text-gray-300">{product.qty} units · {product.orderCount} orders</div>
-                                            <div className="text-emerald-400 font-medium">{formatCurrency(product.salesValue)}</div>
-                                        </div>
-                                    </div>
+                                        <span className="font-medium truncate max-w-[100px]">{product.name}</span>
+                                        <span className="text-blue-600 font-semibold">{product.qty}</span>
+                                    </span>
                                 ))}
                             </div>
                         </div>
 
                         {/* Total Units */}
-                        <div className="text-right">
-                            <div className="text-[10px] uppercase tracking-wide text-gray-400">Open Units</div>
-                            <div className="text-lg font-semibold text-gray-900">{analytics.totalUnits}</div>
+                        <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-100 px-3 py-2">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">
+                                Open Units
+                            </span>
+                            <span className="text-xl font-bold text-gray-900">{analytics.totalUnits}</span>
                         </div>
                     </div>
                 </div>

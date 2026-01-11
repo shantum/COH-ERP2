@@ -233,7 +233,7 @@ export const CreateOrderSchema = z.object({
     paymentMethod: z.enum(['Prepaid', 'COD']).default('Prepaid'),
     // totalAmount can be 0 or negative for exchange orders
     totalAmount: z.number().optional(),
-    customerNotes: z.string().optional().nullable(),
+    // customerNotes: REMOVED - Use shopifyCache.customerNotes instead
     internalNotes: z.string().optional().nullable(),
     lines: z.array(z.object({
         skuId: z.string().uuid('Invalid SKU ID format'),
@@ -261,7 +261,7 @@ export const UpdateOrderSchema = z.object({
     customerPhone: z.string().optional().nullable(),
     shippingAddress: z.string().optional().nullable(),
     channel: z.string().optional(),
-    customerNotes: z.string().optional().nullable(),
+    // customerNotes: REMOVED - Read from shopifyCache.customerNotes instead
     internalNotes: z.string().optional().nullable(),
     totalAmount: z.number().positive('Total amount must be positive').optional(),
     shipByDate: z.string().datetime().optional().nullable(),

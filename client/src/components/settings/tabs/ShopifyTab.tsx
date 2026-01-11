@@ -1009,10 +1009,10 @@ export function ShopifyTab() {
                             </thead>
                             <tbody className="divide-y">
                                 {[
-                                    { topic: 'orders/create', path: '/shopify/orders/create', desc: 'New order placed' },
-                                    { topic: 'orders/updated', path: '/shopify/orders/updated', desc: 'Order modified' },
-                                    { topic: 'orders/cancelled', path: '/shopify/orders/cancelled', desc: 'Order cancelled' },
-                                    { topic: 'orders/fulfilled', path: '/shopify/orders/fulfilled', desc: 'Order shipped/fulfilled' },
+                                    { topic: 'orders/create', path: '/shopify/orders', desc: 'New order placed', unified: true },
+                                    { topic: 'orders/updated', path: '/shopify/orders', desc: 'Order modified', unified: true },
+                                    { topic: 'orders/cancelled', path: '/shopify/orders', desc: 'Order cancelled', unified: true },
+                                    { topic: 'orders/fulfilled', path: '/shopify/orders', desc: 'Order shipped/fulfilled', unified: true },
                                     { topic: 'products/create', path: '/shopify/products/create', desc: 'New product created' },
                                     { topic: 'products/update', path: '/shopify/products/update', desc: 'Product modified' },
                                     { topic: 'products/delete', path: '/shopify/products/delete', desc: 'Product deleted' },
@@ -1022,9 +1022,16 @@ export function ShopifyTab() {
                                 ].map((webhook) => (
                                     <tr key={webhook.topic} className="hover:bg-gray-50">
                                         <td className="px-4 py-2">
-                                            <code className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs">
-                                                {webhook.topic}
-                                            </code>
+                                            <div className="flex items-center gap-2">
+                                                <code className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs">
+                                                    {webhook.topic}
+                                                </code>
+                                                {webhook.unified && (
+                                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs font-medium">
+                                                        Unified
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-2">
                                             <code className="text-xs text-gray-600 font-mono">
@@ -1065,6 +1072,13 @@ export function ShopifyTab() {
                             <li>Set format to JSON</li>
                             <li>Save the webhook</li>
                         </ol>
+                        <div className="mt-3 p-3 bg-white border border-blue-300 rounded">
+                            <p className="text-sm font-medium text-blue-800 mb-1">Order Webhooks (Unified Endpoint):</p>
+                            <p className="text-xs text-blue-700">
+                                All order-related webhooks (create, updated, cancelled, fulfilled) use the same endpoint: <code className="bg-blue-100 px-1 rounded">/shopify/orders</code>.
+                                The endpoint automatically detects the event type from the X-Shopify-Topic header.
+                            </p>
+                        </div>
                         <p className="text-sm text-blue-600 mt-3">
                             <strong>Note:</strong> Webhooks require your server to be publicly accessible (not localhost).
                         </p>

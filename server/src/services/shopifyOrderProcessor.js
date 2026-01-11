@@ -28,6 +28,7 @@
 import shopifyClient from './shopify.js';
 import { findOrCreateCustomer } from '../utils/customerUtils.js';
 import { withOrderLock } from '../utils/orderLock.js';
+import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
 
 /**
  * Cache raw Shopify order data to ShopifyOrderCache table
@@ -58,7 +59,7 @@ import { withOrderLock } from '../utils/orderLock.js';
  * @example
  * const shopifyOrder = await shopify.rest.Order.find({ ...});
  * await cacheShopifyOrder(prisma, shopifyOrder.id, shopifyOrder, 'orders/create');
- * // Detects and caches: paymentMethod, trackingNumber, shippingAddress, etc.
+ * // Caches: discountCodes, customerNotes, financialStatus, fulfillmentStatus, etc.
  */
 export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, webhookTopic = 'api_sync') {
     const orderId = String(shopifyOrderId);
@@ -67,42 +68,11 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
     const discountCodes = (shopifyOrder.discount_codes || [])
         .map(d => d.code).join(', ') || '';
 
-    // Calculate payment method from gateway names and financial status
-    // NOTE: Once an order is COD, it stays COD even after payment (don't confuse with Prepaid)
-    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-    const isCodGateway = gatewayNames.includes('cod') || gatewayNames.includes('cash') || gatewayNames.includes('manual');
-
-    // Check existing cache entry to preserve COD status
-    const existingCache = await prisma.shopifyOrderCache.findUnique({
-        where: { id: orderId },
-        select: { paymentMethod: true }
-    });
-
-    let paymentMethod;
-    if (isPrepaidGateway) {
-        paymentMethod = 'Prepaid';
-    } else if (isCodGateway || existingCache?.paymentMethod === 'COD') {
-        // Gateway indicates COD or was already COD - preserve it
-        paymentMethod = 'COD';
-    } else if (shopifyOrder.financial_status === 'pending') {
-        // New order with pending payment and no prepaid gateway = likely COD
-        paymentMethod = 'COD';
-    } else {
-        paymentMethod = 'Prepaid';
-    }
-
-    // Extract tracking info from fulfillments
+    // Extract tracking info from fulfillments (for reference only, not source of truth)
     const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
         || shopifyOrder.fulfillments?.[0];
-    const trackingNumber = fulfillment?.tracking_number || null;
-    const trackingCompany = fulfillment?.tracking_company || null;
     const trackingUrl = fulfillment?.tracking_url || fulfillment?.tracking_urls?.[0] || null;
-    const shippedAt = fulfillment?.created_at ? new Date(fulfillment.created_at) : null;
-    const shipmentStatus = fulfillment?.shipment_status || null; // in_transit, out_for_delivery, delivered, etc.
     const fulfillmentUpdatedAt = fulfillment?.updated_at ? new Date(fulfillment.updated_at) : null;
-    // Check if delivered - Shopify sets shipment_status to 'delivered'
-    const deliveredAt = shipmentStatus === 'delivered' && fulfillmentUpdatedAt ? fulfillmentUpdatedAt : null;
 
     // Extract shipping address fields
     const addr = shopifyOrder.shipping_address;
@@ -115,17 +85,11 @@ export async function cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, we
         orderNumber: shopifyOrder.name || null,
         financialStatus: shopifyOrder.financial_status || null,
         fulfillmentStatus: shopifyOrder.fulfillment_status || null,
-        // Extracted Shopify fields
+        // Extracted Shopify-owned fields (read-only)
         discountCodes,
         customerNotes: shopifyOrder.note || null,
-        paymentMethod,
         tags: shopifyOrder.tags || null,
-        trackingNumber,
-        trackingCompany,
         trackingUrl,
-        shippedAt,
-        shipmentStatus,
-        deliveredAt,
         fulfillmentUpdatedAt,
         shippingCity,
         shippingState,
@@ -361,24 +325,9 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
         // When auto-ship enabled: open + fulfilled → stays 'shipped' (from mapOrderStatus)
     }
 
-    // Determine payment method (COD vs Prepaid)
+    // Determine payment method using shared utility
     // NOTE: Once an order is COD, it stays COD even after payment (don't confuse with Prepaid)
-    const gatewayNames = (shopifyOrder.payment_gateway_names || []).join(', ').toLowerCase();
-    const isPrepaidGateway = gatewayNames.includes('shopflo') || gatewayNames.includes('razorpay');
-    const isCodGateway = gatewayNames.includes('cod') || gatewayNames.includes('cash') || gatewayNames.includes('manual');
-
-    let paymentMethod;
-    if (isPrepaidGateway) {
-        paymentMethod = 'Prepaid';
-    } else if (isCodGateway || existingOrder?.paymentMethod === 'COD') {
-        // Gateway indicates COD or was already COD - preserve it
-        paymentMethod = 'COD';
-    } else if (shopifyOrder.financial_status === 'pending') {
-        // New order with pending payment and no prepaid gateway = likely COD
-        paymentMethod = 'COD';
-    } else {
-        paymentMethod = 'Prepaid';
-    }
+    const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
 
     // Extract tracking info from fulfillments
     let awbNumber = existingOrder?.awbNumber || null;

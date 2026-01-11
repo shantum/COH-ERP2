@@ -420,24 +420,25 @@ describe('Shopify Order Processing - Order Number Generation', () => {
 
 describe('Shopify Order Processing - Update Detection', () => {
     // Matches needsUpdate logic in shopifyOrderProcessor.js
+    // Only checks ERP-owned fields (Order table)
+    // Shopify-owned fields (customerNotes, shopifyFulfillmentStatus)
+    // are in ShopifyOrderCache and don't trigger Order updates
     const needsUpdate = (existingOrder, newData) => {
         return existingOrder.status !== newData.status ||
-            existingOrder.shopifyFulfillmentStatus !== newData.shopifyFulfillmentStatus ||
             existingOrder.awbNumber !== newData.awbNumber ||
             existingOrder.courier !== newData.courier ||
-            existingOrder.paymentMethod !== newData.paymentMethod ||
-            existingOrder.customerNotes !== newData.customerNotes;
+            existingOrder.paymentMethod !== newData.paymentMethod;
     };
 
     it('should detect status change', () => {
-        const existing = { status: 'open', shopifyFulfillmentStatus: null };
-        const newData = { status: 'cancelled', shopifyFulfillmentStatus: null };
+        const existing = { status: 'open' };
+        const newData = { status: 'cancelled' };
         expect(needsUpdate(existing, newData)).toBe(true);
     });
 
-    it('should detect fulfillment status change', () => {
-        const existing = { status: 'open', shopifyFulfillmentStatus: null };
-        const newData = { status: 'open', shopifyFulfillmentStatus: 'fulfilled' };
+    it('should detect payment method change', () => {
+        const existing = { status: 'open', paymentMethod: 'Prepaid' };
+        const newData = { status: 'open', paymentMethod: 'COD' };
         expect(needsUpdate(existing, newData)).toBe(true);
     });
 
@@ -448,8 +449,8 @@ describe('Shopify Order Processing - Update Detection', () => {
     });
 
     it('should NOT detect when nothing changed', () => {
-        const existing = { status: 'open', shopifyFulfillmentStatus: null, awbNumber: null, courier: null, paymentMethod: 'COD', customerNotes: null };
-        const newData = { status: 'open', shopifyFulfillmentStatus: null, awbNumber: null, courier: null, paymentMethod: 'COD', customerNotes: null };
+        const existing = { status: 'open', awbNumber: null, courier: null, paymentMethod: 'COD' };
+        const newData = { status: 'open', awbNumber: null, courier: null, paymentMethod: 'COD' };
         expect(needsUpdate(existing, newData)).toBe(false);
     });
 });

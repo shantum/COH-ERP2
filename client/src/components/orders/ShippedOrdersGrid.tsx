@@ -22,7 +22,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 const ALL_COLUMN_IDS = [
     'orderNumber', 'customerName', 'city', 'itemCount', 'totalAmount',
     'orderDate', 'shippedAt', 'deliveredAt', 'deliveryDays',
-    'shopifyPaymentMethod', 'shopifyFinancialStatus', 'codRemittedAt', 'shopifyShipmentStatus', 'shopifyDeliveredAt', 'shopifyLink',
+    'paymentMethod', 'shopifyFinancialStatus', 'codRemittedAt', 'shopifyLink',
     'courier', 'awbNumber', 'daysInTransit', 'expectedDeliveryDate', 'deliveryAttempts',
     'courierStatusCode', 'trackingStatus', 'lastScanLocation', 'lastScanAt', 'lastScanStatus',
     'actions'
@@ -31,8 +31,8 @@ const ALL_COLUMN_IDS = [
 const DEFAULT_HEADERS: Record<string, string> = {
     orderNumber: 'Order', customerName: 'Customer', city: 'City', itemCount: 'Items',
     totalAmount: 'Total', orderDate: 'Ordered', shippedAt: 'Shipped', deliveredAt: 'Delivered',
-    deliveryDays: 'Del Days', shopifyPaymentMethod: 'Payment', shopifyFinancialStatus: 'Paid',
-    codRemittedAt: 'COD Paid', shopifyShipmentStatus: 'Status', shopifyDeliveredAt: 'Delivered',
+    deliveryDays: 'Del Days', paymentMethod: 'Payment', shopifyFinancialStatus: 'Paid',
+    codRemittedAt: 'COD Paid',
     shopifyLink: 'Link', courier: 'Courier', awbNumber: 'AWB', daysInTransit: 'Days',
     expectedDeliveryDate: 'EDD', deliveryAttempts: 'OFD', courierStatusCode: 'Code',
     trackingStatus: 'Status', lastScanLocation: 'Location', lastScanAt: 'Scan Time',
@@ -278,16 +278,10 @@ export function ShippedOrdersGrid({
                     .join(', ') + (order.orderLines?.length > 2 ? '...' : ''),
                 // Calculated delivery days
                 deliveryDays,
-                // Shopify cache fields for display
+                // Shopify cache fields for display (read-only reference data)
                 trackingUrl: cache.trackingUrl,
-                shopifyTrackingNumber: cache.trackingNumber,
-                shopifyTrackingCompany: cache.trackingCompany,
-                shopifyShipmentStatus: cache.shipmentStatus,
-                shopifyDeliveredAt: cache.deliveredAt,
-                shopifyFulfillmentUpdatedAt: cache.fulfillmentUpdatedAt,
                 shopifyFulfillmentStatus: cache.fulfillmentStatus,
                 shopifyFinancialStatus: cache.financialStatus,
-                shopifyPaymentMethod: cache.paymentMethod || order.paymentMethod,
             };
         });
     }, [orders]);
@@ -420,13 +414,13 @@ export function ShippedOrdersGrid({
             ],
         },
 
-        // SHOPIFY DATA - Fulfillment info from Shopify
+        // SHOPIFY DATA - Financial info from Shopify
         {
             headerName: 'Shopify',
             headerClass: 'bg-green-50 font-semibold text-green-700',
             children: [
                 {
-                    field: 'shopifyPaymentMethod',
+                    field: 'paymentMethod',
                     headerName: 'Payment',
                     width: 65,
                     cellRenderer: (params: ICellRendererParams) => {
@@ -478,7 +472,7 @@ export function ShippedOrdersGrid({
                         const order = params.data;
                         if (!order) return null;
                         // Only show for COD orders
-                        const isCod = (order.shopifyPaymentMethod || order.paymentMethod || '').toLowerCase() === 'cod';
+                        const isCod = (order.paymentMethod || '').toLowerCase() === 'cod';
                         if (!isCod) return <span className="text-gray-300 text-xs">-</span>;
 
                         if (order.codRemittedAt) {
@@ -498,40 +492,6 @@ export function ShippedOrdersGrid({
                                 Pending
                             </span>
                         );
-                    },
-                },
-                {
-                    field: 'shopifyShipmentStatus',
-                    headerName: 'Status',
-                    width: 90,
-                    cellRenderer: (params: ICellRendererParams) => {
-                        const status = params.value;
-                        if (!status) return <span className="text-gray-400 text-xs">-</span>;
-
-                        const statusColors: Record<string, string> = {
-                            'in_transit': 'bg-blue-100 text-blue-700',
-                            'out_for_delivery': 'bg-amber-100 text-amber-700',
-                            'delivered': 'bg-green-100 text-green-700',
-                            'attempted_delivery': 'bg-red-100 text-red-700',
-                            'failure': 'bg-red-100 text-red-700',
-                        };
-                        const colorClass = statusColors[status] || 'bg-gray-100 text-gray-600';
-                        const label = status.replace(/_/g, ' ');
-
-                        return (
-                            <span className={`text-xs px-1.5 py-0.5 rounded capitalize ${colorClass}`}>
-                                {label}
-                            </span>
-                        );
-                    },
-                },
-                {
-                    field: 'shopifyDeliveredAt',
-                    headerName: 'Delivered',
-                    width: 75,
-                    cellRenderer: (params: ICellRendererParams) => {
-                        const date = params.value || params.data?.deliveredAt;
-                        return <span className="text-xs text-gray-600">{formatDate(date)}</span>;
                     },
                 },
                 {

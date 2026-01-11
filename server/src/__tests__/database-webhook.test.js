@@ -476,24 +476,18 @@ describe('Shopify Order Processing - Order Creation Logic', () => {
 
 describe('Shopify Order Processing - Update Detection', () => {
     const needsUpdate = (existing, newData) => {
+        // Only check ERP-owned fields (Order table)
+        // Shopify-owned fields (discountCode, customerNotes, shopifyFulfillmentStatus)
+        // are in ShopifyOrderCache and don't trigger Order updates
         return existing.status !== newData.status ||
-            existing.shopifyFulfillmentStatus !== newData.shopifyFulfillmentStatus ||
             existing.awbNumber !== newData.awbNumber ||
             existing.courier !== newData.courier ||
-            existing.paymentMethod !== newData.paymentMethod ||
-            existing.customerNotes !== newData.customerNotes ||
-            existing.discountCode !== newData.discountCode;
+            existing.paymentMethod !== newData.paymentMethod;
     };
 
     it('should detect status change', () => {
-        const existing = { status: 'open', shopifyFulfillmentStatus: null };
-        const newData = { status: 'cancelled', shopifyFulfillmentStatus: null };
-        expect(needsUpdate(existing, newData)).toBe(true);
-    });
-
-    it('should detect fulfillment status change', () => {
-        const existing = { status: 'open', shopifyFulfillmentStatus: null };
-        const newData = { status: 'open', shopifyFulfillmentStatus: 'fulfilled' };
+        const existing = { status: 'open' };
+        const newData = { status: 'cancelled' };
         expect(needsUpdate(existing, newData)).toBe(true);
     });
 
@@ -503,21 +497,18 @@ describe('Shopify Order Processing - Update Detection', () => {
         expect(needsUpdate(existing, newData)).toBe(true);
     });
 
-    it('should detect discount code change', () => {
-        const existing = { status: 'open', discountCode: null };
-        const newData = { status: 'open', discountCode: 'SUMMER20' };
+    it('should detect payment method change', () => {
+        const existing = { status: 'open', paymentMethod: 'Prepaid' };
+        const newData = { status: 'open', paymentMethod: 'COD' };
         expect(needsUpdate(existing, newData)).toBe(true);
     });
 
     it('should NOT detect update when nothing changed', () => {
         const existing = {
             status: 'open',
-            shopifyFulfillmentStatus: null,
             awbNumber: null,
             courier: null,
             paymentMethod: 'COD',
-            customerNotes: null,
-            discountCode: null
         };
         const newData = { ...existing };
         expect(needsUpdate(existing, newData)).toBe(false);
