@@ -1,5 +1,12 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
+import {
+    NotFoundError,
+    ValidationError,
+    BusinessLogicError,
+    ConflictError,
+} from '../utils/errors.js';
 import { getTierThresholds, calculateTier, getCustomerStatsMap } from '../utils/tierUtils.js';
 
 const router = Router();
@@ -62,9 +69,8 @@ function sanitizeSearchInput(input) {
 // ============================================
 
 // Get all return requests
-router.get('/', authenticateToken, async (req, res) => {
-    try {
-        const { status, requestType, limit = 50 } = req.query;
+router.get('/', authenticateToken, asyncHandler(async (req, res) => {
+    const { status, requestType, limit = 50 } = req.query;
         const where = {};
         if (status) where.status = status;
         if (requestType) where.requestType = requestType;
@@ -102,77 +108,67 @@ router.get('/', authenticateToken, async (req, res) => {
             };
         });
 
-        res.json(enriched);
-    } catch (error) {
-        console.error('Get return requests error:', error);
-        res.status(500).json({ error: 'Failed to fetch return requests' });
-    }
-});
+    res.json(enriched);
+}));
 
 // Get pending tickets (awaiting receipt)
-router.get('/pending', authenticateToken, async (req, res) => {
-    try {
-        const requests = await req.prisma.returnRequest.findMany({
-            where: {
-                status: { in: ['requested', 'reverse_initiated', 'in_transit'] },
-            },
-            include: {
-                originalOrder: true,
-                customer: true,
-                lines: {
-                    include: {
-                        sku: {
-                            include: {
-                                variation: { include: { product: true } },
-                            },
+router.get('/pending', authenticateToken, asyncHandler(async (req, res) => {
+    const requests = await req.prisma.returnRequest.findMany({
+        where: {
+            status: { in: ['requested', 'reverse_initiated', 'in_transit'] },
+        },
+        include: {
+            originalOrder: true,
+            customer: true,
+            lines: {
+                include: {
+                    sku: {
+                        include: {
+                            variation: { include: { product: true } },
                         },
                     },
                 },
-                shipping: { where: { direction: 'reverse' } },
             },
-            orderBy: { createdAt: 'desc' },
-        });
+            shipping: { where: { direction: 'reverse' } },
+        },
+        orderBy: { createdAt: 'desc' },
+    });
 
-        const enriched = requests.map((r) => ({
-            ...r,
-            ageDays: r.originalOrder?.orderDate
-                ? Math.floor((Date.now() - new Date(r.originalOrder.orderDate).getTime()) / (1000 * 60 * 60 * 24))
-                : Math.floor((Date.now() - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24)),
-            reverseShipping: r.shipping?.[0] || null,
-        }));
+    const enriched = requests.map((r) => ({
+        ...r,
+        ageDays: r.originalOrder?.orderDate
+            ? Math.floor((Date.now() - new Date(r.originalOrder.orderDate).getTime()) / (1000 * 60 * 60 * 24))
+            : Math.floor((Date.now() - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24)),
+        reverseShipping: r.shipping?.[0] || null,
+    }));
 
-        res.json(enriched);
-    } catch (error) {
-        console.error('Get pending returns error:', error);
-        res.status(500).json({ error: 'Failed to fetch pending returns' });
-    }
-});
+    res.json(enriched);
+}));
 
 // Find pending tickets by SKU code or barcode
-router.get('/pending/by-sku', authenticateToken, async (req, res) => {
-    try {
-        const { code } = req.query;
-        if (!code) {
-            return res.status(400).json({ error: 'SKU code or barcode is required' });
-        }
+router.get('/pending/by-sku', authenticateToken, asyncHandler(async (req, res) => {
+    const { code } = req.query;
+    if (!code) {
+        throw new ValidationError('SKU code or barcode is required');
+    }
 
-        // HIGH PRIORITY FIX: Sanitize search input
-        const sanitizedCode = sanitizeSearchInput(code);
-        if (!sanitizedCode) {
-            return res.status(400).json({ error: 'Invalid SKU code format' });
-        }
+    // HIGH PRIORITY FIX: Sanitize search input
+    const sanitizedCode = sanitizeSearchInput(code);
+    if (!sanitizedCode) {
+        throw new ValidationError('Invalid SKU code format');
+    }
 
-        // First find the SKU (skuCode serves as barcode for scanning)
-        const sku = await req.prisma.sku.findFirst({
-            where: { skuCode: sanitizedCode },
-            include: {
-                variation: { include: { product: true } },
-            },
-        });
+    // First find the SKU (skuCode serves as barcode for scanning)
+    const sku = await req.prisma.sku.findFirst({
+        where: { skuCode: sanitizedCode },
+        include: {
+            variation: { include: { product: true } },
+        },
+    });
 
-        if (!sku) {
-            return res.status(404).json({ error: 'SKU not found' });
-        }
+    if (!sku) {
+        throw new NotFoundError('SKU not found', 'SKU', sanitizedCode);
+    }
 
         // Find pending tickets containing this SKU
         const requests = await req.prisma.returnRequest.findMany({
@@ -212,32 +208,27 @@ router.get('/pending/by-sku', authenticateToken, async (req, res) => {
             matchingLine: r.lines.find((l) => l.skuId === sku.id && !l.itemCondition),
         }));
 
-        res.json({
-            sku: {
-                id: sku.id,
-                skuCode: sku.skuCode,
-                barcode: sku.barcode,
-                productName: sku.variation?.product?.name,
-                colorName: sku.variation?.colorName,
-                size: sku.size,
-                imageUrl: sku.variation?.imageUrl || sku.variation?.product?.imageUrl,
-            },
-            tickets: enriched,
-        });
-    } catch (error) {
-        console.error('Find tickets by SKU error:', error);
-        res.status(500).json({ error: 'Failed to find tickets' });
-    }
-});
+    res.json({
+        sku: {
+            id: sku.id,
+            skuCode: sku.skuCode,
+            barcode: sku.barcode,
+            productName: sku.variation?.product?.name,
+            colorName: sku.variation?.colorName,
+            size: sku.size,
+            imageUrl: sku.variation?.imageUrl || sku.variation?.product?.imageUrl,
+        },
+        tickets: enriched,
+    });
+}));
 
 // ============================================
 // ACTION QUEUE DASHBOARD
 // ============================================
 
 // Get action queue summary for dashboard
-router.get('/action-queue', authenticateToken, async (req, res) => {
-    try {
-        // Get all non-completed/cancelled return requests
+router.get('/action-queue', authenticateToken, asyncHandler(async (req, res) => {
+    // Get all non-completed/cancelled return requests
         const allRequests = await req.prisma.returnRequest.findMany({
             where: {
                 status: { notIn: ['resolved', 'cancelled', 'completed'] },
@@ -350,25 +341,20 @@ router.get('/action-queue', authenticateToken, async (req, res) => {
                     createdAt: r.createdAt,
                 })),
             },
-            lists: {
-                pendingPickup: pendingPickup.slice(0, 10),
-                inTransit: inTransit.slice(0, 10),
-                received: received.slice(0, 10),
-            },
-        });
-    } catch (error) {
-        console.error('Get action queue error:', error);
-        res.status(500).json({ error: 'Failed to fetch action queue' });
-    }
-});
+        lists: {
+            pendingPickup: pendingPickup.slice(0, 10),
+            inTransit: inTransit.slice(0, 10),
+            received: received.slice(0, 10),
+        },
+    });
+}));
 
 // Get order details for creating a return
-router.get('/order/:orderId', authenticateToken, async (req, res) => {
-    try {
-        const { orderId } = req.params;
+router.get('/order/:orderId', authenticateToken, asyncHandler(async (req, res) => {
+    const { orderId } = req.params;
 
-        // Try to find by ID first, then by order number
-        let order = await req.prisma.order.findUnique({
+    // Try to find by ID first, then by order number
+    let order = await req.prisma.order.findUnique({
             where: { id: orderId },
             include: {
                 customer: true,
@@ -408,11 +394,11 @@ router.get('/order/:orderId', authenticateToken, async (req, res) => {
             });
         }
 
-        if (!order) {
-            return res.status(404).json({ error: 'Order not found' });
-        }
+    if (!order) {
+        throw new NotFoundError('Order not found', 'Order', orderId);
+    }
 
-        // Try to get cached Shopify data for accurate discounted prices
+    // Try to get cached Shopify data for accurate discounted prices
         let shopifyLineItems = {};
         if (order.orderNumber) {
             const cache = await req.prisma.shopifyOrderCache.findFirst({
@@ -459,85 +445,79 @@ router.get('/order/:orderId', authenticateToken, async (req, res) => {
             };
         });
 
-        res.json({
-            id: order.id,
-            orderNumber: order.orderNumber,
-            shopifyOrderNumber: order.shopifyOrderNumber,
-            orderDate: order.orderDate,
-            shippedAt: order.shippedAt,
-            deliveredAt: order.deliveredAt,
-            customer: order.customer ? {
-                id: order.customer.id,
-                name: order.customer.name,
-                email: order.customer.email,
-                phone: order.customer.phone,
-            } : null,
-            items,
-        });
-    } catch (error) {
-        console.error('Get order for return error:', error);
-        res.status(500).json({ error: 'Failed to fetch order details' });
-    }
-});
+    res.json({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        shopifyOrderNumber: order.shopifyOrderNumber,
+        orderDate: order.orderDate,
+        shippedAt: order.shippedAt,
+        deliveredAt: order.deliveredAt,
+        customer: order.customer ? {
+            id: order.customer.id,
+            name: order.customer.name,
+            email: order.customer.email,
+            phone: order.customer.phone,
+        } : null,
+        items,
+    });
+}));
 
 // Get single request
-router.get('/:id', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                lines: {
-                    include: {
-                        sku: { include: { variation: { include: { product: true } } } },
-                        exchangeSku: true,
-                    },
+router.get('/:id', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            lines: {
+                include: {
+                    sku: { include: { variation: { include: { product: true } } } },
+                    exchangeSku: true,
                 },
-                shipping: true,
-                statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { createdAt: 'asc' } },
             },
-        });
-        if (!request) return res.status(404).json({ error: 'Not found' });
-        res.json(request);
-    } catch (error) {
-        console.error('Get return request error:', error);
-        res.status(500).json({ error: 'Failed to fetch request' });
+            shipping: true,
+            statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { createdAt: 'asc' } },
+        },
+    });
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
     }
-});
+    res.json(request);
+}));
 
 // Create return request (ticket)
-router.post('/', authenticateToken, async (req, res) => {
-    try {
-        const {
-            requestType, // 'return' or 'exchange'
-            resolution, // 'refund', 'exchange_same', 'exchange_up', 'exchange_down'
-            originalOrderId,
-            reasonCategory,
-            reasonDetails,
-            lines, // [{ skuId, qty, exchangeSkuId?, unitPrice? }]
-            returnValue,
-            replacementValue,
-            valueDifference,
-            courier,
-            awbNumber,
-        } = req.body;
+router.post('/', authenticateToken, asyncHandler(async (req, res) => {
+    const {
+        requestType, // 'return' or 'exchange'
+        resolution, // 'refund', 'exchange_same', 'exchange_up', 'exchange_down'
+        originalOrderId,
+        reasonCategory,
+        reasonDetails,
+        lines, // [{ skuId, qty, exchangeSkuId?, unitPrice? }]
+        returnValue,
+        replacementValue,
+        valueDifference,
+        courier,
+        awbNumber,
+    } = req.body;
 
-        // Derive resolution from requestType if not provided
-        const effectiveResolution = resolution || (requestType === 'exchange' ? 'exchange_same' : 'refund');
+    // Derive resolution from requestType if not provided
+    const effectiveResolution = resolution || (requestType === 'exchange' ? 'exchange_same' : 'refund');
 
-        // Validate order
-        const order = await req.prisma.order.findUnique({
-            where: { id: originalOrderId },
-            include: { customer: true },
-        });
-        if (!order) return res.status(404).json({ error: 'Order not found' });
+    // Validate order
+    const order = await req.prisma.order.findUnique({
+        where: { id: originalOrderId },
+        include: { customer: true },
+    });
+    if (!order) {
+        throw new NotFoundError('Order not found', 'Order', originalOrderId);
+    }
 
-        // Validate lines
-        if (!lines || lines.length === 0) {
-            return res.status(400).json({ error: 'At least one item is required' });
-        }
+    // Validate lines
+    if (!lines || lines.length === 0) {
+        throw new ValidationError('At least one item is required');
+    }
 
         // CUSTOMIZATION CHECK: Block returns for non-returnable (customized) items
         const skuIds = lines.map((l) => l.skuId);
@@ -567,14 +547,13 @@ router.post('/', authenticateToken, async (req, res) => {
             }
         }
 
-        if (nonReturnableItems.length > 0) {
-            return res.status(400).json({
-                error: 'Customized items cannot be returned',
-                nonReturnableItems,
-                isCustomized: true,
-                hint: 'These items were customized for this order and are non-returnable'
-            });
-        }
+    if (nonReturnableItems.length > 0) {
+        throw new BusinessLogicError(
+            'Customized items cannot be returned',
+            'NON_RETURNABLE_ITEMS',
+            { nonReturnableItems, isCustomized: true, hint: 'These items were customized for this order and are non-returnable' }
+        );
+    }
 
         // Check for duplicate items - items from this order already in an active ticket
         const existingTickets = await req.prisma.returnRequest.findMany({
@@ -595,23 +574,24 @@ router.post('/', authenticateToken, async (req, res) => {
             },
         });
 
-        if (existingTickets.length > 0) {
-            // Build list of SKUs already in tickets
-            const duplicateSkus = [];
-            for (const ticket of existingTickets) {
-                for (const line of ticket.lines) {
-                    duplicateSkus.push({
-                        skuCode: line.sku.skuCode,
-                        ticketNumber: ticket.requestNumber,
-                        ticketId: ticket.id,
-                    });
-                }
+    if (existingTickets.length > 0) {
+        // Build list of SKUs already in tickets
+        const duplicateSkus = [];
+        for (const ticket of existingTickets) {
+            for (const line of ticket.lines) {
+                duplicateSkus.push({
+                    skuCode: line.sku.skuCode,
+                    ticketNumber: ticket.requestNumber,
+                    ticketId: ticket.id,
+                });
             }
-            return res.status(400).json({
-                error: 'Some items are already in an active return ticket',
-                duplicates: duplicateSkus,
-            });
         }
+        throw new ConflictError(
+            'Some items are already in an active return ticket',
+            'DUPLICATE_RETURN_ITEMS',
+            { duplicates: duplicateSkus }
+        );
+    }
 
         // Generate unique request number - find max number and increment
         const year = new Date().getFullYear();
@@ -687,46 +667,41 @@ router.post('/', authenticateToken, async (req, res) => {
             });
 
             return returnRequest;
-        }, { timeout: 15000 }); // 15 second timeout
+    }, { timeout: 15000 }); // 15 second timeout
 
-        res.status(201).json(request);
-    } catch (error) {
-        console.error('Create return request error:', error);
-        res.status(500).json({ error: 'Failed to create return request' });
-    }
-});
+    res.status(201).json(request);
+}));
 
 // Update return request (add/update shipping info)
-router.put('/:id', authenticateToken, async (req, res) => {
-    try {
-        const { courier, awbNumber, reasonCategory, reasonDetails } = req.body;
+router.put('/:id', authenticateToken, asyncHandler(async (req, res) => {
+    const { courier, awbNumber, reasonCategory, reasonDetails } = req.body;
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                shipping: true,
-                lines: true,
-            },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            shipping: true,
+            lines: true,
+        },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        // HIGH PRIORITY FIX: Check if any items have been received
-        const hasReceivedItems = request.lines.some((l) => l.itemCondition !== null);
+    // HIGH PRIORITY FIX: Check if any items have been received
+    const hasReceivedItems = request.lines.some((l) => l.itemCondition !== null);
 
-        await req.prisma.$transaction(async (tx) => {
-            // Update request details
-            const updateData = {};
+    await req.prisma.$transaction(async (tx) => {
+        // Update request details
+        const updateData = {};
 
-            // HIGH PRIORITY FIX: Lock reason after first item received
-            if (reasonCategory && reasonCategory !== request.reasonCategory) {
-                if (hasReceivedItems) {
-                    throw new Error('VALIDATION:Cannot change reason after items have been received');
-                }
-                updateData.reasonCategory = reasonCategory;
+        // HIGH PRIORITY FIX: Lock reason after first item received
+        if (reasonCategory && reasonCategory !== request.reasonCategory) {
+            if (hasReceivedItems) {
+                throw new BusinessLogicError('Cannot change reason after items have been received', 'REASON_LOCKED');
             }
+            updateData.reasonCategory = reasonCategory;
+        }
 
             if (reasonDetails !== undefined) {
                 // Allow details update even after receiving (for additional notes)
@@ -795,62 +770,53 @@ router.put('/:id', authenticateToken, async (req, res) => {
             },
         });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Update return request error:', error);
-        // Handle validation errors
-        if (error.message && error.message.startsWith('VALIDATION:')) {
-            return res.status(400).json({ error: error.message.replace('VALIDATION:', '') });
-        }
-        res.status(500).json({ error: 'Failed to update return request' });
-    }
-});
+    res.json(updated);
+}));
 
 // Delete return request (only if not yet received)
-router.delete('/:id', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                lines: true,
-                shipping: true,
-                statusHistory: true,
-            },
-        });
+router.delete('/:id', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            lines: true,
+            shipping: true,
+            statusHistory: true,
+        },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        // Only allow deletion if no items have been received yet
-        const hasReceivedItems = request.lines.some((l) => l.itemCondition !== null);
-        if (hasReceivedItems) {
-            return res.status(400).json({
-                error: 'Cannot delete - some items have already been received. Cancel the request instead.',
-            });
-        }
+    // Only allow deletion if no items have been received yet
+    const hasReceivedItems = request.lines.some((l) => l.itemCondition !== null);
+    if (hasReceivedItems) {
+        throw new BusinessLogicError(
+            'Cannot delete - some items have already been received. Cancel the request instead.',
+            'HAS_RECEIVED_ITEMS'
+        );
+    }
 
-        // Don't allow deletion of resolved tickets
-        if (request.status === 'resolved') {
-            return res.status(400).json({
-                error: 'Cannot delete a resolved return request',
-            });
-        }
+    // Don't allow deletion of resolved tickets
+    if (request.status === 'resolved') {
+        throw new BusinessLogicError('Cannot delete a resolved return request', 'ALREADY_RESOLVED');
+    }
 
-        // CRITICAL FIX: Check for processed repacking items that would orphan inventory
-        const processedRepackingItems = await req.prisma.repackingQueueItem.findMany({
-            where: {
-                returnRequestId: request.id,
-                status: { in: ['ready', 'write_off'] },
-            },
-        });
+    // CRITICAL FIX: Check for processed repacking items that would orphan inventory
+    const processedRepackingItems = await req.prisma.repackingQueueItem.findMany({
+        where: {
+            returnRequestId: request.id,
+            status: { in: ['ready', 'write_off'] },
+        },
+    });
 
-        if (processedRepackingItems.length > 0) {
-            return res.status(400).json({
-                error: 'Cannot delete - some items have been processed in the QC queue. Cancel the request instead.',
-                processedItems: processedRepackingItems.length,
-            });
-        }
+    if (processedRepackingItems.length > 0) {
+        throw new BusinessLogicError(
+            'Cannot delete - some items have been processed in the QC queue. Cancel the request instead.',
+            'HAS_PROCESSED_ITEMS',
+            { processedItems: processedRepackingItems.length }
+        );
+    }
 
         // Delete in transaction (cascade delete related records)
         await req.prisma.$transaction(async (tx) => {
@@ -885,64 +851,53 @@ router.delete('/:id', authenticateToken, async (req, res) => {
             });
         });
 
-        res.json({ success: true, message: `Return request ${request.requestNumber} deleted` });
-    } catch (error) {
-        console.error('Delete return request error:', error);
-        res.status(500).json({ error: 'Failed to delete return request' });
-    }
-});
+    res.json({ success: true, message: `Return request ${request.requestNumber} deleted` });
+}));
 
 // Add item to return request (from original order)
-router.post('/:id/add-item', authenticateToken, async (req, res) => {
-    try {
-        const { skuId, qty = 1 } = req.body;
+router.post('/:id/add-item', authenticateToken, asyncHandler(async (req, res) => {
+    const { skuId, qty = 1 } = req.body;
 
-        if (!skuId) {
-            return res.status(400).json({ error: 'skuId is required' });
-        }
+    if (!skuId) {
+        throw new ValidationError('skuId is required');
+    }
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                lines: true,
-                originalOrder: {
-                    include: {
-                        lines: {
-                            include: {
-                                sku: true,
-                            },
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            lines: true,
+            originalOrder: {
+                include: {
+                    lines: {
+                        include: {
+                            sku: true,
                         },
                     },
                 },
             },
-        });
+        },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        // Check if request is in a modifiable state
-        if (['resolved', 'cancelled'].includes(request.status)) {
-            return res.status(400).json({
-                error: 'Cannot modify a resolved or cancelled return request',
-            });
-        }
+    // Check if request is in a modifiable state
+    if (['resolved', 'cancelled'].includes(request.status)) {
+        throw new BusinessLogicError('Cannot modify a resolved or cancelled return request', 'REQUEST_NOT_MODIFIABLE');
+    }
 
-        // Check if SKU is from the original order
-        const orderLine = request.originalOrder?.lines.find((l) => l.skuId === skuId);
-        if (!orderLine) {
-            return res.status(400).json({
-                error: 'This SKU is not from the original order',
-            });
-        }
+    // Check if SKU is from the original order
+    const orderLine = request.originalOrder?.lines.find((l) => l.skuId === skuId);
+    if (!orderLine) {
+        throw new ValidationError('This SKU is not from the original order');
+    }
 
-        // Check if item is already in the return request
-        const existingLine = request.lines.find((l) => l.skuId === skuId);
-        if (existingLine) {
-            return res.status(400).json({
-                error: 'This item is already in the return request',
-            });
-        }
+    // Check if item is already in the return request
+    const existingLine = request.lines.find((l) => l.skuId === skuId);
+    if (existingLine) {
+        throw new ConflictError('This item is already in the return request', 'DUPLICATE_ITEM');
+    }
 
         // Add the item
         const newLine = await req.prisma.returnRequestLine.create({
@@ -964,158 +919,135 @@ router.post('/:id/add-item', authenticateToken, async (req, res) => {
             },
         });
 
-        res.json(newLine);
-    } catch (error) {
-        console.error('Add item to return request error:', error);
-        res.status(500).json({ error: 'Failed to add item to return request' });
-    }
-});
+    res.json(newLine);
+}));
 
 // Remove item from return request
-router.delete('/:id/items/:lineId', authenticateToken, async (req, res) => {
-    try {
-        const { id, lineId } = req.params;
+router.delete('/:id/items/:lineId', authenticateToken, asyncHandler(async (req, res) => {
+    const { id, lineId } = req.params;
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id },
-            include: {
-                lines: true,
-            },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id },
+        include: {
+            lines: true,
+        },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        // Check if request is in a modifiable state
-        if (['resolved', 'cancelled'].includes(request.status)) {
-            return res.status(400).json({
-                error: 'Cannot modify a resolved or cancelled return request',
-            });
-        }
-
-        // Find the line to delete
-        const lineToDelete = request.lines.find((l) => l.id === lineId);
-        if (!lineToDelete) {
-            return res.status(404).json({ error: 'Item not found in return request' });
-        }
-
-        // Check if item has been received
-        if (lineToDelete.itemCondition) {
-            return res.status(400).json({
-                error: 'Cannot remove an item that has already been received',
-            });
-        }
-
-        // Don't allow removing the last item
-        if (request.lines.length <= 1) {
-            return res.status(400).json({
-                error: 'Cannot remove the last item. Delete the entire return request instead.',
-            });
-        }
-
-        // Delete the line
-        await req.prisma.returnRequestLine.delete({
-            where: { id: lineId },
-        });
-
-        res.json({ success: true, message: 'Item removed from return request' });
-    } catch (error) {
-        console.error('Remove item from return request error:', error);
-        res.status(500).json({ error: 'Failed to remove item from return request' });
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', id);
     }
-});
+
+    // Check if request is in a modifiable state
+    if (['resolved', 'cancelled'].includes(request.status)) {
+        throw new BusinessLogicError('Cannot modify a resolved or cancelled return request', 'REQUEST_NOT_MODIFIABLE');
+    }
+
+    // Find the line to delete
+    const lineToDelete = request.lines.find((l) => l.id === lineId);
+    if (!lineToDelete) {
+        throw new NotFoundError('Item not found in return request', 'ReturnRequestLine', lineId);
+    }
+
+    // Check if item has been received
+    if (lineToDelete.itemCondition) {
+        throw new BusinessLogicError('Cannot remove an item that has already been received', 'ITEM_ALREADY_RECEIVED');
+    }
+
+    // Don't allow removing the last item
+    if (request.lines.length <= 1) {
+        throw new BusinessLogicError('Cannot remove the last item. Delete the entire return request instead.', 'LAST_ITEM');
+    }
+
+    // Delete the line
+    await req.prisma.returnRequestLine.delete({
+        where: { id: lineId },
+    });
+
+    res.json({ success: true, message: 'Item removed from return request' });
+}));
 
 // Cancel return request (soft cancel - keeps record but marks as cancelled)
-router.post('/:id/cancel', authenticateToken, async (req, res) => {
-    try {
-        const { reason } = req.body;
+router.post('/:id/cancel', authenticateToken, asyncHandler(async (req, res) => {
+    const { reason } = req.body;
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        if (request.status === 'resolved' || request.status === 'cancelled') {
-            return res.status(400).json({
-                error: `Cannot cancel - request is already ${request.status}`,
-            });
-        }
+    if (request.status === 'resolved' || request.status === 'cancelled') {
+        throw new BusinessLogicError(`Cannot cancel - request is already ${request.status}`, 'ALREADY_TERMINAL');
+    }
 
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: request.id },
-                data: { status: 'cancelled' },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: request.id,
-                    fromStatus: request.status,
-                    toStatus: 'cancelled',
-                    changedById: req.user.id,
-                    notes: reason || 'Request cancelled',
-                },
-            });
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: request.id },
-            include: {
-                originalOrder: true,
-                customer: true,
-                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
-                shipping: true,
-                statusHistory: { include: { changedBy: { select: { name: true } } } },
+            data: { status: 'cancelled' },
+        });
+
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: request.id,
+                fromStatus: request.status,
+                toStatus: 'cancelled',
+                changedById: req.user.id,
+                notes: reason || 'Request cancelled',
             },
         });
+    });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Cancel return request error:', error);
-        res.status(500).json({ error: 'Failed to cancel return request' });
-    }
-});
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: request.id },
+        include: {
+            originalOrder: true,
+            customer: true,
+            lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+            shipping: true,
+            statusHistory: { include: { changedBy: { select: { name: true } } } },
+        },
+    });
+
+    res.json(updated);
+}));
 
 // ============================================
 // RECEIVE ITEMS (Return Inward)
 // ============================================
 
 // Receive a specific line item from a ticket
-router.post('/:id/receive-item', authenticateToken, async (req, res) => {
-    try {
-        const { lineId, condition } = req.body;
+router.post('/:id/receive-item', authenticateToken, asyncHandler(async (req, res) => {
+    const { lineId, condition } = req.body;
 
-        // Validate condition
-        const validConditions = ['good', 'used', 'damaged', 'wrong_product'];
-        if (!validConditions.includes(condition)) {
-            return res.status(400).json({ error: 'Invalid condition. Must be: good, used, damaged, or wrong_product' });
-        }
+    // Validate condition
+    const validConditions = ['good', 'used', 'damaged', 'wrong_product'];
+    if (!validConditions.includes(condition)) {
+        throw new ValidationError('Invalid condition. Must be: good, used, damaged, or wrong_product');
+    }
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
-                customer: true,
-                originalOrder: true,
-            },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+            customer: true,
+            originalOrder: true,
+        },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        const line = request.lines.find((l) => l.id === lineId);
-        if (!line) {
-            return res.status(404).json({ error: 'Return line not found' });
-        }
+    const line = request.lines.find((l) => l.id === lineId);
+    if (!line) {
+        throw new NotFoundError('Return line not found', 'ReturnRequestLine', lineId);
+    }
 
-        if (line.itemCondition) {
-            return res.status(400).json({ error: 'Item already received' });
-        }
+    if (line.itemCondition) {
+        throw new ConflictError('Item already received', 'ALREADY_RECEIVED');
+    }
 
         const result = await req.prisma.$transaction(async (tx) => {
             // CRITICAL FIX: Use optimistic locking - verify line is still unreceived inside transaction
@@ -1124,11 +1056,11 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
             });
 
             if (!freshLine) {
-                throw new Error('CONFLICT:Return line not found');
+                throw new ConflictError('Return line not found', 'LINE_NOT_FOUND');
             }
 
             if (freshLine.itemCondition !== null) {
-                throw new Error('CONFLICT:Item already received by another user');
+                throw new ConflictError('Item already received by another user', 'ALREADY_RECEIVED');
             }
 
             // Update line with condition
@@ -1143,7 +1075,7 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
             });
 
             if (existingRepackingItem) {
-                throw new Error('CONFLICT:Item already in repacking queue');
+                throw new ConflictError('Item already in repacking queue', 'ALREADY_IN_QUEUE');
             }
 
             // Add to repacking queue
@@ -1273,60 +1205,52 @@ router.post('/:id/receive-item', authenticateToken, async (req, res) => {
             message: `${line.sku.skuCode} received and added to QC queue`,
             repackingItem: result.repackingItem,
             allItemsReceived: result.allReceived,
-            sku: {
-                id: line.sku.id,
-                skuCode: line.sku.skuCode,
-                productName: line.sku.variation?.product?.name,
-                colorName: line.sku.variation?.colorName,
-                size: line.sku.size,
-            },
-        });
-    } catch (error) {
-        console.error('Receive item error:', error);
-        // Handle conflict errors (race conditions)
-        if (error.message && error.message.startsWith('CONFLICT:')) {
-            return res.status(409).json({ error: error.message.replace('CONFLICT:', '') });
-        }
-        res.status(500).json({ error: 'Failed to receive item' });
-    }
-});
+        sku: {
+            id: line.sku.id,
+            skuCode: line.sku.skuCode,
+            productName: line.sku.variation?.product?.name,
+            colorName: line.sku.variation?.colorName,
+            size: line.sku.size,
+        },
+    });
+}));
 
 // Undo receive - remove item from QC queue and clear received status
-router.post('/:id/undo-receive', authenticateToken, async (req, res) => {
-    try {
-        const { lineId } = req.body;
+router.post('/:id/undo-receive', authenticateToken, asyncHandler(async (req, res) => {
+    const { lineId } = req.body;
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
-                customer: true,
-            },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+            customer: true,
+        },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        const line = request.lines.find((l) => l.id === lineId);
-        if (!line) {
-            return res.status(404).json({ error: 'Return line not found' });
-        }
+    const line = request.lines.find((l) => l.id === lineId);
+    if (!line) {
+        throw new NotFoundError('Return line not found', 'ReturnRequestLine', lineId);
+    }
 
-        if (!line.itemCondition) {
-            return res.status(400).json({ error: 'Item has not been received yet' });
-        }
+    if (!line.itemCondition) {
+        throw new BusinessLogicError('Item has not been received yet', 'NOT_RECEIVED');
+    }
 
-        // Find the repacking queue item for this line
-        const repackingItem = await req.prisma.repackingQueueItem.findFirst({
-            where: { returnLineId: lineId },
-        });
+    // Find the repacking queue item for this line
+    const repackingItem = await req.prisma.repackingQueueItem.findFirst({
+        where: { returnLineId: lineId },
+    });
 
-        if (repackingItem && (repackingItem.status === 'ready' || repackingItem.status === 'write_off')) {
-            return res.status(400).json({
-                error: 'Cannot undo - item has already been processed (added to stock or written off)',
-            });
-        }
+    if (repackingItem && (repackingItem.status === 'ready' || repackingItem.status === 'write_off')) {
+        throw new BusinessLogicError(
+            'Cannot undo - item has already been processed (added to stock or written off)',
+            'ALREADY_PROCESSED'
+        );
+    }
 
         await req.prisma.$transaction(async (tx) => {
             // CRITICAL FIX: Delete any inventory transactions created for this repacking item
@@ -1446,98 +1370,85 @@ router.post('/:id/undo-receive', authenticateToken, async (req, res) => {
             },
         });
 
-        res.json({
-            success: true,
-            message: `Undid receive for ${line.sku.skuCode}`,
-            request: updated,
-        });
-    } catch (error) {
-        console.error('Undo receive error:', error);
-        res.status(500).json({ error: 'Failed to undo receive' });
-    }
-});
+    res.json({
+        success: true,
+        message: `Undid receive for ${line.sku.skuCode}`,
+        request: updated,
+    });
+}));
 
 // ============================================
 // STATUS UPDATES
 // ============================================
 
-router.post('/:id/initiate-reverse', authenticateToken, async (req, res) => {
-    try {
-        const { courier, awbNumber, pickupScheduledAt } = req.body;
-        await req.prisma.returnShipping.create({
-            data: {
-                requestId: req.params.id,
-                direction: 'reverse',
-                courier,
-                awbNumber,
-                pickupScheduledAt: pickupScheduledAt ? new Date(pickupScheduledAt) : null,
-                status: 'scheduled',
-            },
-        });
-        await updateStatus(req.prisma, req.params.id, 'reverse_initiated', req.user.id);
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Initiate reverse shipping error:', error);
-        res.status(500).json({ error: 'Failed to initiate reverse shipping' });
+router.post('/:id/initiate-reverse', authenticateToken, asyncHandler(async (req, res) => {
+    const { courier, awbNumber, pickupScheduledAt } = req.body;
+    await req.prisma.returnShipping.create({
+        data: {
+            requestId: req.params.id,
+            direction: 'reverse',
+            courier,
+            awbNumber,
+            pickupScheduledAt: pickupScheduledAt ? new Date(pickupScheduledAt) : null,
+            status: 'scheduled',
+        },
+    });
+    await updateStatus(req.prisma, req.params.id, 'reverse_initiated', req.user.id);
+    res.json({ success: true });
+}));
+
+router.post('/:id/mark-received', authenticateToken, asyncHandler(async (req, res) => {
+    await req.prisma.returnShipping.updateMany({
+        where: { requestId: req.params.id, direction: 'reverse' },
+        data: { status: 'delivered', receivedAt: new Date() },
+    });
+    await updateStatus(req.prisma, req.params.id, 'received', req.user.id);
+    res.json({ success: true });
+}));
+
+router.post('/:id/resolve', authenticateToken, asyncHandler(async (req, res) => {
+    const { resolutionType, resolutionNotes, refundAmount } = req.body;
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: { lines: true },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
     }
-});
 
-router.post('/:id/mark-received', authenticateToken, async (req, res) => {
-    try {
-        await req.prisma.returnShipping.updateMany({
-            where: { requestId: req.params.id, direction: 'reverse' },
-            data: { status: 'delivered', receivedAt: new Date() },
-        });
-        await updateStatus(req.prisma, req.params.id, 'received', req.user.id);
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Mark received error:', error);
-        res.status(500).json({ error: 'Failed to mark as received' });
+    // CRITICAL FIX: Validate status transition
+    if (!isValidStatusTransition(request.status, 'resolved')) {
+        throw new BusinessLogicError(
+            `Cannot resolve from status '${request.status}'. Must be in 'received' or 'processing' status first.`,
+            'INVALID_STATUS_TRANSITION'
+        );
     }
-});
 
-router.post('/:id/resolve', authenticateToken, async (req, res) => {
-    try {
-        const { resolutionType, resolutionNotes, refundAmount } = req.body;
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: { lines: true },
-        });
+    // CRITICAL FIX: Validate all lines are received (have itemCondition set)
+    const unreceivedLines = request.lines.filter((l) => l.itemCondition === null);
+    if (unreceivedLines.length > 0) {
+        throw new BusinessLogicError(
+            `Cannot resolve - ${unreceivedLines.length} item(s) have not been received yet. All items must be received before resolving.`,
+            'UNRECEIVED_ITEMS',
+            { unreceived: unreceivedLines.length }
+        );
+    }
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
+    // CRITICAL FIX: Validate refund amount doesn't exceed original value
+    if (refundAmount !== undefined && refundAmount !== null) {
+        const maxRefundAmount = request.lines.reduce((sum, line) => {
+            const linePrice = line.unitPrice || 0;
+            return sum + (linePrice * line.qty);
+        }, 0);
+
+        if (refundAmount > maxRefundAmount) {
+            throw new ValidationError(
+                `Refund amount (${refundAmount}) exceeds maximum allowed (${maxRefundAmount})`,
+                { maxAllowed: maxRefundAmount }
+            );
         }
-
-        // CRITICAL FIX: Validate status transition
-        if (!isValidStatusTransition(request.status, 'resolved')) {
-            return res.status(400).json({
-                error: `Cannot resolve from status '${request.status}'. Must be in 'received' or 'processing' status first.`,
-            });
-        }
-
-        // CRITICAL FIX: Validate all lines are received (have itemCondition set)
-        const unreceivedLines = request.lines.filter((l) => l.itemCondition === null);
-        if (unreceivedLines.length > 0) {
-            return res.status(400).json({
-                error: `Cannot resolve - ${unreceivedLines.length} item(s) have not been received yet. All items must be received before resolving.`,
-                unreceived: unreceivedLines.length,
-            });
-        }
-
-        // CRITICAL FIX: Validate refund amount doesn't exceed original value
-        if (refundAmount !== undefined && refundAmount !== null) {
-            const maxRefundAmount = request.lines.reduce((sum, line) => {
-                const linePrice = line.unitPrice || 0;
-                return sum + (linePrice * line.qty);
-            }, 0);
-
-            if (refundAmount > maxRefundAmount) {
-                return res.status(400).json({
-                    error: `Refund amount (${refundAmount}) exceeds maximum allowed (${maxRefundAmount})`,
-                    maxAllowed: maxRefundAmount,
-                });
-            }
-        }
+    }
 
         await req.prisma.$transaction(async (tx) => {
             const updateData = {
@@ -1593,114 +1504,100 @@ router.post('/:id/resolve', authenticateToken, async (req, res) => {
                 }
             }
         });
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Resolve return error:', error);
-        res.status(500).json({ error: 'Failed to resolve return' });
-    }
-});
+    res.json({ success: true });
+}));
 
-router.post('/:id/cancel', authenticateToken, async (req, res) => {
-    try {
-        const { reason } = req.body;
-        await updateStatus(req.prisma, req.params.id, 'cancelled', req.user.id, reason);
-        res.json({ success: true });
-    } catch (error) {
-        console.error('Cancel return error:', error);
-        res.status(500).json({ error: 'Failed to cancel return' });
-    }
-});
+router.post('/:id/cancel-simple', authenticateToken, asyncHandler(async (req, res) => {
+    const { reason } = req.body;
+    await updateStatus(req.prisma, req.params.id, 'cancelled', req.user.id, reason);
+    res.json({ success: true });
+}));
 
 // ============================================
 // ANALYTICS
 // ============================================
 
-router.get('/analytics/by-product', authenticateToken, async (req, res) => {
-    try {
-        const returnLines = await req.prisma.returnRequestLine.findMany({
-            include: {
-                sku: { include: { variation: { include: { product: true } } } },
-                request: true,
-            },
-        });
-        const orderLines = await req.prisma.orderLine.findMany({
-            include: { sku: { include: { variation: { include: { product: true } } } } },
-        });
+router.get('/analytics/by-product', authenticateToken, asyncHandler(async (req, res) => {
+    const returnLines = await req.prisma.returnRequestLine.findMany({
+        include: {
+            sku: { include: { variation: { include: { product: true } } } },
+            request: true,
+        },
+    });
+    const orderLines = await req.prisma.orderLine.findMany({
+        include: { sku: { include: { variation: { include: { product: true } } } } },
+    });
 
-        const productStats = {};
-        orderLines.forEach((ol) => {
-            const pId = ol.sku.variation.product.id;
-            if (!productStats[pId]) {
-                productStats[pId] = { name: ol.sku.variation.product.name, sold: 0, returned: 0 };
-            }
-            productStats[pId].sold++;
-        });
-        returnLines.forEach((rl) => {
-            const pId = rl.sku.variation.product.id;
-            if (productStats[pId] && rl.request.requestType === 'return') {
-                productStats[pId].returned++;
-            }
-        });
+    const productStats = {};
+    orderLines.forEach((ol) => {
+        const pId = ol.sku.variation.product.id;
+        if (!productStats[pId]) {
+            productStats[pId] = { name: ol.sku.variation.product.name, sold: 0, returned: 0 };
+        }
+        productStats[pId].sold++;
+    });
+    returnLines.forEach((rl) => {
+        const pId = rl.sku.variation.product.id;
+        if (productStats[pId] && rl.request.requestType === 'return') {
+            productStats[pId].returned++;
+        }
+    });
 
-        const result = Object.entries(productStats).map(([id, s]) => ({
-            productId: id,
-            ...s,
-            returnRate: s.sold > 0 ? ((s.returned / s.sold) * 100).toFixed(1) : 0,
-        }));
-        res.json(result.sort((a, b) => b.returnRate - a.returnRate));
-    } catch (error) {
-        console.error('Return analytics error:', error);
-        res.status(500).json({ error: 'Failed to get return analytics' });
-    }
-});
+    const result = Object.entries(productStats).map(([id, s]) => ({
+        productId: id,
+        ...s,
+        returnRate: s.sold > 0 ? ((s.returned / s.sold) * 100).toFixed(1) : 0,
+    }));
+    res.json(result.sort((a, b) => b.returnRate - a.returnRate));
+}));
 
 // ============================================
 // EXCHANGE ORDER LINKING
 // ============================================
 
 // Link exchange ticket to replacement order
-router.put('/:id/link-exchange-order', authenticateToken, async (req, res) => {
-    try {
-        const { orderId } = req.body;
+router.put('/:id/link-exchange-order', authenticateToken, asyncHandler(async (req, res) => {
+    const { orderId } = req.body;
 
-        if (!orderId) {
-            return res.status(400).json({ error: 'orderId is required' });
-        }
+    if (!orderId) {
+        throw new ValidationError('orderId is required');
+    }
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        if (request.requestType !== 'exchange') {
-            return res.status(400).json({ error: 'Only exchange requests can be linked to orders' });
-        }
+    if (request.requestType !== 'exchange') {
+        throw new BusinessLogicError('Only exchange requests can be linked to orders', 'NOT_EXCHANGE');
+    }
 
-        // Verify order exists
-        const order = await req.prisma.order.findUnique({
-            where: { id: orderId },
-        });
+    // Verify order exists
+    const order = await req.prisma.order.findUnique({
+        where: { id: orderId },
+    });
 
-        if (!order) {
-            return res.status(404).json({ error: 'Order not found' });
-        }
+    if (!order) {
+        throw new NotFoundError('Order not found', 'Order', orderId);
+    }
 
-        // Check if order is already linked to another exchange
-        const existingLink = await req.prisma.returnRequest.findFirst({
-            where: {
-                exchangeOrderId: orderId,
-                id: { not: req.params.id },
-            },
-        });
+    // Check if order is already linked to another exchange
+    const existingLink = await req.prisma.returnRequest.findFirst({
+        where: {
+            exchangeOrderId: orderId,
+            id: { not: req.params.id },
+        },
+    });
 
-        if (existingLink) {
-            return res.status(400).json({
-                error: `This order is already linked to exchange ${existingLink.requestNumber}`,
-            });
-        }
+    if (existingLink) {
+        throw new ConflictError(
+            `This order is already linked to exchange ${existingLink.requestNumber}`,
+            'ALREADY_LINKED'
+        );
+    }
 
         await req.prisma.$transaction(async (tx) => {
             await tx.returnRequest.update({
@@ -1730,64 +1627,55 @@ router.put('/:id/link-exchange-order', authenticateToken, async (req, res) => {
             },
         });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Link exchange order error:', error);
-        res.status(500).json({ error: 'Failed to link exchange order' });
-    }
-});
+    res.json(updated);
+}));
 
 // Unlink exchange order (undo)
-router.put('/:id/unlink-exchange-order', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
+router.put('/:id/unlink-exchange-order', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: { exchangeOrder: true },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
+
+    if (!request.exchangeOrderId) {
+        throw new BusinessLogicError('No exchange order linked', 'NO_LINKED_ORDER');
+    }
+
+    const orderNumber = request.exchangeOrder?.orderNumber;
+
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: req.params.id },
-            include: { exchangeOrder: true },
+            data: { exchangeOrderId: null },
         });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        if (!request.exchangeOrderId) {
-            return res.status(400).json({ error: 'No exchange order linked' });
-        }
-
-        const orderNumber = request.exchangeOrder?.orderNumber;
-
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: { exchangeOrderId: null },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: request.status,
-                    changedById: req.user.id,
-                    notes: `Unlinked exchange order ${orderNumber}`,
-                },
-            });
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                customer: true,
-                lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
-                shipping: true,
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: request.status,
+                changedById: req.user.id,
+                notes: `Unlinked exchange order ${orderNumber}`,
             },
         });
+    });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Unlink exchange order error:', error);
-        res.status(500).json({ error: 'Failed to unlink exchange order' });
-    }
-});
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            customer: true,
+            lines: { include: { sku: { include: { variation: { include: { product: true } } } } } },
+            shipping: true,
+        },
+    });
+
+    res.json(updated);
+}));
 
 // ============================================
 // EXCHANGE SHIPMENT TRACKING
@@ -1821,383 +1709,353 @@ async function checkAutoResolve(tx, requestId, userId) {
 }
 
 // Mark reverse shipment received
-router.put('/:id/mark-reverse-received', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
+router.put('/:id/mark-reverse-received', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
+
+    if (request.reverseReceived) {
+        throw new BusinessLogicError('Reverse shipment already marked as received', 'ALREADY_RECEIVED');
+    }
+
+    let autoResolved = false;
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: req.params.id },
-        });
-
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        if (request.reverseReceived) {
-            return res.status(400).json({ error: 'Reverse shipment already marked as received' });
-        }
-
-        let autoResolved = false;
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: {
-                    reverseReceived: true,
-                    reverseReceivedAt: new Date(),
-                },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: request.status,
-                    changedById: req.user.id,
-                    notes: 'Marked reverse shipment as received',
-                },
-            });
-
-            autoResolved = await checkAutoResolve(tx, req.params.id, req.user.id);
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                shipping: true,
+            data: {
+                reverseReceived: true,
+                reverseReceivedAt: new Date(),
             },
         });
 
-        res.json({ ...updated, autoResolved });
-    } catch (error) {
-        console.error('Mark reverse received error:', error);
-        res.status(500).json({ error: 'Failed to mark reverse received' });
-    }
-});
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: request.status,
+                changedById: req.user.id,
+                notes: 'Marked reverse shipment as received',
+            },
+        });
+
+        autoResolved = await checkAutoResolve(tx, req.params.id, req.user.id);
+    });
+
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            shipping: true,
+        },
+    });
+
+    res.json({ ...updated, autoResolved });
+}));
 
 // Unmark reverse received (undo)
-router.put('/:id/unmark-reverse-received', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
+router.put('/:id/unmark-reverse-received', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
+
+    if (!request.reverseReceived) {
+        throw new BusinessLogicError('Reverse shipment not marked as received', 'NOT_RECEIVED');
+    }
+
+    // If already resolved, need to un-resolve
+    const wasResolved = request.status === 'resolved';
+
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: req.params.id },
-        });
-
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        if (!request.reverseReceived) {
-            return res.status(400).json({ error: 'Reverse shipment not marked as received' });
-        }
-
-        // If already resolved, need to un-resolve
-        const wasResolved = request.status === 'resolved';
-
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: {
-                    reverseReceived: false,
-                    reverseReceivedAt: null,
-                    status: wasResolved ? 'in_transit' : request.status,
-                },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: wasResolved ? 'in_transit' : request.status,
-                    changedById: req.user.id,
-                    notes: 'Undo: unmarked reverse shipment as received',
-                },
-            });
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                shipping: true,
+            data: {
+                reverseReceived: false,
+                reverseReceivedAt: null,
+                status: wasResolved ? 'in_transit' : request.status,
             },
         });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Unmark reverse received error:', error);
-        res.status(500).json({ error: 'Failed to unmark reverse received' });
-    }
-});
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: wasResolved ? 'in_transit' : request.status,
+                changedById: req.user.id,
+                notes: 'Undo: unmarked reverse shipment as received',
+            },
+        });
+    });
+
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            shipping: true,
+        },
+    });
+
+    res.json(updated);
+}));
 
 // Mark forward shipment delivered
-router.put('/:id/mark-forward-delivered', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
+router.put('/:id/mark-forward-delivered', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
+
+    if (request.requestType !== 'exchange') {
+        throw new BusinessLogicError('Only exchange requests can have forward delivery', 'NOT_EXCHANGE');
+    }
+
+    if (request.forwardDelivered) {
+        throw new BusinessLogicError('Forward shipment already marked as delivered', 'ALREADY_DELIVERED');
+    }
+
+    let autoResolved = false;
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: req.params.id },
-        });
-
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        if (request.requestType !== 'exchange') {
-            return res.status(400).json({ error: 'Only exchange requests can have forward delivery' });
-        }
-
-        if (request.forwardDelivered) {
-            return res.status(400).json({ error: 'Forward shipment already marked as delivered' });
-        }
-
-        let autoResolved = false;
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: {
-                    forwardDelivered: true,
-                    forwardDeliveredAt: new Date(),
-                },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: request.status,
-                    changedById: req.user.id,
-                    notes: 'Marked forward shipment as delivered',
-                },
-            });
-
-            autoResolved = await checkAutoResolve(tx, req.params.id, req.user.id);
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                shipping: true,
+            data: {
+                forwardDelivered: true,
+                forwardDeliveredAt: new Date(),
             },
         });
 
-        res.json({ ...updated, autoResolved });
-    } catch (error) {
-        console.error('Mark forward delivered error:', error);
-        res.status(500).json({ error: 'Failed to mark forward delivered' });
-    }
-});
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: request.status,
+                changedById: req.user.id,
+                notes: 'Marked forward shipment as delivered',
+            },
+        });
+
+        autoResolved = await checkAutoResolve(tx, req.params.id, req.user.id);
+    });
+
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            shipping: true,
+        },
+    });
+
+    res.json({ ...updated, autoResolved });
+}));
 
 // Unmark forward delivered (undo)
-router.put('/:id/unmark-forward-delivered', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
+router.put('/:id/unmark-forward-delivered', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
+
+    if (!request.forwardDelivered) {
+        throw new BusinessLogicError('Forward shipment not marked as delivered', 'NOT_DELIVERED');
+    }
+
+    // If already resolved, need to un-resolve
+    const wasResolved = request.status === 'resolved';
+
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: req.params.id },
-        });
-
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        if (!request.forwardDelivered) {
-            return res.status(400).json({ error: 'Forward shipment not marked as delivered' });
-        }
-
-        // If already resolved, need to un-resolve
-        const wasResolved = request.status === 'resolved';
-
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: {
-                    forwardDelivered: false,
-                    forwardDeliveredAt: null,
-                    status: wasResolved ? 'in_transit' : request.status,
-                },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: wasResolved ? 'in_transit' : request.status,
-                    changedById: req.user.id,
-                    notes: 'Undo: unmarked forward shipment as delivered',
-                },
-            });
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                shipping: true,
+            data: {
+                forwardDelivered: false,
+                forwardDeliveredAt: null,
+                status: wasResolved ? 'in_transit' : request.status,
             },
         });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Unmark forward delivered error:', error);
-        res.status(500).json({ error: 'Failed to unmark forward delivered' });
-    }
-});
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: wasResolved ? 'in_transit' : request.status,
+                changedById: req.user.id,
+                notes: 'Undo: unmarked forward shipment as delivered',
+            },
+        });
+    });
+
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            shipping: true,
+        },
+    });
+
+    res.json(updated);
+}));
 
 // ============================================
 // EARLY-SHIP LOGIC FOR EXCHANGES
 // ============================================
 
 // Mark reverse shipment as in-transit (enables early shipping of replacement)
-router.put('/:id/mark-reverse-in-transit', authenticateToken, async (req, res) => {
-    try {
-        const request = await req.prisma.returnRequest.findUnique({
+router.put('/:id/mark-reverse-in-transit', authenticateToken, asyncHandler(async (req, res) => {
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: { shipping: true },
+    });
+
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
+
+    if (request.reverseInTransitAt) {
+        throw new BusinessLogicError('Reverse shipment already marked as in-transit', 'ALREADY_IN_TRANSIT');
+    }
+
+    // Check if there's a reverse shipping record with AWB
+    const reverseShipping = request.shipping?.find((s) => s.direction === 'reverse' && s.awbNumber);
+    if (!reverseShipping) {
+        throw new BusinessLogicError('No reverse pickup AWB found. Add reverse shipping details first.', 'NO_REVERSE_AWB');
+    }
+
+    await req.prisma.$transaction(async (tx) => {
+        await tx.returnRequest.update({
             where: { id: req.params.id },
-            include: { shipping: true },
-        });
-
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
-
-        if (request.reverseInTransitAt) {
-            return res.status(400).json({ error: 'Reverse shipment already marked as in-transit' });
-        }
-
-        // Check if there's a reverse shipping record with AWB
-        const reverseShipping = request.shipping?.find((s) => s.direction === 'reverse' && s.awbNumber);
-        if (!reverseShipping) {
-            return res.status(400).json({ error: 'No reverse pickup AWB found. Add reverse shipping details first.' });
-        }
-
-        await req.prisma.$transaction(async (tx) => {
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: {
-                    reverseInTransitAt: new Date(),
-                    status: 'in_transit',
-                },
-            });
-
-            // Update shipping status
-            await tx.returnShipping.update({
-                where: { id: reverseShipping.id },
-                data: { status: 'in_transit' },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: 'in_transit',
-                    changedById: req.user.id,
-                    notes: 'Reverse pickup confirmed in-transit. Exchange replacement can now be shipped.',
-                },
-            });
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                shipping: true,
+            data: {
+                reverseInTransitAt: new Date(),
+                status: 'in_transit',
             },
         });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Mark reverse in-transit error:', error);
-        res.status(500).json({ error: 'Failed to mark reverse in-transit' });
-    }
-});
+        // Update shipping status
+        await tx.returnShipping.update({
+            where: { id: reverseShipping.id },
+            data: { status: 'in_transit' },
+        });
+
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: 'in_transit',
+                changedById: req.user.id,
+                notes: 'Reverse pickup confirmed in-transit. Exchange replacement can now be shipped.',
+            },
+        });
+    });
+
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            shipping: true,
+        },
+    });
+
+    res.json(updated);
+}));
 
 // Ship replacement (for exchanges - can be done when reverse is in-transit)
-router.put('/:id/ship-replacement', authenticateToken, async (req, res) => {
-    try {
-        const { courier, awbNumber, notes } = req.body;
+router.put('/:id/ship-replacement', authenticateToken, asyncHandler(async (req, res) => {
+    const { courier, awbNumber, notes } = req.body;
 
-        if (!courier || !awbNumber) {
-            return res.status(400).json({ error: 'Courier and AWB number are required' });
-        }
+    if (!courier || !awbNumber) {
+        throw new ValidationError('Courier and AWB number are required');
+    }
 
-        const request = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: { shipping: true },
-        });
+    const request = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: { shipping: true },
+    });
 
-        if (!request) {
-            return res.status(404).json({ error: 'Return request not found' });
-        }
+    if (!request) {
+        throw new NotFoundError('Return request not found', 'ReturnRequest', req.params.id);
+    }
 
-        // Check if this is an exchange
-        const isExchange = request.resolution?.startsWith('exchange') || request.requestType === 'exchange';
-        if (!isExchange) {
-            return res.status(400).json({ error: 'This is not an exchange request' });
-        }
+    // Check if this is an exchange
+    const isExchange = request.resolution?.startsWith('exchange') || request.requestType === 'exchange';
+    if (!isExchange) {
+        throw new BusinessLogicError('This is not an exchange request', 'NOT_EXCHANGE');
+    }
 
-        // Check if replacement already shipped
-        if (request.forwardShippedAt) {
-            return res.status(400).json({ error: 'Replacement has already been shipped' });
-        }
+    // Check if replacement already shipped
+    if (request.forwardShippedAt) {
+        throw new BusinessLogicError('Replacement has already been shipped', 'ALREADY_SHIPPED');
+    }
 
-        // Check if reverse is at least in-transit (allows early shipping)
-        const reverseInTransit = request.reverseInTransitAt || request.status === 'in_transit';
-        if (!reverseInTransit) {
-            return res.status(400).json({ error: 'Reverse pickup must be confirmed in-transit before shipping replacement' });
-        }
+    // Check if reverse is at least in-transit (allows early shipping)
+    const reverseInTransit = request.reverseInTransitAt || request.status === 'in_transit';
+    if (!reverseInTransit) {
+        throw new BusinessLogicError('Reverse pickup must be confirmed in-transit before shipping replacement', 'REVERSE_NOT_IN_TRANSIT');
+    }
 
-        await req.prisma.$transaction(async (tx) => {
-            // Create forward shipping record
-            await tx.returnShipping.create({
-                data: {
-                    requestId: req.params.id,
-                    direction: 'forward',
-                    courier,
-                    awbNumber,
-                    status: 'shipped',
-                    shippedAt: new Date(),
-                },
-            });
-
-            // Update request with forward shipped timestamp
-            await tx.returnRequest.update({
-                where: { id: req.params.id },
-                data: {
-                    forwardShippedAt: new Date(),
-                },
-            });
-
-            await tx.returnStatusHistory.create({
-                data: {
-                    requestId: req.params.id,
-                    fromStatus: request.status,
-                    toStatus: request.status,
-                    changedById: req.user.id,
-                    notes: notes || `Replacement shipped via ${courier} (AWB: ${awbNumber})`,
-                },
-            });
-        });
-
-        const updated = await req.prisma.returnRequest.findUnique({
-            where: { id: req.params.id },
-            include: {
-                originalOrder: true,
-                exchangeOrder: true,
-                customer: true,
-                shipping: true,
+    await req.prisma.$transaction(async (tx) => {
+        // Create forward shipping record
+        await tx.returnShipping.create({
+            data: {
+                requestId: req.params.id,
+                direction: 'forward',
+                courier,
+                awbNumber,
+                status: 'shipped',
+                shippedAt: new Date(),
             },
         });
 
-        res.json(updated);
-    } catch (error) {
-        console.error('Ship replacement error:', error);
-        res.status(500).json({ error: 'Failed to ship replacement' });
-    }
-});
+        // Update request with forward shipped timestamp
+        await tx.returnRequest.update({
+            where: { id: req.params.id },
+            data: {
+                forwardShippedAt: new Date(),
+            },
+        });
+
+        await tx.returnStatusHistory.create({
+            data: {
+                requestId: req.params.id,
+                fromStatus: request.status,
+                toStatus: request.status,
+                changedById: req.user.id,
+                notes: notes || `Replacement shipped via ${courier} (AWB: ${awbNumber})`,
+            },
+        });
+    });
+
+    const updated = await req.prisma.returnRequest.findUnique({
+        where: { id: req.params.id },
+        include: {
+            originalOrder: true,
+            exchangeOrder: true,
+            customer: true,
+            shipping: true,
+        },
+    });
+
+    res.json(updated);
+}));
 
 // ============================================
 // HELPERS

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { asyncHandler } from '../middleware/asyncHandler.js';
+import { NotFoundError } from '../utils/errors.js';
 import { getTierThresholds, calculateTier, calculateLTV } from '../utils/tierUtils.js';
 
 const router = Router();
@@ -8,12 +10,11 @@ const router = Router();
 // CUSTOMER LIST
 // ============================================
 
-router.get('/', async (req, res) => {
-    try {
-        const { tier, search, limit = 50, offset = 0 } = req.query;
+router.get('/', asyncHandler(async (req, res) => {
+    const { tier, search, limit = 50, offset = 0 } = req.query;
 
-        // Get configurable tier thresholds
-        const thresholds = await getTierThresholds(req.prisma);
+    // Get configurable tier thresholds
+    const thresholds = await getTierThresholds(req.prisma);
 
         let where = {};
         if (search) {
@@ -105,24 +106,19 @@ router.get('/', async (req, res) => {
             result = enriched.filter((c) => c.customerTier === tier);
         }
 
-        res.json(result);
-    } catch (error) {
-        console.error('Get customers error:', error);
-        res.status(500).json({ error: 'Failed to fetch customers' });
-    }
-});
+    res.json(result);
+}));
 
 // Get customer's past shipping addresses (for address autofill)
 // Searches both ERP orders and Shopify cache
-router.get('/:id/addresses', async (req, res) => {
-    try {
-        // Get customer email for Shopify cache lookup
-        const customer = await req.prisma.customer.findUnique({
-            where: { id: req.params.id },
-            select: { email: true },
-        });
+router.get('/:id/addresses', asyncHandler(async (req, res) => {
+    // Get customer email for Shopify cache lookup
+    const customer = await req.prisma.customer.findUnique({
+        where: { id: req.params.id },
+        select: { email: true },
+    });
 
-        const addressMap = new Map();
+    const addressMap = new Map();
 
         // 1. Get addresses from ERP orders
         const orders = await req.prisma.order.findMany({
@@ -206,57 +202,52 @@ router.get('/:id/addresses', async (req, res) => {
         const addresses = Array.from(addressMap.values())
             .sort((a, b) => new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime());
 
-        res.json(addresses);
-    } catch (error) {
-        console.error('Get customer addresses error:', error);
-        res.status(500).json({ error: 'Failed to fetch addresses' });
-    }
-});
+    res.json(addresses);
+}));
 
 // Get single customer with full details
-router.get('/:id', async (req, res) => {
-    try {
-        const customer = await req.prisma.customer.findUnique({
-            where: { id: req.params.id },
-            include: {
-                orders: {
-                    include: {
-                        orderLines: {
-                            include: {
-                                sku: {
-                                    include: {
-                                        variation: {
-                                            include: {
-                                                product: true,
-                                                fabric: { include: { fabricType: true } },
-                                            },
+router.get('/:id', asyncHandler(async (req, res) => {
+    const customer = await req.prisma.customer.findUnique({
+        where: { id: req.params.id },
+        include: {
+            orders: {
+                include: {
+                    orderLines: {
+                        include: {
+                            sku: {
+                                include: {
+                                    variation: {
+                                        include: {
+                                            product: true,
+                                            fabric: { include: { fabricType: true } },
                                         },
                                     },
                                 },
                             },
                         },
                     },
-                    orderBy: { orderDate: 'desc' },
                 },
-                returnRequests: {
-                    include: {
-                        lines: true,
-                    },
-                    orderBy: { createdAt: 'desc' },
-                },
-                feedback: {
-                    include: {
-                        ratings: true,
-                        content: true,
-                    },
-                    orderBy: { createdAt: 'desc' },
-                },
+                orderBy: { orderDate: 'desc' },
             },
-        });
+            returnRequests: {
+                include: {
+                    lines: true,
+                },
+                orderBy: { createdAt: 'desc' },
+            },
+            feedback: {
+                include: {
+                    ratings: true,
+                    content: true,
+                },
+                orderBy: { createdAt: 'desc' },
+            },
+        },
+    });
 
-        if (!customer) {
-            return res.status(404).json({ error: 'Customer not found' });
-        }
+    if (!customer) {
+        throw new NotFoundError('Customer not found', 'Customer', req.params.id);
+    }
 
         // Get configurable tier thresholds
         const thresholds = await getTierThresholds(req.prisma);
@@ -305,72 +296,57 @@ router.get('/:id', async (req, res) => {
             .sort((a, b) => b.qty - a.qty)
             .slice(0, 5);
 
-        res.json({
-            ...customer,
-            totalOrders,
-            lifetimeValue,
-            customerTier,
-            productAffinity,
-            colorAffinity,
-            fabricAffinity,
-        });
-    } catch (error) {
-        console.error('Get customer error:', error);
-        res.status(500).json({ error: 'Failed to fetch customer' });
-    }
-});
+    res.json({
+        ...customer,
+        totalOrders,
+        lifetimeValue,
+        customerTier,
+        productAffinity,
+        colorAffinity,
+        fabricAffinity,
+    });
+}));
 
 // Create customer
-router.post('/', authenticateToken, async (req, res) => {
-    try {
-        const { email, phone, firstName, lastName, defaultAddress, tags } = req.body;
+router.post('/', authenticateToken, asyncHandler(async (req, res) => {
+    const { email, phone, firstName, lastName, defaultAddress, tags } = req.body;
 
-        const customer = await req.prisma.customer.create({
-            data: {
-                email,
-                phone,
-                firstName,
-                lastName,
-                defaultAddress,
-                tags: tags || [],
-            },
-        });
+    const customer = await req.prisma.customer.create({
+        data: {
+            email,
+            phone,
+            firstName,
+            lastName,
+            defaultAddress,
+            tags: tags || [],
+        },
+    });
 
-        res.status(201).json(customer);
-    } catch (error) {
-        console.error('Create customer error:', error);
-        res.status(500).json({ error: 'Failed to create customer' });
-    }
-});
+    res.status(201).json(customer);
+}));
 
 // Update customer
-router.put('/:id', authenticateToken, async (req, res) => {
-    try {
-        const { phone, firstName, lastName, defaultAddress, tags, acceptsMarketing } = req.body;
+router.put('/:id', authenticateToken, asyncHandler(async (req, res) => {
+    const { phone, firstName, lastName, defaultAddress, tags, acceptsMarketing } = req.body;
 
-        const customer = await req.prisma.customer.update({
-            where: { id: req.params.id },
-            data: { phone, firstName, lastName, defaultAddress, tags, acceptsMarketing },
-        });
+    const customer = await req.prisma.customer.update({
+        where: { id: req.params.id },
+        data: { phone, firstName, lastName, defaultAddress, tags, acceptsMarketing },
+    });
 
-        res.json(customer);
-    } catch (error) {
-        console.error('Update customer error:', error);
-        res.status(500).json({ error: 'Failed to update customer' });
-    }
-});
+    res.json(customer);
+}));
 
 // ============================================
 // CUSTOMER ANALYTICS
 // ============================================
 
 // Customer base analytics with time filtering
-router.get('/analytics/overview', async (req, res) => {
-    try {
-        const { months } = req.query;
+router.get('/analytics/overview', asyncHandler(async (req, res) => {
+    const { months } = req.query;
 
-        // Build date filter
-        let dateFilter = {};
+    // Build date filter
+    let dateFilter = {};
         if (months && months !== 'all') {
             const sinceDate = new Date();
             sinceDate.setMonth(sinceDate.getMonth() - Number(months));
@@ -436,30 +412,25 @@ router.get('/analytics/overview', async (req, res) => {
         // New vs returning breakdown
         const newCustomers = customersWithOrders - repeatCustomers;
 
-        res.json({
-            totalCustomers,
-            customersWithOrders,
-            newCustomers,
-            repeatCustomers,
-            repeatRate: parseFloat(repeatRate.toFixed(1)),
-            totalOrders,
-            totalRevenue: Math.round(totalRevenue),
-            avgOrderValue: Math.round(avgOrderValue),
-            avgOrdersPerCustomer: parseFloat(avgOrdersPerCustomer.toFixed(1)),
-            avgOrderFrequency: parseFloat(avgOrderFrequency.toFixed(2)),
-            avgLTV: Math.round(avgLTV),
-        });
-    } catch (error) {
-        console.error('Get customer analytics error:', error);
-        res.status(500).json({ error: 'Failed to fetch customer analytics' });
-    }
-});
+    res.json({
+        totalCustomers,
+        customersWithOrders,
+        newCustomers,
+        repeatCustomers,
+        repeatRate: parseFloat(repeatRate.toFixed(1)),
+        totalOrders,
+        totalRevenue: Math.round(totalRevenue),
+        avgOrderValue: Math.round(avgOrderValue),
+        avgOrdersPerCustomer: parseFloat(avgOrdersPerCustomer.toFixed(1)),
+        avgOrderFrequency: parseFloat(avgOrderFrequency.toFixed(2)),
+        avgLTV: Math.round(avgLTV),
+    });
+}));
 
 // High-value customers (top N by LTV)
-router.get('/analytics/high-value', async (req, res) => {
-    try {
-        const { limit = 100 } = req.query;
-        const topN = Math.min(Number(limit) || 100, 5000);
+router.get('/analytics/high-value', asyncHandler(async (req, res) => {
+    const { limit = 100 } = req.query;
+    const topN = Math.min(Number(limit) || 100, 5000);
 
         const customers = await req.prisma.customer.findMany({
             include: {
@@ -515,97 +486,83 @@ router.get('/analytics/high-value', async (req, res) => {
             ? enrichedCustomers.reduce((sum, c) => sum + c.orderFrequency, 0) / totalCustomers
             : 0;
 
-        res.json({
-            customers: enrichedCustomers,
-            stats: {
-                totalCustomers,
-                totalRevenue: Math.round(totalRevenue),
-                totalOrders: totalOrdersAll,
-                avgLTV: Math.round(avgLTV),
-                avgAOV: Math.round(avgAOV),
-                avgOrdersPerCustomer: parseFloat(avgOrdersPerCustomer.toFixed(1)),
-                avgOrderFrequency: parseFloat(avgOrderFrequency.toFixed(2)),
-            },
-        });
-    } catch (error) {
-        console.error('Get high-value customers error:', error);
-        res.status(500).json({ error: 'Failed to fetch high-value customers' });
-    }
-});
+    res.json({
+        customers: enrichedCustomers,
+        stats: {
+            totalCustomers,
+            totalRevenue: Math.round(totalRevenue),
+            totalOrders: totalOrdersAll,
+            avgLTV: Math.round(avgLTV),
+            avgAOV: Math.round(avgAOV),
+            avgOrdersPerCustomer: parseFloat(avgOrdersPerCustomer.toFixed(1)),
+            avgOrderFrequency: parseFloat(avgOrderFrequency.toFixed(2)),
+        },
+    });
+}));
 
 // Frequent returners (>20% return rate)
-router.get('/analytics/frequent-returners', async (req, res) => {
-    try {
-        const customers = await req.prisma.customer.findMany({
-            include: {
-                orders: { select: { id: true, status: true } },
-                returnRequests: { select: { id: true, requestType: true } },
-            },
-        });
+router.get('/analytics/frequent-returners', asyncHandler(async (req, res) => {
+    const customers = await req.prisma.customer.findMany({
+        include: {
+            orders: { select: { id: true, status: true } },
+            returnRequests: { select: { id: true, requestType: true } },
+        },
+    });
 
-        const frequentReturners = customers
-            .map((c) => {
-                const orders = c.orders.filter((o) => o.status !== 'cancelled').length;
-                const returns = c.returnRequests.filter((r) => r.requestType === 'return').length;
-                const returnRate = orders > 0 ? (returns / orders) * 100 : 0;
-                return {
-                    id: c.id,
-                    email: c.email,
-                    firstName: c.firstName,
-                    lastName: c.lastName,
-                    totalOrders: orders,
-                    returns,
-                    returnRate: returnRate.toFixed(1),
-                };
-            })
-            .filter((c) => c.returnRate > 20 && c.totalOrders >= 2)
-            .sort((a, b) => b.returnRate - a.returnRate);
+    const frequentReturners = customers
+        .map((c) => {
+            const orders = c.orders.filter((o) => o.status !== 'cancelled').length;
+            const returns = c.returnRequests.filter((r) => r.requestType === 'return').length;
+            const returnRate = orders > 0 ? (returns / orders) * 100 : 0;
+            return {
+                id: c.id,
+                email: c.email,
+                firstName: c.firstName,
+                lastName: c.lastName,
+                totalOrders: orders,
+                returns,
+                returnRate: returnRate.toFixed(1),
+            };
+        })
+        .filter((c) => c.returnRate > 20 && c.totalOrders >= 2)
+        .sort((a, b) => b.returnRate - a.returnRate);
 
-        res.json(frequentReturners);
-    } catch (error) {
-        console.error('Get frequent returners error:', error);
-        res.status(500).json({ error: 'Failed to fetch frequent returners' });
-    }
-});
+    res.json(frequentReturners);
+}));
 
 // At-risk customers (high LTV but no order in 90+ days)
-router.get('/analytics/at-risk', async (req, res) => {
-    try {
-        const thresholds = await getTierThresholds(req.prisma);
+router.get('/analytics/at-risk', asyncHandler(async (req, res) => {
+    const thresholds = await getTierThresholds(req.prisma);
 
-        const customers = await req.prisma.customer.findMany({
-            include: {
-                orders: { select: { totalAmount: true, orderDate: true, status: true } },
-            },
-        });
+    const customers = await req.prisma.customer.findMany({
+        include: {
+            orders: { select: { totalAmount: true, orderDate: true, status: true } },
+        },
+    });
 
-        const atRisk = customers
-            .map((c) => {
-                const lifetimeValue = calculateLTV(c.orders);
-                const validOrders = c.orders.filter((o) => o.status !== 'cancelled');
-                const lastOrder = validOrders.length > 0 ? new Date(Math.max(...validOrders.map((o) => new Date(o.orderDate)))) : null;
-                const daysSinceLastOrder = lastOrder ? Math.floor((Date.now() - lastOrder.getTime()) / (1000 * 60 * 60 * 24)) : null;
-                const customerTier = calculateTier(lifetimeValue, thresholds);
+    const atRisk = customers
+        .map((c) => {
+            const lifetimeValue = calculateLTV(c.orders);
+            const validOrders = c.orders.filter((o) => o.status !== 'cancelled');
+            const lastOrder = validOrders.length > 0 ? new Date(Math.max(...validOrders.map((o) => new Date(o.orderDate)))) : null;
+            const daysSinceLastOrder = lastOrder ? Math.floor((Date.now() - lastOrder.getTime()) / (1000 * 60 * 60 * 24)) : null;
+            const customerTier = calculateTier(lifetimeValue, thresholds);
 
-                return {
-                    id: c.id,
-                    email: c.email,
-                    firstName: c.firstName,
-                    lastName: c.lastName,
-                    lifetimeValue,
-                    customerTier,
-                    lastOrderDate: lastOrder,
-                    daysSinceLastOrder,
-                };
-            })
-            .filter((c) => c.lifetimeValue >= thresholds.silver && c.daysSinceLastOrder > 90) // Silver+ inactive 90+ days
-            .sort((a, b) => b.daysSinceLastOrder - a.daysSinceLastOrder);
+            return {
+                id: c.id,
+                email: c.email,
+                firstName: c.firstName,
+                lastName: c.lastName,
+                lifetimeValue,
+                customerTier,
+                lastOrderDate: lastOrder,
+                daysSinceLastOrder,
+            };
+        })
+        .filter((c) => c.lifetimeValue >= thresholds.silver && c.daysSinceLastOrder > 90) // Silver+ inactive 90+ days
+        .sort((a, b) => b.daysSinceLastOrder - a.daysSinceLastOrder);
 
-        res.json(atRisk);
-    } catch (error) {
-        console.error('Get at-risk customers error:', error);
-        res.status(500).json({ error: 'Failed to fetch at-risk customers' });
-    }
-});
+    res.json(atRisk);
+}));
 
 export default router;
