@@ -18,11 +18,9 @@ interface AnalyticsData {
         prepaid: { count: number; amount: number };
     };
     topProducts: Array<{ name: string; qty: number }>;
-    revenue24h: {
-        total: number;
-        orderCount: number;
-        cod: number;
-        prepaid: number;
+    revenue: {
+        today: { total: number; orderCount: number; cod: number; prepaid: number };
+        yesterday: { total: number; orderCount: number; cod: number; prepaid: number };
     };
 }
 
@@ -121,14 +119,25 @@ export function OrdersAnalyticsBar() {
                     </div>
                 </div>
 
-                {/* Revenue 24h */}
-                <div className="flex items-center gap-2 px-4 border-r border-gray-200">
-                    <IndianRupee size={14} className="text-emerald-500" />
-                    <div>
-                        <div className="text-xs text-gray-500">Last 24h</div>
-                        <div className="text-sm font-semibold text-emerald-600">
-                            {formatCurrency(analytics.revenue24h?.total || 0)}
-                            <span className="text-xs text-gray-400 ml-1">({analytics.revenue24h?.orderCount || 0})</span>
+                {/* Revenue Today & Yesterday */}
+                <div className="flex items-center gap-3 px-4 border-r border-gray-200">
+                    <div className="flex items-center gap-2">
+                        <IndianRupee size={14} className="text-emerald-500" />
+                        <div>
+                            <div className="text-xs text-gray-500">Today</div>
+                            <div className="text-sm font-semibold text-emerald-600">
+                                {formatCurrency(analytics.revenue?.today?.total || 0)}
+                                <span className="text-xs text-gray-400 ml-1">({analytics.revenue?.today?.orderCount || 0})</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div>
+                            <div className="text-xs text-gray-500">Yesterday</div>
+                            <div className="text-sm font-semibold text-gray-600">
+                                {formatCurrency(analytics.revenue?.yesterday?.total || 0)}
+                                <span className="text-xs text-gray-400 ml-1">({analytics.revenue?.yesterday?.orderCount || 0})</span>
+                            </div>
                         </div>
                     </div>
                 </div>

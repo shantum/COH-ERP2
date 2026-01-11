@@ -645,26 +645,41 @@ router.get('/analytics', async (req, res) => {
             }
         });
 
-        // Get orders from last 24 hours for revenue calculation
-        const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        // Get orders for today and yesterday revenue calculation
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterdayStart = new Date(todayStart);
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+        // Get ALL orders from today/yesterday for revenue (regardless of status)
         const recentOrders = await req.prisma.order.findMany({
             where: {
-                orderDate: { gte: last24Hours },
-                isArchived: false,
+                orderDate: { gte: yesterdayStart },
             },
             select: {
                 totalAmount: true,
                 paymentMethod: true,
+                orderDate: true,
             }
         });
 
-        const revenue24h = {
-            total: recentOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
-            orderCount: recentOrders.length,
-            cod: recentOrders.filter(o => o.paymentMethod?.toLowerCase() === 'cod')
+        const todayOrders = recentOrders.filter(o => new Date(o.orderDate) >= todayStart);
+        const yesterdayOrders = recentOrders.filter(o =>
+            new Date(o.orderDate) >= yesterdayStart && new Date(o.orderDate) < todayStart
+        );
+
+        const calcRevenue = (orders) => ({
+            total: orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
+            orderCount: orders.length,
+            cod: orders.filter(o => o.paymentMethod?.toLowerCase() === 'cod')
                 .reduce((sum, o) => sum + (o.totalAmount || 0), 0),
-            prepaid: recentOrders.filter(o => o.paymentMethod?.toLowerCase() !== 'cod')
+            prepaid: orders.filter(o => o.paymentMethod?.toLowerCase() !== 'cod')
                 .reduce((sum, o) => sum + (o.totalAmount || 0), 0),
+        });
+
+        const revenue = {
+            today: calcRevenue(todayOrders),
+            yesterday: calcRevenue(yesterdayOrders),
         };
 
         // Count pending orders (orders with at least one pending line)
@@ -724,7 +739,7 @@ router.get('/analytics', async (req, res) => {
             totalUnits,
             paymentSplit,
             topProducts,
-            revenue24h,
+            revenue,
         });
     } catch (error) {
         console.error('Orders analytics error:', error);
