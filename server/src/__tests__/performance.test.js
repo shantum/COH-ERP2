@@ -17,6 +17,7 @@ import {
     checkThreshold,
     seedTestData,
     cleanupTestData,
+    cleanupAllPerfData,
     createTestOrderLine,
     createTestProductionBatch,
     generateId,
@@ -36,8 +37,10 @@ jest.setTimeout(120000); // 2 minutes
 describe('Performance Benchmarks', () => {
     let prisma;
 
-    beforeAll(() => {
+    beforeAll(async () => {
         prisma = getPrismaClient();
+        // Clean up any leftover data from previous interrupted tests
+        await cleanupAllPerfData(prisma);
     });
 
     afterAll(async () => {
@@ -191,6 +194,207 @@ describe('Performance Benchmarks', () => {
             });
         });
 
+        describe('Inward Hub Operations (Realistic User Flow)', () => {
+            /**
+             * SCAN LOOKUP: Measures SKU lookup speed
+             * This is what happens when user scans a barcode in the inward hub
+             */
+            it('measures scan lookup performance', async () => {
+                // Get an existing SKU code from seeded data
+                const sku = await prisma.sku.findFirst({
+                    where: { id: seedResult.skuIds[0] },
+                    select: { skuCode: true, id: true },
+                });
+
+                const result = await measureOperation(
+                    `scan lookup (${scale})`,
+                    async () => {
+                        // Simulate what /scan-lookup endpoint does:
+                        // 1. Find SKU by code
+                        // skuCode doubles as barcode (see schema comment)
+                        const foundSku = await prisma.sku.findFirst({
+                            where: { skuCode: sku.skuCode },
+                            include: {
+                                variation: {
+                                    include: { product: true },
+                                },
+                            },
+                        });
+
+                        // 2. Check for pending sources (production batches)
+                        const pendingBatch = await prisma.productionBatch.findFirst({
+                            where: {
+                                skuId: foundSku.id,
+                                status: { in: ['planned', 'in_progress'] },
+                            },
+                            orderBy: { batchDate: 'asc' },
+                        });
+
+                        // 3. Get current balance
+                        const balance = await calculateInventoryBalance(prisma, foundSku.id);
+
+                        return { sku: foundSku, pendingBatch, balance };
+                    }
+                );
+
+                // Scan lookup should be fast for good UX (< 500ms)
+                checkThreshold(result, 500, `Scan lookup (${scale})`);
+                expect(result.avg).toBeGreaterThan(0);
+            });
+
+            /**
+             * QUICK INWARD WITH BATCH MATCHING: Simulates production inward
+             * User scans SKU, enters qty, submits - system auto-matches batch
+             */
+            it('measures quick inward with auto-batch matching', async () => {
+                const skuId = seedResult.skuIds[6];
+                const createdBatches = [];
+                const createdTxns = [];
+
+                // Pre-create production batches to match against
+                for (let i = 0; i < 3; i++) {
+                    const batch = await prisma.productionBatch.create({
+                        data: {
+                            id: generateId('batch'),
+                            batchCode: `PERF-BATCH-${i}-${Date.now()}`,
+                            skuId,
+                            qtyPlanned: 10,
+                            qtyCompleted: 0,
+                            status: 'planned',
+                            priority: 'stock_replenishment',
+                        },
+                    });
+                    createdBatches.push(batch.id);
+                }
+
+                const result = await measureOperation(
+                    `quick inward with batch match (${scale})`,
+                    async () => {
+                        // Simulate what /quick-inward does:
+                        // 1. Create inward transaction
+                        const txn = await prisma.inventoryTransaction.create({
+                            data: {
+                                id: generateId('inward'),
+                                skuId,
+                                txnType: 'inward',
+                                qty: 3,
+                                reason: 'production',
+                                createdById: seedResult.userId,
+                            },
+                        });
+                        createdTxns.push(txn.id);
+
+                        // 2. Auto-match oldest pending batch (FIFO)
+                        const batch = await prisma.productionBatch.findFirst({
+                            where: {
+                                skuId,
+                                status: { in: ['planned', 'in_progress'] },
+                            },
+                            orderBy: { createdAt: 'asc' },
+                        });
+
+                        if (batch) {
+                            const newCompleted = Math.min(batch.qtyCompleted + 3, batch.qtyPlanned);
+                            await prisma.productionBatch.update({
+                                where: { id: batch.id },
+                                data: {
+                                    qtyCompleted: newCompleted,
+                                    status: newCompleted >= batch.qtyPlanned ? 'completed' : 'in_progress',
+                                },
+                            });
+                        }
+
+                        // 3. Return updated balance
+                        const balance = await calculateInventoryBalance(prisma, skuId);
+                        return { txn, batch, balance };
+                    }
+                );
+
+                // Quick inward should be fast (< 750ms for good UX)
+                checkThreshold(result, 750, `Quick inward with batch (${scale})`);
+                expect(result.avg).toBeGreaterThan(0);
+
+                // Cleanup
+                await prisma.inventoryTransaction.deleteMany({
+                    where: { id: { in: createdTxns } },
+                });
+                await prisma.productionBatch.deleteMany({
+                    where: { id: { in: createdBatches } },
+                });
+            });
+
+            /**
+             * RAPID SCANS: Simulates warehouse worker scanning multiple items quickly
+             * Measures throughput for high-volume inward operations
+             */
+            it('measures rapid scan-and-inward cycle (5 items)', async () => {
+                const skuId = seedResult.skuIds[7];
+                const createdTxns = [];
+
+                // Pre-create a production batch
+                const batch = await prisma.productionBatch.create({
+                    data: {
+                        id: generateId('batch'),
+                        batchCode: `PERF-RAPID-${Date.now()}`,
+                        skuId,
+                        qtyPlanned: 100,
+                        qtyCompleted: 0,
+                        status: 'planned',
+                        priority: 'stock_replenishment',
+                    },
+                });
+
+                const start = performance.now();
+
+                // Simulate 5 rapid scans (worker scanning items quickly)
+                for (let i = 0; i < 5; i++) {
+                    // 1. Lookup SKU (fast - cached in real app)
+                    const sku = await prisma.sku.findUnique({
+                        where: { id: skuId },
+                        select: { id: true, skuCode: true },
+                    });
+
+                    // 2. Create inward
+                    const txn = await prisma.inventoryTransaction.create({
+                        data: {
+                            id: generateId('rapid'),
+                            skuId: sku.id,
+                            txnType: 'inward',
+                            qty: 1,
+                            reason: 'production',
+                            createdById: seedResult.userId,
+                        },
+                    });
+                    createdTxns.push(txn.id);
+
+                    // 3. Update batch
+                    await prisma.productionBatch.update({
+                        where: { id: batch.id },
+                        data: { qtyCompleted: { increment: 1 }, status: 'in_progress' },
+                    });
+                }
+
+                const elapsed = performance.now() - start;
+                const perScan = elapsed / 5;
+
+                console.log(`[PERF] rapid 5 inwards (${scale}): ${elapsed.toFixed(2)}ms total, ${perScan.toFixed(2)}ms per scan`);
+
+                // Each scan should be < 400ms for good throughput
+                if (perScan > 400) {
+                    console.warn(`⚠️  Inward per scan too slow: ${perScan.toFixed(2)}ms > 400ms`);
+                }
+                expect(perScan).toBeLessThan(1500);
+
+                // Cleanup
+                await prisma.inventoryTransaction.deleteMany({
+                    where: { id: { in: createdTxns } },
+                });
+                await prisma.productionBatch.delete({
+                    where: { id: batch.id },
+                });
+            });
+        });
+
         describe('Allocation Operations', () => {
             /**
              * REALISTIC TEST: Measures allocation of pre-existing lines
@@ -203,23 +407,23 @@ describe('Performance Benchmarks', () => {
                 const createdLines = [];
                 const createdTxns = [];
 
-                // FIRST: Create enough inward stock for 6 allocations
-                // (Extra buffer to account for existing seeded outward transactions)
+                // FIRST: Create enough inward stock for allocations
+                // Use large buffer to account for seeded outward/reserved transactions
                 const stockTxn = await prisma.inventoryTransaction.create({
                     data: {
                         id: generateId('stock'),
                         skuId,
                         txnType: 'inward',
-                        qty: 20, // Plenty of buffer for 6 allocations
+                        qty: 100, // Large buffer for seeded data interference
                         reason: 'production',
                         createdById: seedResult.userId,
                     },
                 });
                 createdTxns.push(stockTxn.id);
 
-                // PRE-CREATE 6 pending lines (simulates lines synced from Shopify)
+                // PRE-CREATE 8 pending lines (6 needed: 1 warm-up + 5 iterations, plus buffer)
                 const pendingLines = [];
-                for (let i = 0; i < 6; i++) {
+                for (let i = 0; i < 8; i++) {
                     const { order, line } = await createTestOrderLine(prisma, skuId, seedResult.userId);
                     createdOrders.push(order.id);
                     createdLines.push(line.id);
@@ -284,13 +488,13 @@ describe('Performance Benchmarks', () => {
                 const createdLines = [];
                 const createdTxns = [];
 
-                // Create enough stock for 5 allocations (buffer for seeded data)
+                // Create enough stock for 5 allocations (large buffer for seeded data)
                 const stockTxn = await prisma.inventoryTransaction.create({
                     data: {
                         id: generateId('stock'),
                         skuId,
                         txnType: 'inward',
-                        qty: 20, // Plenty of buffer for 5 allocations
+                        qty: 100, // Large buffer for seeded data interference
                         reason: 'production',
                         createdById: seedResult.userId,
                     },

@@ -365,7 +365,7 @@ export async function seedTestData(prisma, scale) {
 }
 
 /**
- * Clean up test data
+ * Clean up test data using seedResult if available
  */
 export async function cleanupTestData(prisma, seedResult) {
     console.log('[PERF] Cleaning up test data...');
@@ -415,6 +415,75 @@ export async function cleanupTestData(prisma, seedResult) {
 
     const elapsed = performance.now() - startTime;
     console.log(`[PERF] Cleanup completed in ${elapsed.toFixed(2)}ms`);
+}
+
+/**
+ * Robust cleanup that works even when seedResult is lost (e.g., after interrupted tests)
+ * Uses PERF-* prefix pattern matching instead of relying on seedResult.skuIds
+ */
+export async function cleanupAllPerfData(prisma) {
+    console.log('[PERF] Running full cleanup using PERF-* patterns...');
+    const startTime = performance.now();
+
+    try {
+        // 1. Delete order lines for PERF orders
+        const orderLineResult = await prisma.orderLine.deleteMany({
+            where: { order: { orderNumber: { startsWith: 'PERF-' } } },
+        });
+        console.log(`[PERF]   Deleted ${orderLineResult.count} order lines`);
+
+        // 2. Delete PERF orders
+        const orderResult = await prisma.order.deleteMany({
+            where: { orderNumber: { startsWith: 'PERF-' } },
+        });
+        console.log(`[PERF]   Deleted ${orderResult.count} orders`);
+
+        // 3. Find all PERF-SKU-* SKUs by code pattern
+        const perfSkus = await prisma.sku.findMany({
+            where: { skuCode: { startsWith: 'PERF-SKU-' } },
+            select: { id: true },
+        });
+        const skuIds = perfSkus.map(s => s.id);
+        console.log(`[PERF]   Found ${skuIds.length} PERF SKUs to clean up`);
+
+        if (skuIds.length > 0) {
+            // 4. Delete inventory transactions for these SKUs
+            const txnResult = await prisma.inventoryTransaction.deleteMany({
+                where: { skuId: { in: skuIds } },
+            });
+            console.log(`[PERF]   Deleted ${txnResult.count} inventory transactions`);
+
+            // 5. Delete production batches for these SKUs
+            const batchResult = await prisma.productionBatch.deleteMany({
+                where: { skuId: { in: skuIds } },
+            });
+            console.log(`[PERF]   Deleted ${batchResult.count} production batches`);
+
+            // 6. Delete the SKUs
+            const skuResult = await prisma.sku.deleteMany({
+                where: { id: { in: skuIds } },
+            });
+            console.log(`[PERF]   Deleted ${skuResult.count} SKUs`);
+        }
+
+        // 7. Clean up test product/variation/fabric
+        const productResult = await prisma.product.deleteMany({
+            where: { styleCode: 'PERF-TEST' },
+        }).catch(() => ({ count: 0 }));
+
+        // 8. Clean up test user
+        const userResult = await prisma.user.deleteMany({
+            where: { email: 'perf-test@test.com' },
+        }).catch(() => ({ count: 0 }));
+
+        console.log(`[PERF]   Deleted ${productResult.count} test products, ${userResult.count} test users`);
+
+    } catch (error) {
+        console.error('[PERF] Full cleanup error:', error.message);
+    }
+
+    const elapsed = performance.now() - startTime;
+    console.log(`[PERF] Full cleanup completed in ${elapsed.toFixed(2)}ms`);
 }
 
 /**
