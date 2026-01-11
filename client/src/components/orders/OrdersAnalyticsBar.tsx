@@ -50,9 +50,7 @@ export function OrdersAnalyticsBar() {
     if (!analytics) return null;
 
     const formatCurrency = (amount: number) => {
-        if (amount >= 100000) return `${(amount / 100000).toFixed(1)}L`;
-        if (amount >= 1000) return `${(amount / 1000).toFixed(1)}K`;
-        return amount.toFixed(0);
+        return amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
     const codPercent = analytics.totalOrders > 0
