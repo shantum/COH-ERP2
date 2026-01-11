@@ -204,19 +204,18 @@ describe('Performance Benchmarks', () => {
                 const createdTxns = [];
 
                 // FIRST: Create enough inward stock for 6 allocations
-                for (let i = 0; i < 6; i++) {
-                    const txn = await prisma.inventoryTransaction.create({
-                        data: {
-                            id: generateId('stock'),
-                            skuId,
-                            txnType: 'inward',
-                            qty: 1,
-                            reason: 'production',
-                            createdById: seedResult.userId,
-                        },
-                    });
-                    createdTxns.push(txn.id);
-                }
+                // (Extra buffer to account for existing seeded outward transactions)
+                const stockTxn = await prisma.inventoryTransaction.create({
+                    data: {
+                        id: generateId('stock'),
+                        skuId,
+                        txnType: 'inward',
+                        qty: 20, // Plenty of buffer for 6 allocations
+                        reason: 'production',
+                        createdById: seedResult.userId,
+                    },
+                });
+                createdTxns.push(stockTxn.id);
 
                 // PRE-CREATE 6 pending lines (simulates lines synced from Shopify)
                 const pendingLines = [];
@@ -285,20 +284,18 @@ describe('Performance Benchmarks', () => {
                 const createdLines = [];
                 const createdTxns = [];
 
-                // Create enough stock for 5 allocations
-                for (let i = 0; i < 5; i++) {
-                    const txn = await prisma.inventoryTransaction.create({
-                        data: {
-                            id: generateId('stock'),
-                            skuId,
-                            txnType: 'inward',
-                            qty: 1,
-                            reason: 'production',
-                            createdById: seedResult.userId,
-                        },
-                    });
-                    createdTxns.push(txn.id);
-                }
+                // Create enough stock for 5 allocations (buffer for seeded data)
+                const stockTxn = await prisma.inventoryTransaction.create({
+                    data: {
+                        id: generateId('stock'),
+                        skuId,
+                        txnType: 'inward',
+                        qty: 20, // Plenty of buffer for 5 allocations
+                        reason: 'production',
+                        createdById: seedResult.userId,
+                    },
+                });
+                createdTxns.push(stockTxn.id);
 
                 // Pre-create 5 pending lines
                 for (let i = 0; i < 5; i++) {
