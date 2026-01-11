@@ -28,6 +28,7 @@ import {
     ExternalServiceError,
 } from '../utils/errors.js';
 import ithinkLogistics from '../services/ithinkLogistics.js';
+import { updateCustomerTier } from '../utils/tierUtils.js';
 import trackingSync from '../services/trackingSync.js';
 
 const router = Router();
@@ -456,7 +457,8 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) =
                         }
                     }
 
-                    // Delivery date
+                    // Delivery date and tier update
+                    const isNewDelivery = updateData.trackingStatus === 'delivered' && !order.deliveredAt;
                     if (updateData.trackingStatus === 'delivered' && rawData.last_scan_details?.status_date_time) {
                         updateData.deliveredAt = new Date(rawData.last_scan_details.status_date_time);
                     }
@@ -479,6 +481,11 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) =
                         data: updateData,
                     });
                     result.updated++;
+
+                    // Update customer tier on new delivery
+                    if (isNewDelivery && order.customerId) {
+                        await updateCustomerTier(req.prisma, order.customerId);
+                    }
                 } catch (err) {
                     result.errors++;
                 }

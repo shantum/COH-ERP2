@@ -365,6 +365,9 @@ model Customer {
   exchangeCount Int @default(0)
   rtoCount      Int @default(0)
 
+  // Loyalty tier (auto-calculated from LTV)
+  tier          String  @default("bronze")  // bronze, silver, gold, platinum
+
   orders         Order[]
   returnRequests ReturnRequest[]
   feedback       Feedback[]

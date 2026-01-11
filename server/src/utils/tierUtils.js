@@ -97,3 +97,105 @@ export async function getCustomerStatsMap(prisma, customerIds) {
 
     return statsMap;
 }
+
+/**
+ * Update a single customer's tier based on their LTV
+ * Call this after order delivery or status changes
+ * @param {object} prisma - Prisma client instance
+ * @param {string} customerId - Customer ID to update
+ * @returns {Promise<{updated: boolean, oldTier: string, newTier: string, ltv: number}>}
+ */
+export async function updateCustomerTier(prisma, customerId) {
+    if (!customerId) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
+
+    const thresholds = await getTierThresholds(prisma);
+
+    // Get customer's current tier
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { tier: true }
+    });
+
+    if (!customer) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
+
+    const oldTier = customer.tier || 'bronze';
+
+    // Calculate LTV from orders
+    const stats = await prisma.order.aggregate({
+        where: {
+            customerId,
+            status: { not: 'cancelled' },
+            totalAmount: { gt: 0 }
+        },
+        _sum: { totalAmount: true }
+    });
+
+    const ltv = stats._sum.totalAmount || 0;
+    const newTier = calculateTier(ltv, thresholds);
+
+    // Only update if tier changed
+    if (newTier !== oldTier) {
+        await prisma.customer.update({
+            where: { id: customerId },
+            data: { tier: newTier }
+        });
+        console.log(`[Tier] Customer ${customerId} upgraded: ${oldTier} → ${newTier} (LTV: ₹${ltv.toLocaleString()})`);
+        return { updated: true, oldTier, newTier, ltv };
+    }
+
+    return { updated: false, oldTier, newTier, ltv };
+}
+
+/**
+ * Batch update tiers for all customers
+ * Run this as a maintenance job or after bulk imports
+ * @param {object} prisma - Prisma client instance
+ * @returns {Promise<{total: number, updated: number, upgrades: Array}>}
+ */
+export async function updateAllCustomerTiers(prisma) {
+    const thresholds = await getTierThresholds(prisma);
+
+    // Get all customers with their order totals
+    const customers = await prisma.customer.findMany({
+        select: { id: true, tier: true }
+    });
+
+    const customerIds = customers.map(c => c.id);
+    const statsMap = await getCustomerStatsMap(prisma, customerIds);
+
+    const upgrades = [];
+    const updates = [];
+
+    for (const customer of customers) {
+        const stats = statsMap[customer.id] || { ltv: 0 };
+        const newTier = calculateTier(stats.ltv, thresholds);
+        const oldTier = customer.tier || 'bronze';
+
+        if (newTier !== oldTier) {
+            updates.push({
+                where: { id: customer.id },
+                data: { tier: newTier }
+            });
+            upgrades.push({
+                customerId: customer.id,
+                oldTier,
+                newTier,
+                ltv: stats.ltv
+            });
+        }
+    }
+
+    // Batch update in transaction
+    if (updates.length > 0) {
+        await prisma.$transaction(
+            updates.map(u => prisma.customer.update(u))
+        );
+        console.log(`[Tier] Batch updated ${updates.length} customer tiers`);
+    }
+
+    return {
+        total: customers.length,
+        updated: updates.length,
+        upgrades
+    };
+}

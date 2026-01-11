@@ -95,8 +95,10 @@ router.get('/', asyncHandler(async (req, res) => {
             const exchanges = customer.returnRequests.filter((r) => r.requestType === 'exchange').length;
             const returnRate = totalOrders > 0 ? (returns / totalOrders) * 100 : 0;
 
-            // Use shared tier calculation
-            const customerTier = calculateTier(lifetimeValue, thresholds);
+            // Use stored tier, or calculate if not set
+            // This ensures tier is always accurate (auto-updated on delivery)
+            const calculatedTier = calculateTier(lifetimeValue, thresholds);
+            const customerTier = customer.tier || calculatedTier;
 
             // Orders are now sorted by date desc, so first = most recent, last = oldest
             const sortedOrders = validOrders;
@@ -294,8 +296,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
         const validOrders = customer.orders.filter((o) => o.status !== 'cancelled');
         const totalOrders = validOrders.length;
 
-        // Use shared tier calculation
-        const customerTier = calculateTier(lifetimeValue, thresholds);
+        // Use stored tier, or calculate if not set
+        const calculatedTier = calculateTier(lifetimeValue, thresholds);
+        const customerTier = customer.tier || calculatedTier;
 
         // Product affinity
         const productCounts = {};

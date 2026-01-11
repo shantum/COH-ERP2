@@ -56,10 +56,11 @@ interface Order {
 // CONSTANTS
 // ============================================================================
 
+// Must match backend tierUtils.js DEFAULT_TIER_THRESHOLDS
 const TIER_THRESHOLDS = {
     bronze: 0,
-    silver: 5000,
-    gold: 15000,
+    silver: 10000,
+    gold: 25000,
     platinum: 50000
 };
 

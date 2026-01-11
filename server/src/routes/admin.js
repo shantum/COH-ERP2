@@ -24,7 +24,7 @@ import fs from 'fs';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/permissions.js';
 import { validatePassword } from '../utils/validation.js';
-import { DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
+import { DEFAULT_TIER_THRESHOLDS, updateAllCustomerTiers } from '../utils/tierUtils.js';
 import logBuffer from '../utils/logBuffer.js';
 import { chunkProcess } from '../utils/asyncUtils.js';
 import scheduledSync from '../services/scheduledSync.js';
@@ -234,6 +234,21 @@ router.put('/tier-thresholds', requireAdmin, asyncHandler(async (req, res) => {
     });
 
     res.json({ success: true, thresholds });
+}));
+
+/**
+ * Batch update all customer tiers based on LTV
+ * @route POST /api/admin/update-customer-tiers
+ * @returns {Object} { total, updated, upgrades: [{ customerId, oldTier, newTier, ltv }] }
+ * @description Recalculates tier for all customers. Use after threshold changes or data migration.
+ */
+router.post('/update-customer-tiers', requireAdmin, asyncHandler(async (req, res) => {
+    const result = await updateAllCustomerTiers(req.prisma);
+
+    res.json({
+        message: `Updated ${result.updated} of ${result.total} customer tiers`,
+        ...result
+    });
 }));
 
 // Reset and reseed database (Admin only)
