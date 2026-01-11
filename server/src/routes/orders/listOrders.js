@@ -485,13 +485,8 @@ router.get('/status/archived', async (req, res) => {
                     },
                     shopifyCache: {
                         select: {
-                            paymentMethod: true,
                             financialStatus: true,
                             fulfillmentStatus: true,
-                            shipmentStatus: true,
-                            deliveredAt: true,
-                            trackingNumber: true,
-                            trackingCompany: true,
                         }
                     },
                 },

@@ -136,11 +136,7 @@ export const SHOPIFY_CACHE_SELECT_COMPACT = {
     select: {
         discountCodes: true,
         customerNotes: true,
-        paymentMethod: true,
         tags: true,
-        trackingNumber: true,
-        trackingCompany: true,
-        shippedAt: true,
         fulfillmentStatus: true,
     },
 };
