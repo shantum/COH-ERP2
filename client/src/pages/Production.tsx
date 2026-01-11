@@ -30,7 +30,7 @@ export default function Production() {
     const [itemSelection, setItemSelection] = useState({ productId: '', variationId: '' });
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
     const [copiedDate, setCopiedDate] = useState<string | null>(null);
-    const [requirementsLimit, setRequirementsLimit] = useState(20);
+    const [requirementsLimit, setRequirementsLimit] = useState(10);
 
     // Memoize date range to prevent query key changes on every render
     const dateRange = useMemo(() => getDefaultDateRange(), []);
@@ -530,7 +530,7 @@ export default function Production() {
                                         </tbody>
                                     </table>
                                     {/* Pagination controls */}
-                                    {requirements.requirements.length > 20 && (
+                                    {requirements.requirements.length > 10 && (
                                         <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t">
                                             <span className="text-xs text-gray-500">
                                                 Showing {Math.min(requirementsLimit, requirements.requirements.length)} of {requirements.requirements.length} items
@@ -538,10 +538,10 @@ export default function Production() {
                                             <div className="flex gap-2">
                                                 {requirementsLimit < requirements.requirements.length && (
                                                     <button
-                                                        onClick={() => setRequirementsLimit(prev => Math.min(prev + 20, requirements.requirements.length))}
+                                                        onClick={() => setRequirementsLimit(prev => Math.min(prev + 10, requirements.requirements.length))}
                                                         className="text-xs px-3 py-1.5 text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded"
                                                     >
-                                                        Show More (+20)
+                                                        Show More (+10)
                                                     </button>
                                                 )}
                                                 {requirementsLimit < requirements.requirements.length && (
@@ -552,9 +552,9 @@ export default function Production() {
                                                         Show All
                                                     </button>
                                                 )}
-                                                {requirementsLimit > 20 && (
+                                                {requirementsLimit > 10 && (
                                                     <button
-                                                        onClick={() => setRequirementsLimit(20)}
+                                                        onClick={() => setRequirementsLimit(10)}
                                                         className="text-xs px-3 py-1.5 text-gray-600 hover:text-gray-700 hover:bg-gray-100 rounded"
                                                     >
                                                         Show Less

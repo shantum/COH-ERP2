@@ -1,3 +1,24 @@
+/**
+ * @fileoverview Product Catalog Routes - Manages product hierarchy (Product → Variation → SKU)
+ *
+ * Product Hierarchy:
+ * - Product: Base template (e.g., "Kurti") with production time and fabric type
+ * - Variation: Color variant (e.g., "Red Kurti") linked to specific fabric
+ * - SKU: Size-specific item (e.g., "Red Kurti - M") with unique barcode
+ *
+ * Costing Cascade (SKU → Variation → Product → Global):
+ * - Each level can override costs; null = inherit from next level
+ * - Fabric consumption: SKU.fabricConsumption → Product.defaultFabricConsumption → 1.5
+ * - Labor/Packaging: SKU → Variation → Product → CostConfig defaults
+ * - Lining cost: Only non-null when hasLining=true
+ *
+ * Key Gotchas:
+ * - Route order matters: /cost-config must be before /:id
+ * - Changing Product.fabricTypeId resets all Variations to Default fabric
+ * - Changing Variation.fabricId syncs Product.fabricTypeId if non-Default
+ * - COGS endpoint uses costing cascade for final calculations
+ */
+
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { requirePermission, filterConfidentialFields } from '../middleware/permissions.js';

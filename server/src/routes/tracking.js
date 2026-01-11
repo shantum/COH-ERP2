@@ -1,6 +1,21 @@
 /**
- * Tracking Routes
- * Integration with logistics providers for real-time shipment tracking
+ * @module routes/tracking
+ * @description iThink Logistics tracking integration
+ *
+ * Provides AWB tracking, shipment creation, and background sync for delivery status.
+ *
+ * Status Mapping (iThink → Internal):
+ * - '6'/'delivered' → 'delivered'
+ * - '7'/'rto_*' → 'rto_initiated'/'rto_in_transit'/'rto_delivered'
+ * - '36'/'cancelled' → 'cancelled'
+ * - '11'/'lost' → 'lost'
+ * - Other codes → 'in_transit'/'out_for_delivery'
+ *
+ * Background Sync: trackingSync service updates shipped orders every 30min (configurable).
+ * RTO Detection: return_tracking_no field presence triggers rtoInitiatedAt timestamp and customer.rtoCount increment.
+ *
+ * @see services/ithinkLogistics.js - API wrapper with status mapping
+ * @see services/trackingSync.js - Background sync scheduler
  */
 
 import { Router } from 'express';

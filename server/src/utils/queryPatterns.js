@@ -1,6 +1,19 @@
 /**
- * Shared Prisma query include patterns
- * These reduce duplication across route files
+ * @module queryPatterns
+ * Shared Prisma query patterns, transaction helpers, and inventory calculations.
+ *
+ * Key patterns:
+ * - ORDER_LIST_SELECT: Unified select for all order list views (excludes Shopify-owned fields)
+ * - Transaction helpers: createReservedTransaction, createSaleTransaction, releaseReservedInventory
+ * - Inventory balance: calculateInventoryBalance (single SKU), calculateAllInventoryBalances (batch)
+ * - Customer enrichment: enrichOrdersWithCustomerStats (adds LTV, tier, fulfillment stage)
+ * - Custom SKU workflow: createCustomSku, removeCustomization
+ *
+ * CRITICAL GOTCHAS:
+ * - Shopify fields (discountCode, customerNotes, fulfillmentStatus) live in shopifyCache, NOT on Order
+ * - Use accessor functions (getOrderDiscountCodes, getOrderCustomerNotes) for safe field access
+ * - Inventory balance can be negative (data integrity issue) - use allowNegative option
+ * - Custom SKUs auto-allocate on production completion (standard batches don't)
  */
 
 import { getCustomerStatsMap, getTierThresholds, calculateTier } from './tierUtils.js';
