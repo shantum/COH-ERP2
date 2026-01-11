@@ -269,30 +269,20 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
             });
         }
 
-        // Build overrides array - only include permissions that differ from role defaults
+        // Build overrides array - send ALL permissions currently in localPermissions
+        // The backend will filter out those that match role defaults
         const overrides: Array<{ permission: string; granted: boolean }> = [];
 
-        // Get all permission keys
-        const allPermissions = new Set<string>();
-        Object.values(PERMISSION_CATEGORIES).forEach(category => {
-            category.permissions.forEach(perm => allPermissions.add(perm.key));
+        // Send all permissions in the localPermissions map
+        for (const [permission, granted] of localPermissions.entries()) {
+            overrides.push({ permission, granted });
+        }
+
+        // Always call the update endpoint (even if empty to clear overrides)
+        await updatePermissionsMutation.mutateAsync({
+            userId: user.id,
+            overrides,
         });
-
-        // Check each permission
-        for (const permKey of allPermissions) {
-            const localValue = localPermissions.get(permKey);
-            if (localValue !== undefined) {
-                overrides.push({ permission: permKey, granted: localValue });
-            }
-        }
-
-        // Update permissions if we have any to save
-        if (overrides.length > 0) {
-            await updatePermissionsMutation.mutateAsync({
-                userId: user.id,
-                overrides,
-            });
-        }
 
         onClose();
     };
