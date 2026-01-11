@@ -141,6 +141,9 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
     // Track if there are unsaved changes
     const [hasChanges, setHasChanges] = useState(false);
 
+    // Track if we're in the middle of a save operation to prevent state resets
+    const [isSaving, setIsSaving] = useState(false);
+
     // Fetch user's current permissions and overrides
     const { data: permissionData, isLoading: isLoadingPermissions } = useQuery({
         queryKey: ['user-permissions', user.id],
@@ -166,9 +169,10 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
         return new Set(selectedRole?.permissions || []);
     }, [selectedRole]);
 
-    // Initialize local permissions from server data when it loads
+    // Initialize local permissions from server data when modal opens
+    // CRITICAL: Only run when modal first opens or user changes, NOT during save operations
     useEffect(() => {
-        if (permissionData && isOpen) {
+        if (permissionData && isOpen && !isSaving) {
             const initialMap = new Map<string, boolean>();
 
             // Start with role permissions as base
@@ -184,11 +188,11 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
             setLocalPermissions(initialMap);
             setHasChanges(false);
         }
-    }, [permissionData, isOpen]);
+    }, [permissionData, isOpen, isSaving]);
 
     // Reset local state when role changes
     useEffect(() => {
-        if (selectedRoleId !== user.roleId) {
+        if (selectedRoleId !== user.roleId && !isSaving) {
             // When role changes, reset to role's default permissions
             const newMap = new Map<string, boolean>();
             if (selectedRole?.permissions) {
@@ -199,7 +203,14 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
             setLocalPermissions(newMap);
             setHasChanges(true);
         }
-    }, [selectedRoleId, selectedRole, user.roleId]);
+    }, [selectedRoleId, selectedRole, user.roleId, isSaving]);
+
+    // Reset saving flag when modal closes
+    useEffect(() => {
+        if (!isOpen) {
+            setIsSaving(false);
+        }
+    }, [isOpen]);
 
     // Get permission state for a specific permission key
     const getPermissionState = (permKey: string): PermissionState => {
@@ -261,30 +272,38 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
     });
 
     const handleSave = async () => {
-        // Update role if changed
-        if (selectedRoleId && selectedRoleId !== user.roleId) {
-            await updateRoleMutation.mutateAsync({
+        try {
+            // Set saving flag to prevent useEffect from resetting state during mutations
+            setIsSaving(true);
+
+            // Update role if changed
+            if (selectedRoleId && selectedRoleId !== user.roleId) {
+                await updateRoleMutation.mutateAsync({
+                    userId: user.id,
+                    roleId: selectedRoleId,
+                });
+            }
+
+            // Build overrides array - send ALL permissions currently in localPermissions
+            // The backend will filter out those that match role defaults
+            const overrides: Array<{ permission: string; granted: boolean }> = [];
+
+            // Send all permissions in the localPermissions map
+            for (const [permission, granted] of localPermissions.entries()) {
+                overrides.push({ permission, granted });
+            }
+
+            // Always call the update endpoint (even if empty to clear overrides)
+            await updatePermissionsMutation.mutateAsync({
                 userId: user.id,
-                roleId: selectedRoleId,
+                overrides,
             });
+
+            onClose();
+        } finally {
+            // Reset saving flag
+            setIsSaving(false);
         }
-
-        // Build overrides array - send ALL permissions currently in localPermissions
-        // The backend will filter out those that match role defaults
-        const overrides: Array<{ permission: string; granted: boolean }> = [];
-
-        // Send all permissions in the localPermissions map
-        for (const [permission, granted] of localPermissions.entries()) {
-            overrides.push({ permission, granted });
-        }
-
-        // Always call the update endpoint (even if empty to clear overrides)
-        await updatePermissionsMutation.mutateAsync({
-            userId: user.id,
-            overrides,
-        });
-
-        onClose();
     };
 
     // Calculate permission stats
