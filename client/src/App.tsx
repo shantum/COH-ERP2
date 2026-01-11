@@ -21,6 +21,7 @@ const Picklist = lazy(() => import('./pages/Picklist'));
 const Ledgers = lazy(() => import('./pages/Ledgers'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Settings = lazy(() => import('./pages/Settings'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
 const Login = lazy(() => import('./pages/Login'));
 
 // Loading spinner for Suspense fallback
@@ -90,6 +91,7 @@ function App() {
                 <Route path="ledgers" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Ledgers /></ErrorBoundary></Suspense>} />
                 <Route path="analytics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Analytics /></ErrorBoundary></Suspense>} />
                 <Route path="settings" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Settings /></ErrorBoundary></Suspense>} />
+                <Route path="users" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><UserManagement /></ErrorBoundary></Suspense>} />
               </Route>
             </Routes>
           </BrowserRouter>

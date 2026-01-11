@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
-import { requirePermission } from '../middleware/permissions.js';
+import { requirePermission, filterConfidentialFields } from '../middleware/permissions.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
@@ -32,7 +32,9 @@ router.get('/', authenticateToken, asyncHandler(async (req, res) => {
         orderBy: { createdAt: 'desc' },
     });
 
-    res.json(products);
+    // Filter confidential fields based on user permissions
+    const filtered = filterConfidentialFields(products, req.userPermissions);
+    res.json(filtered);
 }));
 
 // ============================================
@@ -50,7 +52,9 @@ router.get('/cost-config', authenticateToken, asyncHandler(async (req, res) => {
         });
     }
 
-    res.json(config);
+    // Filter confidential fields based on user permissions
+    const filtered = filterConfidentialFields(config, req.userPermissions);
+    res.json(filtered);
 }));
 
 // Update cost config
@@ -132,7 +136,9 @@ router.get('/cogs', authenticateToken, asyncHandler(async (req, res) => {
         };
     });
 
-    res.json(cogsData);
+    // Filter confidential fields based on user permissions
+    const filtered = filterConfidentialFields(cogsData, req.userPermissions);
+    res.json(filtered);
 }));
 
 // Get single product with full details
@@ -158,7 +164,9 @@ router.get('/:id', authenticateToken, asyncHandler(async (req, res) => {
         throw new NotFoundError('Product not found', 'Product', req.params.id);
     }
 
-    res.json(product);
+    // Filter confidential fields based on user permissions
+    const filtered = filterConfidentialFields(product, req.userPermissions);
+    res.json(filtered);
 }));
 
 // Create product
@@ -346,7 +354,9 @@ router.get('/skus/all', authenticateToken, asyncHandler(async (req, res) => {
         orderBy: { skuCode: 'asc' },
     });
 
-    res.json(skus);
+    // Filter confidential fields based on user permissions
+    const filtered = filterConfidentialFields(skus, req.userPermissions);
+    res.json(filtered);
 }));
 
 // Create SKU

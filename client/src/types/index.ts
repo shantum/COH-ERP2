@@ -1,6 +1,57 @@
 // Core entity types for COH-ERP2
 
 // ============================================
+// USERS & PERMISSIONS
+// ============================================
+
+export interface Role {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string | null;
+  permissions: string[];
+  isBuiltIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    users: number;
+  };
+}
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  roleId: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  userRole?: {
+    id: string;
+    name: string;
+    displayName: string;
+  } | null;
+  roleName?: string;
+  permissions?: string[];
+  lastLoginAt?: string | null;
+}
+
+export interface CreateUserData {
+  email: string;
+  password: string;
+  name: string;
+  roleId?: string;
+}
+
+export interface UpdateUserData {
+  email?: string;
+  name?: string;
+  isActive?: boolean;
+  password?: string;
+}
+
+// ============================================
 // PRODUCTS
 // ============================================
 

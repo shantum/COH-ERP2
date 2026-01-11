@@ -2,10 +2,12 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, Scissors, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardList, ClipboardCheck, PackagePlus, Clipboard, Table2, BarChart3
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardList, ClipboardCheck, PackagePlus, Clipboard, Table2, BarChart3, UserCog
 } from 'lucide-react';
+import { usePermissions } from '../hooks/usePermissions';
 import { useState } from 'react';
 
+// Navigation items with optional permission requirement
 const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/catalog', icon: Table2, label: 'Catalog' },
@@ -21,10 +23,12 @@ const navItems = [
     { to: '/ledgers', icon: BookOpen, label: 'Ledgers' },
     { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/settings', icon: Settings, label: 'Settings' },
+    { to: '/users', icon: UserCog, label: 'Users', permission: 'users:view' },
 ];
 
 export default function Layout() {
     const { user, logout } = useAuth();
+    const { hasPermission } = usePermissions();
     const navigate = useNavigate();
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -32,6 +36,12 @@ export default function Layout() {
         logout();
         navigate('/login');
     };
+
+    // Filter nav items based on permissions
+    const filteredNavItems = navItems.filter(item => {
+        if (!item.permission) return true;
+        return hasPermission(item.permission);
+    });
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -53,7 +63,7 @@ export default function Layout() {
 
                     {/* Navigation */}
                     <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
-                        {navItems.map((item) => (
+                        {filteredNavItems.map((item) => (
                             <NavLink
                                 key={item.to}
                                 to={item.to}

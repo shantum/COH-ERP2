@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { filterConfidentialFields } from '../middleware/permissions.js';
 import { calculateAllInventoryBalances } from '../utils/queryPatterns.js';
 
 const router = Router();
@@ -293,8 +294,11 @@ router.get('/sku-inventory', authenticateToken, async (req, res) => {
             where: skuWhere,
         });
 
+        // Filter confidential fields based on user permissions
+        const filteredItems = filterConfidentialFields(items, req.userPermissions);
+
         res.json({
-            items,
+            items: filteredItems,
             pagination: {
                 total: totalCount,
                 limit: Number(limit),

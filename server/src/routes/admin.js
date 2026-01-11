@@ -367,7 +367,7 @@ router.get('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
 
 // Create new user
 router.post('/users', requireAdmin, asyncHandler(async (req, res) => {
-    const { email, password, name, role = 'staff' } = req.body;
+    const { email, password, name, role = 'staff', roleId } = req.body;
 
     // Validate input
     if (!email || !password || !name) {
@@ -380,10 +380,18 @@ router.post('/users', requireAdmin, asyncHandler(async (req, res) => {
         throw new ValidationError(passwordValidation.errors[0]);
     }
 
-    // Validate role
+    // Validate role (legacy string role)
     const validRoles = ['admin', 'staff'];
     if (!validRoles.includes(role)) {
         throw new ValidationError('Invalid role. Must be admin or staff');
+    }
+
+    // Validate roleId if provided
+    if (roleId) {
+        const roleExists = await req.prisma.role.findUnique({ where: { id: roleId } });
+        if (!roleExists) {
+            throw new ValidationError('Invalid roleId - role not found');
+        }
     }
 
     // Check if email already exists
@@ -395,25 +403,38 @@ router.post('/users', requireAdmin, asyncHandler(async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
+    // Create user with roleId if provided
     const user = await req.prisma.user.create({
         data: {
             email,
             password: hashedPassword,
             name,
             role,
+            roleId: roleId || null,
         },
         select: {
             id: true,
             email: true,
             name: true,
             role: true,
+            roleId: true,
             isActive: true,
             createdAt: true,
+            userRole: {
+                select: {
+                    id: true,
+                    name: true,
+                    displayName: true,
+                }
+            },
         },
     });
 
-    res.status(201).json(user);
+    // Transform to include roleName for frontend
+    res.status(201).json({
+        ...user,
+        roleName: user.userRole?.displayName || user.role,
+    });
 }));
 
 // Update user
@@ -479,12 +500,24 @@ router.put('/users/:id', requireAdmin, asyncHandler(async (req, res) => {
             email: true,
             name: true,
             role: true,
+            roleId: true,
             isActive: true,
             createdAt: true,
+            userRole: {
+                select: {
+                    id: true,
+                    name: true,
+                    displayName: true,
+                }
+            },
         },
     });
 
-    res.json(user);
+    // Transform to include roleName for frontend
+    res.json({
+        ...user,
+        roleName: user.userRole?.displayName || user.role,
+    });
 }));
 
 // Delete user

@@ -1,7 +1,7 @@
 /**
  * List Orders Router
  * GET endpoints for listing and viewing orders
- * 
+ *
  * Unified view-based architecture:
  * GET /orders?view=open|shipped|rto|cod_pending|archived
  */
@@ -14,6 +14,7 @@ import {
     getValidViewNames,
     getViewConfig,
 } from '../../utils/orderViews.js';
+import { filterConfidentialFields } from '../../middleware/permissions.js';
 
 const router = Router();
 
@@ -117,8 +118,11 @@ router.get('/', async (req, res) => {
                 .filter(order => order.orderLines.length > 0);
         }
 
+        // Filter confidential fields based on user permissions
+        const filteredOrders = filterConfidentialFields(finalOrders, req.userPermissions);
+
         const response = {
-            orders: finalOrders,
+            orders: filteredOrders,
             view,
             viewName: viewConfig.name,
             pagination: {
@@ -211,7 +215,7 @@ router.get('/rto/summary', async (req, res) => {
             }
         }
 
-        res.json({
+        const summary = {
             pendingReceipt,
             received,
             total: orders.length,
@@ -224,7 +228,11 @@ router.get('/rto/summary', async (req, res) => {
             prepaidValue,
             codValue,
             needsAttention: over14Days,
-        });
+        };
+
+        // Filter confidential fields based on user permissions
+        const filtered = filterConfidentialFields(summary, req.userPermissions);
+        res.json(filtered);
     } catch (error) {
         console.error('Get RTO summary error:', error);
         res.status(500).json({ error: 'Failed to fetch RTO summary' });
@@ -383,13 +391,17 @@ router.get('/archived/analytics', async (req, res) => {
             .sort((a, b) => b.units - a.units)
             .slice(0, 10);
 
-        res.json({
+        const analytics = {
             orderCount,
             totalRevenue,
             avgValue,
             channelSplit,
             topProducts,
-        });
+        };
+
+        // Filter confidential fields based on user permissions
+        const filtered = filterConfidentialFields(analytics, req.userPermissions);
+        res.json(filtered);
     } catch (error) {
         console.error('Get archived analytics error:', error);
         res.status(500).json({ error: 'Failed to fetch archived analytics' });
@@ -514,7 +526,9 @@ router.get('/status/archived', async (req, res) => {
             };
         });
 
-        res.json({ orders: transformedOrders, totalCount, limit: take, offset: skip, sortBy });
+        // Filter confidential fields based on user permissions
+        const filteredOrders = filterConfidentialFields(transformedOrders, req.userPermissions);
+        res.json({ orders: filteredOrders, totalCount, limit: take, offset: skip, sortBy });
     } catch (error) {
         console.error('Get archived orders error:', error);
         res.status(500).json({ error: 'Failed to fetch archived orders' });
@@ -581,7 +595,9 @@ router.get('/status/cancelled', async (req, res) => {
             };
         });
 
-        res.json(rows);
+        // Filter confidential fields based on user permissions
+        const filteredRows = filterConfidentialFields(rows, req.userPermissions);
+        res.json(filteredRows);
     } catch (error) {
         console.error('Get cancelled lines error:', error);
         res.status(500).json({ error: 'Failed to fetch cancelled lines' });
@@ -704,11 +720,15 @@ router.get('/:id', async (req, res) => {
             }
         }
 
-        res.json({
+        const orderData = {
             ...order,
             shopifyDetails,
             shopifyAdminUrl,
-        });
+        };
+
+        // Filter confidential fields based on user permissions
+        const filtered = filterConfidentialFields(orderData, req.userPermissions);
+        res.json(filtered);
     } catch (error) {
         console.error('Get order error:', error);
         res.status(500).json({ error: 'Failed to fetch order' });
