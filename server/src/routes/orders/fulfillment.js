@@ -78,16 +78,16 @@ const router = Router();
  * // Returns: { id, lineStatus: 'allocated', allocatedAt: '2025-01-11T...' }
  */
 router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('orders:allocate'), asyncHandler(async (req, res) => {
+    // Quick pre-check outside transaction (fail fast for invalid requests)
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
-        include: { sku: true, order: true },
+        select: { id: true, skuId: true, qty: true, lineStatus: true },
     });
 
     if (!line) {
         throw new NotFoundError('Order line not found', 'OrderLine', req.params.lineId);
     }
 
-    // Status precondition check
     if (line.lineStatus !== 'pending') {
         throw new BusinessLogicError(
             `Line must be in pending status to allocate (current: ${line.lineStatus})`,
@@ -95,43 +95,165 @@ router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('ord
         );
     }
 
-    const balance = await calculateInventoryBalance(req.prisma, line.skuId);
-    if (balance.availableBalance < line.qty) {
-        throw new BusinessLogicError(
-            `Insufficient stock: ${balance.availableBalance} available, ${line.qty} requested`,
-            'INSUFFICIENT_STOCK'
-        );
-    }
-
-    await req.prisma.$transaction(async (tx) => {
+    // All operations inside single transaction for consistency and fewer round trips
+    const updated = await req.prisma.$transaction(async (tx) => {
         // Re-check status inside transaction to prevent race conditions
         const currentLine = await tx.orderLine.findUnique({
             where: { id: req.params.lineId },
-            select: { lineStatus: true },
+            select: { lineStatus: true, skuId: true, qty: true },
         });
 
         if (currentLine.lineStatus !== 'pending') {
             throw new ConflictError('Line was already allocated by another request', 'RACE_CONDITION');
         }
 
+        // Balance check inside transaction (atomic with reserve creation)
+        const balance = await calculateInventoryBalance(tx, currentLine.skuId);
+        if (balance.availableBalance < currentLine.qty) {
+            throw new BusinessLogicError(
+                `Insufficient stock: ${balance.availableBalance} available, ${currentLine.qty} requested`,
+                'INSUFFICIENT_STOCK'
+            );
+        }
+
         await createReservedTransaction(tx, {
-            skuId: line.skuId,
-            qty: line.qty,
-            orderLineId: line.id,
+            skuId: currentLine.skuId,
+            qty: currentLine.qty,
+            orderLineId: req.params.lineId,
             userId: req.user.id,
         });
 
-        await tx.orderLine.update({
+        // Return updated line directly (no refetch needed)
+        return await tx.orderLine.update({
             where: { id: req.params.lineId },
             data: { lineStatus: 'allocated', allocatedAt: new Date() },
         });
     });
 
-    const updated = await req.prisma.orderLine.findUnique({
-        where: { id: req.params.lineId },
+    res.json(updated);
+}));
+
+/**
+ * POST /lines/bulk-allocate
+ * Reserve inventory for multiple order lines in a single operation
+ *
+ * PERFORMANCE OPTIMIZED:
+ * - Single query to fetch all lines
+ * - Batched balance calculations per SKU
+ * - createMany for transactions (single INSERT)
+ * - updateMany for line status (single UPDATE)
+ *
+ * VALIDATION:
+ * - All lines must be in 'pending' status
+ * - Sufficient stock must be available for each SKU
+ *
+ * @param {string[]} req.body.lineIds - Array of order line IDs to allocate
+ * @returns {Object} { allocated: number, failed: Array<{lineId, reason}> }
+ *
+ * @example
+ * POST /fulfillment/lines/bulk-allocate
+ * Body: { lineIds: ["abc123", "def456", "ghi789"] }
+ */
+router.post('/lines/bulk-allocate', authenticateToken, requirePermission('orders:allocate'), asyncHandler(async (req, res) => {
+    const { lineIds } = req.body;
+
+    if (!lineIds?.length) {
+        throw new ValidationError('lineIds array is required');
+    }
+
+    // Deduplicate
+    const uniqueLineIds = [...new Set(lineIds)];
+
+    // Fetch all lines in single query
+    const lines = await req.prisma.orderLine.findMany({
+        where: { id: { in: uniqueLineIds } },
+        select: { id: true, skuId: true, qty: true, lineStatus: true },
     });
 
-    res.json(updated);
+    if (lines.length === 0) {
+        throw new NotFoundError('No order lines found', 'OrderLine', uniqueLineIds.join(','));
+    }
+
+    // Group lines by SKU for efficient balance checking
+    const linesBySku = new Map();
+    const failed = [];
+
+    for (const line of lines) {
+        if (line.lineStatus !== 'pending') {
+            failed.push({ lineId: line.id, reason: `Invalid status: ${line.lineStatus}` });
+            continue;
+        }
+        if (!linesBySku.has(line.skuId)) {
+            linesBySku.set(line.skuId, []);
+        }
+        linesBySku.get(line.skuId).push(line);
+    }
+
+    // Calculate required qty per SKU
+    const skuRequirements = new Map();
+    for (const [skuId, skuLines] of linesBySku) {
+        const totalQty = skuLines.reduce((sum, l) => sum + l.qty, 0);
+        skuRequirements.set(skuId, { lines: skuLines, totalQty });
+    }
+
+    // Allocate inside transaction with batch operations
+    const result = await req.prisma.$transaction(async (tx) => {
+        const allocated = [];
+        const txnData = [];
+        const allocatableLineIds = [];
+        const timestamp = new Date();
+
+        // Check balance for each SKU and prepare transactions
+        for (const [skuId, { lines: skuLines, totalQty }] of skuRequirements) {
+            const balance = await calculateInventoryBalance(tx, skuId);
+
+            if (balance.availableBalance < totalQty) {
+                // Not enough stock - fail all lines for this SKU
+                for (const line of skuLines) {
+                    failed.push({
+                        lineId: line.id,
+                        reason: `Insufficient stock: ${balance.availableBalance} available, ${totalQty} required for SKU`,
+                    });
+                }
+                continue;
+            }
+
+            // Prepare transaction data for all lines of this SKU
+            for (const line of skuLines) {
+                txnData.push({
+                    skuId: line.skuId,
+                    txnType: TXN_TYPE.RESERVED,
+                    qty: line.qty,
+                    reason: TXN_REASON.ORDER_ALLOCATION,
+                    referenceId: line.id,
+                    createdById: req.user.id,
+                });
+                allocatableLineIds.push(line.id);
+                allocated.push(line.id);
+            }
+        }
+
+        // Batch create all transactions
+        if (txnData.length > 0) {
+            await tx.inventoryTransaction.createMany({
+                data: txnData,
+            });
+
+            // Batch update all line statuses
+            await tx.orderLine.updateMany({
+                where: { id: { in: allocatableLineIds } },
+                data: { lineStatus: 'allocated', allocatedAt: timestamp },
+            });
+        }
+
+        return { allocated, failed };
+    });
+
+    res.json({
+        allocated: result.allocated.length,
+        failed: result.failed.length > 0 ? result.failed : undefined,
+        lineIds: result.allocated,
+    });
 }));
 
 /**
@@ -154,8 +276,10 @@ router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('ord
  * // Returns: { id, lineStatus: 'pending', allocatedAt: null }
  */
 router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (req, res) => {
+    // Quick pre-check outside transaction
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
+        select: { id: true, lineStatus: true },
     });
 
     if (!line) {
@@ -169,17 +293,14 @@ router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (
         );
     }
 
-    await req.prisma.$transaction(async (tx) => {
+    // All operations inside single transaction, return result directly
+    const updated = await req.prisma.$transaction(async (tx) => {
         await releaseReservedInventory(tx, line.id);
 
-        await tx.orderLine.update({
+        return await tx.orderLine.update({
             where: { id: req.params.lineId },
             data: { lineStatus: 'pending', allocatedAt: null },
         });
-    });
-
-    const updated = await req.prisma.orderLine.findUnique({
-        where: { id: req.params.lineId },
     });
 
     res.json(updated);

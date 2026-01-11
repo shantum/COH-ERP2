@@ -29,6 +29,7 @@ import shopifyClient from './shopify.js';
 import { findOrCreateCustomer } from '../utils/customerUtils.js';
 import { withOrderLock } from '../utils/orderLock.js';
 import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
+import { updateCustomerTier } from '../utils/tierUtils.js';
 
 /**
  * Cache raw Shopify order data to ShopifyOrderCache table
@@ -519,6 +520,12 @@ export async function processShopifyOrderToERP(prisma, shopifyOrder, options = {
     let fulfillmentSync = null;
     if (shopifyOrder.fulfillments?.length > 0) {
         fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
+    }
+
+    // Update customer tier based on new order
+    // New orders with totalAmount > 0 may qualify customer for tier upgrade
+    if (orderData.customerId && orderData.totalAmount > 0) {
+        await updateCustomerTier(prisma, orderData.customerId);
     }
 
     return {

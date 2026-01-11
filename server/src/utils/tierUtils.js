@@ -66,12 +66,17 @@ export async function getCustomerStatsMap(prisma, customerIds) {
     if (!customerIds || customerIds.length === 0) return {};
 
     // Use aggregate query - much faster than loading all orders
-    // Exclude cancelled orders and zero-value orders (exchanges, giveaways)
+    // Exclude cancelled orders, RTO orders, and zero-value orders (exchanges, giveaways)
+    // Note: trackingStatus can be null for unshipped orders (which should count)
     const stats = await prisma.order.groupBy({
         by: ['customerId'],
         where: {
             customerId: { in: customerIds },
             status: { not: 'cancelled' },
+            OR: [
+                { trackingStatus: null },
+                { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
+            ],
             totalAmount: { gt: 0 }
         },
         _sum: { totalAmount: true },
@@ -121,10 +126,16 @@ export async function updateCustomerTier(prisma, customerId) {
     const oldTier = customer.tier || 'bronze';
 
     // Calculate LTV from orders
+    // Exclude cancelled orders and RTO orders (returned orders shouldn't count toward LTV)
+    // Note: trackingStatus can be null for unshipped orders (which should count)
     const stats = await prisma.order.aggregate({
         where: {
             customerId,
             status: { not: 'cancelled' },
+            OR: [
+                { trackingStatus: null },
+                { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
+            ],
             totalAmount: { gt: 0 }
         },
         _sum: { totalAmount: true }

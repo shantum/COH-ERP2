@@ -339,6 +339,8 @@ model InventoryTransaction {
   @@index([txnType])
   @@index([createdAt])
   @@index([skuId, reason, createdAt])  // Compound: balance lookups by reason
+  @@index([skuId, txnType])            // Compound: balance calculations (groupBy txnType)
+  @@index([referenceId])               // Release/unallocation lookups
 }
 
 // ============================================

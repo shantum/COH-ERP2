@@ -464,6 +464,7 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) =
                     }
 
                     // RTO
+                    const isNewRto = rawData.return_tracking_no && !order.rtoInitiatedAt;
                     if (rawData.return_tracking_no) {
                         updateData.rtoInitiatedAt = new Date();
 
@@ -482,8 +483,10 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) =
                     });
                     result.updated++;
 
-                    // Update customer tier on new delivery
-                    if (isNewDelivery && order.customerId) {
+                    // Update customer tier on new delivery or RTO
+                    // Delivery: tier may upgrade (order counts toward LTV)
+                    // RTO: tier may downgrade (order no longer counts toward LTV)
+                    if ((isNewDelivery || isNewRto) && order.customerId) {
                         await updateCustomerTier(req.prisma, order.customerId);
                     }
                 } catch (err) {

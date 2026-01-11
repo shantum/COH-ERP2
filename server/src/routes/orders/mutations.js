@@ -17,6 +17,7 @@ import {
     ConflictError,
     BusinessLogicError,
 } from '../../utils/errors.js';
+import { updateCustomerTier } from '../../utils/tierUtils.js';
 
 const router = Router();
 
@@ -114,6 +115,11 @@ router.post('/', authenticateToken, validate(CreateOrderSchema), asyncHandler(as
 
         return createdOrder;
     });
+
+    // Update customer tier based on new order
+    if (order.customerId && totalAmount > 0) {
+        await updateCustomerTier(req.prisma, order.customerId);
+    }
 
     res.status(201).json(order);
 }));
@@ -267,6 +273,11 @@ router.post('/:id/cancel', authenticateToken, requirePermission('orders:cancel')
         });
     });
 
+    // Update customer tier - cancelled orders no longer count toward LTV
+    if (order.customerId) {
+        await updateCustomerTier(req.prisma, order.customerId);
+    }
+
     const updated = await req.prisma.order.findUnique({
         where: { id: req.params.id },
         include: { orderLines: true },
@@ -309,6 +320,11 @@ router.post('/:id/uncancel', authenticateToken, asyncHandler(async (req, res) =>
             data: { lineStatus: 'pending' },
         });
     });
+
+    // Update customer tier - restored order now counts toward LTV again
+    if (order.customerId) {
+        await updateCustomerTier(req.prisma, order.customerId);
+    }
 
     const updated = await req.prisma.order.findUnique({
         where: { id: req.params.id },
@@ -886,6 +902,11 @@ router.post('/lines/:lineId/cancel', authenticateToken, asyncHandler(async (req,
         }
     });
 
+    // Update customer tier - line cancellation affects LTV (especially if order is now fully cancelled)
+    if (line.order.customerId) {
+        await updateCustomerTier(req.prisma, line.order.customerId);
+    }
+
     const updated = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
     });
@@ -946,6 +967,11 @@ router.post('/lines/:lineId/uncancel', authenticateToken, asyncHandler(async (re
             data: updateData,
         });
     });
+
+    // Update customer tier - restored line affects LTV
+    if (line.order.customerId) {
+        await updateCustomerTier(req.prisma, line.order.customerId);
+    }
 
     const updated = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },

@@ -11,6 +11,7 @@
 import prisma from '../lib/prisma.js';
 import ithinkClient from './ithinkLogistics.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
+import { updateCustomerTier } from '../utils/tierUtils.js';
 
 // Sync interval in milliseconds (30 minutes)
 const SYNC_INTERVAL_MS = 30 * 60 * 1000;
@@ -194,6 +195,15 @@ async function updateLineTracking(awbNumber, trackingData, orderInfo) {
     // Also recompute order status from lines
     if (!statusChanged) {
         await recomputeOrderStatus(orderInfo.orderId);
+    }
+
+    // Update customer tier on delivery or RTO
+    // Delivery: tier may upgrade (order counts toward LTV)
+    // RTO: tier may downgrade (order no longer counts toward LTV)
+    const isNewDelivery = trackingData.internalStatus === 'delivered' && orderInfo.previousTrackingStatus !== 'delivered';
+    const isNewRto = lineUpdateData.rtoInitiatedAt && !orderInfo.rtoInitiatedAt;
+    if ((isNewDelivery || isNewRto) && orderInfo.customerId) {
+        await updateCustomerTier(prisma, orderInfo.customerId);
     }
 
     return { lineUpdateData, orderUpdateData, statusChanged };

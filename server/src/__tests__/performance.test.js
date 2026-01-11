@@ -192,36 +192,68 @@ describe('Performance Benchmarks', () => {
         });
 
         describe('Allocation Operations', () => {
-            it('measures single line allocation', async () => {
+            /**
+             * REALISTIC TEST: Measures allocation of pre-existing lines
+             * This simulates the actual user experience - clicking checkboxes
+             * on order lines that already exist (synced from Shopify)
+             */
+            it('measures single line allocation (realistic - pre-existing lines)', async () => {
                 const skuId = seedResult.skuIds[2];
                 const createdOrders = [];
                 const createdLines = [];
                 const createdTxns = [];
 
+                // FIRST: Create enough inward stock for 6 allocations
+                for (let i = 0; i < 6; i++) {
+                    const txn = await prisma.inventoryTransaction.create({
+                        data: {
+                            id: generateId('stock'),
+                            skuId,
+                            txnType: 'inward',
+                            qty: 1,
+                            reason: 'production',
+                            createdById: seedResult.userId,
+                        },
+                    });
+                    createdTxns.push(txn.id);
+                }
+
+                // PRE-CREATE 6 pending lines (simulates lines synced from Shopify)
+                const pendingLines = [];
+                for (let i = 0; i < 6; i++) {
+                    const { order, line } = await createTestOrderLine(prisma, skuId, seedResult.userId);
+                    createdOrders.push(order.id);
+                    createdLines.push(line.id);
+                    pendingLines.push(line);
+                }
+
+                // Measure ONLY the allocation operation (not line creation)
                 const result = await measureOperation(
                     `allocation (${scale})`,
                     async () => {
-                        // Create a fresh order line
-                        const { order, line } = await createTestOrderLine(prisma, skuId, seedResult.userId);
-                        createdOrders.push(order.id);
-                        createdLines.push(line.id);
+                        const line = pendingLines.shift();
+                        if (!line) return null;
 
-                        // Allocate it
-                        const txn = await createReservedTransaction(prisma, {
-                            skuId,
+                        // This is what the API endpoint does:
+                        // 1. Check balance
+                        const balance = await calculateInventoryBalance(prisma, line.skuId);
+                        if (balance.availableBalance < line.qty) {
+                            throw new Error('Insufficient stock');
+                        }
+
+                        // 2. Create reserved transaction
+                        await createReservedTransaction(prisma, {
+                            skuId: line.skuId,
                             qty: line.qty,
                             orderLineId: line.id,
                             userId: seedResult.userId,
                         });
-                        createdTxns.push(txn.id);
 
-                        // Update line status
-                        await prisma.orderLine.update({
+                        // 3. Update line status
+                        return await prisma.orderLine.update({
                             where: { id: line.id },
                             data: { lineStatus: 'allocated', allocatedAt: new Date() },
                         });
-
-                        return { line, txn };
                     }
                 );
 
@@ -231,6 +263,89 @@ describe('Performance Benchmarks', () => {
                 // Cleanup
                 await prisma.inventoryTransaction.deleteMany({
                     where: { id: { in: createdTxns } },
+                });
+                await prisma.inventoryTransaction.deleteMany({
+                    where: { referenceId: { in: createdLines }, txnType: 'reserved' },
+                });
+                await prisma.orderLine.deleteMany({
+                    where: { id: { in: createdLines } },
+                });
+                await prisma.order.deleteMany({
+                    where: { id: { in: createdOrders } },
+                });
+            });
+
+            /**
+             * RAPID CLICKS TEST: Simulates user quickly clicking multiple checkboxes
+             * Measures sequential single-line allocations without iteration overhead
+             */
+            it('measures rapid sequential allocations (5 clicks)', async () => {
+                const skuId = seedResult.skuIds[5];
+                const createdOrders = [];
+                const createdLines = [];
+                const createdTxns = [];
+
+                // Create enough stock for 5 allocations
+                for (let i = 0; i < 5; i++) {
+                    const txn = await prisma.inventoryTransaction.create({
+                        data: {
+                            id: generateId('stock'),
+                            skuId,
+                            txnType: 'inward',
+                            qty: 1,
+                            reason: 'production',
+                            createdById: seedResult.userId,
+                        },
+                    });
+                    createdTxns.push(txn.id);
+                }
+
+                // Pre-create 5 pending lines
+                for (let i = 0; i < 5; i++) {
+                    const { order, line } = await createTestOrderLine(prisma, skuId, seedResult.userId);
+                    createdOrders.push(order.id);
+                    createdLines.push(line.id);
+                }
+
+                // Measure 5 rapid allocations (simulating fast checkbox clicks)
+                const start = performance.now();
+
+                for (const lineId of createdLines) {
+                    const line = await prisma.orderLine.findUnique({
+                        where: { id: lineId },
+                        select: { id: true, skuId: true, qty: true },
+                    });
+
+                    await createReservedTransaction(prisma, {
+                        skuId: line.skuId,
+                        qty: line.qty,
+                        orderLineId: line.id,
+                        userId: seedResult.userId,
+                    });
+
+                    await prisma.orderLine.update({
+                        where: { id: line.id },
+                        data: { lineStatus: 'allocated', allocatedAt: new Date() },
+                    });
+                }
+
+                const elapsed = performance.now() - start;
+                const perClick = elapsed / 5;
+
+                console.log(`[PERF] rapid 5 allocations (${scale}): ${elapsed.toFixed(2)}ms total, ${perClick.toFixed(2)}ms per click`);
+
+                // Should be < 500ms per click for good UX
+                if (perClick > 500) {
+                    console.warn(`⚠️  Allocation per click too slow: ${perClick.toFixed(2)}ms > 500ms`);
+                }
+                expect(perClick).toBeLessThan(2000); // Fail if extremely slow
+
+                // Cleanup
+                await prisma.inventoryTransaction.deleteMany({
+                    where: { id: { in: createdTxns } },
+                });
+                await prisma.inventoryTransaction.deleteMany({
+                    where: { referenceId: { in: createdLines }, txnType: 'reserved' },
                 });
                 await prisma.orderLine.deleteMany({
                     where: { id: { in: createdLines } },
@@ -308,7 +423,6 @@ describe('Performance Benchmarks', () => {
                 const skuId = seedResult.skuIds[4];
                 const createdOrders = [];
                 const createdLines = [];
-                const createdTxns = [];
 
                 // Create 10 pending lines
                 const pendingLines = [];
@@ -319,44 +433,46 @@ describe('Performance Benchmarks', () => {
                     pendingLines.push(line);
                 }
 
-                // Measure bulk allocation directly (no warm-up since we use all lines)
+                // Measure OPTIMIZED bulk allocation using createMany + updateMany
                 const start = performance.now();
 
-                // Allocate all lines in a transaction with extended timeout
                 await prisma.$transaction(async (tx) => {
-                    for (const line of pendingLines) {
-                        const txn = await tx.inventoryTransaction.create({
-                            data: {
-                                id: generateId('bulk-alloc'),
-                                skuId,
-                                txnType: TXN_TYPE.RESERVED,
-                                qty: 1,
-                                reason: TXN_REASON.ORDER_ALLOCATION,
-                                referenceId: line.id,
-                                createdById: seedResult.userId,
-                            },
-                        });
-                        createdTxns.push(txn.id);
+                    const timestamp = new Date();
 
-                        await tx.orderLine.update({
-                            where: { id: line.id },
-                            data: { lineStatus: 'allocated', allocatedAt: new Date() },
-                        });
-                    }
-                }, { timeout: 30000 }); // 30s timeout for bulk operation
+                    // Batch create all transactions in single INSERT
+                    const txnData = pendingLines.map(line => ({
+                        id: generateId('bulk-alloc'),
+                        skuId,
+                        txnType: TXN_TYPE.RESERVED,
+                        qty: 1,
+                        reason: TXN_REASON.ORDER_ALLOCATION,
+                        referenceId: line.id,
+                        createdById: seedResult.userId,
+                    }));
+
+                    await tx.inventoryTransaction.createMany({
+                        data: txnData,
+                    });
+
+                    // Batch update all line statuses in single UPDATE
+                    await tx.orderLine.updateMany({
+                        where: { id: { in: createdLines } },
+                        data: { lineStatus: 'allocated', allocatedAt: timestamp },
+                    });
+                }, { timeout: 30000 });
 
                 const elapsed = performance.now() - start;
                 console.log(`[PERF] bulk allocation 10 lines (${scale}): ${elapsed.toFixed(2)}ms`);
 
-                // Check threshold
-                if (elapsed > thresholds.allocation * 15) {
-                    console.warn(`⚠️  Bulk allocation 10 lines (${scale}) exceeded threshold: ${elapsed.toFixed(2)}ms > ${thresholds.allocation * 15}ms`);
+                // Check threshold - with batch ops, should be much faster
+                if (elapsed > thresholds.allocation * 5) {
+                    console.warn(`⚠️  Bulk allocation 10 lines (${scale}) exceeded threshold: ${elapsed.toFixed(2)}ms > ${thresholds.allocation * 5}ms`);
                 }
                 expect(elapsed).toBeGreaterThan(0);
 
                 // Cleanup
                 await prisma.inventoryTransaction.deleteMany({
-                    where: { id: { in: createdTxns } },
+                    where: { referenceId: { in: createdLines } },
                 });
                 await prisma.orderLine.deleteMany({
                     where: { id: { in: createdLines } },
