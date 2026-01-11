@@ -197,12 +197,10 @@ async function updateLineTracking(awbNumber, trackingData, orderInfo) {
         await recomputeOrderStatus(orderInfo.orderId);
     }
 
-    // Update customer tier on delivery or RTO
-    // Delivery: tier may upgrade (order counts toward LTV)
-    // RTO: tier may downgrade (order no longer counts toward LTV)
-    const isNewDelivery = trackingData.internalStatus === 'delivered' && orderInfo.previousTrackingStatus !== 'delivered';
+    // Update customer tier on RTO (order no longer counts toward LTV)
+    // Note: Delivery doesn't need tier update since order already counted at creation
     const isNewRto = lineUpdateData.rtoInitiatedAt && !orderInfo.rtoInitiatedAt;
-    if ((isNewDelivery || isNewRto) && orderInfo.customerId) {
+    if (isNewRto && orderInfo.customerId) {
         await updateCustomerTier(prisma, orderInfo.customerId);
     }
 
