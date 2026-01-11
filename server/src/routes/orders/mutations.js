@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
+import { requirePermission } from '../../middleware/permissions.js';
 import { releaseReservedInventory, createReservedTransaction, calculateInventoryBalance, recalculateOrderStatus, createCustomSku, removeCustomization } from '../../utils/queryPatterns.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { validate, CreateOrderSchema, UpdateOrderSchema, CustomizeLineSchema } from '../../utils/validation.js';
@@ -206,7 +207,7 @@ router.delete('/:id', authenticateToken, asyncHandler(async (req, res) => {
 // ============================================
 
 // Cancel order
-router.post('/:id/cancel', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/:id/cancel', authenticateToken, requirePermission('orders:cancel'), asyncHandler(async (req, res) => {
     const { reason } = req.body;
 
     const order = await req.prisma.order.findUnique({
@@ -322,7 +323,7 @@ router.post('/:id/uncancel', authenticateToken, asyncHandler(async (req, res) =>
 // ============================================
 
 // Hold entire order (blocks all lines from fulfillment)
-router.put('/:id/hold', authenticateToken, asyncHandler(async (req, res) => {
+router.put('/:id/hold', authenticateToken, requirePermission('orders:hold'), asyncHandler(async (req, res) => {
     const { reason, notes } = req.body;
 
     if (!reason) {

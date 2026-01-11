@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { requirePermission, requireAnyPermission } from '../middleware/permissions.js';
 import { calculateFabricBalance } from '../utils/queryPatterns.js';
 import { chunkProcess } from '../utils/asyncUtils.js';
 
@@ -31,7 +32,7 @@ router.get('/types', authenticateToken, async (req, res) => {
 });
 
 // Create fabric type
-router.post('/types', authenticateToken, async (req, res) => {
+router.post('/types', authenticateToken, requirePermission('fabrics:edit:type'), async (req, res) => {
     try {
         const { name, composition, unit, avgShrinkagePct, defaultCostPerUnit, defaultLeadTimeDays, defaultMinOrderQty } = req.body;
 
@@ -55,7 +56,7 @@ router.post('/types', authenticateToken, async (req, res) => {
 });
 
 // Update fabric type
-router.put('/types/:id', authenticateToken, async (req, res) => {
+router.put('/types/:id', authenticateToken, requirePermission('fabrics:edit:type'), async (req, res) => {
     try {
         const { name, composition, unit, avgShrinkagePct, defaultCostPerUnit, defaultLeadTimeDays, defaultMinOrderQty } = req.body;
 
@@ -154,83 +155,83 @@ router.get('/flat', authenticateToken, async (req, res) => {
 
         // Calculate balances and analysis for all fabrics (batched to prevent connection pool exhaustion)
         const items = await chunkProcess(fabrics, async (fabric) => {
-                const balance = await calculateFabricBalance(req.prisma, fabric.id);
-                const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
+            const balance = await calculateFabricBalance(req.prisma, fabric.id);
+            const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
 
-                // Calculate effective values (inherit from type if null)
-                const effectiveCost = fabric.costPerUnit ?? fabric.fabricType.defaultCostPerUnit ?? 0;
-                const effectiveLeadTime = fabric.leadTimeDays ?? fabric.fabricType.defaultLeadTimeDays ?? 14;
-                const effectiveMinOrder = fabric.minOrderQty ?? fabric.fabricType.defaultMinOrderQty ?? 10;
+            // Calculate effective values (inherit from type if null)
+            const effectiveCost = fabric.costPerUnit ?? fabric.fabricType.defaultCostPerUnit ?? 0;
+            const effectiveLeadTime = fabric.leadTimeDays ?? fabric.fabricType.defaultLeadTimeDays ?? 14;
+            const effectiveMinOrder = fabric.minOrderQty ?? fabric.fabricType.defaultMinOrderQty ?? 10;
 
-                const daysOfStock = avgDailyConsumption > 0
-                    ? balance.currentBalance / avgDailyConsumption
-                    : null;
+            const daysOfStock = avgDailyConsumption > 0
+                ? balance.currentBalance / avgDailyConsumption
+                : null;
 
-                const reorderPoint = avgDailyConsumption * (effectiveLeadTime + 7);
+            const reorderPoint = avgDailyConsumption * (effectiveLeadTime + 7);
 
-                let stockStatus = 'OK';
-                if (balance.currentBalance <= reorderPoint) {
-                    stockStatus = 'ORDER NOW';
-                } else if (balance.currentBalance <= avgDailyConsumption * (effectiveLeadTime + 14)) {
-                    stockStatus = 'ORDER SOON';
-                }
+            let stockStatus = 'OK';
+            if (balance.currentBalance <= reorderPoint) {
+                stockStatus = 'ORDER NOW';
+            } else if (balance.currentBalance <= avgDailyConsumption * (effectiveLeadTime + 14)) {
+                stockStatus = 'ORDER SOON';
+            }
 
-                const suggestedOrderQty = Math.max(
-                    Number(effectiveMinOrder),
-                    Math.ceil((avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * effectiveLeadTime))
-                );
+            const suggestedOrderQty = Math.max(
+                Number(effectiveMinOrder),
+                Math.ceil((avgDailyConsumption * 30) - balance.currentBalance + (avgDailyConsumption * effectiveLeadTime))
+            );
 
-                return {
-                    // Fabric identifiers
-                    fabricId: fabric.id,
-                    colorName: fabric.colorName,
-                    colorHex: fabric.colorHex,
-                    standardColor: fabric.standardColor,
+            return {
+                // Fabric identifiers
+                fabricId: fabric.id,
+                colorName: fabric.colorName,
+                colorHex: fabric.colorHex,
+                standardColor: fabric.standardColor,
 
-                    // Fabric Type info
-                    fabricTypeId: fabric.fabricType.id,
-                    fabricTypeName: fabric.fabricType.name,
-                    composition: fabric.fabricType.composition,
-                    unit: fabric.fabricType.unit,
-                    avgShrinkagePct: fabric.fabricType.avgShrinkagePct,
+                // Fabric Type info
+                fabricTypeId: fabric.fabricType.id,
+                fabricTypeName: fabric.fabricType.name,
+                composition: fabric.fabricType.composition,
+                unit: fabric.fabricType.unit,
+                avgShrinkagePct: fabric.fabricType.avgShrinkagePct,
 
-                    // Supplier info
-                    supplierId: fabric.supplier?.id || null,
-                    supplierName: fabric.supplier?.name || null,
+                // Supplier info
+                supplierId: fabric.supplier?.id || null,
+                supplierName: fabric.supplier?.name || null,
 
-                    // Pricing & Lead time - raw values (null = inherited)
-                    costPerUnit: fabric.costPerUnit,
-                    leadTimeDays: fabric.leadTimeDays,
-                    minOrderQty: fabric.minOrderQty,
+                // Pricing & Lead time - raw values (null = inherited)
+                costPerUnit: fabric.costPerUnit,
+                leadTimeDays: fabric.leadTimeDays,
+                minOrderQty: fabric.minOrderQty,
 
-                    // Effective values (with inheritance applied)
-                    effectiveCostPerUnit: effectiveCost,
-                    effectiveLeadTimeDays: effectiveLeadTime,
-                    effectiveMinOrderQty: effectiveMinOrder,
+                // Effective values (with inheritance applied)
+                effectiveCostPerUnit: effectiveCost,
+                effectiveLeadTimeDays: effectiveLeadTime,
+                effectiveMinOrderQty: effectiveMinOrder,
 
-                    // Inheritance flags
-                    costInherited: fabric.costPerUnit === null,
-                    leadTimeInherited: fabric.leadTimeDays === null,
-                    minOrderInherited: fabric.minOrderQty === null,
+                // Inheritance flags
+                costInherited: fabric.costPerUnit === null,
+                leadTimeInherited: fabric.leadTimeDays === null,
+                minOrderInherited: fabric.minOrderQty === null,
 
-                    // Type defaults (for UI reference)
-                    typeCostPerUnit: fabric.fabricType.defaultCostPerUnit,
-                    typeLeadTimeDays: fabric.fabricType.defaultLeadTimeDays,
-                    typeMinOrderQty: fabric.fabricType.defaultMinOrderQty,
+                // Type defaults (for UI reference)
+                typeCostPerUnit: fabric.fabricType.defaultCostPerUnit,
+                typeLeadTimeDays: fabric.fabricType.defaultLeadTimeDays,
+                typeMinOrderQty: fabric.fabricType.defaultMinOrderQty,
 
-                    // Stock info
-                    currentBalance: Number(balance.currentBalance.toFixed(2)),
-                    totalInward: Number(balance.totalInward.toFixed(2)),
-                    totalOutward: Number(balance.totalOutward.toFixed(2)),
-                    avgDailyConsumption: Number(avgDailyConsumption.toFixed(3)),
-                    daysOfStock: daysOfStock ? Math.floor(daysOfStock) : null,
-                    reorderPoint: Number(reorderPoint.toFixed(2)),
-                    stockStatus,
-                    suggestedOrderQty: suggestedOrderQty > 0 ? suggestedOrderQty : 0,
+                // Stock info
+                currentBalance: Number(balance.currentBalance.toFixed(2)),
+                totalInward: Number(balance.totalInward.toFixed(2)),
+                totalOutward: Number(balance.totalOutward.toFixed(2)),
+                avgDailyConsumption: Number(avgDailyConsumption.toFixed(3)),
+                daysOfStock: daysOfStock ? Math.floor(daysOfStock) : null,
+                reorderPoint: Number(reorderPoint.toFixed(2)),
+                stockStatus,
+                suggestedOrderQty: suggestedOrderQty > 0 ? suggestedOrderQty : 0,
 
-                    // Flag to identify color-level rows
-                    isTypeRow: false,
-                };
+                // Flag to identify color-level rows
+                isTypeRow: false,
+            };
         }, 5); // Process 5 at a time to prevent connection pool exhaustion
 
         // Filter by status if provided
@@ -340,7 +341,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create fabric
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requirePermission('fabrics:edit'), async (req, res) => {
     try {
         const { fabricTypeId, name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty } = req.body;
 
@@ -381,7 +382,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update fabric
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requirePermission('fabrics:edit'), async (req, res) => {
     try {
         const { name, colorName, standardColor, colorHex, costPerUnit, supplierId, leadTimeDays, minOrderQty, isActive, inheritCost, inheritLeadTime, inheritMinOrder } = req.body;
 
@@ -434,12 +435,9 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
 // Delete fabric (soft delete - sets isActive to false)
 // Automatically reassigns any product variations to the default fabric
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requirePermission('fabrics:delete'), async (req, res) => {
     try {
-        // Check if user is admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Only admin can delete fabrics' });
-        }
+        // Permission check replaces old admin role check
 
         const fabric = await req.prisma.fabric.findUnique({
             where: { id: req.params.id },
@@ -587,7 +585,7 @@ router.get('/:id/transactions', authenticateToken, async (req, res) => {
 });
 
 // Create fabric transaction (inward/outward)
-router.post('/:id/transactions', authenticateToken, async (req, res) => {
+router.post('/:id/transactions', authenticateToken, requireAnyPermission('fabrics:inward', 'fabrics:outward'), async (req, res) => {
     try {
         const { txnType, qty, unit, reason, referenceId, notes, costPerUnit, supplierId } = req.body;
 
@@ -617,13 +615,10 @@ router.post('/:id/transactions', authenticateToken, async (req, res) => {
     }
 });
 
-// Delete fabric transaction (admin only)
-router.delete('/transactions/:txnId', authenticateToken, async (req, res) => {
+// Delete fabric transaction (requires fabrics:delete:transaction permission)
+router.delete('/transactions/:txnId', authenticateToken, requirePermission('fabrics:delete:transaction'), async (req, res) => {
     try {
-        // Check if user is admin
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Only admin can delete transactions' });
-        }
+        // Permission check replaces old admin role check
 
         const transaction = await req.prisma.fabricTransaction.findUnique({
             where: { id: req.params.txnId },

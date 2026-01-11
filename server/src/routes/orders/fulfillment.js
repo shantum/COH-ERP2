@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
+import { requirePermission } from '../../middleware/permissions.js';
 import {
     NotFoundError,
     ValidationError,
@@ -31,7 +32,7 @@ const router = Router();
 // ============================================
 
 // Allocate order line (reserve inventory)
-router.post('/lines/:lineId/allocate', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('orders:allocate'), asyncHandler(async (req, res) => {
     const line = await req.prisma.orderLine.findUnique({
         where: { id: req.params.lineId },
         include: { sku: true, order: true },
@@ -362,7 +363,7 @@ router.post('/lines/bulk-update', authenticateToken, asyncHandler(async (req, re
 // SHIP ORDER
 // ============================================
 
-router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), asyncHandler(async (req, res) => {
+router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), validate(ShipOrderSchema), asyncHandler(async (req, res) => {
     const { awbNumber, courier } = req.validatedBody;
 
     const order = await req.prisma.order.findUnique({
@@ -504,7 +505,7 @@ router.post('/:id/ship', authenticateToken, validate(ShipOrderSchema), asyncHand
  * POST /orders/:id/ship-lines
  * Body: { lineIds: string[], awbNumber: string, courier: string }
  */
-router.post('/:id/ship-lines', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship'), asyncHandler(async (req, res) => {
     const { lineIds, awbNumber, courier } = req.body;
 
     // Validate required fields
@@ -619,7 +620,7 @@ router.post('/:id/ship-lines', authenticateToken, asyncHandler(async (req, res) 
 // Releases inventory and creates sale transactions
 // ============================================
 
-router.post('/process-marked-shipped', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/process-marked-shipped', authenticateToken, requirePermission('orders:ship'), asyncHandler(async (req, res) => {
     const { comment } = req.body || {};
 
     // Find all orders with marked_shipped lines

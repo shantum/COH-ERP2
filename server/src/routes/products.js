@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/permissions.js';
 
 const router = Router();
 
@@ -61,7 +62,7 @@ router.get('/cost-config', authenticateToken, async (req, res) => {
 });
 
 // Update cost config
-router.put('/cost-config', authenticateToken, async (req, res) => {
+router.put('/cost-config', authenticateToken, requirePermission('products:edit:cost'), async (req, res) => {
     try {
         const { laborRatePerMin, defaultPackagingCost, gstThreshold, gstRateAbove, gstRateBelow } = req.body;
 
@@ -184,7 +185,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create product
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, requirePermission('products:edit'), async (req, res) => {
     try {
         const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption } = req.body;
 
@@ -210,7 +211,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update product
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', authenticateToken, requirePermission('products:edit'), async (req, res) => {
     try {
         const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, trimsCost, liningCost, packagingCost, isActive } = req.body;
 
@@ -276,7 +277,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete product (soft delete)
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, requirePermission('products:delete'), async (req, res) => {
     try {
         await req.prisma.product.update({
             where: { id: req.params.id },
