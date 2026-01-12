@@ -25,10 +25,11 @@
     "noUncheckedSideEffectImports": true,
 
     /* Path mapping for workspace packages */
+    "baseUrl": ".",
     "paths": {
       "@coh/shared": ["../shared/src"],
       "@coh/shared/*": ["../shared/src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/src"]
 }

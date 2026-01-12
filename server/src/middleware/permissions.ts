@@ -3,6 +3,7 @@
  * Express middleware for checking user permissions
  */
 
+/// <reference path="../types/express.d.ts" />
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { PrismaClient, UserPermissionOverride, Role } from '@prisma/client';
 

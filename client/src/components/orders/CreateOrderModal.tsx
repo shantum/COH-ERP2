@@ -3,11 +3,12 @@
  * Multi-step form for creating a new order with intuitive product search
  */
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X, Trash2, Package, RefreshCw, Plus, ShoppingBag, User, Mail, Phone, Hash, Search, UserCheck, MapPin, ChevronDown, ChevronUp, History, Clock, Check, FileText, Calendar, Info } from 'lucide-react';
 import { getSkuBalance } from '../../utils/orderHelpers';
 import { customersApi } from '../../services/api';
+import { trpc } from '../../services/trpc';
 
 interface AddressData {
     first_name?: string;
@@ -47,12 +48,16 @@ function ProductSearch({
     allSkus,
     inventoryBalance,
     onSelect,
-    onCancel
+    onCancel,
+    fetchedBalances,
+    onFetchBalances,
 }: {
     allSkus: any[];
     inventoryBalance: any[];
     onSelect: (sku: any, stock: number) => void;
     onCancel: () => void;
+    fetchedBalances: Map<string, number>;
+    onFetchBalances: (skuIds: string[]) => void;
 }) {
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +65,18 @@ function ProductSearch({
     useEffect(() => {
         inputRef.current?.focus();
     }, []);
+
+    // Helper to get balance from pre-fetched or on-demand fetched data
+    const getBalance = useCallback((skuId: string): number | null => {
+        // Check pre-fetched inventory balance first
+        const preloaded = inventoryBalance?.find((i: any) => i.skuId === skuId);
+        if (preloaded) return preloaded.availableBalance ?? preloaded.currentBalance ?? 0;
+
+        // Check locally fetched balances
+        if (fetchedBalances.has(skuId)) return fetchedBalances.get(skuId)!;
+
+        return null; // Not yet fetched
+    }, [inventoryBalance, fetchedBalances]);
 
     // Filter SKUs based on search query - supports multi-word search
     const filteredSkus = useMemo(() => {
@@ -118,6 +135,17 @@ function ProductSearch({
         });
     }, [filteredSkus]);
 
+    // Fetch balances on-demand for SKUs not in pre-fetched inventory
+    useEffect(() => {
+        const skusToFetch = sortedSkus
+            .filter((sku: any) => getBalance(sku.id) === null)
+            .map((sku: any) => sku.id);
+
+        if (skusToFetch.length > 0) {
+            onFetchBalances(skusToFetch);
+        }
+    }, [sortedSkus, getBalance, onFetchBalances]);
+
     return (
         <div className="border border-gray-200 rounded-xl bg-white overflow-hidden shadow-sm">
             {/* Search Input */}
@@ -146,7 +174,9 @@ function ProductSearch({
                 ) : (
                     <div className="divide-y divide-gray-50">
                         {sortedSkus.map((sku: any) => {
-                            const stockNum = getSkuBalance(inventoryBalance, sku.id);
+                            const balance = getBalance(sku.id);
+                            const stockNum = balance ?? 0;
+                            const isLoading = balance === null;
                             const isOutOfStock = stockNum <= 0;
                             const isLowStock = stockNum > 0 && stockNum <= 3;
 
@@ -159,16 +189,16 @@ function ProductSearch({
                                 >
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-medium ${isOutOfStock ? 'text-gray-400' : 'text-gray-900'}`}>
+                                            <span className={`text-sm font-medium ${isOutOfStock && !isLoading ? 'text-gray-400' : 'text-gray-900'}`}>
                                                 {sku.variation?.product?.name}
                                             </span>
                                         </div>
                                         <div className="flex items-center gap-1.5 mt-0.5">
-                                            <span className={`text-xs ${isOutOfStock ? 'text-gray-400' : 'text-gray-600'}`}>
+                                            <span className={`text-xs ${isOutOfStock && !isLoading ? 'text-gray-400' : 'text-gray-600'}`}>
                                                 {sku.variation?.colorName}
                                             </span>
                                             <span className="text-gray-300">·</span>
-                                            <span className={`text-xs font-medium ${isOutOfStock ? 'text-gray-400' : 'text-gray-700'}`}>
+                                            <span className={`text-xs font-medium ${isOutOfStock && !isLoading ? 'text-gray-400' : 'text-gray-700'}`}>
                                                 {sku.size}
                                             </span>
                                             <span className="text-gray-300">·</span>
@@ -178,13 +208,19 @@ function ProductSearch({
                                         </div>
                                     </div>
                                     <div className={`shrink-0 ml-3 px-2 py-1 rounded text-xs font-medium ${
-                                        isOutOfStock
+                                        isLoading
+                                            ? 'bg-gray-50 text-gray-400'
+                                            : isOutOfStock
                                             ? 'bg-gray-100 text-gray-500'
                                             : isLowStock
                                             ? 'bg-amber-100 text-amber-700'
                                             : 'bg-green-100 text-green-700'
                                     }`}>
-                                        {stockNum}
+                                        {isLoading ? (
+                                            <span className="inline-block w-3 h-3 border border-gray-300 border-t-transparent rounded-full animate-spin" />
+                                        ) : (
+                                            stockNum
+                                        )}
                                     </div>
                                 </button>
                             );
@@ -493,6 +529,55 @@ export function CreateOrderModal({
     const [isAddressExpanded, setIsAddressExpanded] = useState(false);
     // Track original prices for exchange toggle reversion
     const [originalPrices, setOriginalPrices] = useState<Map<number, number>>(new Map());
+    // Track fetched balances for SKUs not in pre-fetched inventory (on-demand fetch)
+    const [fetchedBalances, setFetchedBalances] = useState<Map<string, number>>(new Map());
+    // Track SKUs currently being fetched to avoid duplicate requests
+    const [fetchingSkuIds, setFetchingSkuIds] = useState<Set<string>>(new Set());
+
+    // tRPC utilities for on-demand fetching
+    const trpcUtils = trpc.useUtils();
+
+    // Handler to fetch balances for SKUs on-demand
+    const handleFetchBalances = useCallback((skuIds: string[]) => {
+        // Filter out SKUs already fetched or currently being fetched
+        const newSkuIds = skuIds.filter(
+            (id) => !fetchedBalances.has(id) && !fetchingSkuIds.has(id)
+        );
+
+        if (newSkuIds.length === 0) return;
+
+        // Mark SKUs as being fetched
+        setFetchingSkuIds((prev) => {
+            const next = new Set(prev);
+            newSkuIds.forEach((id) => next.add(id));
+            return next;
+        });
+
+        // Fetch balances using tRPC
+        trpcUtils.inventory.getBalances
+            .fetch({ skuIds: newSkuIds })
+            .then((balances) => {
+                setFetchedBalances((prev) => {
+                    const next = new Map(prev);
+                    balances.forEach((b: any) => {
+                        next.set(b.skuId, b.availableBalance ?? b.currentBalance ?? 0);
+                    });
+                    return next;
+                });
+            })
+            .catch((error) => {
+                // Silently handle errors - UI will show 0 stock
+                console.error('Failed to fetch inventory balances:', error);
+            })
+            .finally(() => {
+                // Remove from fetching set
+                setFetchingSkuIds((prev) => {
+                    const next = new Set(prev);
+                    newSkuIds.forEach((id) => next.delete(id));
+                    return next;
+                });
+            });
+    }, [fetchedBalances, fetchingSkuIds, trpcUtils.inventory.getBalances]);
 
     // Fetch past addresses when address section is expanded and customer exists
     const { data: pastAddressesData, isLoading: isLoadingAddresses } = useQuery({
@@ -1138,6 +1223,8 @@ export function CreateOrderModal({
                                     inventoryBalance={inventoryBalance}
                                     onSelect={handleSelectSku}
                                     onCancel={() => setIsAddingItem(false)}
+                                    fetchedBalances={fetchedBalances}
+                                    onFetchBalances={handleFetchBalances}
                                 />
                             ) : orderLines.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-8 px-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">

@@ -12,6 +12,7 @@
  * - protectedProcedure: Requires authentication (user must be logged in)
  */
 
+/// <reference path="../types/express.d.ts" />
 import { initTRPC, TRPCError } from '@trpc/server';
 import type { CreateExpressContextOptions } from '@trpc/server/adapters/express';
 import type { PrismaClient } from '@prisma/client';
