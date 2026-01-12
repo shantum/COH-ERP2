@@ -189,7 +189,7 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
 
                         // Count products using this fabric type
                         const productCount = await req.prisma.product.count({
-                            where: { fabricId: { in: fabricIds } },
+                            where: { fabricTypeId: type.id },
                         });
 
                         // Calculate consumption (outward transactions) for 7d and 30d

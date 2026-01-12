@@ -21,8 +21,8 @@ const PAGE_SIZE_OPTIONS = [100, 500, 1000, 0] as const;
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-// All column IDs in display order
-const ALL_COLUMN_IDS = [
+// Color view column IDs in display order
+const COLOR_COLUMN_IDS = [
     'fabricTypeName', 'composition', 'colorName', 'standardColor',
     'supplierName', 'costPerUnit', 'leadTimeDays', 'minOrderQty',
     'currentBalance', 'totalInward', 'totalOutward', 'avgDailyConsumption',
@@ -30,8 +30,16 @@ const ALL_COLUMN_IDS = [
     'actions'
 ];
 
-// Default headers
-const DEFAULT_HEADERS: Record<string, string> = {
+// Type view column IDs in display order
+const TYPE_COLUMN_IDS = [
+    'fabricTypeName', 'composition', 'colorCount', 'productCount',
+    'totalStock', 'consumption7d', 'consumption30d', 'defaultCostPerUnit',
+    'unit', 'avgShrinkagePct', 'defaultLeadTimeDays', 'defaultMinOrderQty',
+    'actions'
+];
+
+// Default headers for color view
+const COLOR_HEADERS: Record<string, string> = {
     fabricTypeName: 'Fabric Type',
     composition: 'Composition',
     colorName: 'Color',
@@ -48,6 +56,23 @@ const DEFAULT_HEADERS: Record<string, string> = {
     reorderPoint: 'Reorder At',
     stockStatus: 'Status',
     suggestedOrderQty: 'Suggested Qty',
+    actions: '',
+};
+
+// Default headers for type view
+const TYPE_HEADERS: Record<string, string> = {
+    fabricTypeName: 'Fabric Type',
+    composition: 'Composition',
+    colorCount: 'Colors',
+    productCount: 'Products',
+    totalStock: 'Stock',
+    consumption7d: 'Use (7d)',
+    consumption30d: 'Use (30d)',
+    defaultCostPerUnit: 'Cost/Unit',
+    unit: 'Unit',
+    avgShrinkagePct: 'Shrink %',
+    defaultLeadTimeDays: 'Lead (d)',
+    defaultMinOrderQty: 'Min Qty',
     actions: '',
 };
 
@@ -76,7 +101,25 @@ export default function Fabrics() {
     const isAdmin = user?.role === 'admin';
     const gridRef = useRef<AgGridReact>(null);
 
-    // Use shared grid state hook for column visibility, order, widths, and page size
+    // View level state (color = individual fabric colors, type = fabric types aggregated)
+    // Must be declared before useGridState hooks since we use it to select the active state
+    type ViewLevel = 'color' | 'type';
+    const [viewLevel, setViewLevel] = useState<ViewLevel>('color');
+
+    // Use separate grid state hooks for color and type views
+    const colorGridState = useGridState({
+        gridId: 'fabricsColorGrid',
+        allColumnIds: COLOR_COLUMN_IDS,
+        defaultPageSize: 100,
+    });
+
+    const typeGridState = useGridState({
+        gridId: 'fabricsTypeGrid',
+        allColumnIds: TYPE_COLUMN_IDS,
+        defaultPageSize: 100,
+    });
+
+    // Select active grid state based on view level
     const {
         visibleColumns,
         columnOrder,
@@ -91,19 +134,11 @@ export default function Fabrics() {
         hasUnsavedChanges,
         isSavingPrefs,
         savePreferencesToServer,
-    } = useGridState({
-        gridId: 'fabricsGrid',
-        allColumnIds: ALL_COLUMN_IDS,
-        defaultPageSize: 100,
-    });
+    } = viewLevel === 'type' ? typeGridState : colorGridState;
 
     // Filter state
     const [filter, setFilter] = useState({ fabricTypeId: '', status: '' });
     const [searchInput, setSearchInput] = useState('');
-
-    // View level state (color = individual fabric colors, type = fabric types aggregated)
-    type ViewLevel = 'color' | 'type';
-    const [viewLevel, setViewLevel] = useState<ViewLevel>('color');
 
     // Modal states
     const [showAddType, setShowAddType] = useState(false);
@@ -392,7 +427,7 @@ export default function Fabrics() {
     const columnDefs: ColDef[] = useMemo(() => [
         {
             colId: 'fabricTypeName',
-            headerName: DEFAULT_HEADERS.fabricTypeName,
+            headerName: COLOR_HEADERS.fabricTypeName,
             field: 'fabricTypeName',
             width: 130,
             pinned: 'left' as const,
@@ -400,14 +435,14 @@ export default function Fabrics() {
         },
         {
             colId: 'composition',
-            headerName: DEFAULT_HEADERS.composition,
+            headerName: COLOR_HEADERS.composition,
             field: 'composition',
             width: 100,
             cellClass: 'text-xs text-gray-600',
         },
         {
             colId: 'colorName',
-            headerName: DEFAULT_HEADERS.colorName,
+            headerName: COLOR_HEADERS.colorName,
             field: 'colorName',
             width: 140,
             cellRenderer: (params: ICellRendererParams) => {
@@ -425,14 +460,14 @@ export default function Fabrics() {
         },
         {
             colId: 'standardColor',
-            headerName: DEFAULT_HEADERS.standardColor,
+            headerName: COLOR_HEADERS.standardColor,
             field: 'standardColor',
             width: 80,
             cellClass: 'text-xs text-gray-500',
         },
         {
             colId: 'supplierName',
-            headerName: DEFAULT_HEADERS.supplierName,
+            headerName: COLOR_HEADERS.supplierName,
             field: 'supplierName',
             width: 110,
             cellClass: 'text-xs',
@@ -440,7 +475,7 @@ export default function Fabrics() {
         },
         {
             colId: 'costPerUnit',
-            headerName: DEFAULT_HEADERS.costPerUnit,
+            headerName: COLOR_HEADERS.costPerUnit,
             field: 'effectiveCostPerUnit',
             width: 95,
             cellRenderer: (params: ICellRendererParams) => {
@@ -456,7 +491,7 @@ export default function Fabrics() {
         },
         {
             colId: 'leadTimeDays',
-            headerName: DEFAULT_HEADERS.leadTimeDays,
+            headerName: COLOR_HEADERS.leadTimeDays,
             field: 'effectiveLeadTimeDays',
             width: 95,
             cellRenderer: (params: ICellRendererParams) => {
@@ -472,7 +507,7 @@ export default function Fabrics() {
         },
         {
             colId: 'minOrderQty',
-            headerName: DEFAULT_HEADERS.minOrderQty,
+            headerName: COLOR_HEADERS.minOrderQty,
             field: 'effectiveMinOrderQty',
             width: 95,
             cellRenderer: (params: ICellRendererParams) => {
@@ -488,7 +523,7 @@ export default function Fabrics() {
         },
         {
             colId: 'currentBalance',
-            headerName: DEFAULT_HEADERS.currentBalance,
+            headerName: COLOR_HEADERS.currentBalance,
             field: 'currentBalance',
             width: 80,
             valueFormatter: (params: ValueFormatterParams) => {
@@ -504,7 +539,7 @@ export default function Fabrics() {
         },
         {
             colId: 'totalInward',
-            headerName: DEFAULT_HEADERS.totalInward,
+            headerName: COLOR_HEADERS.totalInward,
             field: 'totalInward',
             width: 75,
             valueFormatter: (params: ValueFormatterParams) =>
@@ -513,7 +548,7 @@ export default function Fabrics() {
         },
         {
             colId: 'totalOutward',
-            headerName: DEFAULT_HEADERS.totalOutward,
+            headerName: COLOR_HEADERS.totalOutward,
             field: 'totalOutward',
             width: 75,
             valueFormatter: (params: ValueFormatterParams) =>
@@ -522,7 +557,7 @@ export default function Fabrics() {
         },
         {
             colId: 'avgDailyConsumption',
-            headerName: DEFAULT_HEADERS.avgDailyConsumption,
+            headerName: COLOR_HEADERS.avgDailyConsumption,
             field: 'avgDailyConsumption',
             width: 70,
             valueFormatter: (params: ValueFormatterParams) =>
@@ -531,7 +566,7 @@ export default function Fabrics() {
         },
         {
             colId: 'daysOfStock',
-            headerName: DEFAULT_HEADERS.daysOfStock,
+            headerName: COLOR_HEADERS.daysOfStock,
             field: 'daysOfStock',
             width: 80,
             valueFormatter: (params: ValueFormatterParams) =>
@@ -546,7 +581,7 @@ export default function Fabrics() {
         },
         {
             colId: 'reorderPoint',
-            headerName: DEFAULT_HEADERS.reorderPoint,
+            headerName: COLOR_HEADERS.reorderPoint,
             field: 'reorderPoint',
             width: 80,
             valueFormatter: (params: ValueFormatterParams) =>
@@ -555,7 +590,7 @@ export default function Fabrics() {
         },
         {
             colId: 'stockStatus',
-            headerName: DEFAULT_HEADERS.stockStatus,
+            headerName: COLOR_HEADERS.stockStatus,
             field: 'stockStatus',
             width: 80,
             cellRenderer: (params: ICellRendererParams) => (
@@ -564,7 +599,7 @@ export default function Fabrics() {
         },
         {
             colId: 'suggestedOrderQty',
-            headerName: DEFAULT_HEADERS.suggestedOrderQty,
+            headerName: COLOR_HEADERS.suggestedOrderQty,
             field: 'suggestedOrderQty',
             width: 100,
             valueFormatter: (params: ValueFormatterParams) =>
@@ -910,8 +945,8 @@ export default function Fabrics() {
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
                     onResetAll={handleResetAll}
-                    columnIds={ALL_COLUMN_IDS}
-                    columnHeaders={DEFAULT_HEADERS}
+                    columnIds={viewLevel === 'type' ? TYPE_COLUMN_IDS : COLOR_COLUMN_IDS}
+                    columnHeaders={viewLevel === 'type' ? TYPE_HEADERS : COLOR_HEADERS}
                 />
                 {isManager && hasUnsavedChanges && (
                     <button

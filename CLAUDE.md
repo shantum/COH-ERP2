@@ -106,6 +106,7 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 | Shared patterns | `server/src/utils/queryPatterns.js`, `validation.js` |
 | Error handling | `server/src/middleware/asyncHandler.js`, `server/src/utils/errors.js` |
 | Permissions | `server/src/middleware/permissions.js`, `client/src/hooks/usePermissions.ts` |
+| Grid state | `client/src/hooks/useGridState.ts` (visibility, order, widths, server sync) |
 | Frontend | `client/src/services/api.ts`, `types/index.ts`, `hooks/` |
 
 ## Common Gotchas
@@ -124,7 +125,7 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 12. **Map caching**: Use `getInventoryMap()`/`getFabricMap()` for O(1) lookups in loops
 13. **Optimistic updates**: Use `context.skipped` pattern in mutations to prevent stale cache overwrites
 14. **AG-Grid pinned columns**: Set `pinned: 'right'` after resize to keep Actions visible
-15. **AG-Grid shared utilities**: Theme, formatters in `utils/agGridHelpers.ts`; state persistence in `hooks/useGridState.ts`
+15. **AG-Grid shared utilities**: Theme, formatters in `utils/agGridHelpers.ts`; state persistence + cross-user sync in `hooks/useGridState.ts`
 16. **Don't over-engineer shared utilities**: Working code with inline patterns often better than abstraction (order grids kept inline)
 17. **Persistent logs**: Logs stored in `server/logs/server.jsonl`, survive restarts, 24-hour retention
 18. **Costing cascades**: SKU → Variation → Product → Global (null = fallback to next level)
@@ -143,6 +144,10 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 31. **Generated columns (PostgreSQL)**: Use `GENERATED ALWAYS AS (expression) STORED` to auto-extract JSON fields. Prisma `db push` creates regular columns, so run raw SQL migration AFTER to convert. Pattern: Drop column, recreate as generated (can't ALTER existing). No backfills needed - data populates instantly from `rawData`. Example: `ALTER TABLE "ShopifyOrderCache" ADD COLUMN "totalPrice" TEXT GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'total_price')) STORED;` Then add nullable field to Prisma schema. Trade-off: Stores computed values, increases storage on limited plans.
 32. **RTO count logic (COD only)**: Only COD orders with `trackingStatus.startsWith('rto')` count toward customer RTO risk. Prepaid RTOs are refunded and don't represent fulfillment risk. Calculate dynamically from actual orders, not denormalized field: `orders.filter(o => o.trackingStatus?.startsWith('rto') && o.paymentMethod === 'COD').length`
 33. **Customer stats enrichment pattern**: Use `getCustomerStatsMap(prisma, customerIds)` in `server/src/utils/tierUtils.js` to fetch LTV, orderCount, rtoCount for multiple customers in O(1) time. Returns `{customerId: {ltv, orderCount, rtoCount}}`. Call `enrichOrdersWithCustomerStats()` in `queryPatterns.js` to attach these stats to orders for grid display (RTO Risk column, tier display, etc). Pattern: aggregate query (groupBy) with parallel promises for performance.
+34. **Grid column sync (cross-user)**: Managers can sync column preferences for all users via "Sync columns" button. Server stores in `SystemSetting` with key `grid_preferences_{gridId}`. Server prefs override localStorage on mount, then localStorage used as offline cache. Button only shows when `hasUnsavedChanges` (change detection via useMemo comparing current vs saved state).
+35. **AG-Grid column order extraction**: Use `getColumnOrderFromApi(api)` helper from `useGridState.ts` to get current column order. Call in local `onColumnMoved`/`onColumnResized` handlers, then pass to `handleColumnMoved()`/`handleColumnResized()`.
+36. **useGridState destructuring**: Full API: `{ visibleColumns, columnOrder, columnWidths, handleToggleColumn, handleResetAll, handleColumnMoved, handleColumnResized, isManager, hasUnsavedChanges, isSavingPrefs, savePreferencesToServer }`. All order grids and Catalog/Fabrics use this pattern.
+37. **Fabrics Type View aggregation**: GET `/api/fabrics?view=type` returns aggregated FabricType metrics: `totalStock`, `colorCount`, `productCount`, `consumption7d`, `consumption30d`. Server-side calculation with parallel Promise.all queries for performance.
 
 ## Environment
 
