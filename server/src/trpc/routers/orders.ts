@@ -279,7 +279,7 @@ const create = protectedProcedure
                     originalOrderId: originalOrderId || null,
                     shipByDate: shipByDate ? new Date(shipByDate) : null,
                     orderLines: {
-                        create: lines.map((line: { skuId: string; qty: number; unitPrice?: number; shippingAddress?: string }) => ({
+                        create: lines.map((line: { skuId: string; qty: number; unitPrice?: number; shippingAddress?: string | null }) => ({
                             sku: { connect: { id: line.skuId } },
                             qty: line.qty,
                             unitPrice: line.unitPrice ?? 0,

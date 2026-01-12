@@ -19,6 +19,7 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { getCustomerStatsMap, getTierThresholds, calculateTier } from './tierUtils.js';
 import type { CustomerTier } from './tierUtils.js';
+import { inventoryBalanceCache } from '../services/inventoryBalanceCache.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -1106,6 +1107,17 @@ export async function releaseReservedInventory(
     prisma: PrismaOrTransaction,
     orderLineId: string
 ): Promise<number> {
+    // Find affected SKU IDs before deletion for cache invalidation
+    const affectedTransactions = await prisma.inventoryTransaction.findMany({
+        where: {
+            referenceId: orderLineId,
+            txnType: TXN_TYPE.RESERVED,
+            reason: TXN_REASON.ORDER_ALLOCATION,
+        },
+        select: { skuId: true },
+    });
+    const affectedSkuIds = [...new Set(affectedTransactions.map(t => t.skuId))];
+
     const result = await prisma.inventoryTransaction.deleteMany({
         where: {
             referenceId: orderLineId,
@@ -1113,6 +1125,12 @@ export async function releaseReservedInventory(
             reason: TXN_REASON.ORDER_ALLOCATION,
         },
     });
+
+    // Invalidate cache for affected SKUs after successful deletion
+    if (affectedSkuIds.length > 0) {
+        inventoryBalanceCache.invalidate(affectedSkuIds);
+    }
+
     return result.count;
 }
 
@@ -1123,6 +1141,17 @@ export async function releaseReservedInventoryBatch(
     prisma: PrismaOrTransaction,
     orderLineIds: string[]
 ): Promise<number> {
+    // Find affected SKU IDs before deletion for cache invalidation
+    const affectedTransactions = await prisma.inventoryTransaction.findMany({
+        where: {
+            referenceId: { in: orderLineIds },
+            txnType: TXN_TYPE.RESERVED,
+            reason: TXN_REASON.ORDER_ALLOCATION,
+        },
+        select: { skuId: true },
+    });
+    const affectedSkuIds = [...new Set(affectedTransactions.map(t => t.skuId))];
+
     const result = await prisma.inventoryTransaction.deleteMany({
         where: {
             referenceId: { in: orderLineIds },
@@ -1130,6 +1159,12 @@ export async function releaseReservedInventoryBatch(
             reason: TXN_REASON.ORDER_ALLOCATION,
         },
     });
+
+    // Invalidate cache for affected SKUs after successful deletion
+    if (affectedSkuIds.length > 0) {
+        inventoryBalanceCache.invalidate(affectedSkuIds);
+    }
+
     return result.count;
 }
 
@@ -1140,7 +1175,7 @@ export async function createReservedTransaction(
     prisma: PrismaOrTransaction,
     { skuId, qty, orderLineId, userId }: CreateReservedTransactionParams
 ): Promise<Prisma.InventoryTransactionGetPayload<object>> {
-    return prisma.inventoryTransaction.create({
+    const transaction = await prisma.inventoryTransaction.create({
         data: {
             skuId,
             txnType: TXN_TYPE.RESERVED,
@@ -1150,6 +1185,11 @@ export async function createReservedTransaction(
             createdById: userId,
         },
     });
+
+    // Invalidate cache for the affected SKU after successful creation
+    inventoryBalanceCache.invalidate([skuId]);
+
+    return transaction;
 }
 
 /**
@@ -1159,7 +1199,7 @@ export async function createSaleTransaction(
     prisma: PrismaOrTransaction,
     { skuId, qty, orderLineId, userId }: CreateSaleTransactionParams
 ): Promise<Prisma.InventoryTransactionGetPayload<object>> {
-    return prisma.inventoryTransaction.create({
+    const transaction = await prisma.inventoryTransaction.create({
         data: {
             skuId,
             txnType: TXN_TYPE.OUTWARD,
@@ -1169,6 +1209,11 @@ export async function createSaleTransaction(
             createdById: userId,
         },
     });
+
+    // Invalidate cache for the affected SKU after successful creation
+    inventoryBalanceCache.invalidate([skuId]);
+
+    return transaction;
 }
 
 /**
@@ -1178,6 +1223,17 @@ export async function deleteSaleTransactions(
     prisma: PrismaOrTransaction,
     orderLineId: string
 ): Promise<number> {
+    // Find affected SKU IDs before deletion for cache invalidation
+    const affectedTransactions = await prisma.inventoryTransaction.findMany({
+        where: {
+            referenceId: orderLineId,
+            txnType: TXN_TYPE.OUTWARD,
+            reason: TXN_REASON.SALE,
+        },
+        select: { skuId: true },
+    });
+    const affectedSkuIds = [...new Set(affectedTransactions.map(t => t.skuId))];
+
     const result = await prisma.inventoryTransaction.deleteMany({
         where: {
             referenceId: orderLineId,
@@ -1185,6 +1241,12 @@ export async function deleteSaleTransactions(
             reason: TXN_REASON.SALE,
         },
     });
+
+    // Invalidate cache for affected SKUs after successful deletion
+    if (affectedSkuIds.length > 0) {
+        inventoryBalanceCache.invalidate(affectedSkuIds);
+    }
+
     return result.count;
 }
 

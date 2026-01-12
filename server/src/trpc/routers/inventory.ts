@@ -24,6 +24,7 @@ import {
     TXN_TYPE,
     TXN_REASON,
 } from '../../utils/queryPatterns.js';
+import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 
 /**
  * Get balance for a single SKU
@@ -89,9 +90,8 @@ const getBalances = protectedProcedure
             });
         }
 
-        const balanceMap = await calculateAllInventoryBalances(ctx.prisma, skuIds, {
-            allowNegative: true,
-        });
+        // Use cached balance lookup for better performance
+        const balanceMap = await inventoryBalanceCache.get(ctx.prisma, skuIds);
 
         // Build response with SKU codes
         const skuCodeMap = new Map(skus.map((s) => [s.id, s.skuCode]));
@@ -158,11 +158,9 @@ const getAllBalances = protectedProcedure
         });
 
         // Calculate all balances in a single query (fixes N+1)
+        // Use cached balance lookup for better performance
         const skuIds = skus.map(sku => sku.id);
-        const balanceMap = await calculateAllInventoryBalances(ctx.prisma, skuIds, {
-            allowNegative: true,
-            excludeCustomSkus: !includeCustomSkus
-        });
+        const balanceMap = await inventoryBalanceCache.get(ctx.prisma, skuIds);
 
         // Build response with full SKU details
         const balances = skus.map((sku) => {
