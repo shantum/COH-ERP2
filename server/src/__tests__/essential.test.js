@@ -16,8 +16,8 @@ import shopifyClient from '../services/shopify.js';
 import { validatePassword } from '../utils/validation.js';
 import { calculateTier, calculateLTV, DEFAULT_TIER_THRESHOLDS } from '../utils/tierUtils.js';
 import { encrypt, decrypt, isEncrypted } from '../utils/encryption.js';
-import { normalizeSize, buildVariantImageMap, groupVariantsByColor } from '../services/productSyncService.js';
-import { buildCustomerData } from '../services/customerSyncService.js';
+import { normalizeSize, buildVariantImageMap, groupVariantsByColor } from '../services/productSyncService.ts';
+import { buildCustomerData } from '../services/customerSyncService.ts';
 
 // ============================================
 // INVENTORY CALCULATION TESTS
@@ -669,7 +669,7 @@ describe('buildCustomerData', () => {
         expect(data.acceptsMarketing).toBe(true);
     });
 
-    it('should handle customer without optional fields', () => {
+    it('should throw error when customer has no email', () => {
         const shopifyCustomer = {
             id: 99999,
             email: null,
@@ -677,10 +677,22 @@ describe('buildCustomerData', () => {
             first_name: null,
             last_name: null
         };
+
+        expect(() => buildCustomerData(shopifyCustomer)).toThrow('Customer 99999 has no email address');
+    });
+
+    it('should handle customer without other optional fields', () => {
+        const shopifyCustomer = {
+            id: 99999,
+            email: 'test@example.com',
+            phone: null,
+            first_name: null,
+            last_name: null
+        };
         const data = buildCustomerData(shopifyCustomer);
 
         expect(data.shopifyCustomerId).toBe('99999');
-        expect(data.email).toBeUndefined();
+        expect(data.email).toBe('test@example.com');
         expect(data.phone).toBeNull();
         expect(data.firstName).toBeNull();
         expect(data.lastName).toBeNull();

@@ -6,19 +6,41 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/orders/` (modular: listOrders, fulfillment, mutations) |
-| Key Files | `orderViews.js`, `queryPatterns.js`, `validation.js`, `shipOrderService.js` |
+| REST Routes | `server/src/routes/orders/` (modular: listOrders, fulfillment, mutations) |
+| tRPC Router | `server/src/trpc/routers/orders.ts` (list, get, create, allocate, ship) |
+| Key Files | `orderViews.ts`, `queryPatterns.ts`, `validation.ts`, `shipOrderService.ts` |
 | Related | Inventory (reserved/sales), Shopify (cache), Customers (LTV), Shipping |
 
 ## File Structure
 
 ```
 orders/
-├── index.js        ← Router combiner
-├── listOrders.js   ← GET /?view= (unified), legacy /open, /shipped
-├── fulfillment.js  ← POST: /lines/:id/allocate|pick|pack, /:id/ship
-└── mutations.js    ← POST/PUT/DELETE: create, update, cancel, archive
+├── index.ts        ← Router combiner
+├── listOrders.ts   ← GET /?view= (unified), legacy /open, /shipped
+├── fulfillment.ts  ← POST: /lines/:id/allocate|pick|pack, /:id/ship
+└── mutations.ts    ← POST/PUT/DELETE: create, update, cancel, archive
 ```
+
+## Dual API Pattern
+
+Orders support both REST and tRPC. Frontend gradually migrating to tRPC for type safety.
+
+| API | Endpoint | Example |
+|-----|----------|---------|
+| REST | `GET /api/orders?view=open` | Axios, legacy code |
+| tRPC | `trpc.orders.list.useQuery({ view: 'open' })` | Type-safe, new code |
+
+**tRPC Procedures**:
+
+| Procedure | Input | Notes |
+|-----------|-------|-------|
+| `list` | `{ view, page, limit, days?, search?, sortBy? }` | Paginated, view-based filtering |
+| `get` | `{ id }` | Full order with relations |
+| `create` | `CreateOrderSchema` | Shared Zod schema |
+| `allocate` | `{ lineIds[] }` | Batch allocation with inventory check |
+| `ship` | `{ lineIds[], awbNumber, courier }` | Uses ShipOrderService |
+
+**Migration Status**: Read queries (6) and key mutations (create, allocate, ship) migrated. Other mutations (30+) still use Axios due to complex optimistic updates.
 
 ## Unified Views API
 
@@ -36,7 +58,7 @@ orders/
 
 **Search** works across: orderNumber, customerName, awbNumber, email, phone
 
-**Architecture** (`orderViews.js`):
+**Architecture** (`orderViews.ts`):
 - `ORDER_VIEWS`: Config objects with where, orderBy, enrichment arrays
 - `buildViewWhereClause()`: Handles exclusions, date filters, search
 - `enrichOrdersForView()`: Applies view-specific enrichments
@@ -79,7 +101,7 @@ pending → allocated → picked → packed → [ship] → shipped
 ## Gotchas
 
 1. **Unified views preferred**: Legacy endpoints (`/open`, `/shipped`) still work but use `?view=` instead
-2. **Router order matters**: In `orders/index.js`, specific routes must come before parameterized (`:id`)
+2. **Router order matters**: In `orders/index.ts`, specific routes must come before parameterized (`:id`)
 3. **Zod validation**: Order endpoints use `validate()` middleware
 4. **Search is view-aware**: Same implementation via `buildViewWhereClause()`
 5. **Auto-archive**: Orders >90 days old archived on server startup

@@ -1,11 +1,17 @@
 /**
  * useOrdersMutations hook
  * Centralizes all mutations for the Orders page
+ *
+ * Migration status:
+ * - Most mutations use Axios (complex optimistic updates)
+ * - createOrder, allocate, shipLines use tRPC (migrated in Phase 12.2)
+ * - Cache invalidation updated to support both Axios and tRPC queries
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi, productionApi } from '../services/api';
 import { orderQueryKeys, inventoryQueryKeys, orderTabInvalidationMap } from '../constants/queryKeys';
+import { trpc } from '../services/trpc';
 
 interface UseOrdersMutationsOptions {
     onShipSuccess?: () => void;
@@ -22,20 +28,49 @@ type InventoryUpdateContext = { skipped: true } | { skipped?: false; previousOrd
 
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const queryClient = useQueryClient();
+    const trpcUtils = trpc.useUtils();
 
     // Debounced invalidation for rapid-fire operations (allocate/unallocate/pick/pack)
     // Waits for 800ms of inactivity before syncing with server
+    // IMPORTANT: Only use for error recovery, NOT for success cases (optimistic updates are correct)
     const debounceTimerRef = { current: null as ReturnType<typeof setTimeout> | null };
 
-    // Consolidated invalidation function - invalidates a tab and all its related queries
-    // Uses orderTabInvalidationMap to determine which caches to clear
+    // Clear pending debounced invalidation - call this when starting a new mutation
+    // to prevent race conditions where old invalidation overwrites new optimistic updates
+    const clearPendingInvalidation = () => {
+        if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+            debounceTimerRef.current = null;
+        }
+    };
+
+    // Map view names to tRPC query input
+    const viewToTrpcInput: Record<string, { view: string; limit?: number }> = {
+        open: { view: 'open', limit: 500 },
+        shipped: { view: 'shipped' },
+        rto: { view: 'rto' },
+        cod_pending: { view: 'cod_pending' },
+        cancelled: { view: 'cancelled' },
+        archived: { view: 'archived' },
+    };
+
+    // Consolidated invalidation function - invalidates both Axios and tRPC query caches
+    // Uses orderTabInvalidationMap for Axios and trpcUtils for tRPC
     const invalidateTab = (tab: keyof typeof orderTabInvalidationMap, debounce = false) => {
         const invalidate = () => {
+            // Invalidate old Axios query keys (for any remaining Axios queries)
             const keysToInvalidate = orderTabInvalidationMap[tab];
             if (keysToInvalidate) {
                 keysToInvalidate.forEach(key => {
                     queryClient.invalidateQueries({ queryKey: [key] });
                 });
+            }
+
+            // Invalidate tRPC query cache
+            // This ensures tRPC queries refetch after mutations
+            const trpcInput = viewToTrpcInput[tab];
+            if (trpcInput) {
+                trpcUtils.orders.list.invalidate(trpcInput);
             }
         };
 
@@ -90,53 +125,60 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     // Ship specific lines mutation - supports partial shipments
-    const shipLines = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: { lineIds: string[]; awbNumber: string; courier: string } }) =>
-            ordersApi.shipLines(id, data),
+    const shipLines = trpc.orders.ship.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateShippedOrders();
             options.onShipSuccess?.();
         },
-        onError: (err: any) => {
-            const errorData = err.response?.data;
-            if (errorData?.notPackedLines) {
-                alert(`Cannot ship: ${errorData.notPackedLines.length} lines are not packed yet`);
+        onError: (err) => {
+            const errorMsg = err.message || '';
+            // Check for common error patterns
+            if (errorMsg.includes('not packed')) {
+                alert(`Cannot ship: Some lines are not packed yet`);
+            } else if (errorMsg.includes('validation')) {
+                alert(`Validation failed: ${errorMsg}`);
             } else {
-                alert(errorData?.error || 'Failed to ship lines');
+                alert(errorMsg || 'Failed to ship lines');
             }
         }
     });
 
-    // Helper for optimistic line status updates
+    // Helper for optimistic line status updates (pick/pack operations)
     // Returns previous data for rollback on error
+    // Now uses tRPC cache management since orders are fetched via tRPC
     const optimisticLineUpdate = async (lineId: string, newStatus: string) => {
         // Cancel any outgoing refetches to avoid overwriting optimistic update
-        await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
+        await trpcUtils.orders.list.cancel({ view: 'open', limit: 500 });
 
-        // Snapshot the previous value
-        const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
+        // Snapshot the previous value from tRPC cache
+        const previousOrders = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
 
-        // Optimistically update the line status
-        queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
+        // Optimistically update the line status in tRPC cache
+        trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, (old) => {
             if (!old) return old;
-            return old.map(order => ({
-                ...order,
-                orderLines: order.orderLines?.map((line: any) =>
-                    line.id === lineId ? { ...line, lineStatus: newStatus } : line
-                )
-            }));
+            return {
+                ...old,
+                orders: old.orders.map((order: any) => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.id === lineId ? { ...line, lineStatus: newStatus } : line
+                    )
+                }))
+            };
         });
 
         return { previousOrders };
     };
 
-    // Helper to get current line status from cache
+    // Helper to get current line status from tRPC cache
     const getLineStatus = (lineId: string): string | null => {
-        const orders = queryClient.getQueryData(orderQueryKeys.open) as any[] | undefined;
+        // Use tRPC cache (orders.list with view=open)
+        const data = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
+        const orders = data?.orders;
         if (!orders) return null;
         for (const order of orders) {
-            const line = order.orderLines?.find((l: any) => l.id === lineId);
+            const line = (order as any).orderLines?.find((l: any) => l.id === lineId);
             if (line) return line.lineStatus;
         }
         return null;
@@ -144,20 +186,23 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     // Helper for optimistic inventory balance updates (allocate/unallocate)
     // delta: +1 for allocate (increase reserved), -1 for unallocate (decrease reserved)
+    // Now uses tRPC cache management for inventory since we migrated to tRPC
     const optimisticInventoryUpdate = async (lineId: string, newStatus: string, delta: number) => {
-        await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
-        await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
+        // Cancel both tRPC and legacy queries
+        await trpcUtils.orders.list.cancel({ view: 'open', limit: 500 });
+        await trpcUtils.inventory.getAllBalances.cancel({ includeCustomSkus: true });
 
-        const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
-        const previousInventory = queryClient.getQueryData(inventoryQueryKeys.balance);
+        // Get current data from tRPC cache
+        const previousOrdersData = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
+        const previousInventoryData = trpcUtils.inventory.getAllBalances.getData({ includeCustomSkus: true });
 
         // Find the line to get skuId and qty
         let skuId: string | null = null;
         let qty = 0;
-        const orders = previousOrders as any[] | undefined;
+        const orders = previousOrdersData?.orders;
         if (orders) {
             for (const order of orders) {
-                const line = order.orderLines?.find((l: any) => l.id === lineId);
+                const line = (order as any).orderLines?.find((l: any) => l.id === lineId);
                 if (line) {
                     skuId = line.skuId;
                     qty = line.qty || 1;
@@ -166,107 +211,120 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             }
         }
 
-        // Update line status in openOrders
-        queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
+        // Update line status in tRPC openOrders cache
+        trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, (old) => {
             if (!old) return old;
-            return old.map(order => ({
-                ...order,
-                orderLines: order.orderLines?.map((line: any) =>
-                    line.id === lineId ? { ...line, lineStatus: newStatus } : line
-                )
-            }));
+            return {
+                ...old,
+                orders: old.orders.map((order: any) => ({
+                    ...order,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.id === lineId ? { ...line, lineStatus: newStatus } : line
+                    )
+                }))
+            };
         });
 
-        // Update inventory balance for the affected SKU
-        if (skuId && previousInventory) {
-            queryClient.setQueryData(inventoryQueryKeys.balance, (old: any[] | undefined) => {
+        // Update inventory balance for the affected SKU in tRPC cache
+        if (skuId && previousInventoryData) {
+            trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, (old) => {
                 if (!old) return old;
-                return old.map((item: any) => {
-                    if (item.skuId === skuId) {
-                        const reservedChange = qty * delta;
-                        return {
-                            ...item,
-                            totalReserved: (item.totalReserved || 0) + reservedChange,
-                            availableBalance: (item.availableBalance || 0) - reservedChange,
-                        };
-                    }
-                    return item;
-                });
+                return {
+                    ...old,
+                    items: old.items.map((item: any) => {
+                        if (item.skuId === skuId) {
+                            const reservedChange = qty * delta;
+                            return {
+                                ...item,
+                                reservedBalance: (item.reservedBalance || 0) + reservedChange,
+                                availableBalance: (item.availableBalance || 0) - reservedChange,
+                            };
+                        }
+                        return item;
+                    })
+                };
             });
         }
 
-        return { previousOrders, previousInventory };
+        return {
+            previousOrders: previousOrdersData,
+            previousInventory: previousInventoryData
+        };
     };
 
     // Allocate/unallocate line mutations - only affects open orders (with optimistic updates)
     // These also optimistically update inventory balance for instant stock column feedback
-    // Uses debounced invalidation for rapid-fire clicking through the table
-    const allocate = useMutation<unknown, any, string, InventoryUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.allocateLine(lineId),
-        onMutate: async (lineId): Promise<InventoryUpdateContext> => {
+    // NO onSettled invalidation - optimistic updates are correct, only rollback on error
+    const allocate = trpc.orders.allocate.useMutation({
+        onMutate: async (input): Promise<InventoryUpdateContext> => {
+            // Clear any pending invalidation from previous operations to prevent race conditions
+            clearPendingInvalidation();
+
+            const lineId = input.lineIds[0]; // Single line allocation
             const status = getLineStatus(lineId);
             // Skip if already allocated or has wrong status
             if (status !== 'pending') return { skipped: true };
             return optimisticInventoryUpdate(lineId, 'allocated', 1);
         },
-        onError: (err: any, _lineId, context) => {
+        onError: (err, _vars, context) => {
             // ALWAYS rollback first, before any early returns
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
-            if (context && 'previousInventory' in context) {
-                queryClient.setQueryData(inventoryQueryKeys.balance, context.previousInventory);
+            if (context && 'previousInventory' in context && context.previousInventory) {
+                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory);
             }
 
             // Then handle specific error types
             if (context?.skipped) return;
 
-            const errorMsg = err.response?.data?.error || '';
+            const errorMsg = err.message || '';
+            // Only invalidate on state-mismatch errors to sync with server
             if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
                 debouncedInvalidateOpenOrders();
             }
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     const unallocate = useMutation<unknown, any, string, InventoryUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unallocateLine(lineId),
         onMutate: async (lineId): Promise<InventoryUpdateContext> => {
+            // Clear any pending invalidation from previous operations to prevent race conditions
+            clearPendingInvalidation();
+
             const status = getLineStatus(lineId);
             // Skip if not allocated
             if (status !== 'allocated') return { skipped: true };
             return optimisticInventoryUpdate(lineId, 'pending', -1);
         },
         onError: (err: any, _lineId, context) => {
-            // ALWAYS rollback first, before any early returns
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            // ALWAYS rollback first using tRPC cache, before any early returns
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
-            if (context && 'previousInventory' in context) {
-                queryClient.setQueryData(inventoryQueryKeys.balance, context.previousInventory);
+            if (context && 'previousInventory' in context && context.previousInventory) {
+                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory);
             }
 
             // Then handle specific error types
             if (context?.skipped) return;
 
             const errorMsg = err.response?.data?.error || '';
+            // Only invalidate on state-mismatch errors to sync with server
             if (errorMsg.includes('pending') || errorMsg.includes('allocated')) {
                 debouncedInvalidateOpenOrders();
             }
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     // Pick/unpick line mutations - only affects open orders (with optimistic updates)
+    // NO onSettled invalidation - optimistic updates are correct, only rollback on error
     const pickLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.pickLine(lineId),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
+            clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'allocated') return { skipped: true };
             return optimisticLineUpdate(lineId, 'picked');
@@ -274,25 +332,23 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             if (context?.skipped) return;
             const errorMsg = err.response?.data?.error || '';
-            // Suppress state-mismatch errors from rapid clicking
+            // On state-mismatch errors, invalidate to sync with server
             if (errorMsg.includes('allocated') || errorMsg.includes('picked')) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
             alert(errorMsg || 'Failed to pick line');
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     const unpickLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unpickLine(lineId),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
+            clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'picked') return { skipped: true };
             return optimisticLineUpdate(lineId, 'allocated');
@@ -300,26 +356,24 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             if (context?.skipped) return;
             const errorMsg = err.response?.data?.error || '';
-            // Suppress state-mismatch errors from rapid clicking
+            // On state-mismatch errors, invalidate to sync with server
             if (errorMsg.includes('allocated') || errorMsg.includes('picked')) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
             alert(errorMsg || 'Failed to unpick line');
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     // Pack/unpack line mutations - only affects open orders (with optimistic updates)
     const packLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.packLine(lineId),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
+            clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'picked') return { skipped: true };
             return optimisticLineUpdate(lineId, 'packed');
@@ -327,25 +381,23 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             if (context?.skipped) return;
             const errorMsg = err.response?.data?.error || '';
-            // Suppress state-mismatch errors from rapid clicking
+            // On state-mismatch errors, invalidate to sync with server
             if (errorMsg.includes('picked') || errorMsg.includes('packed')) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
             alert(errorMsg || 'Failed to pack line');
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     const unpackLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unpackLine(lineId),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
+            clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'packed') return { skipped: true };
             return optimisticLineUpdate(lineId, 'picked');
@@ -353,26 +405,24 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             if (context?.skipped) return;
             const errorMsg = err.response?.data?.error || '';
-            // Suppress state-mismatch errors from rapid clicking
+            // On state-mismatch errors, invalidate to sync with server
             if (errorMsg.includes('picked') || errorMsg.includes('packed')) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
             alert(errorMsg || 'Failed to unpack line');
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     // Mark shipped (visual only - no inventory release)
     const markShippedLine = useMutation<unknown, any, { lineId: string; data?: { awbNumber?: string; courier?: string } }, LineUpdateContext>({
         mutationFn: ({ lineId, data }) => ordersApi.markShippedLine(lineId, data),
         onMutate: async ({ lineId }): Promise<LineUpdateContext> => {
+            clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'packed') return { skipped: true };
             return optimisticLineUpdate(lineId, 'marked_shipped');
@@ -384,20 +434,18 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
             alert(errorMsg || 'Failed to mark line as shipped');
         },
-        onSettled: (_data, _err, _vars, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     const unmarkShippedLine = useMutation<unknown, any, string, LineUpdateContext>({
         mutationFn: (lineId: string) => ordersApi.unmarkShippedLine(lineId),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
+            clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'marked_shipped') return { skipped: true };
             return optimisticLineUpdate(lineId, 'packed');
@@ -409,15 +457,12 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
-            if (context && 'previousOrders' in context) {
-                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            if (context && 'previousOrders' in context && context.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
             }
             alert(errorMsg || 'Failed to unmark shipped line');
         },
-        onSettled: (_data, _err, _lineId, context) => {
-            if (context?.skipped) return;
-            debouncedInvalidateOpenOrders();
-        }
+        // NO onSettled - optimistic update is authoritative on success
     });
 
     // Update line tracking (AWB/courier) with optimistic update
@@ -615,13 +660,17 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     // Order CRUD mutations - these affect multiple tabs
-    const createOrder = useMutation({
-        mutationFn: (data: any) => ordersApi.create(data),
+    // createOrder uses tRPC for type-safe input validation
+    const createOrder = trpc.orders.create.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             options.onCreateSuccess?.();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create order')
+        onError: (err) => {
+            // tRPC errors have a different shape
+            const message = err.message || 'Failed to create order';
+            alert(message);
+        }
     });
 
     const deleteOrder = useMutation({

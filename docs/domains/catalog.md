@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/catalog.js`, `products.js` (cost-config) |
-| Key Files | `queryPatterns.js` |
+| Routes | `server/src/routes/catalog.ts`, `products.ts` (cost-config) |
+| Key Files | `queryPatterns.ts` |
 | Related | Inventory (balances), Fabrics (cost), Products |
 
 ## Costing Cascade

@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/orders/fulfillment.js` |
-| Key Files | `server/src/services/shipOrderService.js` |
+| Routes | `server/src/routes/orders/fulfillment.ts` |
+| Key Files | `server/src/services/shipOrderService.ts` |
 | Related | Orders (status), Inventory (outward), Tracking (AWB) |
 
 ## Architecture

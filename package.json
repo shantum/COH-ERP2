@@ -2,11 +2,23 @@
   "name": "coh-erp",
   "version": "1.0.0",
   "description": "Creatures of Habit ERP System",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "install:all": "cd server && npm install && cd ../client && npm install",
-    "build": "cd client && npm install && npm run build && cd ../server && npm install && npx prisma generate",
-    "start": "cd server && npm start",
-    "dev": "cd server && npm run dev"
+    "dev": "pnpm --filter server dev",
+    "dev:shared": "pnpm --filter @coh/shared dev",
+    "build": "pnpm --filter @coh/shared build && pnpm --filter server build && pnpm --filter client build",
+    "build:shared": "pnpm --filter @coh/shared build",
+    "build:server": "pnpm --filter server build",
+    "build:client": "pnpm --filter client build",
+    "start": "pnpm --filter server start",
+    "test": "pnpm --filter server test",
+    "typecheck": "pnpm --filter @coh/shared typecheck && pnpm --filter server typecheck",
+    "db:generate": "pnpm --filter server db:generate",
+    "db:push": "pnpm --filter server db:push",
+    "db:migrate": "pnpm --filter server db:migrate",
+    "db:studio": "pnpm --filter server db:studio",
+    "install:all": "cd server && npm install && cd ../client && npm install"
   },
   "engines": {
     "node": ">=18.0.0"

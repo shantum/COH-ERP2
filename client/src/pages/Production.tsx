@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { productionApi, productsApi } from '../services/api';
+import { productionApi } from '../services/api';
+import { trpc } from '../services/trpc';
 import { useState, useMemo } from 'react';
 import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, Search } from 'lucide-react';
 
@@ -44,11 +45,30 @@ export default function Production() {
     });
     const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
     const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
-    const { data: allSkus } = useQuery({
-        queryKey: ['allSkus'],
-        queryFn: () => productsApi.getAllSkus().then(r => r.data),
-        enabled: !!showAddItem, // Lazy load - only fetch when Add Item modal is open
-    });
+    // Migrated to tRPC - lazy load all products with variations and SKUs
+    const allSkusQueryResult = trpc.products.list.useQuery(
+        { limit: 1000 }, // High limit to get comprehensive list
+        {
+            enabled: !!showAddItem, // Lazy load - only fetch when Add Item modal is open
+            staleTime: 60000, // SKUs don't change rapidly
+            // Transform response to flat SKU list for compatibility
+            select: (data) => {
+                const skus: any[] = [];
+                data.products.forEach((product: any) => {
+                    product.variations?.forEach((variation: any) => {
+                        variation.skus?.forEach((sku: any) => {
+                            skus.push({
+                                ...sku,
+                                variation,
+                            });
+                        });
+                    });
+                });
+                return skus;
+            }
+        }
+    );
+    const allSkus = allSkusQueryResult.data; // Extract data for existing code compatibility
     const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
     const { data: requirements, isLoading: requirementsLoading } = useQuery({
         queryKey: ['productionRequirements'],

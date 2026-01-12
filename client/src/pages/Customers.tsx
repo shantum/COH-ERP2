@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { customersApi } from '../services/api';
+import { trpc } from '../services/trpc';
 import { useState, useMemo } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
 import CustomerDetailModal from '../components/orders/CustomerDetailModal';
@@ -68,15 +69,13 @@ export default function Customers() {
     // Reset page when search changes
     useMemo(() => { setPage(0); }, [debouncedSearch]);
 
-    // Server-side search and pagination
-    const { data: customers, isLoading, isFetching } = useQuery({
-        queryKey: ['customers', debouncedSearch, page],
-        queryFn: () => customersApi.getAll({
-            ...(debouncedSearch && { search: debouncedSearch }),
-            limit: String(PAGE_SIZE),
-            offset: String(page * PAGE_SIZE)
-        }).then(r => r.data),
+    // Server-side search and pagination (using tRPC)
+    const { data: customersData, isLoading, isFetching } = trpc.customers.list.useQuery({
+        ...(debouncedSearch && { search: debouncedSearch }),
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE
     });
+    const customers = customersData?.customers;
     const { data: overviewStats } = useQuery({
         queryKey: ['customerOverviewStats', timePeriod],
         queryFn: () => customersApi.getOverviewStats(timePeriod).then(r => r.data),

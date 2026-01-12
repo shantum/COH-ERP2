@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `returns.js` (tickets), `inventory.js` (RTO inward), `repacking.js` (QC) |
-| Key Files | `queryPatterns.js`, `tierUtils.js`, `orderViews.js` |
+| Routes | `returns.ts` (tickets), `inventory.ts` (RTO inward), `repacking.ts` (QC) |
+| Key Files | `queryPatterns.ts`, `tierUtils.ts`, `orderViews.ts` |
 | Related | Inventory (inward/write-off), Orders (RTO view), Customers (RTO risk) |
 
 ## RTO vs Return Distinction

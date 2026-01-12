@@ -1,7 +1,18 @@
 # COH-ERP Architecture
 
-> System overview for COH-ERP manufacturing ERP. **Last updated: January 9, 2026**
+> System overview for COH-ERP manufacturing ERP. **Last updated: January 12, 2026**
 > For commands see `CLAUDE.md`, for domain details see `docs/DOMAINS.md`
+
+---
+
+## Tech Stack
+
+| Layer | Stack |
+|-------|-------|
+| Backend | Express.js + tRPC, TypeScript, Prisma ORM, PostgreSQL, Zod |
+| Frontend | React 19, TypeScript, TanStack Query, AG-Grid, Tailwind |
+| Shared | `@coh/shared` package (types, Zod schemas) |
+| Integrations | Shopify (webhooks + sync), iThink Logistics, JWT auth |
 
 ---
 
@@ -14,14 +25,19 @@ COH-ERP2/
 │   ├── components/        # Layout, Modal + orders/, settings/, common/grid/
 │   ├── hooks/             # useAuth, useOrdersData, useGridState
 │   ├── utils/             # agGridHelpers.ts (shared AG-Grid config)
-│   ├── services/api.ts    # Centralized API client
+│   ├── services/api.ts    # REST API client
 │   └── types/index.ts     # TypeScript interfaces
 │
 ├── server/src/
-│   ├── routes/            # 17 route files (orders/ is modular)
-│   ├── services/          # 8 services (shopify, tracking, sync)
-│   ├── middleware/        # Auth
+│   ├── routes/            # 23 Express route files (.ts)
+│   ├── trpc/              # tRPC routers (auth, orders, inventory, products, customers, returns)
+│   ├── services/          # 9 services (.ts)
+│   ├── middleware/        # Auth, permissions
 │   └── utils/             # queryPatterns, tierUtils, validation, encryption
+│
+├── shared/src/
+│   ├── types/             # Shared TypeScript types
+│   └── schemas/           # Shared Zod schemas
 │
 └── server/prisma/schema.prisma  # 35+ models
 ```
@@ -88,7 +104,23 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 
 ---
 
-## API Routes
+## API Layer
+
+### Dual API Architecture
+- **REST** (`/api/*`): Express routes for existing endpoints
+- **tRPC** (`/trpc/*`): Type-safe RPC for new features
+
+### tRPC Routers
+| Router | Procedures |
+|--------|------------|
+| `auth` | login, register, me |
+| `orders` | list, get, updateStatus |
+| `inventory` | getBalance, listTransactions |
+| `products` | list, get, create, update |
+| `customers` | list, get, updateTier |
+| `returns` | list, get, process |
+
+### REST Routes
 
 | Route | Purpose |
 |-------|---------|
@@ -107,7 +139,7 @@ Upload CSV -> Match order -> Update payment -> Sync to Shopify (Transaction API)
 
 ### Unified Order Views
 Single endpoint `GET /orders?view=<name>` with config-driven architecture:
-- View definitions in `server/src/utils/orderViews.js`
+- View definitions in `server/src/utils/orderViews.ts`
 - WHERE clause builder handles exclusions and search
 - Enrichment functions applied per-view (customerStats, daysInTransit, etc.)
 - Legacy endpoints (`/orders/open`, `/orders/shipped`) still work for backward compatibility
@@ -137,17 +169,25 @@ Single endpoint `GET /orders?view=<name>` with config-driven architecture:
 | File | Purpose |
 |------|---------|
 | `server/src/routes/orders/` | Modular: index, listOrders, fulfillment, mutations |
-| `server/src/utils/orderViews.js` | **View configs, WHERE builder, enrichment functions** |
-| `server/src/utils/queryPatterns.js` | ORDER_LIST_SELECT, inventory helpers |
-| `server/src/utils/validation.js` | Zod schemas with validate() middleware |
-| `server/src/services/shopifyOrderProcessor.js` | Cache-first order processing, auto-ship logic |
-| `server/src/services/ithinkLogistics.js` | Tracking API client |
-| `client/src/services/api.ts` | All API calls |
-| `client/src/types/index.ts` | TypeScript interfaces |
+| `server/src/trpc/routers/` | tRPC routers (6 domain routers) |
+| `server/src/utils/orderViews.ts` | **View configs, WHERE builder, enrichment functions** |
+| `server/src/utils/queryPatterns.ts` | ORDER_LIST_SELECT, inventory helpers |
+| `server/src/utils/validation.ts` | Zod schemas with validate() middleware |
+| `server/src/services/shopifyOrderProcessor.ts` | Cache-first order processing, auto-ship logic |
+| `server/src/services/ithinkLogistics.ts` | Tracking API client |
+| `shared/src/types/` | Shared TypeScript types (`@coh/shared`) |
+| `shared/src/schemas/` | Shared Zod schemas (`@coh/shared`) |
+| `client/src/services/api.ts` | REST API calls |
+| `client/src/types/index.ts` | Client-specific TypeScript interfaces |
 
 ---
 
 ## Changelog
+
+### January 12, 2026
+- **TypeScript Migration**: All server routes (23 files) and services (9 files) converted to TypeScript
+- **tRPC Integration**: 6 routers (auth, orders, inventory, products, customers, returns) at `/trpc` endpoint
+- **Shared Package**: `@coh/shared` with shared types and Zod schemas
 
 ### January 10, 2026
 - **Product Costing System**: Comprehensive costing with cascading trims/lining/packaging costs (SKU → Variation → Product → Global)

@@ -254,12 +254,9 @@ export function UnifiedOrderModal({
     setIsShipping(true);
     try {
       await mutations.shipLines.mutateAsync({
-        id: order.id,
-        data: {
-          lineIds: Array.from(shipForm.selectedLineIds),
-          awbNumber: shipForm.awbNumber.trim(),
-          courier: shipForm.courier.trim(),
-        },
+        lineIds: Array.from(shipForm.selectedLineIds),
+        awbNumber: shipForm.awbNumber.trim(),
+        courier: shipForm.courier.trim(),
       });
     } catch (error) {
       setIsShipping(false);

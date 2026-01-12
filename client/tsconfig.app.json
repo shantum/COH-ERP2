@@ -22,7 +22,13 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+
+    /* Path mapping for workspace packages */
+    "paths": {
+      "@coh/shared": ["../shared/src"],
+      "@coh/shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src"]
 }

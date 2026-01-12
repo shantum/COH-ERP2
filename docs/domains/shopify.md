@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/shopify.js` |
-| Key Files | `services/shopify.js` (ShopifyClient), `services/shopifyOrderProcessor.js` |
+| Routes | `server/src/routes/shopify.ts` |
+| Key Files | `services/shopify.ts` (ShopifyClient), `services/shopifyOrderProcessor.ts` |
 | Related | Orders (synced data), Remittance (COD payment sync) |
 
 ## Architecture

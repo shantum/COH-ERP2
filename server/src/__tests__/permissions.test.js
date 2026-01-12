@@ -397,7 +397,8 @@ describe('filterConfidentialFields - Customer Contact Info', () => {
         expect(result.customerPhone).toBeUndefined();
         expect(result.email).toBeUndefined();
         expect(result.phone).toBeUndefined();
-        expect(result.shippingAddress).toBe('[REDACTED]');
+        // Note: shippingAddress is NOT redacted - city is needed for logistics
+        expect(result.shippingAddress).toBe('123 Main St, Mumbai, MH 400001');
         expect(result.customerName).toBe('John Doe');
     });
 
@@ -650,17 +651,19 @@ describe('getUserPermissions - Role and Override Merging', () => {
 // ============================================
 
 describe('DEFAULT_ROLES - Role Configurations', () => {
-    it('should have owner role with all permissions', () => {
+    it('should have owner role with global wildcard permission', () => {
         const ownerRole = DEFAULT_ROLES.owner;
 
         expect(ownerRole.displayName).toBe('Owner');
         expect(ownerRole.isBuiltIn).toBe(true);
-        expect(ownerRole.permissions.length).toBe(Object.keys(ALL_PERMISSIONS).length);
+        // Owner uses global wildcard '*' which grants ALL permissions
+        expect(ownerRole.permissions).toContain('*');
+        expect(ownerRole.permissions.length).toBe(1);
 
-        // Spot check some permissions
-        expect(ownerRole.permissions).toContain('orders:view');
-        expect(ownerRole.permissions).toContain('users:delete');
-        expect(ownerRole.permissions).toContain('settings:edit');
+        // Verify wildcard grants all permissions via hasPermission
+        expect(hasPermission(ownerRole.permissions, 'orders:view')).toBe(true);
+        expect(hasPermission(ownerRole.permissions, 'users:delete')).toBe(true);
+        expect(hasPermission(ownerRole.permissions, 'settings:edit')).toBe(true);
     });
 
     it('should have viewer role with only view permissions', () => {

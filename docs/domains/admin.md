@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/admin.js`, `auth.js` |
-| Key Files | `middleware/auth.js`, `middleware/permissions.js`, `utils/permissions.js` |
+| Routes | `server/src/routes/admin.ts`, `auth.ts` |
+| Key Files | `middleware/auth.ts`, `middleware/permissions.ts`, `utils/permissions.ts` |
 | Related | All domains (permission-gated) |
 
 ## Authentication Flow
@@ -30,7 +30,7 @@ GET /auth/me (with Bearer token)
 
 ## Permission System
 
-**Role hierarchy** (from `permissions.js`):
+**Role hierarchy** (from `permissions.ts`):
 
 | Role | Access Level |
 |------|-------------|

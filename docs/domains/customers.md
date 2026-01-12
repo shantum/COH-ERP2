@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/customers.js`, `reports.js` |
-| Key Files | `tierUtils.js` (getCustomerStatsMap, calculateTier) |
+| Routes | `server/src/routes/customers.ts`, `reports.ts` |
+| Key Files | `tierUtils.ts` (getCustomerStatsMap, calculateTier) |
 | Related | Orders (LTV source), Shopify (customer sync) |
 
 ## Tier System
@@ -47,7 +47,7 @@ rtoCount = orders.filter(o =>
 
 ```javascript
 // For displaying customer stats on order grids
-import { getCustomerStatsMap, enrichOrdersWithCustomerStats } from 'tierUtils.js';
+import { getCustomerStatsMap, enrichOrdersWithCustomerStats } from 'tierUtils.ts';
 
 // Option 1: Enrich orders
 const enriched = await enrichOrdersWithCustomerStats(prisma, orders);

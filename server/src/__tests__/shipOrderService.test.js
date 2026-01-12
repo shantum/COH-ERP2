@@ -133,6 +133,8 @@ describe('ShipOrderService', () => {
     describe('shipOrderLines - Line Processing', () => {
         it('should ship lines in packed status', async () => {
             const lineId = 'line-1';
+            // Note: allocatedAt must be set for inventory functions to be called
+            const allocatedAt = new Date();
             const lines = [
                 {
                     id: lineId,
@@ -140,6 +142,7 @@ describe('ShipOrderService', () => {
                     skuId: 'sku-1',
                     qty: 2,
                     lineStatus: 'packed',
+                    allocatedAt, // Required for inventory release
                     order: { id: 'order-1', orderNumber: 'ORD-001', status: 'open' },
                     sku: { id: 'sku-1', skuCode: 'LMD-M-S' },
                 },
@@ -420,6 +423,8 @@ describe('ShipOrderService', () => {
 
     describe('shipOrderLines - Inventory Transactions', () => {
         it('should call releaseReservedInventory for each line', async () => {
+            // Note: allocatedAt must be set for inventory functions to be called
+            const allocatedAt = new Date();
             const lines = [
                 {
                     id: 'line-1',
@@ -427,6 +432,7 @@ describe('ShipOrderService', () => {
                     skuId: 'sku-1',
                     qty: 2,
                     lineStatus: 'packed',
+                    allocatedAt, // Required for inventory release
                     order: { id: 'order-1', orderNumber: 'ORD-001', status: 'open' },
                     sku: { id: 'sku-1', skuCode: 'SKU-1' },
                 },
@@ -436,6 +442,7 @@ describe('ShipOrderService', () => {
                     skuId: 'sku-2',
                     qty: 1,
                     lineStatus: 'packed',
+                    allocatedAt, // Required for inventory release
                     order: { id: 'order-1', orderNumber: 'ORD-001', status: 'open' },
                     sku: { id: 'sku-2', skuCode: 'SKU-2' },
                 },
@@ -459,6 +466,8 @@ describe('ShipOrderService', () => {
         });
 
         it('should call createSaleTransaction for each line', async () => {
+            // Note: allocatedAt must be set for inventory functions to be called
+            const allocatedAt = new Date();
             const lines = [
                 {
                     id: 'line-1',
@@ -466,6 +475,7 @@ describe('ShipOrderService', () => {
                     skuId: 'sku-1',
                     qty: 3,
                     lineStatus: 'packed',
+                    allocatedAt, // Required for inventory transactions
                     order: { id: 'order-1', orderNumber: 'ORD-001', status: 'open' },
                     sku: { id: 'sku-1', skuCode: 'SKU-1' },
                 },
@@ -523,6 +533,8 @@ describe('ShipOrderService', () => {
         });
 
         it('should handle inventory transaction errors', async () => {
+            // Note: allocatedAt must be set for inventory functions to be called
+            const allocatedAt = new Date();
             const lines = [
                 {
                     id: 'line-1',
@@ -530,6 +542,7 @@ describe('ShipOrderService', () => {
                     skuId: 'sku-1',
                     qty: 2,
                     lineStatus: 'packed',
+                    allocatedAt, // Required for inventory transactions
                     order: { id: 'order-1', orderNumber: 'ORD-001', status: 'open' },
                     sku: { id: 'sku-1', skuCode: 'SKU-1' },
                 },

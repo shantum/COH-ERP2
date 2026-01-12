@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/inventory.js` |
-| Key Files | `queryPatterns.js`, `components/inward/` (mode components) |
+| Routes | `server/src/routes/inventory.ts` |
+| Key Files | `queryPatterns.ts`, `components/inward/` (mode components) |
 | Related | Orders (reserved/sales), Production (inward), Returns (RTO inward) |
 
 ## Inward Hub Modes

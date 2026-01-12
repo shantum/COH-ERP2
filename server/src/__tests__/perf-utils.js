@@ -478,6 +478,17 @@ export async function cleanupAllPerfData(prisma) {
 
         console.log(`[PERF]   Deleted ${productResult.count} test products, ${userResult.count} test users`);
 
+        // 9. Clean up test fabric and fabric type
+        const fabricResult = await prisma.fabric.deleteMany({
+            where: { id: 'perf-fabric-1' },
+        }).catch(() => ({ count: 0 }));
+
+        const fabricTypeResult = await prisma.fabricType.deleteMany({
+            where: { name: 'Perf Test Fabric Type' },
+        }).catch(() => ({ count: 0 }));
+
+        console.log(`[PERF]   Deleted ${fabricResult.count} test fabrics, ${fabricTypeResult.count} test fabric types`);
+
     } catch (error) {
         console.error('[PERF] Full cleanup error:', error.message);
     }

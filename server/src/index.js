@@ -53,6 +53,12 @@ import trackingSync from './services/trackingSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
+// tRPC setup
+import * as trpcExpress from '@trpc/server/adapters/express';
+import { appRouter } from './trpc/routers/_app.js';
+import { createContext } from './trpc/index.js';
+import { optionalAuth } from './middleware/auth.js';
+
 const app = express();
 
 // Security middleware
@@ -139,6 +145,16 @@ app.use('/api/repacking', repackingRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/remittance', remittanceRoutes);
 app.use('/api/catalog', catalogRoutes);
+
+// tRPC routes (mounted alongside Express for gradual migration)
+app.use(
+    '/trpc',
+    optionalAuth,
+    trpcExpress.createExpressMiddleware({
+        router: appRouter,
+        createContext,
+    })
+);
 
 // Health check
 app.get('/api/health', (req, res) => {

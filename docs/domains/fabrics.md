@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/fabrics.js` |
-| Key Files | `queryPatterns.js` (calculateFabricBalance, getEffectiveFabricConsumption) |
+| Routes | `server/src/routes/fabrics.ts` |
+| Key Files | `queryPatterns.ts` (calculateFabricBalance, getEffectiveFabricConsumption) |
 | Related | Production (outward), Products (fabricTypeId) |
 
 ## Data Model

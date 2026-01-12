@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/remittance.js` |
-| Key Files | `services/shopify.js` (markOrderAsPaid) |
+| Routes | `server/src/routes/remittance.ts` |
+| Key Files | `services/shopify.ts` (markOrderAsPaid) |
 | Related | Shopify (Transaction API), Orders (COD pending view) |
 
 ## Workflow

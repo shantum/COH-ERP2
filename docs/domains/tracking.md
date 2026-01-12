@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/tracking.js` |
-| Key Files | `services/ithinkLogistics.js` |
+| Routes | `server/src/routes/tracking.ts` |
+| Key Files | `services/ithinkLogistics.ts` |
 | Related | Orders (trackingStatus), Returns (RTO detection) |
 | Docs | `docs/ITHINK_LOGISTICS_API.md` (detailed integration) |
 

@@ -6,11 +6,18 @@
  * 1. Active tab loads immediately
  * 2. Once active tab completes, remaining tabs load sequentially in background
  * 3. Priority order: Open → Shipped → RTO → COD Pending → Cancelled → Archived
+ *
+ * Migration status:
+ * - Order list queries: tRPC (type-safe, auto-cached)
+ * - Inventory balance: tRPC (migrated)
+ * - Summary queries: Axios (pending tRPC procedures)
+ * - Supporting queries: Axios (different API domains)
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi, productsApi, inventoryApi, fabricsApi, productionApi, adminApi, customersApi } from '../services/api';
+import { ordersApi, fabricsApi, productionApi, adminApi, customersApi } from '../services/api';
 import { orderQueryKeys, inventoryQueryKeys } from '../constants/queryKeys';
+import { trpc } from '../services/trpc';
 
 // Poll interval for data refresh (30 seconds)
 const POLL_INTERVAL = 30000;
@@ -37,74 +44,85 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
     // 2. Tab counts populate progressively as background loads complete
     // 3. Switching tabs feels instant since data is pre-loaded
 
-    const openOrdersQuery = useQuery({
-        queryKey: orderQueryKeys.open,
-        queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'open' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false,
-        // Open tab is the default, always fetch it immediately
-    });
+    // tRPC query - type-safe, auto-cached with key [['orders', 'list'], { input: { view: 'open' } }]
+    // Note: Using limit=500 (server max) to ensure all open orders are fetched
+    // The open view sorts by orderDate ASC (FIFO), so without high limit, newest orders are cut off
+    const openOrdersQuery = trpc.orders.list.useQuery(
+        { view: 'open', limit: 500 },
+        {
+            staleTime: STALE_TIME,
+            refetchOnWindowFocus: false,
+            refetchInterval: activeTab === 'open' ? POLL_INTERVAL : false,
+            refetchIntervalInBackground: false,
+            // Open tab is the default, always fetch it immediately
+        }
+    );
 
     // Shipped loads: when tab is active OR after open completes
-    const shippedOrdersQuery = useQuery({
-        queryKey: [...orderQueryKeys.shipped, shippedPage, shippedDays],
-        queryFn: () => ordersApi.getShipped({ page: shippedPage, days: shippedDays }).then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false,
-        enabled: activeTab === 'shipped' || openOrdersQuery.isSuccess,
-    });
+    const shippedOrdersQuery = trpc.orders.list.useQuery(
+        { view: 'shipped', page: shippedPage, days: shippedDays },
+        {
+            staleTime: STALE_TIME,
+            refetchOnWindowFocus: false,
+            refetchInterval: activeTab === 'shipped' ? POLL_INTERVAL : false,
+            refetchIntervalInBackground: false,
+            enabled: activeTab === 'shipped' || openOrdersQuery.isSuccess,
+        }
+    );
 
     // RTO loads: when tab is active OR after shipped completes
-    const rtoOrdersQuery = useQuery({
-        queryKey: orderQueryKeys.rto,
-        queryFn: () => ordersApi.getRto().then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false,
-        enabled: activeTab === 'rto' || shippedOrdersQuery.isSuccess,
-    });
+    const rtoOrdersQuery = trpc.orders.list.useQuery(
+        { view: 'rto' },
+        {
+            staleTime: STALE_TIME,
+            refetchOnWindowFocus: false,
+            refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false,
+            refetchIntervalInBackground: false,
+            enabled: activeTab === 'rto' || shippedOrdersQuery.isSuccess,
+        }
+    );
 
     // COD Pending loads: when tab is active OR after RTO completes
-    const codPendingOrdersQuery = useQuery({
-        queryKey: orderQueryKeys.codPending,
-        queryFn: () => ordersApi.getCodPending().then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false,
-        enabled: activeTab === 'cod-pending' || rtoOrdersQuery.isSuccess,
-    });
+    // Note: Server view name is 'cod_pending' (underscore)
+    const codPendingOrdersQuery = trpc.orders.list.useQuery(
+        { view: 'cod_pending' },
+        {
+            staleTime: STALE_TIME,
+            refetchOnWindowFocus: false,
+            refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false,
+            refetchIntervalInBackground: false,
+            enabled: activeTab === 'cod-pending' || rtoOrdersQuery.isSuccess,
+        }
+    );
 
     // Cancelled loads: when tab is active OR after COD Pending completes
-    const cancelledOrdersQuery = useQuery({
-        queryKey: orderQueryKeys.cancelled,
-        queryFn: () => ordersApi.getCancelled().then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'cancelled' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false,
-        enabled: activeTab === 'cancelled' || codPendingOrdersQuery.isSuccess,
-    });
+    const cancelledOrdersQuery = trpc.orders.list.useQuery(
+        { view: 'cancelled' },
+        {
+            staleTime: STALE_TIME,
+            refetchOnWindowFocus: false,
+            refetchInterval: activeTab === 'cancelled' ? POLL_INTERVAL : false,
+            refetchIntervalInBackground: false,
+            enabled: activeTab === 'cancelled' || codPendingOrdersQuery.isSuccess,
+        }
+    );
 
     // Archived loads last: when tab is active OR after Cancelled completes
-    const archivedOrdersQuery = useQuery({
-        queryKey: [...orderQueryKeys.archived, archivedDays, archivedLimit, archivedSortBy],
-        queryFn: () => ordersApi.getArchived({
+    const archivedOrdersQuery = trpc.orders.list.useQuery(
+        {
+            view: 'archived',
             ...(archivedDays > 0 ? { days: archivedDays } : {}),
             limit: archivedLimit,
-            sortBy: archivedSortBy
-        }).then(r => r.data),
-        staleTime: STALE_TIME,
-        refetchOnWindowFocus: false,
-        refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false,
-        refetchIntervalInBackground: false,
-        enabled: activeTab === 'archived' || cancelledOrdersQuery.isSuccess,
-    });
+            sortBy: archivedSortBy,
+        },
+        {
+            staleTime: STALE_TIME,
+            refetchOnWindowFocus: false,
+            refetchInterval: activeTab === 'archived' ? POLL_INTERVAL : false,
+            refetchIntervalInBackground: false,
+            enabled: activeTab === 'archived' || cancelledOrdersQuery.isSuccess,
+        }
+    );
 
     // Summary queries - load with their respective tabs or in background
     const shippedSummaryQuery = useQuery({
@@ -123,20 +141,45 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
     // Supporting data queries - lazy loaded based on what's needed for active tab
     // allSkus and inventoryBalance are heavy queries only needed for Open tab
-    const allSkusQuery = useQuery({
-        queryKey: inventoryQueryKeys.allSkus,
-        queryFn: () => productsApi.getAllSkus().then(r => r.data),
-        staleTime: 60000, // SKU list doesn't change often
-        enabled: activeTab === 'open', // Only needed for Open tab (to change SKU)
-    });
+    // Migrated to tRPC - fetches all products with variations and SKUs (limit=1000 for comprehensive list)
+    const allSkusQuery = trpc.products.list.useQuery(
+        { limit: 1000 }, // Fetch all products with high limit to get comprehensive SKU list
+        {
+            staleTime: 60000, // SKU list doesn't change often
+            refetchOnWindowFocus: false,
+            enabled: activeTab === 'open', // Only needed for Open tab (to change SKU)
+            // Transform the response to match the expected flat SKU structure
+            select: (data) => {
+                const skus: any[] = [];
+                data.products.forEach((product: any) => {
+                    product.variations?.forEach((variation: any) => {
+                        variation.skus?.forEach((sku: any) => {
+                            skus.push({
+                                ...sku,
+                                variation,
+                                // Keep original structure for compatibility
+                            });
+                        });
+                    });
+                });
+                return skus;
+            }
+        }
+    );
 
-    const inventoryBalanceQuery = useQuery({
-        queryKey: inventoryQueryKeys.balance,
-        // Include custom SKUs so orders with customized lines show correct stock
-        queryFn: () => inventoryApi.getBalance({ includeCustomSkus: 'true' }).then(r => r.data.items || r.data),
-        staleTime: 60000, // Inventory balance doesn't change rapidly (60s cache)
-        enabled: activeTab === 'open', // Only needed for Open tab (stock column)
-    });
+    // tRPC query - type-safe inventory balance for all SKUs
+    // Include custom SKUs so orders with customized lines show correct stock
+    // NOTE: This fetches ~4000+ SKUs (~3MB response). For better performance, consider
+    // fetching only SKU IDs from openOrders and using getBalances() for just those SKUs.
+    // Current 60s cache mitigates repeated fetches but initial load can be slow.
+    const inventoryBalanceQuery = trpc.inventory.getAllBalances.useQuery(
+        { includeCustomSkus: true },
+        {
+            staleTime: 60000, // Inventory balance doesn't change rapidly (60s cache)
+            refetchOnWindowFocus: false,
+            enabled: activeTab === 'open', // Only needed for Open tab (stock column)
+        }
+    );
 
     const fabricStockQuery = useQuery({
         queryKey: inventoryQueryKeys.fabric,
@@ -174,33 +217,37 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         activeTab === 'cancelled' ? cancelledOrdersQuery.isLoading :
         archivedOrdersQuery.isLoading;
 
+    // Extract orders from tRPC response shape: { orders, pagination, view, viewName }
+    const openOrders = openOrdersQuery.data?.orders || [];
+
     // Extract shipped orders and pagination from response
     const shippedData = shippedOrdersQuery.data;
     const shippedOrders = shippedData?.orders || [];
     const shippedPagination = shippedData?.pagination || { total: 0, page: 1, totalPages: 1 };
 
     // Extract archived orders and total count from response
-    // Handles both legacy (totalCount) and unified (pagination.total) response shapes
     const archivedData = archivedOrdersQuery.data;
     const archivedOrders = archivedData?.orders || [];
-    const archivedTotalCount = archivedData?.totalCount ?? archivedData?.pagination?.total ?? 0;
+    const archivedTotalCount = archivedData?.pagination?.total ?? 0;
 
     // Extract RTO orders from response
-    // Handles both legacy (total) and unified (pagination.total) response shapes
     const rtoData = rtoOrdersQuery.data;
     const rtoOrders = rtoData?.orders || [];
-    const rtoTotalCount = rtoData?.total ?? rtoData?.pagination?.total ?? 0;
+    const rtoTotalCount = rtoData?.pagination?.total ?? 0;
 
     // Extract COD pending orders from response
-    // Handles both legacy (total, totalPendingAmount) and unified (pagination.total) response shapes
     const codPendingData = codPendingOrdersQuery.data;
     const codPendingOrders = codPendingData?.orders || [];
-    const codPendingTotalCount = codPendingData?.total ?? codPendingData?.pagination?.total ?? 0;
-    const codPendingTotalAmount = codPendingData?.totalPendingAmount ?? 0;
+    const codPendingTotalCount = codPendingData?.pagination?.total ?? 0;
+    // Note: totalPendingAmount not available in tRPC response - needs server-side addition
+    const codPendingTotalAmount = 0;
+
+    // Extract cancelled orders from response
+    const cancelledOrders = cancelledOrdersQuery.data?.orders || [];
 
     return {
-        // Order data
-        openOrders: openOrdersQuery.data,
+        // Order data (extracted from tRPC response shape)
+        openOrders,
         shippedOrders,
         shippedPagination,
         rtoOrders,
@@ -208,7 +255,7 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         codPendingOrders,
         codPendingTotalCount,
         codPendingTotalAmount,
-        cancelledOrders: cancelledOrdersQuery.data,
+        cancelledOrders,
         archivedOrders,
         archivedTotalCount,
 
@@ -220,7 +267,7 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
         // Supporting data
         allSkus: allSkusQuery.data,
-        inventoryBalance: inventoryBalanceQuery.data,
+        inventoryBalance: inventoryBalanceQuery.data?.items,
         fabricStock: fabricStockQuery.data,
         channels: channelsQuery.data,
         lockedDates: lockedDatesQuery.data,

@@ -29,73 +29,73 @@
 
 ### Orders
 - **Scope**: Order lifecycle, fulfillment workflow, unified views API
-- **Key Files**: `routes/orders/`, `orderViews.js`, `shipOrderService.js`
+- **Key Files**: `routes/orders/`, `orderViews.ts`, `shipOrderService.ts`
 - **Touches**: Inventory (reserved/sales), Shopify (cache), Customers (LTV)
 - **[Read →](domains/orders.md)**
 
 ### Shipping
 - **Scope**: Unified shipping via ShipOrderService
-- **Key Files**: `services/shipOrderService.js`
+- **Key Files**: `services/shipOrderService.ts`
 - **Touches**: Orders (status), Inventory (outward)
 - **[Read →](domains/shipping.md)**
 
 ### Inventory
 - **Scope**: SKU ledger, transactions, balances, mode-based Inward Hub
-- **Key Files**: `routes/inventory.js`, `components/inward/` (10 components)
+- **Key Files**: `routes/inventory.ts`, `components/inward/` (10 components)
 - **Touches**: Orders (reserved/sales), Production (inward), Returns (RTO)
 - **[Read →](domains/inventory.md)**
 
 ### Returns & RTO
 - **Scope**: Customer returns + carrier RTOs (two distinct workflows)
-- **Key Files**: `routes/returns.js`, `routes/repacking.js`
+- **Key Files**: `routes/returns.ts`, `routes/repacking.ts`
 - **Touches**: Inventory (inward/write-off), Customers (RTO risk)
 - **[Read →](domains/returns.md)**
 
 ### Shopify
 - **Scope**: Sync, webhooks, cache management, COD payment sync
-- **Key Files**: `routes/shopify.js`, `services/shopify.js`, `shopifyOrderProcessor.js`
+- **Key Files**: `routes/shopify.ts`, `services/shopify.ts`, `shopifyOrderProcessor.ts`
 - **Touches**: Orders (synced data), Remittance (COD sync)
 - **[Read →](domains/shopify.md)**
 
 ### Remittance
 - **Scope**: COD payment reconciliation, Shopify financial sync
-- **Key Files**: `routes/remittance.js`
+- **Key Files**: `routes/remittance.ts`
 - **Touches**: Shopify (Transaction API), Orders (COD pending)
 - **[Read →](domains/remittance.md)**
 
 ### Production
 - **Scope**: Batch scheduling and completion
-- **Key Files**: `routes/production.js`
+- **Key Files**: `routes/production.ts`
 - **Touches**: Inventory (inward), Fabrics (outward)
 - **[Read →](domains/production.md)**
 
 ### Tracking
 - **Scope**: Shipment tracking via iThink Logistics
-- **Key Files**: `routes/tracking.js`, `services/ithinkLogistics.js`
+- **Key Files**: `routes/tracking.ts`, `services/ithinkLogistics.ts`
 - **Touches**: Orders (trackingStatus), Returns (RTO detection)
 - **[Read →](domains/tracking.md)** | **[Deep dive: ITHINK_LOGISTICS_API.md](ITHINK_LOGISTICS_API.md)**
 
 ### Fabrics
 - **Scope**: Fabric inventory, cost inheritance, reorder analysis
-- **Key Files**: `routes/fabrics.js`, `queryPatterns.js`
+- **Key Files**: `routes/fabrics.ts`, `queryPatterns.ts`
 - **Touches**: Production (outward), Products (fabricTypeId)
 - **[Read →](domains/fabrics.md)**
 
 ### Catalog
 - **Scope**: Combined product + inventory view with costing
-- **Key Files**: `routes/catalog.js`, `routes/products.js`
+- **Key Files**: `routes/catalog.ts`, `routes/products.ts`
 - **Touches**: Inventory (balances), Fabrics (cost), Products
 - **[Read →](domains/catalog.md)**
 
 ### Customers
 - **Scope**: Tier calculation, LTV tracking, RTO risk
-- **Key Files**: `routes/customers.js`, `tierUtils.js`
+- **Key Files**: `routes/customers.ts`, `tierUtils.ts`
 - **Touches**: Orders (LTV source), Shopify (sync)
 - **[Read →](domains/customers.md)**
 
 ### Admin
 - **Scope**: Auth, permissions, settings, operational tools
-- **Key Files**: `routes/admin.js`, `routes/auth.js`, `utils/permissions.js`
+- **Key Files**: `routes/admin.ts`, `routes/auth.ts`, `utils/permissions.ts`
 - **Touches**: All domains (permission-gated)
 - **[Read →](domains/admin.md)** | **[Deep dive: PERMISSIONS_PLAN.md](PERMISSIONS_PLAN.md)**
 

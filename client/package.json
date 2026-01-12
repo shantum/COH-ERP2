@@ -10,7 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@coh/shared": "workspace:*",
     "@tanstack/react-query": "^5.90.16",
+    "@trpc/client": "^11.8.1",
+    "@trpc/react-query": "^11.8.1",
     "ag-grid-community": "^35.0.0",
     "ag-grid-react": "^35.0.0",
     "axios": "^1.13.2",
@@ -18,7 +21,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^6.30.2",
-    "recharts": "^3.6.0"
+    "recharts": "^3.6.0",
+    "superjson": "^2.2.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

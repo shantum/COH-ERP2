@@ -153,9 +153,10 @@ export default function Orders() {
 
     // Handler for OrdersGrid which passes orderId (not full order)
     const handleViewOrderById = useCallback((orderId: string) => {
-        const order = openOrders?.find((o: Order) => o.id === orderId);
+        // openOrders is EnrichedOrder[] from tRPC - cast through unknown for type compatibility
+        const order = openOrders?.find((o: any) => o.id === orderId);
         if (order) {
-            openUnifiedModal(order, 'view');
+            openUnifiedModal(order as unknown as Order, 'view');
         }
     }, [openOrders, openUnifiedModal]);
 
@@ -413,7 +414,7 @@ export default function Orders() {
 
     // Optimistic updates handle UI state instantly - no need for loading tracking
     const handleAllocate = useCallback(
-        (lineId: string) => mutations.allocate.mutate(lineId),
+        (lineId: string) => mutations.allocate.mutate({ lineIds: [lineId] }),
         [mutations.allocate]
     );
 
@@ -1049,8 +1050,9 @@ export default function Orders() {
                     onShipFormChange={setShipForm}
                     onShip={() => mutations.ship.mutate({ id: pendingShipOrder.id, data: shipForm })}
                     onShipLines={(lineIds) => mutations.shipLines.mutate({
-                        id: pendingShipOrder.id,
-                        data: { lineIds, awbNumber: shipForm.awbNumber, courier: shipForm.courier }
+                        lineIds,
+                        awbNumber: shipForm.awbNumber,
+                        courier: shipForm.courier
                     })}
                     onClose={() => {
                         setPendingShipOrder(null);

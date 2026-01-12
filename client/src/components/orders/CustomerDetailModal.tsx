@@ -6,7 +6,6 @@
  */
 
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import {
     X, Crown, Medal, Award,
     Mail, Phone, MessageCircle, MapPin,
@@ -16,7 +15,7 @@ import {
     RotateCcw, Truck,
     Heart, AlertCircle, CheckCircle2, XCircle
 } from 'lucide-react';
-import { customersApi } from '../../services/api';
+import { trpc } from '../../services/trpc';
 
 // ============================================================================
 // TYPES
@@ -690,12 +689,11 @@ export function CustomerDetailModal({
 }: CustomerDetailModalProps) {
     const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
 
-    // Fetch customer data if customerId is provided and no customer object
-    const { data: fetchedCustomer, isLoading: fetchLoading } = useQuery({
-        queryKey: ['customer', customerId],
-        queryFn: () => customersApi.getById(customerId!).then(r => r.data),
-        enabled: !!customerId && !providedCustomer,
-    });
+    // Fetch customer data if customerId is provided and no customer object (using tRPC)
+    const { data: fetchedCustomer, isLoading: fetchLoading } = trpc.customers.get.useQuery(
+        { id: customerId! },
+        { enabled: !!customerId && !providedCustomer }
+    );
 
     // Use provided customer or fetched customer
     const customer = providedCustomer || fetchedCustomer;

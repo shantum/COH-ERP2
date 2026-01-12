@@ -6,8 +6,8 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/production.js` |
-| Key Files | `queryPatterns.js` (getEffectiveFabricConsumption) |
+| Routes | `server/src/routes/production.ts` |
+| Key Files | `queryPatterns.ts` (getEffectiveFabricConsumption) |
 | Related | Inventory (inward), Fabrics (outward) |
 
 ## Batch Status Flow
