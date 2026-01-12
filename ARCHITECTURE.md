@@ -164,6 +164,24 @@ Single endpoint `GET /orders?view=<name>` with config-driven architecture:
 
 ---
 
+## Deployment
+
+### Runtime
+- **No build step**: Server runs TypeScript directly via `tsx` (not compiled)
+- **Why tsx in production**: `index.js` imports `.ts` files with `.js` extensions; `tsx` resolves them transparently
+- **Scripts**: `dev` = `tsx watch`, `start` = `tsx` (no `node dist/`)
+
+### Package Management
+- **Local dev**: pnpm workspaces (`workspace:*` protocol)
+- **Production/CI**: `file:` protocol for `@coh/shared` in server/package.json (npm-compatible)
+- **Shared package**: Must build before server starts (`npm run build` in shared/)
+
+### Environment Variables
+Required: `DATABASE_URL`, `JWT_SECRET`
+Optional: `PORT` (defaults 3001), `NODE_ENV`
+
+---
+
 ## Key Files
 
 | File | Purpose |

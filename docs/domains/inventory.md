@@ -7,12 +7,31 @@
 | Aspect | Value |
 |--------|-------|
 | Routes | `server/src/routes/inventory.ts` |
-| Key Files | `queryPatterns.ts`, `components/inward/` (mode components) |
+| Page | `pages/InwardHub.tsx` (67 lines, mode orchestrator only) |
+| Components | `components/inward/*.tsx` (10 modular components) |
 | Related | Orders (reserved/sales), Production (inward), Returns (RTO inward) |
 
-## Inward Hub Modes
+## InwardHub Architecture
 
-Users must select a mode before scanning. Each mode validates scans against its pending queue.
+Refactored from 2000+ line monolith to modular components. Each mode is self-contained with own scan handling, queue management, transaction creation, and UI state.
+
+**Layout**: `ModeSelector` → `InwardModeHeader` + `[Mode]Inward` + `PendingQueuePanel` + `RecentInwardsTable`
+
+**Shared pattern across all modes**: Scanner input → lookup → queue → process
+
+| Component | Purpose |
+|-----------|---------|
+| `ModeSelector.tsx` | Mode selection UI (production, rto, returns, repacking, adjustments) |
+| `InwardModeHeader.tsx` | Header with mode info and context |
+| `PendingQueuePanel.tsx` | Pending items queue for current mode |
+| `RecentInwardsTable.tsx` | Recent transactions table filtered by mode |
+| `ProductionInward.tsx` | Production batch completion workflow |
+| `RtoInward.tsx` | RTO processing with condition handling (good/damaged) |
+| `ReturnsInward.tsx` | Customer returns processing |
+| `RepackingInward.tsx` | Repacking workflow from QC queue |
+| `AdjustmentsInward.tsx` | Manual stock adjustments (any SKU) |
+
+## Inward Hub Modes
 
 | Mode | Source | Validation | Action |
 |------|--------|------------|--------|
@@ -21,8 +40,6 @@ Users must select a mode before scanning. Each mode validates scans against its 
 | RTO | `rto` | Must match RTO order line | Inward (good) or write-off |
 | Repacking | `repacking` | Must match QC queue item | Inward (ready) or write-off |
 | Adjustments | `adjustments` | Any valid SKU | Manual stock adjustment |
-
-**Components**: `ModeSelector` → `InwardModeHeader` + mode component + `PendingQueuePanel` + `RecentInwardsTable`
 
 ## Balance Formula
 

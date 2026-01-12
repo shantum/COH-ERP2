@@ -169,6 +169,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             // Only update that specific order
             const newOrders = [...old.orders];
             const order = newOrders[orderIndex];
+            if (!order.orderLines) return old;
             const newOrderLines = order.orderLines.map((line: any) =>
                 line.id === lineId ? { ...line, lineStatus: newStatus } : line
             );
@@ -250,6 +251,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             // Only update that specific order
             const newOrders = [...old.orders];
             const order = newOrders[orderIndex];
+            if (!order.orderLines) return old;
             const newOrderLines = order.orderLines.map((line: any) =>
                 line.id === lineId ? { ...line, lineStatus: newStatus } : line
             );

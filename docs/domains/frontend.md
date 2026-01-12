@@ -91,7 +91,52 @@ const invMap = getInventoryMap(inventoryBalance);
 const stock = invMap.get(line.skuId) ?? 0;  // O(1) vs O(n) find()
 ```
 
-**Optimistic updates** (`useOrdersMutations.ts`):
+**Optimistic updates** - see dedicated section below.
+
+## Optimistic Updates
+
+Patterns for responsive UI without full refetches.
+
+### Selective Object Updates (Preserve Grid State)
+
+```typescript
+// BAD: Replaces entire array, loses checkbox/selection state
+queryClient.setQueryData(['orders', 'open'], (old) => ({
+  ...old,
+  orders: old.orders.map(o => o.id === orderId ? {...o, status: 'allocated'} : o)
+}));
+
+// GOOD: Only updates specific object reference, preserves grid state
+queryClient.setQueryData(['orders', 'open'], (old) => {
+  const orderIndex = old.orders.findIndex(o => o.id === orderId);
+  if (orderIndex === -1) return old;
+  const newOrders = [...old.orders];
+  newOrders[orderIndex] = { ...newOrders[orderIndex], status: 'allocated' };
+  return { ...old, orders: newOrders };
+});
+```
+
+### Filtered Inventory Invalidation
+
+Don't refetch all balances - only invalidate affected SKUs:
+
+```typescript
+// BAD: Refetches entire inventory
+trpcUtils.inventory.getAllBalances.invalidate();
+
+// GOOD: Extract affected SKUs, refetch only those
+const affectedSkuIds = order.lines.map(l => l.skuId);
+const updatedBalances = await trpc.inventory.getBalances.query({ skuIds: affectedSkuIds });
+queryClient.setQueryData(['inventory', 'balances'], (old) => {
+  // Merge only the changed balances
+  return { ...old, ...updatedBalances };
+});
+```
+
+### Skip Stale Updates Pattern
+
+Prevent optimistic cache from being overwritten by slow responses:
+
 ```typescript
 onMutate: () => ({ skipped: false }),
 onSuccess: (_, __, ctx) => {
@@ -99,6 +144,15 @@ onSuccess: (_, __, ctx) => {
   invalidateTab('open');
 }
 ```
+
+### Field Name Consistency
+
+Always check tRPC router types for correct field names:
+
+| Domain | Correct | Wrong |
+|--------|---------|-------|
+| Inventory | `totalReserved` | `reservedBalance` |
+| Orders | `trackingStatus` | `status` (different meaning) |
 
 ## Custom Hooks
 
@@ -154,7 +208,9 @@ trpcUtils.orders.list.invalidate({ view: 'open', limit: 500 });
 3. **Tab counts delayed**: Populate progressively as loading completes
 4. **Map caching required**: Use `getInventoryMap()`/`getFabricMap()` for loops
 5. **Optimistic context pattern**: Use `skipped` for conditional invalidation
-6. **AG-Grid shared**: Use `agGridHelpers.ts` - don't recreate formatters
-7. **Column sync**: Managers can sync preferences for all users via server
-8. **Pinned columns**: Set `pinned: 'right'` to keep Actions visible after resize
-9. **tRPC errors**: Different shape than Axios - use `err.message` not `err.response?.data?.error`
+6. **Selective cache updates**: Use index-based updates, not `.map()` - preserves AG-Grid checkbox state
+7. **Inventory field names**: Use `totalReserved` not `reservedBalance` (check tRPC types)
+8. **AG-Grid shared**: Use `agGridHelpers.ts` - don't recreate formatters
+9. **Column sync**: Managers can sync preferences for all users via server
+10. **Pinned columns**: Set `pinned: 'right'` to keep Actions visible after resize
+11. **tRPC errors**: Different shape than Axios - use `err.message` not `err.response?.data?.error`
