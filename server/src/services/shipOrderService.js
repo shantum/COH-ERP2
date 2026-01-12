@@ -204,7 +204,8 @@ export async function shipOrderLines(tx, options) {
     for (const line of linesToShip) {
         try {
             // Release reserved inventory and create sale transaction
-            if (!skipInventory) {
+            // Only deduct inventory if the line was properly allocated
+            if (!skipInventory && line.allocatedAt) {
                 await releaseReservedInventory(tx, line.id);
                 await createSaleTransaction(tx, {
                     skuId: line.skuId,

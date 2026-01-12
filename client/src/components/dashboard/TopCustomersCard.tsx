@@ -18,6 +18,7 @@ interface CustomerData {
     name: string;
     email?: string;
     phone?: string;
+    city?: string;
     tier?: string;
     units: number;
     revenue: number;
@@ -127,6 +128,7 @@ export function TopCustomersCard() {
                                     {getTierBadge(customer.tier)}
                                 </div>
                                 <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5">
+                                    {customer.city && <span className="text-gray-600">{customer.city} • </span>}
                                     {customer.orderCount} orders • {customer.units} units
                                 </div>
                                 {/* Top Products */}

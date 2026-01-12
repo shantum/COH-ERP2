@@ -281,6 +281,7 @@ router.get('/top-customers', async (req, res) => {
                         customerName: true,
                         customerEmail: true,
                         customerPhone: true,
+                        shippingAddress: true,
                         customer: {
                             select: { tier: true },
                         },
@@ -305,11 +306,21 @@ router.get('/top-customers', async (req, res) => {
             if (!customerId) continue;
 
             if (!customerStats[customerId]) {
+                // Parse city from shipping address JSON
+                let city = null;
+                try {
+                    const addr = JSON.parse(line.order.shippingAddress || '{}');
+                    city = addr.city || null;
+                } catch {
+                    city = null;
+                }
+
                 customerStats[customerId] = {
                     id: customerId,
                     name: line.order.customerName || 'Unknown',
                     email: line.order.customerEmail,
                     phone: line.order.customerPhone,
+                    city,
                     tier: line.order.customer?.tier || null,
                     units: 0,
                     revenue: 0,
