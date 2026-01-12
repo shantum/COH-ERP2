@@ -202,9 +202,12 @@ export function CodPendingGrid({
             ),
         },
         {
-            field: 'totalAmount',
+            colId: 'totalAmount',
             headerName: 'COD Amount',
             width: 100,
+            valueGetter: (params) =>
+                // Prefer shopifyCache.totalPrice (generated column), fallback to totalAmount
+                params.data?.shopifyCache?.totalPrice ?? params.data?.totalAmount ?? 0,
             valueFormatter: (params: ValueFormatterParams) =>
                 params.value ? `₹${Number(params.value).toLocaleString()}` : '-',
             cellClass: 'font-medium text-amber-700',

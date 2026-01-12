@@ -328,7 +328,36 @@ import {
 export async function enrichOrdersForView(prisma, orders, enrichments = []) {
     if (!orders || orders.length === 0) return orders;
 
-    let enriched = orders;
+    console.log('[enrichOrdersForView] Processing', orders.length, 'orders');
+
+    // Always calculate totalAmount from orderLines if null (fallback for unmigrated data)
+    let enriched = orders.map((order, idx) => {
+        if (order.totalAmount != null) return order;
+
+        // Calculate from orderLines
+        const linesTotal = order.orderLines?.reduce((sum, line) => {
+            const lineTotal = (line.unitPrice || 0) * (line.qty || 1);
+            return sum + lineTotal;
+        }, 0) || 0;
+
+        // Debug first order
+        if (idx === 0) {
+            console.log('[enrichOrdersForView] Order:', order.orderNumber,
+                'db totalAmount:', order.totalAmount,
+                'lines:', order.orderLines?.length,
+                'linesTotal:', linesTotal);
+        }
+
+        // Fallback to shopifyCache rawData if no line prices
+        if (linesTotal === 0 && order.shopifyCache?.rawData) {
+            const rawData = typeof order.shopifyCache.rawData === 'string'
+                ? JSON.parse(order.shopifyCache.rawData)
+                : order.shopifyCache.rawData;
+            return { ...order, totalAmount: parseFloat(rawData?.total_price) || null };
+        }
+
+        return { ...order, totalAmount: linesTotal > 0 ? linesTotal : null };
+    });
 
     // Customer stats (common to most views)
     if (enrichments.includes('customerStats')) {
@@ -499,6 +528,11 @@ export const ORDER_UNIFIED_SELECT = {
             fulfillmentStatus: true,
             financialStatus: true,
             rawData: true, // For tracking extraction
+            // Generated columns (auto-populated from rawData by PostgreSQL)
+            totalPrice: true,
+            subtotalPrice: true,
+            totalTax: true,
+            totalDiscounts: true,
         },
     },
 };

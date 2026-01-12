@@ -968,6 +968,18 @@ model ShopifyOrderCache {
   shippingState     String?
   shippingCountry   String?
 
+  // ============================================
+  // GENERATED COLUMNS (auto-extracted from rawData by PostgreSQL)
+  // These are read-only and populated automatically - no backfill needed!
+  // NOTE: Keep minimal to conserve database disk space
+  // ============================================
+
+  // Order amounts (essential for order display)
+  totalPrice           Float?    // rawData.total_price
+  subtotalPrice        Float?    // rawData.subtotal_price
+  totalTax             Float?    // rawData.total_tax
+  totalDiscounts       Float?    // rawData.total_discounts
+
   // Metadata
   lastWebhookAt     DateTime  @default(now())
   webhookTopic      String?   // orders/create, orders/updated, etc.

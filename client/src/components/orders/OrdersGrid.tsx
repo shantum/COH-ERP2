@@ -708,8 +708,13 @@ export function OrdersGrid({
                 colId: 'orderValue',
                 headerName: getHeaderName('orderValue'),
                 width: 80,
-                valueGetter: (params: ValueGetterParams) =>
-                    params.data?.isFirstLine ? params.data.order?.totalAmount || 0 : null,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    // Prefer shopifyCache.totalPrice (generated column), fallback to Order.totalAmount
+                    return params.data.order?.shopifyCache?.totalPrice
+                        ?? params.data.order?.totalAmount
+                        ?? 0;
+                },
                 valueFormatter: (params: ValueFormatterParams) => {
                     if (!params.data?.isFirstLine || params.value === null) return '';
                     return `₹${Math.round(params.value).toLocaleString('en-IN')}`;

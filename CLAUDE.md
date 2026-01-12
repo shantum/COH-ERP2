@@ -53,24 +53,30 @@ npm run db:push
 
 Defines which system owns each field and where data lives. Critical for understanding data flow.
 
-| Field | Owner | Location | Notes |
-|-------|-------|----------|-------|
-| `discountCodes` | Shopify | ShopifyOrderCache | Read-only from Shopify, comma-separated |
-| `customerNotes` | Shopify | ShopifyOrderCache | Shopify order.note field |
-| `tags` | Shopify | ShopifyOrderCache | Comma-separated tags from Shopify |
-| `financialStatus` | Shopify | ShopifyOrderCache | paid/pending/refunded/etc |
-| `fulfillmentStatus` | Shopify | ShopifyOrderCache | unfulfilled/partial/fulfilled/null |
-| `paymentMethod` | ERP | Order | COD/Prepaid, editable in ERP |
-| `awbNumber` | ERP | Order | Tracking number assigned by ERP |
-| `courier` | ERP | Order | Shipping provider (iThink, etc) |
-| `trackingStatus` | ERP | Order | From iThink Logistics API |
-| `status` | ERP | Order | open/allocated/picked/packed/shipped/delivered |
-| `shippedAt` | Both | Order & Cache | ERP controls, synced to Shopify |
-| `deliveredAt` | Both | Order & Cache | Set by ERP, may sync from Shopify fulfillment |
+| Field | Owner | Location | Type | Notes |
+|-------|-------|----------|------|-------|
+| `discountCodes` | Shopify | ShopifyOrderCache.rawData | JSON | Read-only from Shopify, comma-separated |
+| `customerNotes` | Shopify | ShopifyOrderCache.rawData | JSON | Shopify order.note field |
+| `tags` | Shopify | ShopifyOrderCache.rawData | JSON | Comma-separated tags from Shopify |
+| `financialStatus` | Shopify | ShopifyOrderCache.rawData | JSON | paid/pending/refunded/etc |
+| `fulfillmentStatus` | Shopify | ShopifyOrderCache.rawData | JSON | unfulfilled/partial/fulfilled/null |
+| `totalPrice` | Shopify | ShopifyOrderCache (generated) | Extracted | Auto-extracted from rawData.total_price |
+| `subtotalPrice` | Shopify | ShopifyOrderCache (generated) | Extracted | Auto-extracted from rawData.subtotal_price |
+| `totalTax` | Shopify | ShopifyOrderCache (generated) | Extracted | Auto-extracted from rawData.total_tax |
+| `totalDiscounts` | Shopify | ShopifyOrderCache (generated) | Extracted | Auto-extracted from rawData.total_discounts |
+| `paymentMethod` | ERP | Order | Direct | COD/Prepaid, editable in ERP |
+| `awbNumber` | ERP | Order | Direct | Tracking number assigned by ERP |
+| `courier` | ERP | Order | Direct | Shipping provider (iThink, etc) |
+| `trackingStatus` | ERP | Order | Direct | From iThink Logistics API |
+| `status` | ERP | Order | Direct | open/allocated/picked/packed/shipped/delivered |
+| `shippedAt` | Both | Order & Cache | Both | ERP controls, synced to Shopify |
+| `deliveredAt` | Both | Order & Cache | Both | Set by ERP, may sync from Shopify fulfillment |
 
 **Access pattern**: Query `Order` with `include: { shopifyCache: true }` to get both ERP and Shopify fields.
 
-**Backfill endpoint**: `POST /api/shopify/sync/backfill` with `{ fields: ['all'] }` to populate missing fields from cache.
+**Generated columns**: Use PostgreSQL `GENERATED ALWAYS AS ... STORED` to auto-extract Shopify JSON fields. No backfills needed - computed on insert/update. Schema: `server/prisma/schema.prisma`, migration: `server/prisma/migrations/20260112_shopify_cache_generated_columns/`
+
+**Frontend fallback**: Use nullish coalescing for graceful degradation: `shopifyCache.totalPrice ?? order.totalAmount ?? 0`
 
 ## Shipping (Unified Service)
 
@@ -134,6 +140,7 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 28. **Migration-ship**: Use `POST /fulfillment/:id/migration-ship` for onboarding orders (admin only, skips inventory)
 29. **RTO orders excluded from LTV**: Customer tier upgrades exclude RTO (returned) orders. Use `OR[trackingStatus=null OR NOT IN rto_*]` not just `!=null` because unshipped orders must count
 30. **Batch update limits**: Updating 5000+ customers at once hits PostgreSQL bind variable limits; use `chunkProcess()` helper in batches of 5000
+31. **Generated columns (PostgreSQL)**: Use `GENERATED ALWAYS AS (expression) STORED` to auto-extract JSON fields. Prisma `db push` creates regular columns, so run raw SQL migration AFTER to convert. Pattern: Drop column, recreate as generated (can't ALTER existing). No backfills needed - data populates instantly from `rawData`. Example: `ALTER TABLE "ShopifyOrderCache" ADD COLUMN "totalPrice" TEXT GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'total_price')) STORED;` Then add nullable field to Prisma schema. Trade-off: Stores computed values, increases storage on limited plans.
 
 ## Environment
 
