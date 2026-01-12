@@ -397,8 +397,8 @@ export function CodPendingGrid({
                     theme={compactTheme}
                     getRowStyle={getRowStyle}
                     animateRows={true}
-                    onColumnMoved={handleColumnMoved}
-                    onColumnResized={handleColumnResized}
+                    onColumnMoved={onColumnMoved}
+                    onColumnResized={onColumnResized}
                     maintainColumnOrder={true}
                 />
             </div>

@@ -701,7 +701,7 @@ export default function InwardHub() {
 
     // State
     const [searchInput, setSearchInput] = useState('');
-    const [isSearching, setIsSearching] = useState(false);
+    const [_isSearching, setIsSearching] = useState(false);
     const [scanResult, setScanResult] = useState<ScanLookupResult | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -1112,33 +1112,6 @@ export default function InwardHub() {
         if (e.key === 'Enter') {
             e.preventDefault();
             handleInstantInward();
-        }
-    };
-
-    // Legacy search for queue panel item selection (shows details)
-    const handleSearch = async () => {
-        if (!searchInput.trim()) return;
-
-        setIsSearching(true);
-        setScanError(null);
-        setScanResult(null);
-
-        try {
-            const res = await inventoryApi.scanLookup(searchInput.trim());
-            setScanResult(res.data);
-            setQuantity(1);
-            setSelectedCondition('unused');
-            setQcDecision('ready');
-            setWriteOffReason('defective');
-            setAdjustmentReason('adjustment');
-            setNotes('');
-            setCustomConfirmed(false);
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
-        } finally {
-            setIsSearching(false);
-            setSearchInput('');
-            inputRef.current?.focus();
         }
     };
 

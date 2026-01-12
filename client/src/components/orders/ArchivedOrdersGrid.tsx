@@ -120,7 +120,7 @@ export function ArchivedOrdersGrid({
     // Use shared grid state hook with server sync
     const {
         visibleColumns,
-        columnOrder,
+        columnOrder: _columnOrder,
         columnWidths,
         handleToggleColumn,
         handleResetAll,
@@ -272,7 +272,7 @@ export function ArchivedOrdersGrid({
                     colId: 'totalAmount',
                     headerName: 'Total',
                     width: 75,
-                    valueGetter: (params) =>
+                    valueGetter: (params: { data?: { shopifyCache?: { totalPrice?: number }; totalAmount?: number } }) =>
                         // Prefer shopifyCache.totalPrice (generated column), fallback to totalAmount
                         params.data?.shopifyCache?.totalPrice ?? params.data?.totalAmount ?? 0,
                     valueFormatter: (params: ValueFormatterParams) =>

@@ -383,8 +383,8 @@ export function CancelledOrdersGrid({
                     defaultColDef={defaultColDef}
                     theme={compactTheme}
                     animateRows={true}
-                    onColumnMoved={handleColumnMoved}
-                    onColumnResized={handleColumnResized}
+                    onColumnMoved={onColumnMoved}
+                    onColumnResized={onColumnResized}
                     maintainColumnOrder={true}
                 />
             </div>
