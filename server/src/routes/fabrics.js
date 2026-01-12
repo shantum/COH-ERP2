@@ -132,20 +132,20 @@ router.put('/types/:id', authenticateToken, requirePermission('fabrics:edit:type
 router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
     const { search, status, fabricTypeId, view } = req.query;
 
-        // If viewing by type, return fabric types with aggregated data
-        if (view === 'type') {
-            const types = await req.prisma.fabricType.findMany({
-                where: search ? { name: { contains: search, mode: 'insensitive' } } : {},
-                include: {
-                    fabrics: { where: { isActive: true } },
-                },
-                orderBy: { name: 'asc' },
-            });
+    // Date ranges for consumption and sales calculations (shared by both views)
+    const now = new Date();
+    const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
+    const thirtyDaysAgo = new Date(now); thirtyDaysAgo.setDate(now.getDate() - 30);
 
-            // Date ranges for consumption calculations
-            const now = new Date();
-            const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
-            const thirtyDaysAgo = new Date(now); thirtyDaysAgo.setDate(now.getDate() - 30);
+    // If viewing by type, return fabric types with aggregated data
+    if (view === 'type') {
+        const types = await req.prisma.fabricType.findMany({
+            where: search ? { name: { contains: search, mode: 'insensitive' } } : {},
+            include: {
+                fabrics: { where: { isActive: true } },
+            },
+            orderBy: { name: 'asc' },
+        });
 
             // Build items with aggregated data
             const items = await Promise.all(
@@ -214,40 +214,47 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                             }),
                         ]);
 
-                        // Calculate sales (order line quantities) for products with this fabric type
+                        // Calculate sales value (qty * unitPrice) for products with this fabric type
                         // Excludes cancelled orders and RTO orders
-                        const [sales7dResult, sales30dResult] = await Promise.all([
-                            req.prisma.orderLine.aggregate({
+                        // Using raw query for multiplication since Prisma aggregate doesn't support computed fields
+                        const salesBaseWhere = {
+                            sku: {
+                                variation: {
+                                    product: { fabricTypeId: type.id },
+                                },
+                            },
+                            order: {
+                                status: { not: 'cancelled' },
+                                trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                            },
+                        };
+
+                        const [sales7dLines, sales30dLines] = await Promise.all([
+                            req.prisma.orderLine.findMany({
                                 where: {
-                                    sku: {
-                                        variation: {
-                                            product: { fabricTypeId: type.id },
-                                        },
-                                    },
+                                    ...salesBaseWhere,
                                     order: {
+                                        ...salesBaseWhere.order,
                                         orderDate: { gte: sevenDaysAgo },
-                                        status: { not: 'cancelled' },
-                                        trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
                                     },
                                 },
-                                _sum: { qty: true },
+                                select: { qty: true, unitPrice: true },
                             }),
-                            req.prisma.orderLine.aggregate({
+                            req.prisma.orderLine.findMany({
                                 where: {
-                                    sku: {
-                                        variation: {
-                                            product: { fabricTypeId: type.id },
-                                        },
-                                    },
+                                    ...salesBaseWhere,
                                     order: {
+                                        ...salesBaseWhere.order,
                                         orderDate: { gte: thirtyDaysAgo },
-                                        status: { not: 'cancelled' },
-                                        trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
                                     },
                                 },
-                                _sum: { qty: true },
+                                select: { qty: true, unitPrice: true },
                             }),
                         ]);
+
+                        // Calculate total sales value
+                        const sales7d = sales7dLines.reduce((sum, line) => sum + (line.qty * line.unitPrice), 0);
+                        const sales30d = sales30dLines.reduce((sum, line) => sum + (line.qty * line.unitPrice), 0);
 
                         return {
                             // Type identifiers
@@ -268,8 +275,8 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                             productCount,
                             consumption7d: Number((Number(consumption7dResult._sum.qty) || 0).toFixed(2)),
                             consumption30d: Number((Number(consumption30dResult._sum.qty) || 0).toFixed(2)),
-                            sales7d: Number(sales7dResult._sum.qty) || 0,
-                            sales30d: Number(sales30dResult._sum.qty) || 0,
+                            sales7d: Math.round(sales7d),
+                            sales30d: Math.round(sales30d),
 
                             // Flag to identify type-level rows
                             isTypeRow: true,
@@ -307,6 +314,45 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
         const items = await chunkProcess(fabrics, async (fabric) => {
             const balance = await calculateFabricBalance(req.prisma, fabric.id);
             const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
+
+            // Calculate sales (based on fabric type since products link to type, not specific fabric)
+            const salesBaseWhere = {
+                sku: {
+                    variation: {
+                        product: { fabricTypeId: fabric.fabricTypeId },
+                    },
+                },
+                order: {
+                    status: { not: 'cancelled' },
+                    trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                },
+            };
+
+            const [sales7dLines, sales30dLines] = await Promise.all([
+                req.prisma.orderLine.findMany({
+                    where: {
+                        ...salesBaseWhere,
+                        order: {
+                            ...salesBaseWhere.order,
+                            orderDate: { gte: sevenDaysAgo },
+                        },
+                    },
+                    select: { qty: true, unitPrice: true },
+                }),
+                req.prisma.orderLine.findMany({
+                    where: {
+                        ...salesBaseWhere,
+                        order: {
+                            ...salesBaseWhere.order,
+                            orderDate: { gte: thirtyDaysAgo },
+                        },
+                    },
+                    select: { qty: true, unitPrice: true },
+                }),
+            ]);
+
+            const sales7d = sales7dLines.reduce((sum, line) => sum + (line.qty * line.unitPrice), 0);
+            const sales30d = sales30dLines.reduce((sum, line) => sum + (line.qty * line.unitPrice), 0);
 
             // Calculate effective values (inherit from type if null)
             const effectiveCost = fabric.costPerUnit ?? fabric.fabricType.defaultCostPerUnit ?? 0;
@@ -378,6 +424,10 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                 reorderPoint: Number(reorderPoint.toFixed(2)),
                 stockStatus,
                 suggestedOrderQty: suggestedOrderQty > 0 ? suggestedOrderQty : 0,
+
+                // Sales info (based on fabric type)
+                sales7d: Math.round(sales7d),
+                sales30d: Math.round(sales30d),
 
                 // Flag to identify color-level rows
                 isTypeRow: false,

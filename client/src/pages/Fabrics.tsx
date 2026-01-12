@@ -25,9 +25,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 const COLOR_COLUMN_IDS = [
     'fabricTypeName', 'composition', 'colorName', 'standardColor',
     'supplierName', 'costPerUnit', 'leadTimeDays', 'minOrderQty',
-    'currentBalance', 'totalInward', 'totalOutward', 'avgDailyConsumption',
-    'daysOfStock', 'reorderPoint', 'stockStatus', 'suggestedOrderQty',
-    'actions'
+    'currentBalance', 'totalInward', 'totalOutward', 'sales7d', 'sales30d',
+    'avgDailyConsumption', 'daysOfStock', 'reorderPoint', 'stockStatus',
+    'suggestedOrderQty', 'actions'
 ];
 
 // Type view column IDs in display order
@@ -51,6 +51,8 @@ const COLOR_HEADERS: Record<string, string> = {
     currentBalance: 'Balance',
     totalInward: 'Total In',
     totalOutward: 'Total Out',
+    sales7d: 'Sales (7d)',
+    sales30d: 'Sales (30d)',
     avgDailyConsumption: 'Avg/Day',
     daysOfStock: 'Days Stock',
     reorderPoint: 'Reorder At',
@@ -558,6 +560,28 @@ export default function Fabrics() {
             cellClass: 'text-right text-red-600 text-xs',
         },
         {
+            colId: 'sales7d',
+            headerName: COLOR_HEADERS.sales7d,
+            field: 'sales7d',
+            width: 95,
+            cellClass: 'text-right text-xs font-medium text-green-600',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null || params.value === 0) return '-';
+                return `₹${params.value.toLocaleString()}`;
+            },
+        },
+        {
+            colId: 'sales30d',
+            headerName: COLOR_HEADERS.sales30d,
+            field: 'sales30d',
+            width: 100,
+            cellClass: 'text-right text-xs font-medium text-green-600',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null || params.value === 0) return '-';
+                return `₹${params.value.toLocaleString()}`;
+            },
+        },
+        {
             colId: 'avgDailyConsumption',
             headerName: COLOR_HEADERS.avgDailyConsumption,
             field: 'avgDailyConsumption',
@@ -711,22 +735,22 @@ export default function Fabrics() {
             colId: 'sales7d',
             headerName: 'Sales (7d)',
             field: 'sales7d',
-            width: 85,
+            width: 95,
             cellClass: 'text-right text-xs font-medium text-green-600',
             valueFormatter: (params: ValueFormatterParams) => {
                 if (params.value == null || params.value === 0) return '-';
-                return params.value.toLocaleString();
+                return `₹${params.value.toLocaleString()}`;
             },
         },
         {
             colId: 'sales30d',
             headerName: 'Sales (30d)',
             field: 'sales30d',
-            width: 90,
+            width: 100,
             cellClass: 'text-right text-xs font-medium text-green-600',
             valueFormatter: (params: ValueFormatterParams) => {
                 if (params.value == null || params.value === 0) return '-';
-                return params.value.toLocaleString();
+                return `₹${params.value.toLocaleString()}`;
             },
         },
         {
