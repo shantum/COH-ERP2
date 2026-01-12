@@ -681,7 +681,18 @@ export function ItemsSection({
   const isCod = paymentMethod.toUpperCase() === 'COD';
   const hasShopifyData = !!shopifyDetails?.subtotalPrice;
 
-  // Note: onAddLine prop is kept for future product search implementation
+  // Handle product selection from search
+  const handleSelectProduct = useCallback((sku: any, _stock: number) => {
+    if (onAddLine) {
+      const unitPrice = Number(sku.mrp) || 0;
+      onAddLine({
+        skuId: sku.id,
+        qty: 1,
+        unitPrice,
+      });
+    }
+    onSetAddingProduct(false);
+  }, [onAddLine, onSetAddingProduct]);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden">
@@ -744,19 +755,13 @@ export function ItemsSection({
         </div>
       </div>
 
-      {/* Product search placeholder (when adding) */}
+      {/* Product search (when adding) */}
       {isAddingProduct && (
         <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-          <div className="text-center py-4">
-            <p className="text-sm text-slate-500">Product search coming soon...</p>
-            <button
-              type="button"
-              onClick={() => onSetAddingProduct(false)}
-              className="mt-2 text-xs text-sky-600 hover:text-sky-700"
-            >
-              Cancel
-            </button>
-          </div>
+          <ProductSearch
+            onSelect={handleSelectProduct}
+            onCancel={() => onSetAddingProduct(false)}
+          />
         </div>
       )}
 

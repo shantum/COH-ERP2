@@ -6,7 +6,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X, Trash2, Package, RefreshCw, Plus, ShoppingBag, User, Mail, Phone, Hash, Search, UserCheck, MapPin, ChevronDown, ChevronUp, History, Clock, Check, FileText, Calendar, Info } from 'lucide-react';
-import { getSkuBalance } from '../../utils/orderHelpers';
 import { customersApi } from '../../services/api';
 import { trpc } from '../../services/trpc';
 
