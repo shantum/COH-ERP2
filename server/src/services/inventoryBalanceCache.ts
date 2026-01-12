@@ -20,7 +20,6 @@
 import type { PrismaClient } from '@prisma/client';
 import {
     calculateAllInventoryBalances,
-    type InventoryBalanceWithSkuId,
     type PrismaOrTransaction,
 } from '../utils/queryPatterns.js';
 

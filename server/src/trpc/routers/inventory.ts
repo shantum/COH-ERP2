@@ -20,7 +20,6 @@ import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
 import {
     calculateInventoryBalance,
-    calculateAllInventoryBalances,
     TXN_TYPE,
     TXN_REASON,
 } from '../../utils/queryPatterns.js';
