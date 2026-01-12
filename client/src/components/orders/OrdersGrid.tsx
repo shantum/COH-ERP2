@@ -940,7 +940,7 @@ export function OrdersGrid({
             {
                 colId: 'rtoHistory',
                 headerName: getHeaderName('rtoHistory'),
-                width: 85,
+                width: 200,
                 valueGetter: (params: ValueGetterParams) => {
                     if (!params.data?.isFirstLine) return '';
                     return params.data.order?.customerRtoCount || 0;
@@ -971,14 +971,8 @@ export function OrdersGrid({
                     // First-time customer with COD - verification warning
                     if (isCod && orderCount <= 1) {
                         return (
-                            <span
-                                className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium border border-amber-200"
-                                title="First-time customer with COD payment - verify before shipping"
-                            >
-                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                                </svg>
-                                1st - Verify
+                            <span className="text-xs text-amber-600">
+                                1st Order + COD - Confirm before shipping
                             </span>
                         );
                     }
