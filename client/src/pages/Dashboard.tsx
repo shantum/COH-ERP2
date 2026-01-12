@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { reportsApi, ordersApi, inventoryApi } from '../services/api';
 import { ShoppingCart, AlertTriangle, RotateCcw, TrendingUp } from 'lucide-react';
+import { OrdersAnalyticsBar } from '../components/orders/OrdersAnalyticsBar';
 
 export default function Dashboard() {
     const { data: dashboard } = useQuery({ queryKey: ['dashboard'], queryFn: () => reportsApi.getDashboard().then(r => r.data) });
@@ -18,6 +19,9 @@ export default function Dashboard() {
     return (
         <div className="space-y-4 md:space-y-6">
             <h1 className="text-xl md:text-2xl font-bold text-gray-900">Dashboard</h1>
+
+            {/* Orders Analytics Bar */}
+            <OrdersAnalyticsBar />
 
             {/* Stats Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
