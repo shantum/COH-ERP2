@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.js",
-    "start": "node dist/index.js",
-    "start:js": "node src/index.js",
+    "start": "node src/index.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",

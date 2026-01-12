@@ -96,19 +96,17 @@ const getBalances = protectedProcedure
         const skuCodeMap = new Map(skus.map((s) => [s.id, s.skuCode]));
 
         return skuIds.map((skuId) => {
-            const balance = balanceMap.get(skuId) || {
-                skuId,
-                totalInward: 0,
-                totalOutward: 0,
-                totalReserved: 0,
-                currentBalance: 0,
-                availableBalance: 0,
-                hasDataIntegrityIssue: false,
-            };
+            const balance = balanceMap.get(skuId);
 
             return {
-                ...balance,
+                skuId,
                 skuCode: skuCodeMap.get(skuId) || '',
+                totalInward: balance?.totalInward ?? 0,
+                totalOutward: balance?.totalOutward ?? 0,
+                totalReserved: balance?.totalReserved ?? 0,
+                currentBalance: balance?.currentBalance ?? 0,
+                availableBalance: balance?.availableBalance ?? 0,
+                hasDataIntegrityIssue: balance?.hasDataIntegrityIssue ?? false,
             };
         });
     });

@@ -184,14 +184,15 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
     // tRPC query - type-safe inventory balance for ONLY SKUs in open orders
     // Optimized: fetches ~100-200 SKUs (~50-100KB) instead of ~4000+ SKUs (~3MB)
-    // Waits for open orders to load first, then fetches balances for those SKUs
+    // Starts fetching as soon as SKU IDs are available (not gated by tab)
+    // so data is ready when user views the Open tab
     const inventoryBalanceQuery = trpc.inventory.getBalances.useQuery(
         { skuIds: openOrderSkuIds },
         {
             staleTime: 60000, // Inventory balance doesn't change rapidly (60s cache)
             refetchOnWindowFocus: false,
-            // Only fetch when: Open tab + openOrders loaded + we have SKU IDs to fetch
-            enabled: activeTab === 'open' && openOrderSkuIds.length > 0,
+            // Fetch as soon as we have SKU IDs (not gated by activeTab)
+            enabled: openOrderSkuIds.length > 0,
         }
     );
 
