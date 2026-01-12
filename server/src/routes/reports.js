@@ -225,6 +225,134 @@ router.get('/top-products', async (req, res) => {
     }
 });
 
+// Top customers report - configurable time period with top products breakdown
+router.get('/top-customers', async (req, res) => {
+    try {
+        const { period = '3months', limit = 15 } = req.query;
+
+        // Calculate start date based on period
+        const now = new Date();
+        let startDate = new Date();
+
+        switch (period) {
+            case 'thisMonth':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                break;
+            case 'lastMonth':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                // For last month, we need to also set end date
+                break;
+            case '3months':
+                startDate.setMonth(now.getMonth() - 3);
+                break;
+            case '6months':
+                startDate.setMonth(now.getMonth() - 6);
+                break;
+            case '1year':
+                startDate.setFullYear(now.getFullYear() - 1);
+                break;
+            default:
+                startDate.setMonth(now.getMonth() - 3);
+        }
+
+        // Build date filter
+        let dateFilter = { gte: startDate };
+        if (period === 'lastMonth') {
+            const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+            dateFilter = { gte: startOfLastMonth, lte: endOfLastMonth };
+        }
+
+        // Get order lines with customer data
+        const orderLines = await req.prisma.orderLine.findMany({
+            where: {
+                order: {
+                    orderDate: dateFilter,
+                    status: { not: 'cancelled' },
+                    trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                },
+            },
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        customerId: true,
+                        customerName: true,
+                        customerEmail: true,
+                        customerPhone: true,
+                        customerTier: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Aggregate by customer
+        const customerStats = {};
+        for (const line of orderLines) {
+            const customerId = line.order?.customerId;
+            if (!customerId) continue;
+
+            if (!customerStats[customerId]) {
+                customerStats[customerId] = {
+                    id: customerId,
+                    name: line.order.customerName || 'Unknown',
+                    email: line.order.customerEmail,
+                    phone: line.order.customerPhone,
+                    tier: line.order.customerTier,
+                    units: 0,
+                    revenue: 0,
+                    orderCount: new Set(),
+                    products: {},
+                };
+            }
+
+            customerStats[customerId].units += line.qty;
+            customerStats[customerId].revenue += line.qty * Number(line.unitPrice);
+            customerStats[customerId].orderCount.add(line.orderId);
+
+            // Track product purchases for this customer
+            const productName = line.sku?.variation?.product?.name;
+            if (productName) {
+                if (!customerStats[customerId].products[productName]) {
+                    customerStats[customerId].products[productName] = { name: productName, units: 0, revenue: 0 };
+                }
+                customerStats[customerId].products[productName].units += line.qty;
+                customerStats[customerId].products[productName].revenue += line.qty * Number(line.unitPrice);
+            }
+        }
+
+        const result = Object.values(customerStats)
+            .map(c => ({
+                ...c,
+                orderCount: c.orderCount.size,
+                topProducts: Object.values(c.products)
+                    .sort((a, b) => b.revenue - a.revenue)
+                    .slice(0, 3)
+                    .map(p => ({ name: p.name, units: p.units })),
+            }))
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, Number(limit));
+
+        // Remove the products object from response
+        result.forEach(r => delete r.products);
+
+        return res.json({ period, data: result });
+    } catch (error) {
+        console.error('Top customers error:', error);
+        res.status(500).json({ error: 'Failed to fetch top customers' });
+    }
+});
+
 // Dashboard summary
 router.get('/dashboard', async (req, res) => {
     try {

@@ -1,51 +1,52 @@
 /**
- * TopProductsCard - Configurable top products display
+ * TopFabricsCard - Configurable top fabrics display by sales value
+ * Supports fabric type and specific color aggregation
  * Mobile-first responsive design
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { reportsApi } from '../../services/api';
-import { TrendingUp, Package, Palette } from 'lucide-react';
+import { fabricsApi } from '../../services/api';
+import { Layers, Palette } from 'lucide-react';
 
-interface ProductData {
+interface FabricData {
     id: string;
     name: string;
-    category?: string;
-    colorName?: string;
-    fabricName?: string | null;
-    imageUrl: string | null;
+    typeName?: string;
+    composition?: string | null;
     units: number;
     revenue: number;
     orderCount: number;
-    variations?: Array<{ colorName: string; units: number }>;
+    productCount: number;
+    topColors?: string[];
 }
 
-interface TopProductsResponse {
-    level: 'product' | 'variation';
+interface TopFabricsResponse {
+    level: 'type' | 'color';
     days: number;
-    data: ProductData[];
+    data: FabricData[];
 }
 
 const TIME_PERIODS = [
     { value: 7, label: '7d' },
     { value: 14, label: '14d' },
     { value: 30, label: '30d' },
+    { value: 60, label: '60d' },
     { value: 90, label: '90d' },
 ];
 
 const LEVELS = [
-    { value: 'product', label: 'Product', icon: Package },
-    { value: 'variation', label: 'Variation', icon: Palette },
+    { value: 'type', label: 'Type', icon: Layers },
+    { value: 'color', label: 'Color', icon: Palette },
 ] as const;
 
-export function TopProductsCard() {
+export function TopFabricsCard() {
     const [days, setDays] = useState(30);
-    const [level, setLevel] = useState<'product' | 'variation'>('product');
+    const [level, setLevel] = useState<'type' | 'color'>('type');
 
-    const { data, isLoading } = useQuery<TopProductsResponse>({
-        queryKey: ['topProducts', days, level],
-        queryFn: () => reportsApi.getTopProducts({ days, level, limit: 15 }).then(r => r.data),
+    const { data, isLoading } = useQuery<TopFabricsResponse>({
+        queryKey: ['topFabrics', days, level],
+        queryFn: () => fabricsApi.getTopFabrics({ days, level, limit: 12 }).then(r => r.data),
         staleTime: 60 * 1000,
     });
 
@@ -60,8 +61,8 @@ export function TopProductsCard() {
             {/* Header with controls */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
                 <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
-                    <h2 className="text-base sm:text-lg font-semibold">Top Products</h2>
+                    <Layers className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+                    <h2 className="text-base sm:text-lg font-semibold">Top Fabrics</h2>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -73,12 +74,12 @@ export function TopProductsCard() {
                                 onClick={() => setLevel(value)}
                                 className={`flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-1.5 text-[10px] sm:text-xs font-medium transition-colors ${
                                     level === value
-                                        ? 'bg-blue-50 text-blue-600'
+                                        ? 'bg-purple-50 text-purple-600'
                                         : 'bg-white text-gray-600 hover:bg-gray-50'
                                 }`}
                             >
                                 <Icon size={12} className="sm:w-[14px] sm:h-[14px]" />
-                                <span className="hidden xs:inline sm:inline">{label}</span>
+                                <span>{label}</span>
                             </button>
                         ))}
                     </div>
@@ -87,7 +88,7 @@ export function TopProductsCard() {
                     <select
                         value={days}
                         onChange={(e) => setDays(Number(e.target.value))}
-                        className="text-[10px] sm:text-xs border border-gray-200 rounded-lg px-1.5 sm:px-2 py-1 sm:py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="text-[10px] sm:text-xs border border-gray-200 rounded-lg px-1.5 sm:px-2 py-1 sm:py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     >
                         {TIME_PERIODS.map(({ value, label }) => (
                             <option key={value} value={value}>{label}</option>
@@ -104,7 +105,7 @@ export function TopProductsCard() {
                     ))}
                 </div>
             ) : !data?.data?.length ? (
-                <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">No sales data for this period</p>
+                <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">No fabric sales data for this period</p>
             ) : (
                 <div className="space-y-1.5 sm:space-y-2 max-h-[300px] sm:max-h-[400px] overflow-y-auto">
                     {data.data.map((item, index) => (
@@ -114,26 +115,22 @@ export function TopProductsCard() {
                         >
                             {/* Rank */}
                             <div className={`w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center rounded-full text-[10px] sm:text-xs font-bold flex-shrink-0 ${
-                                index === 0 ? 'bg-amber-100 text-amber-700' :
+                                index === 0 ? 'bg-purple-100 text-purple-700' :
                                 index === 1 ? 'bg-gray-200 text-gray-700' :
-                                index === 2 ? 'bg-orange-100 text-orange-700' :
+                                index === 2 ? 'bg-indigo-100 text-indigo-700' :
                                 'bg-gray-100 text-gray-500'
                             }`}>
                                 {index + 1}
                             </div>
 
-                            {/* Image */}
-                            {item.imageUrl ? (
-                                <img
-                                    src={item.imageUrl}
-                                    alt={item.name}
-                                    className="w-8 h-8 sm:w-10 sm:h-10 rounded object-cover flex-shrink-0"
-                                />
-                            ) : (
-                                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                    <Package size={14} className="text-gray-400 sm:w-4 sm:h-4" />
-                                </div>
-                            )}
+                            {/* Fabric swatch placeholder */}
+                            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center flex-shrink-0">
+                                {level === 'type' ? (
+                                    <Layers size={14} className="text-purple-400 sm:w-4 sm:h-4" />
+                                ) : (
+                                    <Palette size={14} className="text-purple-400 sm:w-4 sm:h-4" />
+                                )}
+                            </div>
 
                             {/* Details */}
                             <div className="flex-1 min-w-0">
@@ -141,20 +138,21 @@ export function TopProductsCard() {
                                     <span className="font-medium text-gray-900 truncate text-sm sm:text-base">
                                         {item.name}
                                     </span>
-                                    {level === 'variation' && item.colorName && (
-                                        <span className="text-[10px] sm:text-xs px-1 sm:px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded flex-shrink-0">
-                                            {item.colorName}
+                                    {level === 'color' && item.typeName && (
+                                        <span className="text-[10px] sm:text-xs px-1 sm:px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded flex-shrink-0">
+                                            {item.typeName}
                                         </span>
                                     )}
                                 </div>
                                 <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-gray-500">
+                                    <span>{item.productCount} products</span>
+                                    <span className="text-gray-300">•</span>
                                     <span>{item.orderCount} orders</span>
-                                    {level === 'product' && item.variations && item.variations.length > 0 && (
+                                    {level === 'type' && item.topColors && item.topColors.length > 0 && (
                                         <>
                                             <span className="text-gray-300 hidden sm:inline">•</span>
-                                            <span className="truncate hidden sm:inline">
-                                                {item.variations.slice(0, 2).map(v => v.colorName).join(', ')}
-                                                {item.variations.length > 2 && ` +${item.variations.length - 2}`}
+                                            <span className="truncate hidden sm:inline text-purple-500">
+                                                {item.topColors.join(', ')}
                                             </span>
                                         </>
                                     )}
@@ -164,10 +162,10 @@ export function TopProductsCard() {
                             {/* Stats */}
                             <div className="text-right flex-shrink-0">
                                 <div className="text-xs sm:text-sm font-semibold text-gray-900">
-                                    {item.units} <span className="text-gray-500 font-normal hidden sm:inline">units</span>
+                                    {formatCurrency(item.revenue)}
                                 </div>
                                 <div className="text-[10px] sm:text-xs text-gray-500">
-                                    {formatCurrency(item.revenue)}
+                                    {item.units} units
                                 </div>
                             </div>
                         </div>
@@ -178,4 +176,4 @@ export function TopProductsCard() {
     );
 }
 
-export default TopProductsCard;
+export default TopFabricsCard;

@@ -106,6 +106,9 @@ export const fabricsApi = {
     getTransactions: (id: string) => api.get(`/fabrics/${id}/transactions`),
     getAllTransactions: (params?: { limit?: number; days?: number }) => api.get('/fabrics/transactions/all', { params }),
     deleteTransaction: (txnId: string) => api.delete(`/fabrics/transactions/${txnId}`),
+    // Top Fabrics Report
+    getTopFabrics: (params: { days?: number; level?: 'type' | 'color'; limit?: number }) =>
+        api.get('/fabrics/top-fabrics', { params }),
     // Reconciliation
     getReconciliationHistory: (limit?: number) => api.get('/fabrics/reconciliation/history', { params: { limit } }),
     startReconciliation: () => api.post('/fabrics/reconciliation/start'),
@@ -433,6 +436,8 @@ export const reportsApi = {
     getSalesVelocity: (days?: number) => api.get('/reports/sales-velocity', { params: { days } }),
     getTopProducts: (params: { days?: number; level?: 'product' | 'variation'; limit?: number }) =>
         api.get('/reports/top-products', { params }),
+    getTopCustomers: (params: { period?: string; limit?: number }) =>
+        api.get('/reports/top-customers', { params }),
     getInventoryTurnover: () => api.get('/reports/inventory-turnover'),
     getCogsSummary: () => api.get('/reports/cogs-summary'),
     // Sales Analytics
