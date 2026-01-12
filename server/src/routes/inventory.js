@@ -1401,13 +1401,29 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
  * Optimized: Uses select instead of include for minimal payload
  */
 router.get('/recent-inwards', authenticateToken, asyncHandler(async (req, res) => {
-    const { limit = 50 } = req.query;
+    const { limit = 50, source } = req.query;
+
+    // Map source param to reason values for filtering
+    const reasonMap = {
+        production: ['production'],
+        returns: ['return_receipt'],
+        rto: ['rto_received'],
+        repacking: ['repack_complete'],
+        adjustments: ['adjustment', 'found_stock', 'correction', 'received']
+    };
+
+    const where = {
+        txnType: 'inward',
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    };
+
+    // Add reason filter if source specified
+    if (source && reasonMap[source]) {
+        where.reason = { in: reasonMap[source] };
+    }
 
     const transactions = await req.prisma.inventoryTransaction.findMany({
-        where: {
-            txnType: 'inward',
-            createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-        },
+        where,
         orderBy: { createdAt: 'desc' },
         take: Number(limit),
         select: {

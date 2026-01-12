@@ -140,7 +140,12 @@ export const inventoryApi = {
     // Inward Hub
     getPendingSources: () => api.get('/inventory/pending-sources'),
     scanLookup: (code: string) => api.get(`/inventory/scan-lookup?code=${encodeURIComponent(code)}`),
-    getRecentInwards: (limit?: number) => api.get(`/inventory/recent-inwards?limit=${limit || 50}`),
+    getRecentInwards: (limit?: number, source?: string) => {
+        const params = new URLSearchParams();
+        params.set('limit', String(limit || 50));
+        if (source) params.set('source', source);
+        return api.get(`/inventory/recent-inwards?${params.toString()}`);
+    },
     undoTransaction: (id: string) => api.delete(`/inventory/transactions/${id}`),
     // Queue panel
     getPendingQueue: (source: string, params?: { limit?: number; offset?: number; search?: string }) =>
