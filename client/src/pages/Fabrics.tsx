@@ -33,9 +33,9 @@ const COLOR_COLUMN_IDS = [
 // Type view column IDs in display order
 const TYPE_COLUMN_IDS = [
     'fabricTypeName', 'composition', 'colorCount', 'productCount',
-    'totalStock', 'consumption7d', 'consumption30d', 'defaultCostPerUnit',
-    'unit', 'avgShrinkagePct', 'defaultLeadTimeDays', 'defaultMinOrderQty',
-    'actions'
+    'totalStock', 'sales7d', 'sales30d', 'consumption7d', 'consumption30d',
+    'defaultCostPerUnit', 'unit', 'avgShrinkagePct', 'defaultLeadTimeDays',
+    'defaultMinOrderQty', 'actions'
 ];
 
 // Default headers for color view
@@ -66,6 +66,8 @@ const TYPE_HEADERS: Record<string, string> = {
     colorCount: 'Colors',
     productCount: 'Products',
     totalStock: 'Stock',
+    sales7d: 'Sales (7d)',
+    sales30d: 'Sales (30d)',
     consumption7d: 'Use (7d)',
     consumption30d: 'Use (30d)',
     defaultCostPerUnit: 'Cost/Unit',
@@ -703,6 +705,28 @@ export default function Fabrics() {
                 if (params.value == null) return '-';
                 const unit = params.data?.unit === 'kg' ? 'kg' : 'm';
                 return `${params.value.toLocaleString()} ${unit}`;
+            },
+        },
+        {
+            colId: 'sales7d',
+            headerName: 'Sales (7d)',
+            field: 'sales7d',
+            width: 85,
+            cellClass: 'text-right text-xs font-medium text-green-600',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null || params.value === 0) return '-';
+                return params.value.toLocaleString();
+            },
+        },
+        {
+            colId: 'sales30d',
+            headerName: 'Sales (30d)',
+            field: 'sales30d',
+            width: 90,
+            cellClass: 'text-right text-xs font-medium text-green-600',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null || params.value === 0) return '-';
+                return params.value.toLocaleString();
             },
         },
         {

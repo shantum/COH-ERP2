@@ -170,6 +170,8 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                                 productCount: 0,
                                 consumption7d: 0,
                                 consumption30d: 0,
+                                sales7d: 0,
+                                sales30d: 0,
                                 isTypeRow: true,
                             };
                         }
@@ -212,6 +214,41 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                             }),
                         ]);
 
+                        // Calculate sales (order line quantities) for products with this fabric type
+                        // Excludes cancelled orders and RTO orders
+                        const [sales7dResult, sales30dResult] = await Promise.all([
+                            req.prisma.orderLine.aggregate({
+                                where: {
+                                    sku: {
+                                        variation: {
+                                            product: { fabricTypeId: type.id },
+                                        },
+                                    },
+                                    order: {
+                                        orderDate: { gte: sevenDaysAgo },
+                                        status: { not: 'cancelled' },
+                                        trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                                    },
+                                },
+                                _sum: { qty: true },
+                            }),
+                            req.prisma.orderLine.aggregate({
+                                where: {
+                                    sku: {
+                                        variation: {
+                                            product: { fabricTypeId: type.id },
+                                        },
+                                    },
+                                    order: {
+                                        orderDate: { gte: thirtyDaysAgo },
+                                        status: { not: 'cancelled' },
+                                        trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                                    },
+                                },
+                                _sum: { qty: true },
+                            }),
+                        ]);
+
                         return {
                             // Type identifiers
                             fabricTypeId: type.id,
@@ -231,6 +268,8 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                             productCount,
                             consumption7d: Number((Number(consumption7dResult._sum.qty) || 0).toFixed(2)),
                             consumption30d: Number((Number(consumption30dResult._sum.qty) || 0).toFixed(2)),
+                            sales7d: Number(sales7dResult._sum.qty) || 0,
+                            sales30d: Number(sales30dResult._sum.qty) || 0,
 
                             // Flag to identify type-level rows
                             isTypeRow: true,
