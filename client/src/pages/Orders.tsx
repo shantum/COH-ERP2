@@ -41,7 +41,6 @@ import {
     SummaryPanel,
     TrackingModal,
     ProcessShippedModal,
-    OrdersAnalyticsBar,
     UnifiedOrderModal,
     GlobalOrderSearch,
 } from '../components/orders';
@@ -361,6 +360,30 @@ export default function Orders() {
         return count;
     }, [openOrders]);
 
+    // Pipeline counts for simple status bar
+    const pipelineCounts = useMemo(() => {
+        if (!openOrders) return { pending: 0, allocated: 0, ready: 0 };
+        let pending = 0, allocated = 0, ready = 0;
+        for (const order of openOrders) {
+            const lines = (order.orderLines || []).filter((l: any) => l.lineStatus !== 'cancelled');
+            if (lines.length === 0) continue;
+            const allAllocatedOrBetter = lines.every((l: any) =>
+                ['allocated', 'picked', 'packed', 'marked_shipped'].includes(l.lineStatus)
+            );
+            const allPackedOrBetter = lines.every((l: any) =>
+                ['packed', 'marked_shipped'].includes(l.lineStatus)
+            );
+            if (allPackedOrBetter) {
+                ready++;
+            } else if (allAllocatedOrBetter) {
+                allocated++;
+            } else {
+                pending++;
+            }
+        }
+        return { pending, allocated, ready };
+    }, [openOrders]);
+
     // Get orders with marked_shipped lines for the modal
     const ordersWithMarkedShipped = useMemo(() => {
         if (!openOrders) return [];
@@ -595,8 +618,26 @@ export default function Orders() {
                 </div>
             </div>
 
-            {/* Analytics Bar */}
-            <OrdersAnalyticsBar />
+            {/* Pipeline Status Bar */}
+            <div className="flex items-center gap-4 px-4 py-2.5 bg-white border border-gray-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                    <span className="text-sm text-gray-600">Pending</span>
+                    <span className="text-sm font-semibold text-gray-900">{pipelineCounts.pending}</span>
+                </div>
+                <span className="text-gray-300">→</span>
+                <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+                    <span className="text-sm text-gray-600">Allocated</span>
+                    <span className="text-sm font-semibold text-gray-900">{pipelineCounts.allocated}</span>
+                </div>
+                <span className="text-gray-300">→</span>
+                <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                    <span className="text-sm text-gray-600">Ready</span>
+                    <span className="text-sm font-semibold text-gray-900">{pipelineCounts.ready}</span>
+                </div>
+            </div>
 
             {/* Tabs */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
