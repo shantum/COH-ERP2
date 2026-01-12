@@ -56,47 +56,68 @@ export function calculateLTV(orders) {
 }
 
 /**
- * Get LTV and order count map for multiple customers
+ * Get LTV, order count, and RTO count map for multiple customers
  * Uses aggregate query for performance - avoids loading all orders
  * @param {object} prisma - Prisma client instance
  * @param {string[]} customerIds - Array of customer IDs
- * @returns {Promise<Record<string, {ltv: number, orderCount: number}>>} - Map of customerId to stats
+ * @returns {Promise<Record<string, {ltv: number, orderCount: number, rtoCount: number}>>} - Map of customerId to stats
  */
 export async function getCustomerStatsMap(prisma, customerIds) {
     if (!customerIds || customerIds.length === 0) return {};
 
-    // Use aggregate query - much faster than loading all orders
-    // Exclude cancelled orders, RTO orders, and zero-value orders (exchanges, giveaways)
-    // Note: trackingStatus can be null for unshipped orders (which should count)
-    const stats = await prisma.order.groupBy({
-        by: ['customerId'],
-        where: {
-            customerId: { in: customerIds },
-            status: { not: 'cancelled' },
-            OR: [
-                { trackingStatus: null },
-                { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
-            ],
-            totalAmount: { gt: 0 }
-        },
-        _sum: { totalAmount: true },
-        _count: { id: true }
-    });
+    // Run both queries in parallel for performance
+    const [stats, rtoStats] = await Promise.all([
+        // LTV and order count query
+        // Exclude cancelled orders, RTO orders, and zero-value orders (exchanges, giveaways)
+        // Note: trackingStatus can be null for unshipped orders (which should count)
+        prisma.order.groupBy({
+            by: ['customerId'],
+            where: {
+                customerId: { in: customerIds },
+                status: { not: 'cancelled' },
+                OR: [
+                    { trackingStatus: null },
+                    { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
+                ],
+                totalAmount: { gt: 0 }
+            },
+            _sum: { totalAmount: true },
+            _count: { id: true }
+        }),
+        // RTO count query (COD orders only - prepaid RTOs are refunded)
+        prisma.order.groupBy({
+            by: ['customerId'],
+            where: {
+                customerId: { in: customerIds },
+                paymentMethod: 'COD',
+                trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] }
+            },
+            _count: { id: true }
+        })
+    ]);
 
     const statsMap = {};
 
     // Initialize all customerIds with defaults (in case some have no orders)
     for (const id of customerIds) {
-        statsMap[id] = { ltv: 0, orderCount: 0 };
+        statsMap[id] = { ltv: 0, orderCount: 0, rtoCount: 0 };
     }
 
-    // Populate from aggregate results
+    // Populate LTV and order count from aggregate results
     for (const stat of stats) {
         if (stat.customerId) {
             statsMap[stat.customerId] = {
                 ltv: stat._sum.totalAmount || 0,
-                orderCount: stat._count.id || 0
+                orderCount: stat._count.id || 0,
+                rtoCount: 0
             };
+        }
+    }
+
+    // Add RTO counts
+    for (const stat of rtoStats) {
+        if (stat.customerId && statsMap[stat.customerId]) {
+            statsMap[stat.customerId].rtoCount = stat._count.id || 0;
         }
     }
 

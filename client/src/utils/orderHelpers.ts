@@ -399,6 +399,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     orderValue: 'Value',
     discountCode: 'Discount',
     paymentMethod: 'Payment',
+    rtoHistory: 'RTO Risk',
     customerNotes: 'Order Notes',
     customerOrderCount: 'Orders',
     customerLtv: 'LTV',
@@ -425,6 +426,6 @@ export const DEFAULT_HEADERS: Record<string, string> = {
 
 // Columns shown by default (cleaner initial view)
 export const DEFAULT_VISIBLE_COLUMNS = [
-    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'paymentMethod', 'productName',
+    'orderDate', 'orderAge', 'orderNumber', 'customerName', 'paymentMethod', 'rtoHistory', 'productName',
     'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'actions'
 ];

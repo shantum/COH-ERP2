@@ -322,12 +322,13 @@ export async function enrichOrdersWithCustomerStats(prisma, orders, options = {}
 
     // Enrich each order
     return orders.map((order) => {
-        const customerStats = customerStatsMap[order.customerId] || { ltv: 0, orderCount: 0 };
+        const customerStats = customerStatsMap[order.customerId] || { ltv: 0, orderCount: 0, rtoCount: 0 };
 
         const enriched = {
             ...order,
             customerLtv: customerStats.ltv,
             customerOrderCount: customerStats.orderCount,
+            customerRtoCount: customerStats.rtoCount,
             customerTier: calculateTier(customerStats.ltv, thresholds),
         };
 

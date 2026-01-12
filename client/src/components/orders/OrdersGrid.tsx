@@ -261,7 +261,7 @@ function ProductionDatePopover({
 // All column IDs in display order
 const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'shipByDate', 'orderNumber', 'customerName', 'city', 'orderValue',
-    'discountCode', 'paymentMethod', 'customerNotes', 'customerOrderCount',
+    'discountCode', 'paymentMethod', 'rtoHistory', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'shopifyStatus',
     'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus', 'actions'
@@ -770,6 +770,50 @@ export function OrdersGrid({
                     );
                 },
                 cellClass: 'text-center',
+            },
+            {
+                colId: 'rtoHistory',
+                headerName: getHeaderName('rtoHistory'),
+                width: 70,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return '';
+                    return params.data.order?.customerRtoCount || 0;
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const rtoCount = params.data.order?.customerRtoCount || 0;
+                    const paymentMethod = params.data.order?.shopifyCache?.paymentMethod
+                        || params.data.order?.paymentMethod || '';
+                    const isCod = paymentMethod.toLowerCase().includes('cod');
+
+                    // Only show warning for COD orders with RTO history
+                    if (isCod && rtoCount > 0) {
+                        return (
+                            <span
+                                className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium border border-red-200"
+                                title={`This customer has ${rtoCount} prior COD RTO${rtoCount > 1 ? 's' : ''}`}
+                            >
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                {rtoCount} RTO
+                            </span>
+                        );
+                    }
+
+                    // For prepaid orders or no RTO history, show nothing or a subtle indicator
+                    if (rtoCount > 0) {
+                        return (
+                            <span className="text-xs text-gray-400" title={`${rtoCount} prior RTO${rtoCount > 1 ? 's' : ''} (prepaid - refunded)`}>
+                                {rtoCount}
+                            </span>
+                        );
+                    }
+
+                    return null;
+                },
+                cellClass: 'text-center',
+                headerTooltip: 'Customer RTO History (COD only)',
             },
             {
                 colId: 'customerNotes',

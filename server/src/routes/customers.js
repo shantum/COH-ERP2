@@ -72,7 +72,7 @@ router.get('/', asyncHandler(async (req, res) => {
             where,
             include: {
                 orders: {
-                    select: { id: true, totalAmount: true, orderDate: true, status: true, customerPhone: true },
+                    select: { id: true, totalAmount: true, orderDate: true, status: true, customerPhone: true, trackingStatus: true, paymentMethod: true },
                     orderBy: { orderDate: 'desc' },
                 },
                 returnRequests: {
@@ -94,6 +94,11 @@ router.get('/', asyncHandler(async (req, res) => {
             const returns = customer.returnRequests.filter((r) => r.requestType === 'return').length;
             const exchanges = customer.returnRequests.filter((r) => r.requestType === 'exchange').length;
             const returnRate = totalOrders > 0 ? (returns / totalOrders) * 100 : 0;
+
+            // Calculate RTO count from actual order status (COD orders only - prepaid RTOs are refunded)
+            const rtoCount = customer.orders.filter((o) =>
+                o.trackingStatus?.startsWith('rto') && o.paymentMethod === 'COD'
+            ).length;
 
             // Use stored tier, or calculate if not set
             // This ensures tier is always accurate (auto-updated on delivery)
@@ -120,7 +125,7 @@ router.get('/', asyncHandler(async (req, res) => {
                 avgOrderValue,
                 returns,
                 exchanges,
-                rtoCount: customer.rtoCount || 0,
+                rtoCount, // Calculated from actual orders
                 returnRate: parseFloat(returnRate.toFixed(1)),
                 customerTier,
                 firstOrderDate: sortedOrders.length > 0 ? sortedOrders[sortedOrders.length - 1].orderDate : null,
@@ -296,6 +301,11 @@ router.get('/:id', asyncHandler(async (req, res) => {
         const validOrders = customer.orders.filter((o) => o.status !== 'cancelled');
         const totalOrders = validOrders.length;
 
+        // Calculate RTO count from actual order status (COD orders only - prepaid RTOs are refunded)
+        const rtoCount = customer.orders.filter((o) =>
+            o.trackingStatus?.startsWith('rto') && o.paymentMethod === 'COD'
+        ).length;
+
         // Use stored tier, or calculate if not set
         const calculatedTier = calculateTier(lifetimeValue, thresholds);
         const customerTier = customer.tier || calculatedTier;
@@ -351,6 +361,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
         totalOrders,
         lifetimeValue,
         customerTier,
+        rtoCount, // Calculated from actual orders (overrides denormalized field)
         productAffinity,
         colorAffinity,
         fabricAffinity,
