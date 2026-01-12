@@ -24,7 +24,7 @@ interface UseOrdersMutationsOptions {
 
 // Context types for optimistic update mutations
 type LineUpdateContext = { skipped: true } | { skipped?: false; previousOrders: unknown };
-type InventoryUpdateContext = { skipped: true } | { skipped?: false; previousOrders: unknown; previousInventory: unknown };
+type InventoryUpdateContext = { skipped: true } | { skipped?: false; previousOrders: unknown; previousInventory: unknown; skuIds?: string[] };
 
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const queryClient = useQueryClient();
@@ -155,17 +155,26 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         const previousOrders = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
 
         // Optimistically update the line status in tRPC cache
+        // IMPORTANT: Only create new objects for the modified order/line to preserve AG-Grid selection state
         trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, (old) => {
             if (!old) return old;
-            return {
-                ...old,
-                orders: old.orders.map((order: any) => ({
-                    ...order,
-                    orderLines: order.orderLines?.map((line: any) =>
-                        line.id === lineId ? { ...line, lineStatus: newStatus } : line
-                    )
-                }))
-            };
+
+            // Find which order contains this line
+            const orderIndex = old.orders.findIndex((order: any) =>
+                order.orderLines?.some((line: any) => line.id === lineId)
+            );
+
+            if (orderIndex === -1) return old;
+
+            // Only update that specific order
+            const newOrders = [...old.orders];
+            const order = newOrders[orderIndex];
+            const newOrderLines = order.orderLines.map((line: any) =>
+                line.id === lineId ? { ...line, lineStatus: newStatus } : line
+            );
+            newOrders[orderIndex] = { ...order, orderLines: newOrderLines };
+
+            return { ...old, orders: newOrders };
         });
 
         return { previousOrders };
@@ -186,15 +195,13 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     // Helper for optimistic inventory balance updates (allocate/unallocate)
     // delta: +1 for allocate (increase reserved), -1 for unallocate (decrease reserved)
-    // Now uses tRPC cache management for inventory since we migrated to tRPC
+    // Uses tRPC cache management for inventory - updates getBalances cache (filtered by skuIds)
     const optimisticInventoryUpdate = async (lineId: string, newStatus: string, delta: number) => {
-        // Cancel both tRPC and legacy queries
+        // Cancel tRPC queries
         await trpcUtils.orders.list.cancel({ view: 'open', limit: 500 });
-        await trpcUtils.inventory.getAllBalances.cancel({ includeCustomSkus: true });
 
         // Get current data from tRPC cache
         const previousOrdersData = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
-        const previousInventoryData = trpcUtils.inventory.getAllBalances.getData({ includeCustomSkus: true });
 
         // Find the line to get skuId and qty
         let skuId: string | null = null;
@@ -211,44 +218,69 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             }
         }
 
+        // Extract all SKU IDs from open orders to match the cache key used by useOrdersData
+        const openOrderSkuIds: string[] = [];
+        if (orders) {
+            const skuSet = new Set<string>();
+            orders.forEach((order: any) => {
+                order.orderLines?.forEach((line: any) => {
+                    if (line.skuId) skuSet.add(line.skuId);
+                });
+            });
+            openOrderSkuIds.push(...Array.from(skuSet));
+        }
+
+        // Get previous inventory data for rollback (using the exact skuIds from open orders)
+        const previousInventoryData = openOrderSkuIds.length > 0
+            ? trpcUtils.inventory.getBalances.getData({ skuIds: openOrderSkuIds })
+            : null;
+
         // Update line status in tRPC openOrders cache
+        // IMPORTANT: Only create new objects for the modified order/line to preserve AG-Grid selection state
         trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, (old) => {
             if (!old) return old;
-            return {
-                ...old,
-                orders: old.orders.map((order: any) => ({
-                    ...order,
-                    orderLines: order.orderLines?.map((line: any) =>
-                        line.id === lineId ? { ...line, lineStatus: newStatus } : line
-                    )
-                }))
-            };
+
+            // Find which order contains this line
+            const orderIndex = old.orders.findIndex((order: any) =>
+                order.orderLines?.some((line: any) => line.id === lineId)
+            );
+
+            if (orderIndex === -1) return old;
+
+            // Only update that specific order
+            const newOrders = [...old.orders];
+            const order = newOrders[orderIndex];
+            const newOrderLines = order.orderLines.map((line: any) =>
+                line.id === lineId ? { ...line, lineStatus: newStatus } : line
+            );
+            newOrders[orderIndex] = { ...order, orderLines: newOrderLines };
+
+            return { ...old, orders: newOrders };
         });
 
-        // Update inventory balance for the affected SKU in tRPC cache
-        if (skuId && previousInventoryData) {
-            trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, (old) => {
+        // Update inventory balance for the affected SKU in tRPC cache (getBalances with skuIds)
+        if (skuId && openOrderSkuIds.length > 0) {
+            trpcUtils.inventory.getBalances.setData({ skuIds: openOrderSkuIds }, (old) => {
                 if (!old) return old;
-                return {
-                    ...old,
-                    items: old.items.map((item: any) => {
-                        if (item.skuId === skuId) {
-                            const reservedChange = qty * delta;
-                            return {
-                                ...item,
-                                reservedBalance: (item.reservedBalance || 0) + reservedChange,
-                                availableBalance: (item.availableBalance || 0) - reservedChange,
-                            };
-                        }
-                        return item;
-                    })
-                };
+                // getBalances returns an array directly with fields: totalReserved, availableBalance
+                return old.map((item: any) => {
+                    if (item.skuId === skuId) {
+                        const reservedChange = qty * delta;
+                        return {
+                            ...item,
+                            totalReserved: (item.totalReserved || 0) + reservedChange,
+                            availableBalance: (item.availableBalance || 0) - reservedChange,
+                        };
+                    }
+                    return item;
+                });
             });
         }
 
         return {
             previousOrders: previousOrdersData,
-            previousInventory: previousInventoryData
+            previousInventory: previousInventoryData,
+            skuIds: openOrderSkuIds, // Store for rollback
         };
     };
 
@@ -271,8 +303,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             if (context && 'previousOrders' in context && context.previousOrders) {
                 trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
-            if (context && 'previousInventory' in context && context.previousInventory) {
-                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory as any);
+            if (context && 'previousInventory' in context && context.previousInventory && context.skuIds?.length) {
+                trpcUtils.inventory.getBalances.setData({ skuIds: context.skuIds }, context.previousInventory as any);
             }
 
             // Then handle specific error types
@@ -303,8 +335,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
             if (context && 'previousOrders' in context && context.previousOrders) {
                 trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
-            if (context && 'previousInventory' in context && context.previousInventory) {
-                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory as any);
+            if (context && 'previousInventory' in context && context.previousInventory && context.skuIds?.length) {
+                trpcUtils.inventory.getBalances.setData({ skuIds: context.skuIds }, context.previousInventory as any);
             }
 
             // Then handle specific error types

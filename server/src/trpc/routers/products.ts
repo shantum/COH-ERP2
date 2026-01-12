@@ -95,7 +95,7 @@ const list = protectedProcedure
             category: z.string().optional(),
             isActive: z.boolean().optional(),
             page: z.number().int().min(1).default(1),
-            limit: z.number().int().min(1).max(100).default(50),
+            limit: z.number().int().min(1).max(1000).default(50),
         }).optional()
     )
     .query(async ({ input, ctx }) => {

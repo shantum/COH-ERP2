@@ -140,16 +140,17 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         enabled: activeTab === 'rto' || rtoOrdersQuery.isSuccess,
     });
 
-    // Supporting data queries - lazy loaded based on what's needed for active tab
-    // allSkus and inventoryBalance are heavy queries only needed for Open tab
+    // Supporting data queries
+    // allSkus is needed for CreateOrderModal product search (can be opened from any tab)
     // Migrated to tRPC - fetches all products with variations and SKUs (limit=1000 for comprehensive list)
     const allSkusQuery = trpc.products.list.useQuery(
         { limit: 1000 }, // Fetch all products with high limit to get comprehensive SKU list
         {
             staleTime: 60000, // SKU list doesn't change often
             refetchOnWindowFocus: false,
-            enabled: activeTab === 'open', // Only needed for Open tab (to change SKU)
+            // Always enabled - needed for CreateOrderModal product search from any tab
             // Transform the response to match the expected flat SKU structure
+            // CreateOrderModal expects sku.variation?.product?.name for display
             select: (data) => {
                 const skus: any[] = [];
                 data.products.forEach((product: any) => {
@@ -157,8 +158,11 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
                         variation.skus?.forEach((sku: any) => {
                             skus.push({
                                 ...sku,
-                                variation,
-                                // Keep original structure for compatibility
+                                // Include variation with product reference for display
+                                variation: {
+                                    ...variation,
+                                    product, // Add product for sku.variation.product.name access
+                                },
                             });
                         });
                     });

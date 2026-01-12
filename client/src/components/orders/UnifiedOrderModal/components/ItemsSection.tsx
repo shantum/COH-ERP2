@@ -599,10 +599,16 @@ export function ItemsSection({
     : 12;
 
   // Order-level totals for summary
+  // Calculate from line items for accurate display (order.totalAmount may be 0 for exchanges)
+  const calculatedLineTotal = useMemo(() => {
+    return activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
+  }, [activeLines]);
+
   const orderTotals = useMemo(() => {
+    // Use Shopify data if available, otherwise calculate from line items
     const subtotalWithGst = shopifyDetails?.subtotalPrice
       ? parseFloat(shopifyDetails.subtotalPrice)
-      : order.totalAmount || 0;
+      : calculatedLineTotal;
     const totalTax = shopifyDetails?.totalTax
       ? parseFloat(shopifyDetails.totalTax)
       : 0;
@@ -612,7 +618,9 @@ export function ItemsSection({
     const shippingCost = shopifyDetails?.shippingLines?.reduce(
       (sum, line) => sum + parseFloat(line.price || '0'), 0
     ) || 0;
-    const finalTotal = order.totalAmount || subtotalWithGst;
+    // Final total: use calculated subtotal for display (line item total)
+    // This ensures exchange orders show correct total even when order.totalAmount is 0
+    const finalTotal = subtotalWithGst;
 
     // Pre-GST calculations
     const subtotalPreGst = subtotalWithGst - totalTax;
@@ -630,7 +638,7 @@ export function ItemsSection({
         ? (totalDiscount / itemTotalWithGst) * 100
         : 0,
     };
-  }, [order, shopifyDetails]);
+  }, [order, shopifyDetails, calculatedLineTotal]);
 
   // Build map of SKU -> full financial info from Shopify line items
   const financialInfoBySku = useMemo<Map<string, LineFinancialInfo>>(() => {

@@ -345,7 +345,7 @@ function CustomerSearch({
                                         </span>
                                         {customer.tags && (
                                             <span className="shrink-0 px-1.5 py-0.5 text-[10px] bg-purple-100 text-purple-600 rounded">
-                                                {customer.tags.split(',')[0]}
+                                                {Array.isArray(customer.tags) ? customer.tags[0] : customer.tags.split(',')[0]}
                                             </span>
                                         )}
                                     </div>
@@ -519,6 +519,7 @@ export function CreateOrderModal({
         customerPhone: '',
         channel: 'offline',
         isExchange: false,
+        paymentMethod: 'Prepaid' as 'Prepaid' | 'COD',
         shipByDate: '',
     });
     const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
@@ -590,6 +591,8 @@ export function CreateOrderModal({
 
     const handleSelectPastAddress = (addr: AddressData) => {
         setAddressForm(addr);
+        // Minimize the address section after selection
+        setIsAddressExpanded(false);
     };
 
     const handleAddressChange = (field: keyof AddressData, value: string) => {
@@ -877,37 +880,66 @@ export function CreateOrderModal({
                                 </div>
                             </div>
 
-                            {/* Exchange Checkbox */}
-                            <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                <label className="flex items-start gap-3 cursor-pointer flex-1">
-                                    <div className="relative flex items-center">
-                                        <input
-                                            type="checkbox"
-                                            checked={orderForm.isExchange}
-                                            onChange={(e) => handleExchangeToggle(e.target.checked)}
-                                            className="peer appearance-none w-5 h-5 border-2 border-gray-300 rounded bg-white checked:bg-amber-500 checked:border-amber-500 transition-all cursor-pointer focus:ring-2 focus:ring-amber-200 focus:ring-offset-1"
-                                        />
-                                        <svg
-                                            className="absolute w-3 h-3 text-white pointer-events-none left-1 top-1 opacity-0 peer-checked:opacity-100 transition-opacity"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    </div>
-                                    <div className="flex-1 min-w-0 select-none">
-                                        <div className="flex items-center gap-2">
-                                            <RefreshCw size={14} className={orderForm.isExchange ? 'text-amber-600' : 'text-gray-400'} />
-                                            <span className={`text-sm font-medium ${orderForm.isExchange ? 'text-gray-900' : 'text-gray-600'}`}>
-                                                This is an exchange order
-                                            </span>
+                            {/* Exchange Checkbox & Payment Method Row */}
+                            <div className="flex items-stretch gap-3">
+                                {/* Exchange Checkbox */}
+                                <div className="flex-1 flex items-start gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                    <label className="flex items-start gap-3 cursor-pointer flex-1">
+                                        <div className="relative flex items-center">
+                                            <input
+                                                type="checkbox"
+                                                checked={orderForm.isExchange}
+                                                onChange={(e) => handleExchangeToggle(e.target.checked)}
+                                                className="peer appearance-none w-5 h-5 border-2 border-gray-300 rounded bg-white checked:bg-amber-500 checked:border-amber-500 transition-all cursor-pointer focus:ring-2 focus:ring-amber-200 focus:ring-offset-1"
+                                            />
+                                            <svg
+                                                className="absolute w-3 h-3 text-white pointer-events-none left-1 top-1 opacity-0 peer-checked:opacity-100 transition-opacity"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                            </svg>
                                         </div>
-                                        <p className="text-xs text-gray-500 mt-0.5">
-                                            Product prices will be set to zero
-                                        </p>
-                                    </div>
-                                </label>
+                                        <div className="flex-1 min-w-0 select-none">
+                                            <div className="flex items-center gap-2">
+                                                <RefreshCw size={14} className={orderForm.isExchange ? 'text-amber-600' : 'text-gray-400'} />
+                                                <span className={`text-sm font-medium ${orderForm.isExchange ? 'text-gray-900' : 'text-gray-600'}`}>
+                                                    Exchange
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-0.5">
+                                                Prices set to zero
+                                            </p>
+                                        </div>
+                                    </label>
+                                </div>
+
+                                {/* Payment Method Toggle */}
+                                <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrderForm(f => ({ ...f, paymentMethod: 'Prepaid' }))}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                                            orderForm.paymentMethod === 'Prepaid'
+                                                ? 'bg-green-500 text-white shadow-sm'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
+                                        }`}
+                                    >
+                                        Prepaid
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrderForm(f => ({ ...f, paymentMethod: 'COD' }))}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                                            orderForm.paymentMethod === 'COD'
+                                                ? 'bg-amber-500 text-white shadow-sm'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
+                                        }`}
+                                    >
+                                        COD
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">

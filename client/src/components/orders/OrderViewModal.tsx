@@ -195,7 +195,7 @@ export function OrderViewModal({ orderId, onClose }: OrderViewModalProps) {
                     {/* Tags */}
                     {shopify?.tags && (
                         <div className="flex flex-wrap gap-1">
-                            {shopify.tags.split(',').map((tag: string, idx: number) => (
+                            {(Array.isArray(shopify.tags) ? shopify.tags : shopify.tags.split(',')).map((tag: string, idx: number) => (
                                 <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
                                     {tag.trim()}
                                 </span>

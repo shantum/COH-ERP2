@@ -934,7 +934,7 @@ export function CustomerDetailModal({
                                 <div className="mt-4">
                                     <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Tags</div>
                                     <div className="flex flex-wrap gap-1">
-                                        {customer.tags.split(',').map((tag: string, i: number) => (
+                                        {(Array.isArray(customer.tags) ? customer.tags : customer.tags.split(',')).map((tag: string, i: number) => (
                                             <span key={i} className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">
                                                 {tag.trim()}
                                             </span>
