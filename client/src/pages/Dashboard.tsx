@@ -2,12 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { reportsApi, ordersApi, inventoryApi } from '../services/api';
 import { ShoppingCart, AlertTriangle, RotateCcw, TrendingUp } from 'lucide-react';
 import { OrdersAnalyticsBar } from '../components/orders/OrdersAnalyticsBar';
+import { TopProductsCard } from '../components/dashboard/TopProductsCard';
 
 export default function Dashboard() {
     const { data: dashboard } = useQuery({ queryKey: ['dashboard'], queryFn: () => reportsApi.getDashboard().then(r => r.data) });
     const { data: openOrders } = useQuery({ queryKey: ['openOrders'], queryFn: () => ordersApi.getOpen().then(r => r.data.orders || r.data) });
     const { data: alerts } = useQuery({ queryKey: ['stockAlerts'], queryFn: () => inventoryApi.getAlerts().then(r => r.data) });
-    const { data: velocity } = useQuery({ queryKey: ['velocity'], queryFn: () => reportsApi.getSalesVelocity(7).then(r => r.data) });
 
     const stats = [
         { label: 'Open Orders', value: dashboard?.openOrders || 0, icon: ShoppingCart, color: 'bg-blue-500' },
@@ -81,35 +81,9 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Top Sellers */}
-                <div className="card lg:col-span-2">
-                    <h2 className="text-lg font-semibold mb-4">Top Sellers (7 days)</h2>
-                    <div className="table-scroll-container">
-                        <table className="w-full" style={{ minWidth: '500px' }}>
-                            <thead>
-                                <tr className="border-b">
-                                    <th className="table-header">SKU</th>
-                                    <th className="table-header">Product</th>
-                                    <th className="table-header">Color</th>
-                                    <th className="table-header">Size</th>
-                                    <th className="table-header text-right">Units Sold</th>
-                                    <th className="table-header text-right">Daily Avg</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {velocity?.slice(0, 10).map((item: any) => (
-                                    <tr key={item.skuCode} className="border-b last:border-0">
-                                        <td className="table-cell font-medium">{item.skuCode}</td>
-                                        <td className="table-cell">{item.productName}</td>
-                                        <td className="table-cell">{item.colorName}</td>
-                                        <td className="table-cell">{item.size}</td>
-                                        <td className="table-cell text-right font-medium">{item.totalSold}</td>
-                                        <td className="table-cell text-right">{item.avgDailySales}</td>
-                                    </tr>
-                                )) || <tr><td colSpan={6} className="table-cell text-center text-gray-500">No sales data</td></tr>}
-                            </tbody>
-                        </table>
-                    </div>
+                {/* Top Products */}
+                <div className="lg:col-span-2">
+                    <TopProductsCard />
                 </div>
             </div>
         </div>

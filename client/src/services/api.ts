@@ -431,6 +431,8 @@ export const productionApi = {
 export const reportsApi = {
     getDashboard: () => api.get('/reports/dashboard'),
     getSalesVelocity: (days?: number) => api.get('/reports/sales-velocity', { params: { days } }),
+    getTopProducts: (params: { days?: number; level?: 'product' | 'variation'; limit?: number }) =>
+        api.get('/reports/top-products', { params }),
     getInventoryTurnover: () => api.get('/reports/inventory-turnover'),
     getCogsSummary: () => api.get('/reports/cogs-summary'),
     // Sales Analytics

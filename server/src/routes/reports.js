@@ -110,6 +110,121 @@ router.get('/cogs-summary', async (req, res) => {
     }
 });
 
+// Top products report - configurable time period and aggregation level
+router.get('/top-products', async (req, res) => {
+    try {
+        const { days = 30, level = 'product', limit = 20 } = req.query;
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - Number(days));
+
+        // Get order lines from shipped/delivered orders within the time period
+        const orderLines = await req.prisma.orderLine.findMany({
+            where: {
+                order: {
+                    orderDate: { gte: startDate },
+                    status: { not: 'cancelled' },
+                    trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                },
+            },
+            include: {
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                                fabric: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (level === 'variation') {
+            // Aggregate at variation level (product + color)
+            const variationStats = {};
+            for (const line of orderLines) {
+                const variation = line.sku?.variation;
+                if (!variation) continue;
+
+                const key = variation.id;
+                if (!variationStats[key]) {
+                    variationStats[key] = {
+                        id: variation.id,
+                        name: variation.product?.name || 'Unknown',
+                        colorName: variation.colorName || 'Unknown',
+                        fabricName: variation.fabric?.colorName || null,
+                        imageUrl: variation.imageUrl || variation.product?.imageUrl || null,
+                        units: 0,
+                        revenue: 0,
+                        orderCount: new Set(),
+                    };
+                }
+                variationStats[key].units += line.qty;
+                variationStats[key].revenue += line.qty * Number(line.unitPrice);
+                variationStats[key].orderCount.add(line.orderId);
+            }
+
+            const result = Object.values(variationStats)
+                .map(v => ({ ...v, orderCount: v.orderCount.size }))
+                .sort((a, b) => b.units - a.units)
+                .slice(0, Number(limit));
+
+            return res.json({ level: 'variation', days: Number(days), data: result });
+        } else {
+            // Aggregate at product level
+            const productStats = {};
+            for (const line of orderLines) {
+                const product = line.sku?.variation?.product;
+                if (!product) continue;
+
+                const key = product.id;
+                if (!productStats[key]) {
+                    productStats[key] = {
+                        id: product.id,
+                        name: product.name,
+                        category: product.category,
+                        imageUrl: product.imageUrl || null,
+                        units: 0,
+                        revenue: 0,
+                        orderCount: new Set(),
+                        variations: {},
+                    };
+                }
+                productStats[key].units += line.qty;
+                productStats[key].revenue += line.qty * Number(line.unitPrice);
+                productStats[key].orderCount.add(line.orderId);
+
+                // Track variation breakdown
+                const variationId = line.sku?.variation?.id;
+                const colorName = line.sku?.variation?.colorName || 'Unknown';
+                if (variationId) {
+                    if (!productStats[key].variations[variationId]) {
+                        productStats[key].variations[variationId] = { colorName, units: 0 };
+                    }
+                    productStats[key].variations[variationId].units += line.qty;
+                }
+            }
+
+            const result = Object.values(productStats)
+                .map(p => ({
+                    ...p,
+                    orderCount: p.orderCount.size,
+                    variations: Object.values(p.variations)
+                        .sort((a, b) => b.units - a.units)
+                        .slice(0, 5),
+                }))
+                .sort((a, b) => b.units - a.units)
+                .slice(0, Number(limit));
+
+            return res.json({ level: 'product', days: Number(days), data: result });
+        }
+    } catch (error) {
+        console.error('Top products error:', error);
+        res.status(500).json({ error: 'Failed to fetch top products' });
+    }
+});
+
 // Dashboard summary
 router.get('/dashboard', async (req, res) => {
     try {
