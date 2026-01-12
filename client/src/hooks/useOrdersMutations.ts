@@ -685,6 +685,35 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // No need to invalidate - optimistic update is sufficient, server confirmed
     });
 
+    // Update ship by date - affects open orders (with optimistic updates)
+    const updateShipByDate = useMutation({
+        mutationFn: ({ orderId, date }: { orderId: string; date: string | null }) =>
+            ordersApi.update(orderId, { shipByDate: date }),
+        onMutate: async ({ orderId, date }) => {
+            // Cancel outgoing refetches
+            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
+            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
+
+            // Optimistically update the shipByDate in cache
+            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
+                if (!old) return old;
+                return old.map((order: any) =>
+                    order.id === orderId ? { ...order, shipByDate: date } : order
+                );
+            });
+
+            return { previousOrders };
+        },
+        onError: (err: any, _vars, context) => {
+            // Rollback on error
+            if (context?.previousOrders) {
+                queryClient.setQueryData(orderQueryKeys.open, context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to update ship by date');
+        },
+        // No need to invalidate - optimistic update is sufficient, server confirmed
+    });
+
     // Shipping status mutations - moves between shipped and open
     const unship = useMutation({
         mutationFn: (id: string) => ordersApi.unship(id),
@@ -895,6 +924,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         uncancelLine,
         updateLine,
         updateLineNotes,
+        updateShipByDate,
         addLine,
 
         // Customization

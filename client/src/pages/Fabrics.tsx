@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle, Save } from 'lucide-react';
 import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -87,6 +87,10 @@ export default function Fabrics() {
         handleColumnMoved,
         handleColumnResized,
         handlePageSizeChange,
+        isManager,
+        hasUnsavedChanges,
+        isSavingPrefs,
+        savePreferencesToServer,
     } = useGridState({
         gridId: 'fabricsGrid',
         allColumnIds: ALL_COLUMN_IDS,
@@ -641,56 +645,99 @@ export default function Fabrics() {
             cellClass: 'text-xs text-gray-600',
         },
         {
-            colId: 'unit',
-            headerName: 'Unit',
-            field: 'unit',
-            width: 80,
-            cellClass: 'text-xs',
-            valueFormatter: (params: ValueFormatterParams) => params.value === 'kg' ? 'Kilogram' : 'Meter',
+            colId: 'colorCount',
+            headerName: 'Colors',
+            field: 'colorCount',
+            width: 70,
+            cellClass: 'text-right text-xs font-medium',
         },
         {
-            colId: 'avgShrinkagePct',
-            headerName: 'Shrinkage %',
-            field: 'avgShrinkagePct',
-            width: 100,
+            colId: 'productCount',
+            headerName: 'Products',
+            field: 'productCount',
+            width: 80,
+            cellClass: 'text-right text-xs font-medium',
+        },
+        {
+            colId: 'totalStock',
+            headerName: 'Stock',
+            field: 'totalStock',
+            width: 90,
+            cellClass: 'text-right font-medium',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null) return '-';
+                const unit = params.data?.unit === 'kg' ? 'kg' : 'm';
+                return `${params.value.toLocaleString()} ${unit}`;
+            },
+        },
+        {
+            colId: 'consumption7d',
+            headerName: 'Use (7d)',
+            field: 'consumption7d',
+            width: 90,
             cellClass: 'text-right text-xs',
-            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `${params.value}%` : '-',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null || params.value === 0) return '-';
+                const unit = params.data?.unit === 'kg' ? 'kg' : 'm';
+                return `${params.value.toLocaleString()} ${unit}`;
+            },
+        },
+        {
+            colId: 'consumption30d',
+            headerName: 'Use (30d)',
+            field: 'consumption30d',
+            width: 90,
+            cellClass: 'text-right text-xs',
+            valueFormatter: (params: ValueFormatterParams) => {
+                if (params.value == null || params.value === 0) return '-';
+                const unit = params.data?.unit === 'kg' ? 'kg' : 'm';
+                return `${params.value.toLocaleString()} ${unit}`;
+            },
         },
         {
             colId: 'defaultCostPerUnit',
-            headerName: 'Default Cost',
+            headerName: 'Cost/Unit',
             field: 'defaultCostPerUnit',
-            width: 100,
+            width: 90,
             cellClass: 'text-right',
             valueFormatter: (params: ValueFormatterParams) => params.value != null ? `₹${params.value}` : '-',
         },
         {
-            colId: 'defaultLeadTimeDays',
-            headerName: 'Default Lead',
-            field: 'defaultLeadTimeDays',
-            width: 100,
+            colId: 'unit',
+            headerName: 'Unit',
+            field: 'unit',
+            width: 70,
+            cellClass: 'text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value === 'kg' ? 'kg' : 'm',
+        },
+        {
+            colId: 'avgShrinkagePct',
+            headerName: 'Shrink %',
+            field: 'avgShrinkagePct',
+            width: 80,
             cellClass: 'text-right text-xs',
-            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `${params.value} days` : '-',
+            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `${params.value}%` : '-',
+        },
+        {
+            colId: 'defaultLeadTimeDays',
+            headerName: 'Lead (d)',
+            field: 'defaultLeadTimeDays',
+            width: 80,
+            cellClass: 'text-right text-xs',
+            valueFormatter: (params: ValueFormatterParams) => params.value != null ? `${params.value}` : '-',
         },
         {
             colId: 'defaultMinOrderQty',
-            headerName: 'Default Min',
+            headerName: 'Min Qty',
             field: 'defaultMinOrderQty',
-            width: 100,
+            width: 80,
             cellClass: 'text-right text-xs',
             valueFormatter: (params: ValueFormatterParams) => params.value != null ? params.value.toString() : '-',
         },
         {
-            colId: 'colorCount',
-            headerName: 'Colors',
-            field: 'colorCount',
-            width: 80,
-            cellClass: 'text-right text-xs',
-        },
-        {
             colId: 'actions',
             headerName: '',
-            width: 80,
+            width: 60,
             pinned: 'right' as const,
             sortable: false,
             cellRenderer: (params: ICellRendererParams) => {
@@ -866,6 +913,24 @@ export default function Fabrics() {
                     columnIds={ALL_COLUMN_IDS}
                     columnHeaders={DEFAULT_HEADERS}
                 />
+                {isManager && hasUnsavedChanges && (
+                    <button
+                        onClick={async () => {
+                            const success = await savePreferencesToServer();
+                            if (success) {
+                                alert('Column preferences saved for all users');
+                            } else {
+                                alert('Failed to save preferences');
+                            }
+                        }}
+                        disabled={isSavingPrefs}
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
+                        title="Save current column visibility and order for all users"
+                    >
+                        <Save size={12} />
+                        {isSavingPrefs ? 'Saving...' : 'Sync columns'}
+                    </button>
+                )}
             </div>
 
             {/* AG-Grid */}

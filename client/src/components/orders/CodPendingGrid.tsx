@@ -3,14 +3,15 @@
  * AG Grid implementation for COD orders awaiting payment
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Clock, AlertTriangle, CheckCircle, ExternalLink, Radio, Eye } from 'lucide-react';
+import { Clock, AlertTriangle, CheckCircle, ExternalLink, Radio, Eye, Save } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 import { compactTheme, formatDateTime, getTrackingUrl } from '../../utils/agGridHelpers';
 import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
+import { useGridState, getColumnOrderFromApi } from '../../hooks/useGridState';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -67,60 +68,54 @@ export function CodPendingGrid({
 }: CodPendingGridProps) {
     const gridRef = useRef<AgGridReact>(null);
 
-    // Column visibility state
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem('codPendingGridVisibleColumns');
-        if (saved) { try { return new Set(JSON.parse(saved)); } catch { return new Set(ALL_COLUMN_IDS); } }
-        return new Set(ALL_COLUMN_IDS);
+    // Use shared grid state hook with server sync
+    const {
+        visibleColumns,
+        columnOrder,
+        columnWidths,
+        handleToggleColumn,
+        handleResetAll,
+        handleColumnMoved,
+        handleColumnResized,
+        isManager,
+        hasUnsavedChanges,
+        isSavingPrefs,
+        savePreferencesToServer,
+    } = useGridState({
+        gridId: 'codPendingGrid',
+        allColumnIds: ALL_COLUMN_IDS,
     });
 
-    // Column order state
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem('codPendingGridColumnOrder');
-        if (saved) { try { return JSON.parse(saved); } catch { return ALL_COLUMN_IDS; } }
-        return ALL_COLUMN_IDS;
-    });
-
-    // Column widths state
-    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-        const saved = localStorage.getItem('codPendingGridColumnWidths');
-        if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
-        return {};
-    });
-
-    useEffect(() => { localStorage.setItem('codPendingGridVisibleColumns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
-    useEffect(() => { localStorage.setItem('codPendingGridColumnOrder', JSON.stringify(columnOrder)); }, [columnOrder]);
-    useEffect(() => { localStorage.setItem('codPendingGridColumnWidths', JSON.stringify(columnWidths)); }, [columnWidths]);
-
-    const handleToggleColumn = useCallback((colId: string) => {
-        setVisibleColumns(prev => { const next = new Set(prev); if (next.has(colId)) next.delete(colId); else next.add(colId); return next; });
-    }, []);
-
-    const handleColumnMoved = useCallback(() => {
+    // Handle column moved event from AG-Grid
+    const onColumnMoved = useCallback(() => {
         const api = gridRef.current?.api;
         if (!api) return;
-        const newOrder = api.getAllDisplayedColumns().map(col => col.getColId()).filter((id): id is string => id !== undefined);
-        if (newOrder.length > 0) setColumnOrder(newOrder);
-    }, []);
+        const newOrder = getColumnOrderFromApi(api);
+        handleColumnMoved(newOrder);
+    }, [handleColumnMoved]);
 
-    const handleColumnResized = useCallback((event: any) => {
+    // Handle column resize event from AG-Grid
+    const onColumnResized = useCallback((event: any) => {
         if (event.finished && event.columns?.length) {
             event.columns.forEach((col: any) => {
                 const colId = col.getColId();
                 const width = col.getActualWidth();
                 if (colId && width) {
-                    setColumnWidths(prev => ({ ...prev, [colId]: width }));
+                    handleColumnResized(colId, width);
                 }
             });
         }
-    }, []);
+    }, [handleColumnResized]);
 
-    const handleResetAll = useCallback(() => {
-        setVisibleColumns(new Set(ALL_COLUMN_IDS));
-        setColumnOrder([...ALL_COLUMN_IDS]);
-        setColumnWidths({});
-        localStorage.removeItem('codPendingGridColumnWidths');
-    }, []);
+    // Handle save preferences to server (managers only)
+    const handleSavePreferences = useCallback(async () => {
+        const success = await savePreferencesToServer();
+        if (success) {
+            alert('Column preferences saved for all users');
+        } else {
+            alert('Failed to save preferences');
+        }
+    }, [savePreferencesToServer]);
 
     // Transform orders for grid
     const rowData = useMemo(() => {
@@ -373,7 +368,7 @@ export function CodPendingGrid({
 
     return (
         <div className="border rounded" style={{ height: '500px', width: '100%' }}>
-            <div className="flex justify-end p-2 border-b bg-gray-50">
+            <div className="flex justify-end gap-2 p-2 border-b bg-gray-50">
                 <ColumnVisibilityDropdown
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
@@ -381,6 +376,17 @@ export function CodPendingGrid({
                     columnIds={ALL_COLUMN_IDS}
                     columnHeaders={DEFAULT_HEADERS}
                 />
+                {isManager && hasUnsavedChanges && (
+                    <button
+                        onClick={handleSavePreferences}
+                        disabled={isSavingPrefs}
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
+                        title="Save current column visibility and order for all users"
+                    >
+                        <Save size={12} />
+                        {isSavingPrefs ? 'Saving...' : 'Sync columns'}
+                    </button>
+                )}
             </div>
             <div style={{ height: 'calc(100% - 40px)' }}>
                 <AgGridReact

@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Undo2, ExternalLink, Archive, MoreHorizontal, CheckCircle, AlertTriangle, Package } from 'lucide-react';
+import { Undo2, ExternalLink, Archive, MoreHorizontal, CheckCircle, AlertTriangle, Package, Save } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 import { compactTheme, formatDate, formatRelativeTime, getTrackingUrl } from '../../utils/agGridHelpers';
 import { useGridState, getColumnOrderFromApi, applyColumnWidths } from '../../hooks/useGridState';
@@ -228,6 +228,10 @@ export function ShippedOrdersGrid({
         handleResetAll,
         handleColumnMoved,
         handleColumnResized,
+        isManager,
+        hasUnsavedChanges,
+        isSavingPrefs,
+        savePreferencesToServer,
     } = useGridState({
         gridId: 'shippedGrid',
         allColumnIds: ALL_COLUMN_IDS,
@@ -816,7 +820,7 @@ export function ShippedOrdersGrid({
 
     return (
         <div className="space-y-2">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
                 <ColumnVisibilityDropdown
                     visibleColumns={visibleColumns}
                     onToggleColumn={handleToggleColumn}
@@ -824,6 +828,24 @@ export function ShippedOrdersGrid({
                     columnIds={ALL_COLUMN_IDS}
                     columnHeaders={DEFAULT_HEADERS}
                 />
+                {isManager && hasUnsavedChanges && (
+                    <button
+                        onClick={async () => {
+                            const success = await savePreferencesToServer();
+                            if (success) {
+                                alert('Column preferences saved for all users');
+                            } else {
+                                alert('Failed to save preferences');
+                            }
+                        }}
+                        disabled={isSavingPrefs}
+                        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
+                        title="Save current column visibility and order for all users"
+                    >
+                        <Save size={12} />
+                        {isSavingPrefs ? 'Saving...' : 'Sync columns'}
+                    </button>
+                )}
             </div>
             <div className="border rounded" style={{ height: '500px', width: '100%' }}>
                 <AgGridReact

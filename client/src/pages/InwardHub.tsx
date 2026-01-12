@@ -9,7 +9,7 @@ import { inventoryApi, ordersApi, returnsApi, repackingApi } from '../services/a
 import {
     Package, Search, Plus, X, Check, AlertTriangle, Undo2,
     Factory, RotateCcw, Truck, RefreshCw, ClipboardList,
-    ChevronRight, HelpCircle
+    ChevronRight, HelpCircle, Pencil
 } from 'lucide-react';
 import type {
     PendingSources,
@@ -21,6 +21,7 @@ import type {
     PendingQueueResponse,
     RtoCondition,
     RtoScanMatchData,
+    AllocationMatch,
 } from '../types';
 
 // ============================================
@@ -139,6 +140,237 @@ function SourceCard({ title, count, icon, colorClass, activeRingClass, isActive,
                 </span>
             )}
         </div>
+    );
+}
+
+// ============================================
+// ALLOCATION CELL COMPONENT
+// ============================================
+
+interface AllocationCellProps {
+    transaction: RecentInward;
+    onAllocate: (data: { transactionId: string; allocationType: string; allocationId?: string; rtoCondition?: string }) => void;
+    isAllocating: boolean;
+    allocatingId?: string;
+    getSourceColor: (source: string) => string;
+    getSourceLabel: (source: string) => string;
+}
+
+function AllocationCell({ transaction, onAllocate, isAllocating, allocatingId, getSourceColor, getSourceLabel }: AllocationCellProps) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [matches, setMatches] = useState<AllocationMatch[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [hasFetched, setHasFetched] = useState(false);
+
+    const isAllocated = transaction.isAllocated !== false;
+    const isThisAllocating = isAllocating && allocatingId === transaction.id;
+    const canEdit = true; // All allocations can now be edited/reverted
+
+    // Fetch matches when needed (unallocated or editing)
+    const shouldFetch = !isAllocated || isEditing;
+
+    useEffect(() => {
+        if (!shouldFetch || hasFetched) return;
+        let cancelled = false;
+        setLoading(true);
+        inventoryApi.getTransactionMatches(transaction.id)
+            .then(res => {
+                if (!cancelled) {
+                    setMatches(res.data.matches || []);
+                    setLoading(false);
+                    setHasFetched(true);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setMatches([]);
+                    setLoading(false);
+                    setHasFetched(true);
+                }
+            });
+        return () => { cancelled = true; };
+    }, [shouldFetch, hasFetched, transaction.id]);
+
+    // Reset fetch state when editing starts
+    useEffect(() => {
+        if (isEditing) {
+            setHasFetched(false);
+            setLoading(true);
+        }
+    }, [isEditing]);
+
+    // Track if we started allocating this transaction (to close edit after success)
+    const wasAllocatingRef = useRef(false);
+    useEffect(() => {
+        if (isThisAllocating) {
+            wasAllocatingRef.current = true;
+        } else if (wasAllocatingRef.current && !isThisAllocating) {
+            // Allocation just finished - close edit mode
+            wasAllocatingRef.current = false;
+            setIsEditing(false);
+        }
+    }, [isThisAllocating]);
+
+    const handleSelect = (match: AllocationMatch) => {
+        onAllocate({
+            transactionId: transaction.id,
+            allocationType: match.type,
+            allocationId: match.id,
+            rtoCondition: match.type === 'rto' ? 'good' : undefined,
+        });
+    };
+
+    const handleAdjustment = () => {
+        onAllocate({ transactionId: transaction.id, allocationType: 'adjustment' });
+    };
+
+    // Show allocation options (editing mode or unallocated)
+    if (isEditing || !isAllocated) {
+        return (
+            <div className="flex flex-wrap gap-1 items-center">
+                {loading ? (
+                    <span className="text-xs text-gray-400">Loading...</span>
+                ) : (
+                    <>
+                        {matches.slice(0, 3).map((match, idx) => (
+                            <button
+                                key={`${match.type}-${match.id}-${idx}`}
+                                onClick={() => handleSelect(match)}
+                                disabled={isThisAllocating}
+                                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                    match.type === 'production'
+                                        ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200'
+                                        : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200'
+                                } ${isThisAllocating ? 'opacity-50' : ''}`}
+                                title={match.detail}
+                            >
+                                {match.type === 'production' ? 'Prod' : 'RTO'}: {match.label.replace(/^(Prod |RTO #)/, '')}
+                            </button>
+                        ))}
+                        <button
+                            onClick={handleAdjustment}
+                            disabled={isThisAllocating}
+                            className={`px-2 py-1 rounded text-xs font-medium bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 ${
+                                isThisAllocating ? 'opacity-50' : ''
+                            }`}
+                        >
+                            Adj
+                        </button>
+                        {matches.length === 0 && !loading && (
+                            <span className="text-xs text-gray-400 py-1">No pending sources</span>
+                        )}
+                        {isEditing && (
+                            <button
+                                onClick={() => setIsEditing(false)}
+                                className="p-1 text-gray-400 hover:text-gray-600"
+                                title="Cancel"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </>
+                )}
+            </div>
+        );
+    }
+
+    // Show current allocation with edit button
+    return (
+        <div className="flex items-center gap-1">
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getSourceColor(transaction.source || transaction.reason)}`}>
+                {getSourceLabel(transaction.source || transaction.reason)}
+            </span>
+            {canEdit && (
+                <button
+                    onClick={() => setIsEditing(true)}
+                    className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                    title="Change allocation"
+                >
+                    <Pencil size={12} />
+                </button>
+            )}
+        </div>
+    );
+}
+
+// ============================================
+// NOTES CELL COMPONENT
+// ============================================
+
+interface NotesCellProps {
+    transactionId: string;
+    initialNotes: string;
+}
+
+function NotesCell({ transactionId, initialNotes }: NotesCellProps) {
+    const [isEditing, setIsEditing] = useState(false);
+    const [notes, setNotes] = useState(initialNotes);
+    const [saving, setSaving] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+    const queryClient = useQueryClient();
+
+    useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [isEditing]);
+
+    const handleSave = async () => {
+        if (notes === initialNotes) {
+            setIsEditing(false);
+            return;
+        }
+        setSaving(true);
+        try {
+            await inventoryApi.editInward(transactionId, { notes: notes || undefined });
+            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+            setIsEditing(false);
+        } catch {
+            // Revert on error
+            setNotes(initialNotes);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleSave();
+        } else if (e.key === 'Escape') {
+            setNotes(initialNotes);
+            setIsEditing(false);
+        }
+    };
+
+    if (isEditing) {
+        return (
+            <input
+                ref={inputRef}
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                onBlur={handleSave}
+                onKeyDown={handleKeyDown}
+                disabled={saving}
+                className="w-full px-1 py-0.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Add note..."
+            />
+        );
+    }
+
+    return (
+        <button
+            onClick={() => setIsEditing(true)}
+            className={`text-xs truncate max-w-[100px] text-left rounded px-1 py-0.5 transition-colors ${
+                notes
+                    ? 'text-gray-600 hover:bg-gray-100'
+                    : 'text-gray-400 hover:text-blue-600 hover:bg-blue-50 italic'
+            }`}
+            title={notes || 'Click to add note'}
+        >
+            {notes || '+ note'}
+        </button>
     );
 }
 
@@ -475,6 +707,14 @@ export default function InwardHub() {
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [expandedSource, setExpandedSource] = useState<string | null>(null);
 
+    // Scan queue for rapid scanning - prevents misfires
+    const scanQueueRef = useRef<string[]>([]);
+    const isProcessingRef = useRef(false);
+    const [queueLength, setQueueLength] = useState(0);
+
+    // Track which transaction is being allocated
+    const [allocatingTransactionId, setAllocatingTransactionId] = useState<string | null>(null);
+
     // Form state
     const [quantity, setQuantity] = useState(1);
     const [selectedCondition, setSelectedCondition] = useState('unused');
@@ -751,10 +991,131 @@ export default function InwardHub() {
         },
     });
 
+    // Instant inward mutation - FAST: scan → +1 immediately
+    const instantInwardMutation = useMutation({
+        mutationFn: async (skuCode: string) => {
+            return inventoryApi.instantInward(skuCode);
+        },
+        onMutate: async (skuCode: string) => {
+            // Cancel outgoing refetches
+            await queryClient.cancelQueries({ queryKey: ['recent-inwards'] });
+            const previousRecent = queryClient.getQueryData<RecentInward[]>(['recent-inwards']);
+            return { previousRecent, skuCode };
+        },
+        onError: (error: any, _, context) => {
+            if (context?.previousRecent) {
+                queryClient.setQueryData(['recent-inwards'], context.previousRecent);
+            }
+            setScanError(error.response?.data?.error || 'SKU not found');
+        },
+        onSuccess: (response) => {
+            const txn = response.data.transaction;
+            setSuccessMessage(`+1 ${txn.skuCode} (${txn.productName})`);
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
+        },
+    });
+
+    // Allocate transaction mutation
+    const allocateMutation = useMutation({
+        mutationFn: async (data: { transactionId: string; allocationType: string; allocationId?: string; rtoCondition?: string }) => {
+            setAllocatingTransactionId(data.transactionId);
+            return inventoryApi.allocateTransaction(data);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
+            setSuccessMessage('Allocated');
+        },
+        onError: (error: any) => {
+            setScanError(error.response?.data?.error || 'Failed to allocate');
+        },
+        onSettled: () => {
+            setAllocatingTransactionId(null);
+        },
+    });
+
+    // ============================================
+    // SCAN QUEUE PROCESSOR
+    // ============================================
+
+    // Process scan queue sequentially
+    const processQueue = async () => {
+        if (isProcessingRef.current) return;
+        if (scanQueueRef.current.length === 0) return;
+
+        isProcessingRef.current = true;
+
+        while (scanQueueRef.current.length > 0) {
+            const code = scanQueueRef.current.shift()!;
+            setQueueLength(scanQueueRef.current.length);
+
+            try {
+                const response = await inventoryApi.instantInward(code);
+                const txn = response.data.transaction;
+                setSuccessMessage(`+1 ${txn.skuCode}`);
+                // Optimistic update for recent inwards
+                queryClient.setQueryData<RecentInward[]>(['recent-inwards'], (old) => {
+                    if (!old) return old;
+                    const newItem: RecentInward = {
+                        id: txn.id,
+                        skuId: txn.skuId,
+                        skuCode: txn.skuCode,
+                        productName: txn.productName,
+                        colorName: txn.colorName,
+                        size: txn.size,
+                        qty: 1,
+                        reason: 'received',
+                        source: 'received',
+                        notes: null,
+                        createdAt: new Date().toISOString(),
+                        isAllocated: false,
+                    };
+                    return [newItem, ...old];
+                });
+            } catch (error: any) {
+                setScanError(error.response?.data?.error || `Failed: ${code}`);
+            }
+        }
+
+        isProcessingRef.current = false;
+        setQueueLength(0);
+        // Final sync with server
+        queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
+        queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
+    };
+
     // ============================================
     // HANDLERS
     // ============================================
 
+    // INSTANT INWARD: Add to queue, clear immediately, process sequentially
+    const handleInstantInward = () => {
+        if (!searchInput.trim()) return;
+        const code = searchInput.trim();
+
+        // Optimistic: Clear input IMMEDIATELY for next scan
+        setSearchInput('');
+        inputRef.current?.focus();
+
+        // Add to queue
+        scanQueueRef.current.push(code);
+        setQueueLength(scanQueueRef.current.length);
+
+        // Start processing if not already
+        processQueue();
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleInstantInward();
+        }
+    };
+
+    // Legacy search for queue panel item selection (shows details)
     const handleSearch = async () => {
         if (!searchInput.trim()) return;
 
@@ -778,13 +1139,6 @@ export default function InwardHub() {
             setIsSearching(false);
             setSearchInput('');
             inputRef.current?.focus();
-        }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            handleSearch();
         }
     };
 
@@ -873,7 +1227,8 @@ export default function InwardHub() {
         || returnReceiveMutation.isPending
         || rtoReceiveMutation.isPending
         || repackingProcessMutation.isPending
-        || adjustmentMutation.isPending;
+        || adjustmentMutation.isPending
+        || instantInwardMutation.isPending;
 
     // ============================================
     // RENDER HELPERS
@@ -887,6 +1242,7 @@ export default function InwardHub() {
             repacking: 'Repacking',
             adjustment: 'Adjustment',
             return_receipt: 'Return',
+            received: 'Unallocated', // New instant inward
         };
         return labels[source] || source;
     };
@@ -899,6 +1255,7 @@ export default function InwardHub() {
             repacking: 'bg-green-100 text-green-700',
             adjustment: 'bg-gray-100 text-gray-700',
             return_receipt: 'bg-orange-100 text-orange-700',
+            received: 'bg-yellow-100 text-yellow-700', // Unallocated - needs attention
         };
         return colors[source] || 'bg-gray-100 text-gray-700';
     };
@@ -1374,7 +1731,7 @@ export default function InwardHub() {
                 </div>
             )}
 
-            {/* Scan Input */}
+            {/* Scan Input - Instant Inward */}
             <div className="card">
                 <div className="flex items-center gap-3">
                     <div className="relative flex-1 max-w-lg">
@@ -1385,19 +1742,29 @@ export default function InwardHub() {
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            placeholder="Scan barcode or enter SKU code..."
+                            placeholder="Scan or type SKU → Enter to add +1"
                             className="input pl-10 w-full text-lg"
                             autoFocus
                         />
+                        {/* Queue indicator */}
+                        {queueLength > 0 && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                                <span className="text-xs text-blue-600 font-medium">{queueLength}</span>
+                            </div>
+                        )}
                     </div>
                     <button
-                        onClick={handleSearch}
-                        disabled={isSearching}
+                        onClick={handleInstantInward}
+                        disabled={!searchInput.trim()}
                         className="btn btn-primary"
                     >
-                        {isSearching ? 'Searching...' : 'Search'}
+                        Add +1
                     </button>
                 </div>
+                <p className="text-xs text-gray-500 mt-1">
+                    Scan rapidly - items queue up and process sequentially
+                </p>
             </div>
 
             {/* Source Cards */}
@@ -1565,13 +1932,14 @@ export default function InwardHub() {
                         <table className="w-full text-sm">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Time</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">SKU</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600 w-16">ID</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600 w-20">Time</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600 w-24">SKU</th>
                                     <th className="px-3 py-2 text-left font-medium text-gray-600">Product</th>
-                                    <th className="px-3 py-2 text-center font-medium text-gray-600">Qty</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Source</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Notes</th>
-                                    <th className="px-3 py-2 text-center font-medium text-gray-600">Action</th>
+                                    <th className="px-3 py-2 text-center font-medium text-gray-600 w-12">Qty</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600 min-w-[220px]">Allocate To</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600 w-32">Notes</th>
+                                    <th className="px-3 py-2 text-center font-medium text-gray-600 w-16">Undo</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
@@ -1586,6 +1954,15 @@ export default function InwardHub() {
                                                     : ''
                                             }`}
                                         >
+                                            <td className="px-3 py-2">
+                                                <span
+                                                    className="font-mono text-xs text-gray-400 cursor-pointer hover:text-gray-600"
+                                                    title={txn.id}
+                                                    onClick={() => navigator.clipboard.writeText(txn.id)}
+                                                >
+                                                    {txn.id.slice(0, 6)}
+                                                </span>
+                                            </td>
                                             <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
                                                 {isToday
                                                     ? new Date(txn.createdAt).toLocaleTimeString('en-IN', {
@@ -1607,13 +1984,21 @@ export default function InwardHub() {
                                             <td className="px-3 py-2 text-center">
                                                 <span className="text-green-600 font-semibold">+{txn.qty}</span>
                                             </td>
-                                            <td className="px-3 py-2">
-                                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getSourceColor(txn.source || txn.reason)}`}>
-                                                    {getSourceLabel(txn.source || txn.reason)}
-                                                </span>
+                                            <td className="px-3 py-2 min-w-[220px]">
+                                                <AllocationCell
+                                                    transaction={txn}
+                                                    onAllocate={(data) => allocateMutation.mutate(data)}
+                                                    isAllocating={allocateMutation.isPending}
+                                                    allocatingId={allocatingTransactionId ?? undefined}
+                                                    getSourceColor={getSourceColor}
+                                                    getSourceLabel={getSourceLabel}
+                                                />
                                             </td>
-                                            <td className="px-3 py-2 text-gray-500 text-xs max-w-[200px] truncate">
-                                                {txn.notes || '-'}
+                                            <td className="px-3 py-2">
+                                                <NotesCell
+                                                    transactionId={txn.id}
+                                                    initialNotes={txn.notes || ''}
+                                                />
                                             </td>
                                             <td className="px-3 py-2 text-center">
                                                 <button

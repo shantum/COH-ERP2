@@ -585,6 +585,90 @@ async function backfillTrackingFields(prisma, batchSize = 5000) {
     return { updated: 0, errors: [], total: 0, remaining: 0, deprecated: true };
 }
 
+/**
+ * Backfill order fields (totalAmount, etc.) from ShopifyOrderCache rawData
+ * @param {Object} prisma - Prisma client
+ * @param {number} batchSize - Maximum number of orders to process
+ * @returns {Object} Results summary
+ */
+async function backfillOrderFields(prisma, batchSize = 5000) {
+    // Find orders with low/zero totalAmount that have cached Shopify data
+    // Use raw query to handle null values (schema says Float but DB may have nulls)
+    const ordersToBackfill = await prisma.$queryRaw`
+        SELECT o.id, o."shopifyOrderId", o."orderNumber"
+        FROM "Order" o
+        WHERE o."shopifyOrderId" IS NOT NULL
+        AND (o."totalAmount" IS NULL OR o."totalAmount" = 0)
+        LIMIT ${batchSize}
+    `;
+
+    if (ordersToBackfill.length === 0) {
+        return { updated: 0, errors: [], total: 0, remaining: 0 };
+    }
+
+    console.log(`[Backfill OrderFields] Found ${ordersToBackfill.length} orders with null totalAmount`);
+
+    // Convert BigInt to String for cache lookup (raw query returns BigInt, cache uses String IDs)
+    const shopifyIds = ordersToBackfill.map((o) => String(o.shopifyOrderId));
+    const cacheEntries = await prisma.shopifyOrderCache.findMany({
+        where: { id: { in: shopifyIds } },
+        select: { id: true, rawData: true },
+    });
+
+    console.log(`[Backfill OrderFields] Found ${cacheEntries.length} cache entries for ${shopifyIds.length} orders`);
+
+    const cacheMap = new Map(cacheEntries.map((c) => [c.id, c]));
+
+    let updated = 0;
+    const errors = [];
+
+    let noCache = 0;
+    let noRawData = 0;
+    let noTotalPrice = 0;
+
+    for (const order of ordersToBackfill) {
+        const cache = cacheMap.get(String(order.shopifyOrderId));
+        if (!cache) {
+            noCache++;
+            continue;
+        }
+        if (!cache.rawData) {
+            noRawData++;
+            continue;
+        }
+
+        try {
+            const rawData = typeof cache.rawData === 'string' ? JSON.parse(cache.rawData) : cache.rawData;
+            const totalAmount = parseFloat(rawData.total_price) || null;
+
+            if (totalAmount === null) {
+                noTotalPrice++;
+                continue;
+            }
+
+            await prisma.order.update({
+                where: { id: order.id },
+                data: { totalAmount },
+            });
+            updated++;
+        } catch (error) {
+            errors.push({ orderId: order.id, orderNumber: order.orderNumber, error: error.message });
+        }
+    }
+
+    console.log(`[Backfill OrderFields] Debug: noCache=${noCache}, noRawData=${noRawData}, noTotalPrice=${noTotalPrice}`);
+
+    // Count remaining using raw query to handle null values
+    const [{ count: remaining }] = await prisma.$queryRaw`
+        SELECT COUNT(*)::int as count FROM "Order"
+        WHERE "shopifyOrderId" IS NOT NULL
+        AND ("totalAmount" IS NULL OR "totalAmount" = 0)
+    `;
+
+    console.log(`[Backfill OrderFields] Updated ${updated} orders, ${remaining} remaining`);
+    return { updated, errors, total: ordersToBackfill.length, remaining };
+}
+
 // ============================================
 // UNIFIED BACKFILL ENDPOINT
 // ============================================
@@ -595,7 +679,7 @@ async function backfillTrackingFields(prisma, batchSize = 5000) {
  * POST /api/shopify/sync/backfill
  *
  * Body:
- * - fields: string[] - Array of field types to backfill. Options: 'all', 'paymentMethod', 'cacheFields', 'trackingFields'
+ * - fields: string[] - Array of field types to backfill. Options: 'all', 'paymentMethod', 'cacheFields', 'trackingFields', 'orderFields'
  *   Default: ['all']
  * - batchSize: number - Maximum records to process per field type. Default: 5000
  *
@@ -628,6 +712,12 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req, res) =
     if (shouldBackfillAll || fields.includes('trackingFields')) {
         console.log('[Unified Backfill] Running trackingFields backfill...');
         results.trackingFields = await backfillTrackingFields(req.prisma, batchSize);
+    }
+
+    // Backfill order fields (totalAmount) from ShopifyOrderCache.rawData
+    if (shouldBackfillAll || fields.includes('orderFields')) {
+        console.log('[Unified Backfill] Running orderFields backfill (totalAmount)...');
+        results.orderFields = await backfillOrderFields(req.prisma, batchSize);
     }
 
     const totalUpdated = Object.values(results).reduce((sum, r) => sum + (r.updated || 0), 0);

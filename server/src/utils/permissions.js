@@ -119,7 +119,7 @@ export const DEFAULT_ROLES = {
     owner: {
         displayName: 'Owner',
         description: 'Full access to everything',
-        permissions: Object.keys(ALL_PERMISSIONS),
+        permissions: ['*'], // Global wildcard - grants ALL permissions automatically
         isBuiltIn: true,
     },
     manager: {

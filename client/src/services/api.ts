@@ -144,6 +144,12 @@ export const inventoryApi = {
         api.get(`/inventory/pending-queue/${source}`, { params }),
     rtoInwardLine: (data: { lineId: string; condition: string; notes?: string }) =>
         api.post('/inventory/rto-inward-line', data),
+    // Instant inward (fast scan flow)
+    instantInward: (skuCode: string) => api.post('/inventory/instant-inward', { skuCode }),
+    // Allocation
+    getTransactionMatches: (transactionId: string) => api.get(`/inventory/transaction-matches/${transactionId}`),
+    allocateTransaction: (data: { transactionId: string; allocationType: string; allocationId?: string; rtoCondition?: string }) =>
+        api.post('/inventory/allocate-transaction', data),
     // Reconciliation
     getReconciliationHistory: (limit?: number) => api.get('/inventory/reconciliation/history', { params: { limit } }),
     startReconciliation: () => api.post('/inventory/reconciliation/start'),
@@ -255,6 +261,8 @@ export const ordersApi = {
     markDelivered: (id: string) => api.post(`/orders/${id}/mark-delivered`),
     markRto: (id: string) => api.post(`/orders/${id}/mark-rto`),
     receiveRto: (id: string) => api.post(`/orders/${id}/receive-rto`),
+    // Cross-tab search
+    searchAll: (q: string, limit?: number) => api.get('/orders/search-all', { params: { q, limit } }),
     // Bulk archive
     archiveDeliveredPrepaid: () => api.post('/orders/archive-delivered-prepaid'),
 };
@@ -562,6 +570,10 @@ export const adminApi = {
     triggerBackgroundJob: (jobId: string) => api.post(`/admin/background-jobs/${jobId}/trigger`),
     updateBackgroundJob: (jobId: string, data: { enabled: boolean }) =>
         api.put(`/admin/background-jobs/${jobId}`, data),
+    // Grid column preferences (synced across users)
+    getGridPreferences: (gridId: string) => api.get(`/admin/grid-preferences/${gridId}`),
+    saveGridPreferences: (gridId: string, data: { visibleColumns: string[]; columnOrder: string[]; columnWidths?: Record<string, number> }) =>
+        api.put(`/admin/grid-preferences/${gridId}`, data),
 };
 
 // Tracking API (iThink Logistics integration)

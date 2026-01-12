@@ -229,7 +229,7 @@ export const CreateOrderSchema = z.object({
     customerId: z.string().uuid('Invalid customer ID').optional().nullable(), // Link to existing customer
     shippingAddress: z.string().optional().nullable(),
     orderDate: z.string().datetime().optional(),
-    shipByDate: z.string().datetime().optional().nullable(), // Optional shipping deadline
+    shipByDate: z.string().optional().nullable(), // Optional shipping deadline (YYYY-MM-DD or ISO datetime)
     paymentMethod: z.enum(['Prepaid', 'COD']).default('Prepaid'),
     // totalAmount can be 0 or negative for exchange orders
     totalAmount: z.number().optional(),
@@ -264,7 +264,7 @@ export const UpdateOrderSchema = z.object({
     // customerNotes: REMOVED - Read from shopifyCache.customerNotes instead
     internalNotes: z.string().optional().nullable(),
     totalAmount: z.number().positive('Total amount must be positive').optional(),
-    shipByDate: z.string().datetime().optional().nullable(),
+    shipByDate: z.string().optional().nullable(), // Accepts YYYY-MM-DD or ISO datetime
     isExchange: z.boolean().optional(),
 });
 

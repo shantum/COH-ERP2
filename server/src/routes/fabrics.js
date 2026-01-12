@@ -142,27 +142,101 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
                 orderBy: { name: 'asc' },
             });
 
-            const items = types
-                .filter(t => t.name !== 'Default')
-                .map(type => ({
-                    // Type identifiers
-                    fabricTypeId: type.id,
-                    fabricTypeName: type.name,
-                    composition: type.composition,
-                    unit: type.unit,
-                    avgShrinkagePct: type.avgShrinkagePct,
+            // Date ranges for consumption calculations
+            const now = new Date();
+            const sevenDaysAgo = new Date(now); sevenDaysAgo.setDate(now.getDate() - 7);
+            const thirtyDaysAgo = new Date(now); thirtyDaysAgo.setDate(now.getDate() - 30);
 
-                    // Default values (editable at type level)
-                    defaultCostPerUnit: type.defaultCostPerUnit,
-                    defaultLeadTimeDays: type.defaultLeadTimeDays,
-                    defaultMinOrderQty: type.defaultMinOrderQty,
+            // Build items with aggregated data
+            const items = await Promise.all(
+                types
+                    .filter(t => t.name !== 'Default')
+                    .map(async (type) => {
+                        const fabricIds = type.fabrics.map(f => f.id);
 
-                    // Aggregated info
-                    colorCount: type.fabrics.length,
+                        // Skip calculations if no fabrics
+                        if (fabricIds.length === 0) {
+                            return {
+                                fabricTypeId: type.id,
+                                fabricTypeName: type.name,
+                                composition: type.composition,
+                                unit: type.unit,
+                                avgShrinkagePct: type.avgShrinkagePct,
+                                defaultCostPerUnit: type.defaultCostPerUnit,
+                                defaultLeadTimeDays: type.defaultLeadTimeDays,
+                                defaultMinOrderQty: type.defaultMinOrderQty,
+                                colorCount: 0,
+                                totalStock: 0,
+                                productCount: 0,
+                                consumption7d: 0,
+                                consumption30d: 0,
+                                isTypeRow: true,
+                            };
+                        }
 
-                    // Flag to identify type-level rows
-                    isTypeRow: true,
-                }));
+                        // Calculate total stock (sum of all fabric balances)
+                        const [inwardSum, outwardSum] = await Promise.all([
+                            req.prisma.fabricTransaction.aggregate({
+                                where: { fabricId: { in: fabricIds }, txnType: 'inward' },
+                                _sum: { qty: true },
+                            }),
+                            req.prisma.fabricTransaction.aggregate({
+                                where: { fabricId: { in: fabricIds }, txnType: 'outward' },
+                                _sum: { qty: true },
+                            }),
+                        ]);
+                        const totalStock = (Number(inwardSum._sum.qty) || 0) - (Number(outwardSum._sum.qty) || 0);
+
+                        // Count products using this fabric type
+                        const productCount = await req.prisma.product.count({
+                            where: { fabricId: { in: fabricIds } },
+                        });
+
+                        // Calculate consumption (outward transactions) for 7d and 30d
+                        const [consumption7dResult, consumption30dResult] = await Promise.all([
+                            req.prisma.fabricTransaction.aggregate({
+                                where: {
+                                    fabricId: { in: fabricIds },
+                                    txnType: 'outward',
+                                    createdAt: { gte: sevenDaysAgo },
+                                },
+                                _sum: { qty: true },
+                            }),
+                            req.prisma.fabricTransaction.aggregate({
+                                where: {
+                                    fabricId: { in: fabricIds },
+                                    txnType: 'outward',
+                                    createdAt: { gte: thirtyDaysAgo },
+                                },
+                                _sum: { qty: true },
+                            }),
+                        ]);
+
+                        return {
+                            // Type identifiers
+                            fabricTypeId: type.id,
+                            fabricTypeName: type.name,
+                            composition: type.composition,
+                            unit: type.unit,
+                            avgShrinkagePct: type.avgShrinkagePct,
+
+                            // Default values (editable at type level)
+                            defaultCostPerUnit: type.defaultCostPerUnit,
+                            defaultLeadTimeDays: type.defaultLeadTimeDays,
+                            defaultMinOrderQty: type.defaultMinOrderQty,
+
+                            // Aggregated info
+                            colorCount: type.fabrics.length,
+                            totalStock: Number(totalStock.toFixed(2)),
+                            productCount,
+                            consumption7d: Number((Number(consumption7dResult._sum.qty) || 0).toFixed(2)),
+                            consumption30d: Number((Number(consumption30dResult._sum.qty) || 0).toFixed(2)),
+
+                            // Flag to identify type-level rows
+                            isTypeRow: true,
+                        };
+                    })
+            );
 
             return res.json({ items, summary: { total: items.length } });
         }

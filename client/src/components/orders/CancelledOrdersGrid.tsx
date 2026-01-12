@@ -3,14 +3,15 @@
  * AG Grid implementation for cancelled orders
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Undo2, Eye, ExternalLink, XCircle } from 'lucide-react';
+import { Undo2, Eye, ExternalLink, XCircle, Save } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 import { compactTheme, formatDate } from '../../utils/agGridHelpers';
 import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
+import { useGridState, getColumnOrderFromApi } from '../../hooks/useGridState';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -65,60 +66,54 @@ export function CancelledOrdersGrid({
 }: CancelledOrdersGridProps) {
     const gridRef = useRef<AgGridReact>(null);
 
-    // Column visibility state
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem('cancelledGridVisibleColumns');
-        if (saved) { try { return new Set(JSON.parse(saved)); } catch { return new Set(ALL_COLUMN_IDS); } }
-        return new Set(ALL_COLUMN_IDS);
+    // Use shared grid state hook with server sync
+    const {
+        visibleColumns,
+        columnOrder,
+        columnWidths,
+        handleToggleColumn,
+        handleResetAll,
+        handleColumnMoved,
+        handleColumnResized,
+        isManager,
+        hasUnsavedChanges,
+        isSavingPrefs,
+        savePreferencesToServer,
+    } = useGridState({
+        gridId: 'cancelledGrid',
+        allColumnIds: ALL_COLUMN_IDS,
     });
 
-    // Column order state
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem('cancelledGridColumnOrder');
-        if (saved) { try { return JSON.parse(saved); } catch { return ALL_COLUMN_IDS; } }
-        return ALL_COLUMN_IDS;
-    });
-
-    // Column widths state
-    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-        const saved = localStorage.getItem('cancelledGridColumnWidths');
-        if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
-        return {};
-    });
-
-    useEffect(() => { localStorage.setItem('cancelledGridVisibleColumns', JSON.stringify([...visibleColumns])); }, [visibleColumns]);
-    useEffect(() => { localStorage.setItem('cancelledGridColumnOrder', JSON.stringify(columnOrder)); }, [columnOrder]);
-    useEffect(() => { localStorage.setItem('cancelledGridColumnWidths', JSON.stringify(columnWidths)); }, [columnWidths]);
-
-    const handleToggleColumn = useCallback((colId: string) => {
-        setVisibleColumns(prev => { const next = new Set(prev); if (next.has(colId)) next.delete(colId); else next.add(colId); return next; });
-    }, []);
-
-    const handleColumnMoved = useCallback(() => {
+    // Handle column moved event from AG-Grid
+    const onColumnMoved = useCallback(() => {
         const api = gridRef.current?.api;
         if (!api) return;
-        const newOrder = api.getAllDisplayedColumns().map(col => col.getColId()).filter((id): id is string => id !== undefined);
-        if (newOrder.length > 0) setColumnOrder(newOrder);
-    }, []);
+        const newOrder = getColumnOrderFromApi(api);
+        handleColumnMoved(newOrder);
+    }, [handleColumnMoved]);
 
-    const handleColumnResized = useCallback((event: any) => {
+    // Handle column resize event from AG-Grid
+    const onColumnResized = useCallback((event: any) => {
         if (event.finished && event.columns?.length) {
             event.columns.forEach((col: any) => {
                 const colId = col.getColId();
                 const width = col.getActualWidth();
                 if (colId && width) {
-                    setColumnWidths(prev => ({ ...prev, [colId]: width }));
+                    handleColumnResized(colId, width);
                 }
             });
         }
-    }, []);
+    }, [handleColumnResized]);
 
-    const handleResetAll = useCallback(() => {
-        setVisibleColumns(new Set(ALL_COLUMN_IDS));
-        setColumnOrder([...ALL_COLUMN_IDS]);
-        setColumnWidths({});
-        localStorage.removeItem('cancelledGridColumnWidths');
-    }, []);
+    // Handle save preferences to server (managers only)
+    const handleSavePreferences = useCallback(async () => {
+        const success = await savePreferencesToServer();
+        if (success) {
+            alert('Column preferences saved for all users');
+        } else {
+            alert('Failed to save preferences');
+        }
+    }, [savePreferencesToServer]);
 
     // Transform orders for grid
     const rowData = useMemo(() => {
@@ -359,13 +354,26 @@ export function CancelledOrdersGrid({
                 <span className="text-xs text-gray-500">
                     {orders.length} cancelled order{orders.length !== 1 ? 's' : ''}
                 </span>
-                <ColumnVisibilityDropdown
-                    visibleColumns={visibleColumns}
-                    onToggleColumn={handleToggleColumn}
-                    onResetAll={handleResetAll}
-                    columnIds={ALL_COLUMN_IDS}
-                    columnHeaders={DEFAULT_HEADERS}
-                />
+                <div className="flex items-center gap-2">
+                    <ColumnVisibilityDropdown
+                        visibleColumns={visibleColumns}
+                        onToggleColumn={handleToggleColumn}
+                        onResetAll={handleResetAll}
+                        columnIds={ALL_COLUMN_IDS}
+                        columnHeaders={DEFAULT_HEADERS}
+                    />
+                    {isManager && hasUnsavedChanges && (
+                        <button
+                            onClick={handleSavePreferences}
+                            disabled={isSavingPrefs}
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
+                            title="Save current column visibility and order for all users"
+                        >
+                            <Save size={12} />
+                            {isSavingPrefs ? 'Saving...' : 'Sync columns'}
+                        </button>
+                    )}
+                </div>
             </div>
             <div style={{ height: 'calc(100% - 40px)' }}>
                 <AgGridReact

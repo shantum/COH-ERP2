@@ -6,14 +6,13 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Search, RefreshCw, Archive, Truck } from 'lucide-react';
+import { Plus, RefreshCw, Archive, Truck, Save } from 'lucide-react';
 import { shopifyApi, trackingApi, ordersApi } from '../services/api';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
 import type { OrderTab } from '../hooks/useOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
-import { useDebounce } from '../hooks/useDebounce';
 import { useAuth } from '../hooks/useAuth';
 
 // Utilities
@@ -44,6 +43,7 @@ import {
     ProcessShippedModal,
     OrdersAnalyticsBar,
     UnifiedOrderModal,
+    GlobalOrderSearch,
 } from '../components/orders';
 import type { Order } from '../types';
 
@@ -62,11 +62,7 @@ export default function Orders() {
         }, { replace: true }); // Use replace to avoid polluting browser history
     }, [setSearchParams]);
 
-    // Search and filter state
-    // searchInput: immediate value for responsive typing
-    // searchQuery: debounced value (300ms) for filtering
-    const [searchInput, setSearchInput] = useState('');
-    const searchQuery = useDebounce(searchInput, 300);
+    // Filter state (per-tab filtering, separate from GlobalOrderSearch)
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
@@ -304,7 +300,8 @@ export default function Orders() {
     );
 
     const filteredOpenRows = useMemo(() => {
-        let rows = filterRows(openRows, searchQuery, dateRange, tab === 'open');
+        // Note: Global search now handles cross-tab search. Per-tab filtering uses AG-Grid's built-in filters.
+        let rows = filterRows(openRows, '', dateRange, tab === 'open');
 
         // Apply allocated filter
         if (allocatedFilter === 'yes') {
@@ -342,14 +339,10 @@ export default function Orders() {
         }
 
         return rows;
-    }, [openRows, searchQuery, dateRange, tab, allocatedFilter, productionFilter]);
+    }, [openRows, dateRange, tab, allocatedFilter, productionFilter]);
 
-    const filteredShippedOrders = useMemo(() => {
-        if (!searchQuery.trim()) return shippedOrders;
-        return shippedOrders?.filter((order: any) =>
-            order.orderNumber?.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-    }, [shippedOrders, searchQuery]);
+    // Shipped orders are now unfiltered - use AG-Grid's quick filter or GlobalOrderSearch
+    const filteredShippedOrders = shippedOrders;
 
     const uniqueOpenOrderCount = new Set(filteredOpenRows.map((r) => r.orderId)).size;
 
@@ -523,7 +516,7 @@ export default function Orders() {
     );
 
     // Grid component
-    const { gridComponent, actionPanel, columnVisibilityDropdown, statusLegend } = OrdersGrid({
+    const { gridComponent, actionPanel, columnVisibilityDropdown, statusLegend, isManager, hasUnsavedChanges, isSavingPrefs, savePreferencesToServer } = OrdersGrid({
         rows: filteredOpenRows,
         lockedDates: lockedDates || [],
         onAllocate: handleAllocate,
@@ -551,6 +544,7 @@ export default function Orders() {
         onCustomize: handleCustomize,
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
+        onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         allocatingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
@@ -561,7 +555,7 @@ export default function Orders() {
 
     // Tab configuration for cleaner rendering
     const tabs = [
-        { id: 'open' as const, label: 'Open', count: openOrders?.length || 0, filteredCount: searchQuery || dateRange ? uniqueOpenOrderCount : null },
+        { id: 'open' as const, label: 'Open', count: openOrders?.length || 0, filteredCount: dateRange ? uniqueOpenOrderCount : null },
         { id: 'shipped' as const, label: 'Shipped', count: shippedPagination.total },
         { id: 'rto' as const, label: 'RTO', count: rtoTotalCount, highlight: true },
         { id: 'cod-pending' as const, label: 'COD Pending', count: codPendingTotalCount, highlight: true },
@@ -575,24 +569,22 @@ export default function Orders() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <h1 className="text-xl md:text-2xl font-bold text-gray-900">Orders</h1>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                    <div className="relative flex-1 sm:flex-none">
-                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Search order #..."
-                            value={searchInput}
-                            onChange={(e) => setSearchInput(e.target.value)}
-                            className="pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-lg w-full sm:w-48 md:w-56 focus:outline-none focus:ring-2 focus:ring-primary-100 focus:border-primary-300 bg-gray-50/50"
-                        />
-                        {searchInput && (
-                            <button
-                                onClick={() => setSearchInput('')}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                            >
-                                <X size={14} />
-                            </button>
-                        )}
-                    </div>
+                    <GlobalOrderSearch
+                        onSelectOrder={(orderId, selectedTab) => {
+                            // Navigate to the tab where the order is found
+                            setTab(selectedTab);
+                            // Find the order and open it in the unified modal
+                            // The order data will be fetched when opening the modal
+                            ordersApi.getAll({ view: selectedTab === 'cod-pending' ? 'cod_pending' : selectedTab, search: orderId.slice(0, 8) })
+                                .then(res => {
+                                    const order = res.data.orders?.find((o: Order) => o.id === orderId);
+                                    if (order) {
+                                        setUnifiedModalOrder(order);
+                                        setUnifiedModalMode('view');
+                                    }
+                                });
+                        }}
+                    />
                     <button
                         onClick={() => setShowCreateOrder(true)}
                         className="btn-primary flex items-center gap-1.5 text-sm px-4 py-2 whitespace-nowrap"
@@ -720,6 +712,24 @@ export default function Orders() {
                             <div className="w-px h-4 bg-gray-200" />
                             {statusLegend}
                             {columnVisibilityDropdown}
+                            {isManager && hasUnsavedChanges && (
+                                <button
+                                    onClick={async () => {
+                                        const success = await savePreferencesToServer();
+                                        if (success) {
+                                            alert('Column preferences saved for all users');
+                                        } else {
+                                            alert('Failed to save preferences');
+                                        }
+                                    }}
+                                    disabled={isSavingPrefs}
+                                    className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
+                                    title="Save current column visibility and order for all users"
+                                >
+                                    <Save size={12} />
+                                    {isSavingPrefs ? 'Saving...' : 'Sync columns'}
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}
@@ -788,7 +798,7 @@ export default function Orders() {
                 {actionPanel}
                 {!isLoading && tab === 'open' && filteredOpenRows.length === 0 && (
                     <div className="text-center text-gray-400 py-16">
-                        {searchQuery || dateRange ? 'No orders match your filters' : 'No open orders'}
+                        {dateRange ? 'No orders match your filters' : 'No open orders'}
                     </div>
                 )}
 

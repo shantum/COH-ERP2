@@ -459,6 +459,7 @@ export interface UpdateOrderData {
   customerPhone?: string;
   shippingAddress?: string;
   internalNotes?: string;
+  shipByDate?: string | null;
 }
 
 export interface ShipOrderData {
@@ -897,6 +898,19 @@ export interface RecentInward {
   notes: string | null;
   createdAt: string;
   createdBy?: string;
+  isAllocated?: boolean; // false for 'received' reason (can be allocated to source)
+}
+
+// Allocation match for transaction
+export interface AllocationMatch {
+  type: 'production' | 'rto';
+  id: string;
+  label: string;
+  detail: string;
+  date?: string;
+  pending?: number;
+  orderId?: string;
+  atWarehouse?: boolean;
 }
 
 // ============================================

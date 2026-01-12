@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi, productsApi } from '../services/api';
 import { useState, useMemo } from 'react';
-import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors } from 'lucide-react';
+import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, Search } from 'lucide-react';
 
 // Default date range for production batches (14 days past to 45 days future)
 const getDefaultDateRange = () => {
@@ -31,6 +31,8 @@ export default function Production() {
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
     const [copiedDate, setCopiedDate] = useState<string | null>(null);
     const [requirementsLimit, setRequirementsLimit] = useState(10);
+    const [skuSearch, setSkuSearch] = useState('');
+    const [showSkuDropdown, setShowSkuDropdown] = useState(false);
 
     // Memoize date range to prevent query key changes on every render
     const dateRange = useMemo(() => getDefaultDateRange(), []);
@@ -116,7 +118,7 @@ export default function Production() {
     });
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
-        onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); setItemSelection({ productId: '', variationId: '' }); },
+        onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); setItemSelection({ productId: '', variationId: '' }); setSkuSearch(''); setShowSkuDropdown(false); },
         onError: (error: any) => { alert(error.response?.data?.error || 'Failed to add item'); }
     });
     const lockDate = useMutation({
@@ -384,6 +386,29 @@ export default function Production() {
                 const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
                 return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
             });
+    };
+
+    // Filter SKUs based on search term (code, product name, color)
+    const getFilteredSkus = () => {
+        if (!allSkus || !skuSearch.trim()) return [];
+        const search = skuSearch.toLowerCase().trim();
+        return allSkus
+            .filter((sku: any) => {
+                const skuCode = sku.skuCode?.toLowerCase() || '';
+                const productName = sku.variation?.product?.name?.toLowerCase() || '';
+                const colorName = sku.variation?.colorName?.toLowerCase() || '';
+                const size = sku.size?.toLowerCase() || '';
+                return skuCode.includes(search) || productName.includes(search) || colorName.includes(search) || size.includes(search);
+            })
+            .slice(0, 20); // Limit results for performance
+    };
+
+    // Get selected SKU display text
+    const getSelectedSkuDisplay = () => {
+        if (!newItem.skuId || !allSkus) return '';
+        const sku = allSkus.find((s: any) => s.id === newItem.skuId);
+        if (!sku) return '';
+        return `${sku.skuCode} - ${sku.variation?.product?.name} ${sku.variation?.colorName} ${sku.size}`;
     };
 
     const dateGroups = groupBatchesByDate(batches);
@@ -947,7 +972,7 @@ export default function Production() {
                     <div className="bg-white rounded-xl p-6 w-full max-w-sm">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-lg font-semibold">Add to Production</h2>
-                            <button onClick={() => setShowAddItem(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                            <button onClick={() => { setShowAddItem(null); setSkuSearch(''); setShowSkuDropdown(false); }} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
                         </div>
                         <form onSubmit={handleAddItem} className="space-y-4">
                             <div>
@@ -1020,24 +1045,72 @@ export default function Production() {
                                 <div className="flex-1 border-t" />
                             </div>
 
-                            {/* Direct SKU Search */}
-                            <div>
+                            {/* Direct SKU Search - Searchable */}
+                            <div className="relative">
                                 <label className="text-xs text-gray-500 mb-1 block">SKU Code</label>
-                                <select
-                                    className="input text-sm"
-                                    value={newItem.skuId}
-                                    onChange={(e) => {
-                                        setNewItem(n => ({ ...n, skuId: e.target.value }));
-                                        setItemSelection({ productId: '', variationId: '' });
-                                    }}
-                                >
-                                    <option value="">Search SKU...</option>
-                                    {allSkus?.map((sku: any) => (
-                                        <option key={sku.id} value={sku.id}>
-                                            {sku.skuCode} - {sku.variation?.product?.name} {sku.size}
-                                        </option>
-                                    ))}
-                                </select>
+                                {newItem.skuId && !showSkuDropdown ? (
+                                    // Show selected SKU with clear button
+                                    <div className="flex items-center gap-2">
+                                        <div className="input text-sm flex-1 bg-gray-50 text-gray-700 truncate">
+                                            {getSelectedSkuDisplay()}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setNewItem(n => ({ ...n, skuId: '' }));
+                                                setSkuSearch('');
+                                            }}
+                                            className="text-gray-400 hover:text-gray-600 p-1"
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    // Search input
+                                    <div className="relative">
+                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                                            <Search size={16} />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            className="input text-sm pl-9"
+                                            placeholder="Type to search SKU, product, color..."
+                                            value={skuSearch}
+                                            onChange={(e) => {
+                                                setSkuSearch(e.target.value);
+                                                setShowSkuDropdown(true);
+                                            }}
+                                            onFocus={() => setShowSkuDropdown(true)}
+                                        />
+                                    </div>
+                                )}
+                                {/* Dropdown results */}
+                                {showSkuDropdown && skuSearch.trim() && (
+                                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                                        {getFilteredSkus().length === 0 ? (
+                                            <div className="px-3 py-2 text-sm text-gray-500">No SKUs found</div>
+                                        ) : (
+                                            getFilteredSkus().map((sku: any) => (
+                                                <button
+                                                    key={sku.id}
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0"
+                                                    onClick={() => {
+                                                        setNewItem(n => ({ ...n, skuId: sku.id }));
+                                                        setItemSelection({ productId: '', variationId: '' });
+                                                        setShowSkuDropdown(false);
+                                                        setSkuSearch('');
+                                                    }}
+                                                >
+                                                    <div className="font-medium text-gray-900">{sku.skuCode}</div>
+                                                    <div className="text-xs text-gray-500">
+                                                        {sku.variation?.product?.name} • {sku.variation?.colorName} • {sku.size}
+                                                    </div>
+                                                </button>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             <div>
@@ -1052,7 +1125,7 @@ export default function Production() {
                                 />
                             </div>
                             <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => setShowAddItem(null)} className="btn-secondary flex-1 text-sm">Cancel</button>
+                                <button type="button" onClick={() => { setShowAddItem(null); setSkuSearch(''); setShowSkuDropdown(false); }} className="btn-secondary flex-1 text-sm">Cancel</button>
                                 <button type="submit" className="btn-primary flex-1 text-sm" disabled={createBatch.isPending}>
                                     {createBatch.isPending ? 'Adding...' : 'Add to Plan'}
                                 </button>

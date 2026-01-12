@@ -27,6 +27,12 @@ export async function getUserPermissions(prisma, userId) {
             : []
     );
 
+    // Fallback for legacy admin users without roleId
+    // This ensures admin access even if seed-roles hasn't run
+    if (rolePermissions.size === 0 && user.role === 'admin') {
+        rolePermissions.add('*');
+    }
+
     // Apply overrides
     for (const override of user.permissionOverrides || []) {
         if (override.granted) {
@@ -232,14 +238,12 @@ export function filterConfidentialFields(data, userPermissions) {
         }
 
         // Customer contact info - require customers:view:contact
+        // Note: shippingAddress is NOT redacted as city is needed for logistics
         if (!hasPermission(userPermissions, 'customers:view:contact')) {
             delete result.customerEmail;
             delete result.customerPhone;
             delete result.email;
             delete result.phone;
-            if (result.shippingAddress) {
-                result.shippingAddress = '[REDACTED]';
-            }
         }
 
         return result;

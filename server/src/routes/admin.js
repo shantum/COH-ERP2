@@ -1187,4 +1187,63 @@ router.put('/background-jobs/:jobId', requireAdmin, asyncHandler(async (req, res
     });
 }));
 
+// ============================================
+// GRID COLUMN PREFERENCES (Synced across users)
+// ============================================
+
+/**
+ * Get grid column preferences for a specific grid
+ * @route GET /api/admin/grid-preferences/:gridId
+ * @param {string} gridId - Grid identifier (e.g., 'ordersGrid', 'shippedGrid')
+ * @returns {Object} { visibleColumns, columnOrder, columnWidths }
+ * @description Returns server-stored preferences for all users to use
+ */
+router.get('/grid-preferences/:gridId', authenticateToken, asyncHandler(async (req, res) => {
+    const { gridId } = req.params;
+    const key = `grid_preferences_${gridId}`;
+
+    const setting = await req.prisma.systemSetting.findUnique({
+        where: { key }
+    });
+
+    if (!setting?.value) {
+        return res.json(null); // No preferences set, use defaults
+    }
+
+    res.json(JSON.parse(setting.value));
+}));
+
+/**
+ * Save grid column preferences (admin only)
+ * @route PUT /api/admin/grid-preferences/:gridId
+ * @param {string} gridId - Grid identifier
+ * @body {Object} { visibleColumns, columnOrder, columnWidths }
+ * @description Saves preferences that will be used by all users
+ */
+router.put('/grid-preferences/:gridId', requireAdmin, asyncHandler(async (req, res) => {
+    const { gridId } = req.params;
+    const { visibleColumns, columnOrder, columnWidths } = req.body;
+    const key = `grid_preferences_${gridId}`;
+
+    const preferences = {
+        visibleColumns,
+        columnOrder,
+        columnWidths,
+        updatedAt: new Date().toISOString(),
+        updatedBy: req.user?.email || 'admin',
+    };
+
+    await req.prisma.systemSetting.upsert({
+        where: { key },
+        update: { value: JSON.stringify(preferences) },
+        create: { key, value: JSON.stringify(preferences) }
+    });
+
+    res.json({
+        message: 'Grid preferences saved',
+        gridId,
+        preferences,
+    });
+}));
+
 export default router;
