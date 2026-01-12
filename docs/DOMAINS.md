@@ -1,6 +1,6 @@
 # Domain Reference
 
-> All backend and frontend domains consolidated. **Last updated: January 11, 2026** (Consolidated ORDER_COLUMNS.md, added Order column sources)
+> All backend and frontend domains consolidated. **Last updated: January 12, 2026** (Dashboard simplified, shipping inventory fix for unallocated orders)
 
 ---
 
@@ -46,9 +46,12 @@ orders/
 ### Order Line Status Machine
 ```
 pending → allocated → picked → packed → [ship order] → shipped
-           ↓
-    (creates reserved inventory)
+           ↓                                    ↓
+    (creates reserved inventory)         (only deducts inventory
+                                          if allocatedAt is set)
 ```
+
+**Inventory deduction**: Only lines with `allocatedAt` set get inventory deducted on ship. Unallocated orders (migration imports) skip inventory transactions automatically.
 
 **Undo actions:** unallocate (deletes reserved), unpick, unpack, unship (reverses sale + recreates reserved)
 
@@ -536,6 +539,7 @@ Global costing settings stored in `CostConfig` table (single row):
 ### Page-to-Domain Mapping
 | Page | Backend | Size |
 |------|---------|------|
+| `Dashboard.tsx` | Reports | - |
 | `Orders.tsx` | Orders | 40KB |
 | `Returns.tsx` | Returns | 114KB |
 | `ReturnInward.tsx` | Returns | 74KB |
@@ -545,6 +549,8 @@ Global costing settings stored in `CostConfig` table (single row):
 | `Products.tsx` | Products | 49KB |
 | `Catalog.tsx` | Catalog | 2243 lines |
 | `Fabrics.tsx` | Fabrics | 37KB |
+
+**Dashboard**: OrdersAnalyticsBar + 3 analytics cards (Top Products, Top Fabrics, Top Customers with city). No stats grid or alerts.
 
 ### Performance Patterns
 

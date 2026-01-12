@@ -94,6 +94,8 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 - `shipOrder(tx, { orderId, ...options })` - convenience wrapper
 - `validateShipment(prisma, orderLineIds, options)` - pre-check without transaction
 
+**Inventory deduction**: Only lines with `allocatedAt` set get inventory deducted. Unallocated orders (e.g., migration imports) skip inventory transactions automatically.
+
 **Removed systems**: Quick-ship, auto-ship, bulk-update to shipped status (all bypass proper inventory handling).
 
 ## Key Files
@@ -108,6 +110,7 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 | Permissions | `server/src/middleware/permissions.js`, `client/src/hooks/usePermissions.ts` |
 | Grid state | `client/src/hooks/useGridState.ts` (visibility, order, widths, server sync) |
 | Frontend | `client/src/services/api.ts`, `types/index.ts`, `hooks/` |
+| Scripts | `server/src/scripts/` (reverseUnallocatedShipments.js, etc.) |
 
 ## Common Gotchas
 
@@ -148,6 +151,8 @@ All shipping operations go through `ShipOrderService` (`server/src/services/ship
 35. **AG-Grid column order extraction**: Use `getColumnOrderFromApi(api)` helper from `useGridState.ts` to get current column order. Call in local `onColumnMoved`/`onColumnResized` handlers, then pass to `handleColumnMoved()`/`handleColumnResized()`.
 36. **useGridState destructuring**: Full API: `{ visibleColumns, columnOrder, columnWidths, handleToggleColumn, handleResetAll, handleColumnMoved, handleColumnResized, isManager, hasUnsavedChanges, isSavingPrefs, savePreferencesToServer }`. All order grids and Catalog/Fabrics use this pattern.
 37. **Fabrics Type View aggregation**: GET `/api/fabrics?view=type` returns aggregated FabricType metrics: `totalStock`, `colorCount`, `productCount`, `consumption7d`, `consumption30d`. Server-side calculation with parallel Promise.all queries for performance.
+38. **Unallocated orders skip inventory**: Shipping service only deducts inventory for lines with `allocatedAt` set. Orders imported via migration or shipped without allocation don't affect inventory. Use `reverseUnallocatedShipments.js` script to fix historical incorrect deductions.
+39. **Dashboard simplified**: Shows OrdersAnalyticsBar + 3 analytics cards (Top Products, Top Fabrics, Top Customers with city). No stats grid or alerts.
 
 ## Environment
 
