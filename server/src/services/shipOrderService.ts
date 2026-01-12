@@ -31,8 +31,6 @@
  */
 
 import {
-    TXN_TYPE,
-    TXN_REASON,
     releaseReservedInventory,
     createSaleTransaction,
 } from '../utils/queryPatterns.js';

@@ -1547,15 +1547,7 @@ export async function removeCustomization(
             });
         }
 
-        // 4. Get original SKU for response
-        const _originalSku = await tx.sku.findUnique({
-            where: { id: orderLine.originalSkuId },
-            include: {
-                variation: { include: { product: true } },
-            },
-        });
-
-        // 5. Revert order line to original SKU
+        // 4. Revert order line to original SKU
         const updatedLine = await tx.orderLine.update({
             where: { id: orderLineId },
             data: {

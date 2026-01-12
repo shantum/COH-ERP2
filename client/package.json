@@ -12,6 +12,7 @@
   "dependencies": {
     "@coh/shared": "file:../shared",
     "@tanstack/react-query": "^5.90.16",
+    "zod": "^4.3.5",
     "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
     "ag-grid-community": "^35.0.0",

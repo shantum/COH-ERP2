@@ -23,9 +23,9 @@ import { z } from 'zod';
 export const awbSchema = z.string()
     .min(1, 'AWB number is required')
     .trim()
-    .transform(val => val.toUpperCase())
+    .transform((val: string) => val.toUpperCase())
     .refine(
-        (val) => /^[A-Za-z0-9]{8,20}$/.test(val),
+        (val: string) => /^[A-Za-z0-9]{8,20}$/.test(val),
         { message: 'AWB number must be 8-20 alphanumeric characters' }
     );
 
@@ -89,7 +89,7 @@ export const CreateOrderSchema = z.object({
         unitPrice: z.number().min(0, 'Unit price cannot be negative').optional(),
         shippingAddress: z.string().optional().nullable(), // Line-level shipping address (JSON string)
     })).min(1, 'At least one line item is required'),
-}).refine((data) => {
+}).refine((data: { isExchange?: boolean; totalAmount?: number }) => {
     // For non-exchange orders, totalAmount must be positive if provided
     if (!data.isExchange && data.totalAmount !== undefined && data.totalAmount <= 0) {
         return false;

@@ -27,7 +27,6 @@ import {
     calculateInventoryBalance,
     TXN_TYPE,
     TXN_REASON,
-    createReservedTransaction,
 } from '../../utils/queryPatterns.js';
 import { shipOrderLines } from '../../services/shipOrderService.js';
 
@@ -280,7 +279,7 @@ const create = protectedProcedure
                     originalOrderId: originalOrderId || null,
                     shipByDate: shipByDate ? new Date(shipByDate) : null,
                     orderLines: {
-                        create: lines.map((line) => ({
+                        create: lines.map((line: { skuId: string; qty: number; unitPrice?: number; shippingAddress?: string }) => ({
                             sku: { connect: { id: line.skuId } },
                             qty: line.qty,
                             unitPrice: line.unitPrice ?? 0,

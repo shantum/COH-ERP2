@@ -14,6 +14,7 @@
  * - Supporting queries: Axios (different API domains)
  */
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi, fabricsApi, productionApi, adminApi, customersApi } from '../services/api';
 import { orderQueryKeys, inventoryQueryKeys } from '../constants/queryKeys';
@@ -167,17 +168,30 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
         }
     );
 
-    // tRPC query - type-safe inventory balance for all SKUs
-    // Include custom SKUs so orders with customized lines show correct stock
-    // NOTE: This fetches ~4000+ SKUs (~3MB response). For better performance, consider
-    // fetching only SKU IDs from openOrders and using getBalances() for just those SKUs.
-    // Current 60s cache mitigates repeated fetches but initial load can be slow.
-    const inventoryBalanceQuery = trpc.inventory.getAllBalances.useQuery(
-        { includeCustomSkus: true },
+    // Extract unique SKU IDs from open orders for targeted inventory balance fetch
+    // This reduces payload from ~3MB (all SKUs) to ~50-100KB (only SKUs in open orders)
+    const openOrderSkuIds = useMemo(() => {
+        const orders = openOrdersQuery.data?.orders;
+        if (!orders) return [];
+        const skuSet = new Set<string>();
+        orders.forEach((order: any) => {
+            order.orderLines?.forEach((line: any) => {
+                if (line.skuId) skuSet.add(line.skuId);
+            });
+        });
+        return Array.from(skuSet);
+    }, [openOrdersQuery.data]);
+
+    // tRPC query - type-safe inventory balance for ONLY SKUs in open orders
+    // Optimized: fetches ~100-200 SKUs (~50-100KB) instead of ~4000+ SKUs (~3MB)
+    // Waits for open orders to load first, then fetches balances for those SKUs
+    const inventoryBalanceQuery = trpc.inventory.getBalances.useQuery(
+        { skuIds: openOrderSkuIds },
         {
             staleTime: 60000, // Inventory balance doesn't change rapidly (60s cache)
             refetchOnWindowFocus: false,
-            enabled: activeTab === 'open', // Only needed for Open tab (stock column)
+            // Only fetch when: Open tab + openOrders loaded + we have SKU IDs to fetch
+            enabled: activeTab === 'open' && openOrderSkuIds.length > 0,
         }
     );
 
@@ -267,7 +281,8 @@ export function useOrdersData({ activeTab, selectedCustomerId, shippedPage = 1, 
 
         // Supporting data
         allSkus: allSkusQuery.data,
-        inventoryBalance: inventoryBalanceQuery.data?.items,
+        // getBalances returns array directly (optimized query for open order SKUs only)
+        inventoryBalance: inventoryBalanceQuery.data,
         fabricStock: fabricStockQuery.data,
         channels: channelsQuery.data,
         lockedDates: lockedDatesQuery.data,

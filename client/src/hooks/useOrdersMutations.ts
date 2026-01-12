@@ -269,10 +269,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err, _vars, context) => {
             // ALWAYS rollback first, before any early returns
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             if (context && 'previousInventory' in context && context.previousInventory) {
-                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory);
+                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory as any);
             }
 
             // Then handle specific error types
@@ -301,10 +301,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             // ALWAYS rollback first using tRPC cache, before any early returns
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             if (context && 'previousInventory' in context && context.previousInventory) {
-                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory);
+                trpcUtils.inventory.getAllBalances.setData({ includeCustomSkus: true }, context.previousInventory as any);
             }
 
             // Then handle specific error types
@@ -338,7 +338,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to pick line');
         },
@@ -362,7 +362,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to unpick line');
         },
@@ -387,7 +387,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to pack line');
         },
@@ -411,7 +411,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to unpack line');
         },
@@ -435,7 +435,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to mark line as shipped');
         },
@@ -458,7 +458,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to unmark shipped line');
         },
