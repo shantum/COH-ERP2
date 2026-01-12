@@ -315,11 +315,11 @@ router.get('/flat', authenticateToken, asyncHandler(async (req, res) => {
             const balance = await calculateFabricBalance(req.prisma, fabric.id);
             const avgDailyConsumption = await calculateAvgDailyConsumption(req.prisma, fabric.id);
 
-            // Calculate sales (based on fabric type since products link to type, not specific fabric)
+            // Calculate sales by specific fabric color (Variation.fabricId links to Fabric)
             const salesBaseWhere = {
                 sku: {
                     variation: {
-                        product: { fabricTypeId: fabric.fabricTypeId },
+                        fabricId: fabric.id, // Specific fabric color
                     },
                 },
                 order: {
