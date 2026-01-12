@@ -12,6 +12,7 @@ import { Layers, Palette } from 'lucide-react';
 interface FabricData {
     id: string;
     name: string;
+    colorHex?: string | null;
     typeName?: string;
     composition?: string | null;
     units: number;
@@ -101,70 +102,73 @@ export function TopFabricsCard() {
             {isLoading ? (
                 <div className="space-y-2">
                     {[...Array(5)].map((_, i) => (
-                        <div key={i} className="h-10 sm:h-12 bg-gray-100 rounded animate-pulse" />
+                        <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
                     ))}
                 </div>
             ) : !data?.data?.length ? (
                 <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">No fabric sales data for this period</p>
             ) : (
-                <div className="space-y-1.5 sm:space-y-2 max-h-[300px] sm:max-h-[400px] overflow-y-auto">
+                <div className="space-y-0.5 max-h-[300px] sm:max-h-[400px] overflow-y-auto">
                     {data.data.map((item, index) => (
                         <div
                             key={item.id}
-                            className="flex items-center gap-2 sm:gap-3 p-1.5 sm:p-2 rounded-lg hover:bg-gray-50 transition-colors"
+                            className="flex items-center gap-2 sm:gap-3 py-1.5 sm:py-2 px-1 rounded hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0"
                         >
                             {/* Rank */}
-                            <div className={`w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center rounded-full text-[10px] sm:text-xs font-bold flex-shrink-0 ${
-                                index === 0 ? 'bg-purple-100 text-purple-700' :
-                                index === 1 ? 'bg-gray-200 text-gray-700' :
-                                index === 2 ? 'bg-indigo-100 text-indigo-700' :
-                                'bg-gray-100 text-gray-500'
+                            <span className={`w-5 text-center text-xs sm:text-sm font-semibold flex-shrink-0 ${
+                                index === 0 ? 'text-purple-600' :
+                                index === 1 ? 'text-gray-600' :
+                                index === 2 ? 'text-indigo-600' :
+                                'text-gray-400'
                             }`}>
                                 {index + 1}
-                            </div>
+                            </span>
 
-                            {/* Fabric swatch placeholder */}
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center flex-shrink-0">
-                                {level === 'type' ? (
-                                    <Layers size={14} className="text-purple-400 sm:w-4 sm:h-4" />
-                                ) : (
-                                    <Palette size={14} className="text-purple-400 sm:w-4 sm:h-4" />
-                                )}
-                            </div>
+                            {/* Color Swatch - only in color mode */}
+                            {level === 'color' && (
+                                <div
+                                    className="w-6 h-6 sm:w-7 sm:h-7 rounded-md flex-shrink-0 border border-gray-200 shadow-sm"
+                                    style={{
+                                        backgroundColor: item.colorHex || '#e5e7eb',
+                                    }}
+                                    title={item.colorHex || 'No color'}
+                                />
+                            )}
 
-                            {/* Details */}
+                            {/* Name & Type Badge */}
                             <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1 sm:gap-2">
-                                    <span className="font-medium text-gray-900 truncate text-sm sm:text-base">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="font-medium text-gray-900 text-sm sm:text-base truncate">
                                         {item.name}
                                     </span>
                                     {level === 'color' && item.typeName && (
-                                        <span className="text-[10px] sm:text-xs px-1 sm:px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded flex-shrink-0">
+                                        <span className="text-[9px] sm:text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded flex-shrink-0">
                                             {item.typeName}
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-gray-500">
+                                {/* Stats row */}
+                                <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-400 mt-0.5">
                                     <span>{item.productCount} products</span>
-                                    <span className="text-gray-300">•</span>
+                                    <span>·</span>
                                     <span>{item.orderCount} orders</span>
                                     {level === 'type' && item.topColors && item.topColors.length > 0 && (
                                         <>
-                                            <span className="text-gray-300 hidden sm:inline">•</span>
-                                            <span className="truncate hidden sm:inline text-purple-500">
-                                                {item.topColors.join(', ')}
+                                            <span className="hidden sm:inline">·</span>
+                                            <span className="truncate hidden sm:inline text-purple-400">
+                                                {item.topColors.slice(0, 2).join(', ')}
                                             </span>
                                         </>
                                     )}
                                 </div>
                             </div>
 
-                            {/* Stats */}
+                            {/* Revenue & Units */}
                             <div className="text-right flex-shrink-0">
-                                <div className="text-xs sm:text-sm font-semibold text-gray-900">
+                                <div className="text-sm sm:text-base font-semibold text-gray-900">
                                     {formatCurrency(item.revenue)}
                                 </div>
-                                <div className="text-[10px] sm:text-xs text-gray-500">
+                                <div className="text-[10px] sm:text-xs text-gray-400">
                                     {item.units} units
                                 </div>
                             </div>

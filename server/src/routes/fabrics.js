@@ -552,6 +552,7 @@ router.get('/top-fabrics', authenticateToken, asyncHandler(async (req, res) => {
                 fabricStats[key] = {
                     id: fabric.id,
                     name: fabric.colorName,
+                    colorHex: fabric.colorHex || null,
                     typeName: fabric.fabricType?.name || 'Unknown',
                     composition: fabric.fabricType?.composition || null,
                     units: 0,
