@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@coh/shared": "workspace:*",
+    "@coh/shared": "file:../shared",
     "@tanstack/react-query": "^5.90.16",
     "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
