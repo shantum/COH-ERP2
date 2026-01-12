@@ -503,6 +503,140 @@ router.get('/', authenticateToken, asyncHandler(async (req, res) => {
     res.json(fabricsWithBalance);
 }));
 
+// ============================================
+// TOP FABRICS REPORT (must be before /:id route)
+// ============================================
+
+// Top fabrics by sales value - configurable time period and aggregation level
+router.get('/top-fabrics', authenticateToken, asyncHandler(async (req, res) => {
+    const { days = 30, level = 'type', limit = 15 } = req.query;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - Number(days));
+
+    // Get order lines from non-cancelled, non-RTO orders within the time period
+    const orderLines = await req.prisma.orderLine.findMany({
+        where: {
+            order: {
+                orderDate: { gte: startDate },
+                status: { not: 'cancelled' },
+                trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+            },
+        },
+        include: {
+            sku: {
+                include: {
+                    variation: {
+                        include: {
+                            product: {
+                                include: { fabricType: true },
+                            },
+                            fabric: {
+                                include: { fabricType: true },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    });
+
+    if (level === 'color') {
+        // Aggregate at specific fabric color level
+        const fabricStats = {};
+        for (const line of orderLines) {
+            const fabric = line.sku?.variation?.fabric;
+            if (!fabric) continue;
+
+            const key = fabric.id;
+            if (!fabricStats[key]) {
+                fabricStats[key] = {
+                    id: fabric.id,
+                    name: fabric.colorName,
+                    typeName: fabric.fabricType?.name || 'Unknown',
+                    composition: fabric.fabricType?.composition || null,
+                    units: 0,
+                    revenue: 0,
+                    orderCount: new Set(),
+                    productCount: new Set(),
+                };
+            }
+            fabricStats[key].units += line.qty;
+            fabricStats[key].revenue += line.qty * Number(line.unitPrice);
+            fabricStats[key].orderCount.add(line.orderId);
+            if (line.sku?.variation?.product?.id) {
+                fabricStats[key].productCount.add(line.sku.variation.product.id);
+            }
+        }
+
+        const result = Object.values(fabricStats)
+            .map(f => ({
+                ...f,
+                orderCount: f.orderCount.size,
+                productCount: f.productCount.size,
+            }))
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, Number(limit));
+
+        return res.json({ level: 'color', days: Number(days), data: result });
+    } else {
+        // Aggregate at fabric type level
+        const typeStats = {};
+        for (const line of orderLines) {
+            // Try to get fabric type from variation's fabric, fallback to product's fabricType
+            const fabricType = line.sku?.variation?.fabric?.fabricType
+                || line.sku?.variation?.product?.fabricType;
+            if (!fabricType) continue;
+
+            const key = fabricType.id;
+            if (!typeStats[key]) {
+                typeStats[key] = {
+                    id: fabricType.id,
+                    name: fabricType.name,
+                    composition: fabricType.composition,
+                    units: 0,
+                    revenue: 0,
+                    orderCount: new Set(),
+                    productCount: new Set(),
+                    colors: {},
+                };
+            }
+            typeStats[key].units += line.qty;
+            typeStats[key].revenue += line.qty * Number(line.unitPrice);
+            typeStats[key].orderCount.add(line.orderId);
+            if (line.sku?.variation?.product?.id) {
+                typeStats[key].productCount.add(line.sku.variation.product.id);
+            }
+
+            // Track top colors within this type
+            const fabric = line.sku?.variation?.fabric;
+            if (fabric) {
+                if (!typeStats[key].colors[fabric.id]) {
+                    typeStats[key].colors[fabric.id] = { name: fabric.colorName, revenue: 0 };
+                }
+                typeStats[key].colors[fabric.id].revenue += line.qty * Number(line.unitPrice);
+            }
+        }
+
+        const result = Object.values(typeStats)
+            .map(t => ({
+                ...t,
+                orderCount: t.orderCount.size,
+                productCount: t.productCount.size,
+                topColors: Object.values(t.colors)
+                    .sort((a, b) => b.revenue - a.revenue)
+                    .slice(0, 3)
+                    .map(c => c.name),
+            }))
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, Number(limit));
+
+        // Remove the colors object from response
+        result.forEach(r => delete r.colors);
+
+        return res.json({ level: 'type', days: Number(days), data: result });
+    }
+}));
+
 // Get single fabric with details
 router.get('/:id', authenticateToken, asyncHandler(async (req, res) => {
     const fabric = await req.prisma.fabric.findUnique({
@@ -1306,139 +1440,5 @@ async function calculateAvgDailyConsumption(prisma, fabricId) {
     const totalConsumption = Number(result._sum.qty) || 0;
     return totalConsumption / 28;
 }
-
-// ============================================
-// TOP FABRICS REPORT
-// ============================================
-
-// Top fabrics by sales value - configurable time period and aggregation level
-router.get('/top-fabrics', authenticateToken, asyncHandler(async (req, res) => {
-    const { days = 30, level = 'type', limit = 15 } = req.query;
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - Number(days));
-
-    // Get order lines from non-cancelled, non-RTO orders within the time period
-    const orderLines = await req.prisma.orderLine.findMany({
-        where: {
-            order: {
-                orderDate: { gte: startDate },
-                status: { not: 'cancelled' },
-                trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
-            },
-        },
-        include: {
-            sku: {
-                include: {
-                    variation: {
-                        include: {
-                            product: {
-                                include: { fabricType: true },
-                            },
-                            fabric: {
-                                include: { fabricType: true },
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    });
-
-    if (level === 'color') {
-        // Aggregate at specific fabric color level
-        const fabricStats = {};
-        for (const line of orderLines) {
-            const fabric = line.sku?.variation?.fabric;
-            if (!fabric) continue;
-
-            const key = fabric.id;
-            if (!fabricStats[key]) {
-                fabricStats[key] = {
-                    id: fabric.id,
-                    name: fabric.colorName,
-                    typeName: fabric.fabricType?.name || 'Unknown',
-                    composition: fabric.fabricType?.composition || null,
-                    units: 0,
-                    revenue: 0,
-                    orderCount: new Set(),
-                    productCount: new Set(),
-                };
-            }
-            fabricStats[key].units += line.qty;
-            fabricStats[key].revenue += line.qty * Number(line.unitPrice);
-            fabricStats[key].orderCount.add(line.orderId);
-            if (line.sku?.variation?.product?.id) {
-                fabricStats[key].productCount.add(line.sku.variation.product.id);
-            }
-        }
-
-        const result = Object.values(fabricStats)
-            .map(f => ({
-                ...f,
-                orderCount: f.orderCount.size,
-                productCount: f.productCount.size,
-            }))
-            .sort((a, b) => b.revenue - a.revenue)
-            .slice(0, Number(limit));
-
-        return res.json({ level: 'color', days: Number(days), data: result });
-    } else {
-        // Aggregate at fabric type level
-        const typeStats = {};
-        for (const line of orderLines) {
-            // Try to get fabric type from variation's fabric, fallback to product's fabricType
-            const fabricType = line.sku?.variation?.fabric?.fabricType
-                || line.sku?.variation?.product?.fabricType;
-            if (!fabricType) continue;
-
-            const key = fabricType.id;
-            if (!typeStats[key]) {
-                typeStats[key] = {
-                    id: fabricType.id,
-                    name: fabricType.name,
-                    composition: fabricType.composition,
-                    units: 0,
-                    revenue: 0,
-                    orderCount: new Set(),
-                    productCount: new Set(),
-                    colors: {},
-                };
-            }
-            typeStats[key].units += line.qty;
-            typeStats[key].revenue += line.qty * Number(line.unitPrice);
-            typeStats[key].orderCount.add(line.orderId);
-            if (line.sku?.variation?.product?.id) {
-                typeStats[key].productCount.add(line.sku.variation.product.id);
-            }
-
-            // Track top colors within this type
-            const fabric = line.sku?.variation?.fabric;
-            if (fabric) {
-                if (!typeStats[key].colors[fabric.id]) {
-                    typeStats[key].colors[fabric.id] = { name: fabric.colorName, revenue: 0 };
-                }
-                typeStats[key].colors[fabric.id].revenue += line.qty * Number(line.unitPrice);
-            }
-        }
-
-        const result = Object.values(typeStats)
-            .map(t => ({
-                ...t,
-                orderCount: t.orderCount.size,
-                productCount: t.productCount.size,
-                topColors: Object.values(t.colors)
-                    .sort((a, b) => b.revenue - a.revenue)
-                    .slice(0, 3)
-                    .map(c => c.name),
-            }))
-            .sort((a, b) => b.revenue - a.revenue)
-            .slice(0, Number(limit));
-
-        // Remove the colors object from response
-        result.forEach(r => delete r.colors);
-
-        return res.json({ level: 'type', days: Number(days), data: result });
-    }
-}));
 
 export default router;

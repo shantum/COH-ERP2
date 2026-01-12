@@ -281,7 +281,9 @@ router.get('/top-customers', async (req, res) => {
                         customerName: true,
                         customerEmail: true,
                         customerPhone: true,
-                        customerTier: true,
+                        customer: {
+                            select: { tier: true },
+                        },
                     },
                 },
                 sku: {
@@ -308,7 +310,7 @@ router.get('/top-customers', async (req, res) => {
                     name: line.order.customerName || 'Unknown',
                     email: line.order.customerEmail,
                     phone: line.order.customerPhone,
-                    tier: line.order.customerTier,
+                    tier: line.order.customer?.tier || null,
                     units: 0,
                     revenue: 0,
                     orderCount: new Set(),
