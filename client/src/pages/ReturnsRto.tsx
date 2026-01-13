@@ -5,7 +5,7 @@
  * 1. Scan SKU → Item added to repacking queue immediately
  * 2. Queue shows all items awaiting processing
  * 3. User can allocate items to return/RTO orders (optional)
- * 4. User processes items: Ready for stock OR Write-off
+ * 4. Processing (QC) happens in Inventory Inward page
  *
  * This allows fast scanning without needing to match to orders upfront.
  */
@@ -24,31 +24,9 @@ import {
     Truck,
     RefreshCw,
     X,
-    Plus,
     Link,
 } from 'lucide-react';
 import type { ScanLookupResult, PendingQueueResponse, QueuePanelItem } from '../types';
-
-// QC decision options for repacking items
-const QC_DECISIONS = [
-    { value: 'ready', label: 'Ready for Stock', description: 'Item passed QC, add to inventory', color: 'green' },
-    { value: 'write_off', label: 'Write Off', description: 'Item cannot be sold', color: 'red' },
-];
-
-const WRITE_OFF_REASONS = [
-    { value: 'defective', label: 'Defective (Manufacturing/Quality defect)' },
-    { value: 'destroyed', label: 'Destroyed (Damaged beyond repair)' },
-    { value: 'wrong_product', label: 'Wrong Product (Customer returned wrong item)' },
-    { value: 'stained', label: 'Stained / Soiled' },
-    { value: 'other', label: 'Other' },
-];
-
-// Condition options for processing
-const ITEM_CONDITIONS = [
-    { value: 'good', label: 'Good', description: 'Item is in sellable condition' },
-    { value: 'used', label: 'Used', description: 'Item was used but can be resold' },
-    { value: 'damaged', label: 'Damaged', description: 'Item is damaged' },
-];
 
 type TabType = 'repacking' | 'returns' | 'rto';
 
@@ -64,16 +42,9 @@ export default function ReturnsRto() {
     } | null>(null);
     const [activeTab, setActiveTab] = useState<TabType>('repacking');
 
-    // Selected item for processing/allocation
+    // Selected item for allocation
     const [selectedItem, setSelectedItem] = useState<QueuePanelItem | null>(null);
-    const [showProcessModal, setShowProcessModal] = useState(false);
     const [showAllocateModal, setShowAllocateModal] = useState(false);
-
-    // QC processing state
-    const [itemCondition, setItemCondition] = useState('good');
-    const [qcDecision, setQcDecision] = useState<'ready' | 'write_off'>('ready');
-    const [writeOffReason, setWriteOffReason] = useState('defective');
-    const [qcNotes, setQcNotes] = useState('');
 
     // Pagination
     const [pageSize, setPageSize] = useState(50);
@@ -162,57 +133,6 @@ export default function ReturnsRto() {
         },
     });
 
-    // Handle scan - add to repacking queue directly (fast path)
-    const handleScan = () => {
-        const code = scanInput.trim();
-        if (!code || addToQueueMutation.isPending) return;
-
-        setScanFeedback(null);
-        // Call addToQueue directly - it handles SKU validation
-        // This avoids the expensive scanLookup call (5+ queries)
-        addToQueueMutation.mutate(code);
-        setScanInput('');
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            handleScan();
-        }
-    };
-
-    // Process (QC) mutation
-    const processMutation = useMutation({
-        mutationFn: async () => {
-            if (!selectedItem) throw new Error('No item selected');
-            return repackingApi.process({
-                itemId: selectedItem.queueItemId || selectedItem.id,
-                action: qcDecision,
-                writeOffReason: qcDecision === 'write_off' ? writeOffReason : undefined,
-                notes: qcNotes || undefined,
-            });
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
-            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
-            queryClient.invalidateQueries({ queryKey: ['inventory-balance'] });
-
-            setScanFeedback({
-                type: 'success',
-                message: qcDecision === 'ready'
-                    ? `${selectedItem?.skuCode} added to stock`
-                    : `${selectedItem?.skuCode} written off`,
-            });
-            closeModals();
-        },
-        onError: (error: any) => {
-            setScanFeedback({
-                type: 'error',
-                message: error.response?.data?.error || 'Failed to process item',
-            });
-        },
-    });
-
     // Delete from queue mutation
     const deleteFromQueueMutation = useMutation({
         mutationFn: async (itemId: string) => {
@@ -235,52 +155,29 @@ export default function ReturnsRto() {
         },
     });
 
-    // RTO inward mutation (for RTO tab processing)
-    const rtoInwardMutation = useMutation({
-        mutationFn: async (data: { lineId: string; condition: string; notes?: string }) => {
-            return inventoryApi.rtoInwardLine(data);
-        },
-        onSuccess: (res) => {
-            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
-            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
-            queryClient.invalidateQueries({ queryKey: ['inventory-balance'] });
+    // Handle scan - add to repacking queue directly (fast path)
+    const handleScan = () => {
+        const code = scanInput.trim();
+        if (!code || addToQueueMutation.isPending) return;
 
-            const isWriteOff = qcDecision === 'write_off';
-            setScanFeedback({
-                type: 'success',
-                message: isWriteOff
-                    ? `RTO written off`
-                    : `RTO processed - added to inventory`,
-            });
-            closeModals();
-        },
-        onError: (error: any) => {
-            setScanFeedback({
-                type: 'error',
-                message: error.response?.data?.error || 'Failed to process RTO',
-            });
-        },
-    });
-
-    const closeModals = () => {
-        setShowProcessModal(false);
-        setShowAllocateModal(false);
-        setSelectedItem(null);
-        setItemCondition('good');
-        setQcDecision('ready');
-        setWriteOffReason('defective');
-        setQcNotes('');
-        inputRef.current?.focus();
+        setScanFeedback(null);
+        // Call addToQueue directly - it handles SKU validation
+        // This avoids the expensive scanLookup call (5+ queries)
+        addToQueueMutation.mutate(code);
+        setScanInput('');
     };
 
-    // Handle process click from queue
-    const handleProcessClick = (item: QueuePanelItem) => {
-        setSelectedItem(item);
-        setItemCondition(item.condition || 'good');
-        setQcDecision('ready');
-        setWriteOffReason('defective');
-        setQcNotes('');
-        setShowProcessModal(true);
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleScan();
+        }
+    };
+
+    const closeModal = () => {
+        setShowAllocateModal(false);
+        setSelectedItem(null);
+        inputRef.current?.focus();
     };
 
     // Handle delete from queue
@@ -294,18 +191,6 @@ export default function ReturnsRto() {
     const handleAllocateClick = (item: QueuePanelItem) => {
         setSelectedItem(item);
         setShowAllocateModal(true);
-    };
-
-    // Handle RTO processing
-    const handleRtoProcess = () => {
-        if (!selectedItem || !selectedItem.lineId) return;
-
-        const condition = qcDecision === 'write_off' ? 'damaged' : 'good';
-        rtoInwardMutation.mutate({
-            lineId: selectedItem.lineId,
-            condition,
-            notes: qcNotes || undefined,
-        });
     };
 
     // Get urgency badge for RTO items
@@ -436,7 +321,7 @@ export default function ReturnsRto() {
                     </div>
 
                     <p className="text-sm text-gray-500 mt-2">
-                        Scan items quickly. Set condition and allocate when processing.
+                        Scan items to add to queue. Process them in Inventory Inward.
                     </p>
                 </div>
 
@@ -537,7 +422,9 @@ export default function ReturnsRto() {
                                         {activeTab === 'rto' && (
                                             <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
                                         )}
-                                        <th className="px-4 py-3 text-center font-medium text-gray-600">Actions</th>
+                                        {activeTab === 'repacking' && (
+                                            <th className="px-4 py-3 text-center font-medium text-gray-600">Actions</th>
+                                        )}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200">
@@ -577,38 +464,30 @@ export default function ReturnsRto() {
                                                     </div>
                                                 </td>
                                             )}
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    {activeTab === 'repacking' && (
-                                                        <>
-                                                            {!item.returnRequestNumber && (
-                                                                <button
-                                                                    onClick={() => handleAllocateClick(item)}
-                                                                    className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-                                                                    title="Link to return/RTO"
-                                                                >
-                                                                    <Link size={14} className="inline mr-1" />
-                                                                    Allocate
-                                                                </button>
-                                                            )}
+                                            {activeTab === 'repacking' && (
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        {!item.returnRequestNumber && (
                                                             <button
-                                                                onClick={() => handleDeleteClick(item)}
-                                                                disabled={deleteFromQueueMutation.isPending}
-                                                                className="px-2 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors disabled:opacity-50"
-                                                                title="Remove from queue"
+                                                                onClick={() => handleAllocateClick(item)}
+                                                                className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                                                                title="Link to return/RTO"
                                                             >
-                                                                <X size={14} />
+                                                                <Link size={14} className="inline mr-1" />
+                                                                Allocate
                                                             </button>
-                                                        </>
-                                                    )}
-                                                    <button
-                                                        onClick={() => handleProcessClick(item)}
-                                                        className="px-3 py-1 text-xs font-medium bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
-                                                    >
-                                                        Process
-                                                    </button>
-                                                </div>
-                                            </td>
+                                                        )}
+                                                        <button
+                                                            onClick={() => handleDeleteClick(item)}
+                                                            disabled={deleteFromQueueMutation.isPending}
+                                                            className="px-2 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors disabled:opacity-50"
+                                                            title="Remove from queue"
+                                                        >
+                                                            <X size={14} />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            )}
                                         </tr>
                                     ))}
                                 </tbody>
@@ -648,180 +527,18 @@ export default function ReturnsRto() {
                 </div>
             </div>
 
-            {/* Process Modal */}
-            {showProcessModal && selectedItem && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-                        <div className="p-6">
-                            <div className="flex justify-between items-start mb-4">
-                                <h3 className="text-lg font-semibold">Process Item</h3>
-                                <button onClick={closeModals} className="text-gray-400 hover:text-gray-600">
-                                    <X size={20} />
-                                </button>
-                            </div>
-
-                            {/* Item Info */}
-                            <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                                <p className="font-medium">{selectedItem.productName}</p>
-                                <p className="text-sm text-gray-600">{selectedItem.colorName} / {selectedItem.size}</p>
-                                <p className="font-mono text-sm text-gray-500 mt-1">{selectedItem.skuCode}</p>
-                                <div className="flex items-center gap-2 mt-2">
-                                    <span className="text-sm">Qty: <strong>{selectedItem.qty}</strong></span>
-                                </div>
-                            </div>
-
-                            {/* Condition Selection */}
-                            <div className="mb-4">
-                                <label className="text-sm font-medium text-gray-700 block mb-2">Item Condition</label>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {ITEM_CONDITIONS.map((c) => (
-                                        <label
-                                            key={c.value}
-                                            className={`flex flex-col items-center p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                                                itemCondition === c.value
-                                                    ? c.value === 'damaged'
-                                                        ? 'border-red-500 bg-red-50'
-                                                        : c.value === 'used'
-                                                        ? 'border-yellow-500 bg-yellow-50'
-                                                        : 'border-green-500 bg-green-50'
-                                                    : 'border-gray-200 hover:border-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="radio"
-                                                name="itemCondition"
-                                                value={c.value}
-                                                checked={itemCondition === c.value}
-                                                onChange={(e) => {
-                                                    setItemCondition(e.target.value);
-                                                    // Auto-set QC decision based on condition
-                                                    if (e.target.value === 'damaged') {
-                                                        setQcDecision('write_off');
-                                                    } else {
-                                                        setQcDecision('ready');
-                                                    }
-                                                }}
-                                                className="sr-only"
-                                            />
-                                            <span className="font-medium text-sm">{c.label}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* QC Decision */}
-                            <div className="mb-4">
-                                <label className="text-sm font-medium text-gray-700 block mb-2">QC Decision</label>
-                                <div className="space-y-2">
-                                    {QC_DECISIONS.map((d) => (
-                                        <label
-                                            key={d.value}
-                                            className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                                                qcDecision === d.value
-                                                    ? d.color === 'green'
-                                                        ? 'border-green-500 bg-green-50'
-                                                        : 'border-red-500 bg-red-50'
-                                                    : 'border-gray-200 hover:border-gray-300'
-                                            }`}
-                                        >
-                                            <input
-                                                type="radio"
-                                                name="qcDecision"
-                                                value={d.value}
-                                                checked={qcDecision === d.value}
-                                                onChange={(e) => setQcDecision(e.target.value as 'ready' | 'write_off')}
-                                                className="mt-1"
-                                            />
-                                            <div>
-                                                <p className="font-medium text-sm">{d.label}</p>
-                                                <p className="text-xs text-gray-500">{d.description}</p>
-                                            </div>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Write-off Reason */}
-                            {qcDecision === 'write_off' && (
-                                <div className="mb-4">
-                                    <label className="text-sm font-medium text-gray-700 block mb-1">Write-off Reason</label>
-                                    <select
-                                        value={writeOffReason}
-                                        onChange={(e) => setWriteOffReason(e.target.value)}
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-                                    >
-                                        {WRITE_OFF_REASONS.map((r) => (
-                                            <option key={r.value} value={r.value}>{r.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-
-                            {/* Notes */}
-                            <div className="mb-4">
-                                <label className="text-sm font-medium text-gray-700 block mb-1">Notes (optional)</label>
-                                <input
-                                    type="text"
-                                    value={qcNotes}
-                                    onChange={(e) => setQcNotes(e.target.value)}
-                                    placeholder="QC notes..."
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-                                />
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={closeModals}
-                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        if (activeTab === 'rto' && selectedItem.lineId) {
-                                            handleRtoProcess();
-                                        } else {
-                                            processMutation.mutate();
-                                        }
-                                    }}
-                                    disabled={processMutation.isPending || rtoInwardMutation.isPending}
-                                    className={`flex-1 px-4 py-2 font-medium rounded-lg flex items-center justify-center gap-2 ${
-                                        qcDecision === 'write_off'
-                                            ? 'bg-red-600 hover:bg-red-700 text-white'
-                                            : 'bg-green-600 hover:bg-green-700 text-white'
-                                    } disabled:opacity-50`}
-                                >
-                                    {qcDecision === 'write_off' ? (
-                                        <>
-                                            <X size={16} />
-                                            {processMutation.isPending || rtoInwardMutation.isPending ? 'Processing...' : 'Write Off'}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Plus size={16} />
-                                            {processMutation.isPending || rtoInwardMutation.isPending ? 'Processing...' : 'Add to Stock'}
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Allocate Modal */}
             {showAllocateModal && selectedItem && (
                 <AllocationModalContent
                     item={selectedItem}
-                    onClose={closeModals}
+                    onClose={closeModal}
                     onSuccess={() => {
                         queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
                         setScanFeedback({
                             type: 'success',
                             message: 'Item allocated successfully',
                         });
-                        closeModals();
+                        closeModal();
                     }}
                 />
             )}
@@ -839,11 +556,10 @@ function AllocationModalContent({
     onClose: () => void;
     onSuccess: () => void;
 }) {
-    const [selectedType, setSelectedType] = useState<'return' | 'rto' | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
     // Fetch matching returns and RTOs for this SKU
-    const { data: matchData } = useQuery({
+    const { data: matchData, isLoading: isLoadingMatches } = useQuery({
         queryKey: ['allocation-matches', item.skuId],
         queryFn: async () => {
             const res = await inventoryApi.scanLookup(item.skuCode);
@@ -854,17 +570,21 @@ function AllocationModalContent({
     const returnMatches = matchData?.matches.filter(m => m.source === 'return') || [];
     const rtoMatches = matchData?.matches.filter(m => m.source === 'rto') || [];
 
-    const handleAllocate = async (type: 'return' | 'rto', id: string) => {
+    const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string) => {
+        if (type === 'rto') {
+            // RTO items should be processed via Inventory Inward, not linked here
+            return;
+        }
+
         setIsLoading(true);
         try {
             await repackingApi.updateQueueItem(item.queueItemId || item.id, {
-                // The API may need adjustment to support linking
-                // For now, we'll just trigger success
+                returnRequestId: requestId,
+                returnLineId: lineId,
             });
             onSuccess();
         } catch (error) {
             console.error('Failed to allocate:', error);
-        } finally {
             setIsLoading(false);
         }
     };
@@ -885,7 +605,12 @@ function AllocationModalContent({
                 </div>
 
                 <div className="p-6 overflow-y-auto max-h-[60vh]">
-                    {returnMatches.length === 0 && rtoMatches.length === 0 ? (
+                    {isLoadingMatches ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600 mb-3"></div>
+                            <p className="text-sm text-gray-500">Loading matching orders...</p>
+                        </div>
+                    ) : returnMatches.length === 0 && rtoMatches.length === 0 ? (
                         <div className="text-center py-8 text-gray-500">
                             <Package size={48} className="mx-auto mb-3 text-gray-300" />
                             <p>No matching returns or RTO orders found for this SKU</p>
@@ -903,7 +628,7 @@ function AllocationModalContent({
                                         {returnMatches.map((match) => (
                                             <button
                                                 key={match.data.lineId}
-                                                onClick={() => handleAllocate('return', match.data.lineId)}
+                                                onClick={() => handleAllocate('return', match.data.lineId, match.data.requestId)}
                                                 disabled={isLoading}
                                                 className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
                                             >
@@ -918,20 +643,21 @@ function AllocationModalContent({
                                 </div>
                             )}
 
-                            {/* RTO Matches */}
+                            {/* RTO Matches - Info only, processed via Inventory Inward */}
                             {rtoMatches.length > 0 && (
                                 <div>
                                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                                         <Truck size={16} className="text-purple-600" />
                                         Pending RTO Orders
                                     </h4>
+                                    <p className="text-xs text-gray-500 mb-2">
+                                        RTO items should be processed via Inventory Inward
+                                    </p>
                                     <div className="space-y-2">
                                         {rtoMatches.map((match) => (
-                                            <button
+                                            <div
                                                 key={match.data.lineId}
-                                                onClick={() => handleAllocate('rto', match.data.lineId)}
-                                                disabled={isLoading}
-                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg bg-gray-50"
                                             >
                                                 <div className="flex justify-between">
                                                     <span className="font-medium">Order #{match.data.orderNumber}</span>
@@ -943,7 +669,7 @@ function AllocationModalContent({
                                                         At Warehouse
                                                     </span>
                                                 )}
-                                            </button>
+                                            </div>
                                         ))}
                                     </div>
                                 </div>

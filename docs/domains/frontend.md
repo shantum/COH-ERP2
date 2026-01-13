@@ -215,6 +215,26 @@ Located in `constants/`:
 | `useGridState.ts` | Column visibility, order, widths, server sync |
 | `common/grid/` | Reusable: StatusBadge, TrackingStatusBadge, ColumnVisibilityDropdown |
 
+### AG-Grid cellRenderer Pattern
+
+**CRITICAL**: `cellRenderer` must return JSX elements, not HTML strings.
+
+```typescript
+// BAD: HTML string gets escaped and displayed as text
+cellRenderer: (params) => {
+  return '<span class="text-red-600">Error</span>';  // Shows literal string!
+}
+
+// GOOD: Return JSX element
+cellRenderer: (params) => {
+  return <span className="text-red-600">Error</span>;
+}
+```
+
+**Why**: AG-Grid treats string returns as text content and escapes HTML. Only JSX/React elements render as markup.
+
+**Pattern used in**: `Inventory.tsx` Status column (lines 218-226), `Catalog.tsx`, `Orders.tsx`
+
 ## useGridState API
 
 ```typescript
@@ -296,3 +316,4 @@ Located in `components/Layout.tsx`. Features:
 14. **Page split mutations**: When splitting pages, ensure all mutation references are updated (e.g., remove `archiveOrder` from Orders.tsx after moving to useShipmentsMutations)
 15. **URL-based tab state**: Use `useSearchParams` for tab state - cleaner than local state, enables deep linking and refresh
 16. **GlobalOrderSearch routing**: Includes page navigation logic to route between Orders and Shipments pages based on order status
+17. **AG-Grid cellRenderer JSX**: Return JSX elements, not HTML strings - strings get escaped and display as text

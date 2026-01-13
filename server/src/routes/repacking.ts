@@ -214,10 +214,10 @@ router.post('/queue', authenticateToken, asyncHandler(async (req: Request, res: 
     });
 }));
 
-// Update repacking queue item status
+// Update repacking queue item status or allocation
 router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const { status, condition, inspectionNotes } = req.body;
+    const { status, condition, inspectionNotes, returnRequestId, returnLineId } = req.body;
 
     const item = await req.prisma.repackingQueueItem.update({
         where: { id },
@@ -225,6 +225,8 @@ router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, re
             ...(status && { status }),
             ...(condition && { condition }),
             ...(inspectionNotes !== undefined && { inspectionNotes }),
+            ...(returnRequestId !== undefined && { returnRequestId }),
+            ...(returnLineId !== undefined && { returnLineId }),
         },
         include: {
             sku: {
@@ -232,10 +234,22 @@ router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, re
                     variation: { include: { product: true } },
                 },
             },
+            returnRequest: {
+                select: {
+                    requestNumber: true,
+                    requestType: true,
+                },
+            },
         },
     });
 
-    res.json(item);
+    res.json({
+        ...item,
+        productName: item.sku?.variation?.product?.name,
+        colorName: item.sku?.variation?.colorName,
+        size: item.sku?.size,
+        skuCode: item.sku?.skuCode,
+    });
 }));
 
 // Get processed items history (accepted/rejected)

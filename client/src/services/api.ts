@@ -387,7 +387,7 @@ export const repackingApi = {
         returnLineId?: string;
         inspectionNotes?: string;
     }) => api.post('/repacking/queue', data),
-    updateQueueItem: (id: string, data: { status?: string; condition?: string; inspectionNotes?: string }) =>
+    updateQueueItem: (id: string, data: { status?: string; condition?: string; inspectionNotes?: string; returnRequestId?: string; returnLineId?: string }) =>
         api.put(`/repacking/queue/${id}`, data),
     deleteQueueItem: (id: string) => api.delete(`/repacking/queue/${id}`),
     // Process - move to stock or write-off

@@ -20,6 +20,33 @@
 | **Returns & RTO** | `/returns-rto` | Scan-first workflow for Returns, RTO, Repacking |
 | ~~InwardHub~~ | ~~`/inward-hub`~~ | **@deprecated** - redirects to `/inventory-inward` |
 
+### Inventory Page Details
+
+**Purpose**: Fast SKU lookup optimized for finding stock levels quickly. Simpler than Catalog page.
+
+**Data Sources**:
+- `trpc.inventory.getAllBalances` - Fetches all SKU balances (limit: 10000)
+- `/reports/top-products` - REST endpoint for demand analytics
+
+**Features**:
+1. **Stats Cards**: Total Pcs, SKUs, In Stock, Low Stock, Out of Stock counts
+2. **Client-side Search**: AG-Grid quick filter with 200ms debounce
+3. **Stock Filters**: Buttons for All | In Stock | Low Stock | Out of Stock
+4. **Analytics Section** (collapsible, minimized by default):
+   - **Most Stocked Products**: Client-side aggregation by productId with color breakdown
+   - **Highest Demand**: Top 5 products by units sold (14/30/60/90 day periods)
+
+**Key Patterns**:
+- **Map-based aggregation**: Builds `Map<productId, ProductStock>` for O(1) lookups during aggregation
+- **Dynamic grid height**: `calc(100vh - 580px)` when expanded, `calc(100vh - 340px)` when collapsed
+- **Mixed data sources**: tRPC for inventory balances + REST for demand data
+- **Auto-focus**: Search input focused on page load via `useRef` + `useEffect`
+
+**Performance**:
+- Client-side filtering (no server round-trip)
+- Pagination: 100 rows/page default (50/100/200/500 options)
+- Cache: `staleTime: 60000` for demand data
+
 ## Route Structure
 
 ```
@@ -140,3 +167,5 @@ Defined in `utils/queryPatterns.ts` as `TXN_TYPE` and `TXN_REASON`.
 9. **Scan-first vs mode-selection**: `/inventory-inward` and `/returns-rto` use scan-first (faster); old `InwardHub` used mode-selection (deprecated)
 10. **Instant inward unallocated**: `POST /instant-inward` creates transactions with source='received' - must be allocated later
 11. **Inventory page filters**: Client-side filtering via AG-Grid quick filter + stock status buttons (all/in_stock/low_stock/out_of_stock)
+12. **Analytics aggregation**: Use Map for O(1) product lookups during color breakdown aggregation (pattern in `Inventory.tsx` lines 111-149)
+13. **Collapsible sections**: Dynamic grid height based on expanded state prevents layout shift

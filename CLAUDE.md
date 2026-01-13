@@ -75,6 +75,7 @@ npm run db:push
 16. **Hook separation**: `useOrdersData`/`useOrdersMutations` for Orders page; `useShipmentsData`/`useShipmentsMutations` for Shipments page
 17. **Scan-first inward**: `/inventory-inward` and `/returns-rto` use instant-inward API, assign source later. Faster than mode-selection workflow
 18. **Sidebar collapse**: Uses `localStorage.getItem('sidebar-collapsed')`. Hover expands when collapsed
+19. **AG-Grid cellRenderer JSX**: Return JSX elements, not HTML strings - strings get escaped and display as literal text
 
 ## Domain-Specific Docs
 
