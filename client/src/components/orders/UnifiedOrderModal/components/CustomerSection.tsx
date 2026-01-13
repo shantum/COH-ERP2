@@ -2,10 +2,10 @@
  * CustomerSection - Customer info and shipping address
  */
 
-import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, Check, Clock, CreditCard } from 'lucide-react';
 import { customersApi } from '../../../../services/api';
+import { CustomerSearch } from '../../../common/CustomerSearch';
 import type { Order } from '../../../../types';
 import type { ModalMode, AddressData, EditFormState } from '../types';
 import { formatAddressDisplay } from '../hooks/useUnifiedOrderModal';
@@ -34,121 +34,6 @@ interface CustomerSectionProps {
   onSelectPastAddress: (address: AddressData) => void;
   onToggleAddressPicker: () => void;
   onSetSearchingCustomer: (value: boolean) => void;
-}
-
-// Customer Search Component
-function CustomerSearch({
-  onSelect,
-  onCancel,
-  initialQuery = '',
-}: {
-  onSelect: (customer: any) => void;
-  onCancel: () => void;
-  initialQuery?: string;
-}) {
-  const [query, setQuery] = useState(initialQuery);
-  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query), 300);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  const { data: customersData, isLoading } = useQuery({
-    queryKey: ['customers-search', debouncedQuery],
-    queryFn: () => {
-      const params: Record<string, string> = { limit: '50' };
-      if (debouncedQuery.trim()) params.search = debouncedQuery.trim();
-      return customersApi.getAll(params);
-    },
-    staleTime: 30 * 1000,
-  });
-
-  const customers = customersData?.data || [];
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const getDisplayName = (customer: any) => {
-    const firstName = customer.firstName || '';
-    const lastName = customer.lastName || '';
-    if (firstName || lastName) return `${firstName} ${lastName}`.trim();
-    return customer.email?.split('@')[0] || 'Unknown';
-  };
-
-  return (
-    <div className="absolute z-50 w-full mt-2 border border-slate-200 rounded-xl bg-white overflow-hidden shadow-xl">
-      <div className="p-3 border-b border-slate-100 bg-slate-50/50">
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, email, or phone..."
-            className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-            autoComplete="off"
-          />
-        </div>
-      </div>
-      <div className="max-h-56 overflow-y-auto">
-        {isLoading ? (
-          <div className="p-6 text-center">
-            <div className="animate-spin w-5 h-5 border-2 border-sky-500 border-t-transparent rounded-full mx-auto mb-2" />
-            <p className="text-xs text-slate-500">Searching...</p>
-          </div>
-        ) : customers.length === 0 ? (
-          <div className="p-6 text-center">
-            <User size={24} className="mx-auto text-slate-300 mb-2" />
-            <p className="text-sm text-slate-500">
-              {query.trim() ? 'No customers found' : 'Type to search'}
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-50">
-            {customers.map((customer: any) => (
-              <button
-                key={customer.id}
-                type="button"
-                onClick={() => onSelect(customer)}
-                className="w-full px-4 py-3 flex items-start hover:bg-sky-50 transition-colors text-left"
-              >
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-slate-800">{getDisplayName(customer)}</span>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                    {customer.email && (
-                      <span className="flex items-center gap-1">
-                        <Mail size={11} className="text-slate-400" />
-                        {customer.email}
-                      </span>
-                    )}
-                    {customer.phone && (
-                      <span className="flex items-center gap-1">
-                        <Phone size={11} className="text-slate-400" />
-                        {customer.phone}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/50">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="text-xs text-slate-500 hover:text-slate-700 font-medium"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
 }
 
 export function CustomerSection({
@@ -273,6 +158,7 @@ export function CustomerSection({
                 onSelect={handleSelectCustomer}
                 onCancel={() => onSetSearchingCustomer(false)}
                 initialQuery={editForm.customerName}
+                variant="slate"
               />
             )}
             <div className="relative">

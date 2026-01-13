@@ -89,3 +89,4 @@ Available = Balance - SUM(reserved)
 5. **Unallocated skip**: Lines without `allocatedAt` don't create inventory txn on ship
 6. **Mode validation**: Each inward mode only accepts scans matching its source queue
 7. **Source filter mapping**: `returns` → `return_receipt`, `rto` → `rto_received`, `repacking` → `repack_complete`
+8. **Cache invalidation required**: `inventoryBalanceCache` (5-min staleness) must be manually invalidated after direct `prisma.inventoryTransaction.create()` calls. Use `inventoryBalanceCache.invalidate([skuId])`. The `queryPatterns.ts` helpers (`createReservedTransaction`, `createSaleTransaction`, `releaseReservedInventory`) already handle this - only direct Prisma calls need manual invalidation.

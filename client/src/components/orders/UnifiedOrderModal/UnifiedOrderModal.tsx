@@ -390,9 +390,11 @@ export function UnifiedOrderModal({
                 awbMatches={awbMatches}
                 canShipOrder={canShipOrder}
                 isShipping={isShipping}
+                addressForm={addressForm}
                 onShipFieldChange={handleShipFieldChange}
                 onShip={handleShipOrder}
                 onShipLines={handleShipLines}
+                onShipmentBooked={onSuccess}
               />
 
               {/* Timeline */}

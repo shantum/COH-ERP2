@@ -3,6 +3,7 @@ import { productionApi } from '../services/api';
 import { trpc } from '../services/trpc';
 import { useState, useMemo } from 'react';
 import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, Search } from 'lucide-react';
+import { SIZE_ORDER, sortBySizeOrder } from '../constants/sizes';
 
 // Default date range for production batches (14 days past to 45 days future)
 const getDefaultDateRange = () => {
@@ -190,8 +191,7 @@ export default function Production() {
             if (productCompare !== 0) return productCompare;
             const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
             if (colorCompare !== 0) return colorCompare;
-            const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
-            return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+            return sortBySizeOrder(a.sku?.size || '', b.sku?.size || '');
         });
 
         // Format date as "19 Aug 2025"
@@ -315,10 +315,7 @@ export default function Production() {
                             .sort(([a], [b]) => a.localeCompare(b))
                             .map(([colorName, colorData]) => ({
                                 colorName,
-                                skus: colorData.skus.sort((a, b) => {
-                                    const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
-                                    return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
-                                })
+                                skus: colorData.skus.sort((a, b) => sortBySizeOrder(a.size || '', b.size || ''))
                             }))
                     }));
 
@@ -402,10 +399,7 @@ export default function Production() {
         return allSkus
             .filter((sku: any) => sku.variation?.id === variationId)
             .map((sku: any) => ({ id: sku.id, size: sku.size, skuCode: sku.skuCode }))
-            .sort((a: any, b: any) => {
-                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
-                return sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size);
-            });
+            .sort((a: any, b: any) => sortBySizeOrder(a.size || '', b.size || ''));
     };
 
     // Filter SKUs based on search term (code, product name, color)
@@ -711,8 +705,7 @@ export default function Production() {
                                                 if (productCompare !== 0) return productCompare;
                                                 const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
                                                 if (colorCompare !== 0) return colorCompare;
-                                                const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
-                                                return sizeOrder.indexOf(a.sku?.size) - sizeOrder.indexOf(b.sku?.size);
+                                                return sortBySizeOrder(a.sku?.size || '', b.sku?.size || '');
                                             })
                                             .map((batch: any) => (
                                             <tr key={batch.id} className={`border-t hover:bg-gray-50 ${batch.isCustomSku ? 'bg-orange-50/50' : ''}`}>

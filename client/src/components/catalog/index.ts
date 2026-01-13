@@ -1,0 +1,14 @@
+/**
+ * Catalog Components
+ *
+ * Centralized exports for all catalog-related components.
+ */
+
+export { FabricEditPopover } from './FabricEditPopover';
+export type { FabricEditPopoverProps, ViewLevel } from './FabricEditPopover';
+
+export { EditModal } from './EditModal';
+export type { EditModalProps } from './EditModal';
+
+export { CatalogFilters, PAGE_SIZE_OPTIONS, VIEW_OPTIONS } from './CatalogFilters';
+export type { CatalogFiltersProps } from './CatalogFilters';

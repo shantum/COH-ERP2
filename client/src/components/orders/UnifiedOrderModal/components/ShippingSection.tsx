@@ -1,5 +1,5 @@
 /**
- * ShippingSection - AWB entry, verification, and shipping info
+ * ShippingSection - AWB entry, verification, shipping info, and iThink booking
  */
 
 import { useState } from 'react';
@@ -10,6 +10,16 @@ import {
 import type { Order } from '../../../../types';
 import type { ModalMode, ShipFormState, CategorizedLines } from '../types';
 import { COURIER_OPTIONS } from '../types';
+import { BookShipmentSection } from '../../shared/BookShipmentSection';
+
+interface AddressData {
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  zip?: string;
+  country?: string;
+}
 
 interface ShippingSectionProps {
   order: Order;
@@ -20,9 +30,11 @@ interface ShippingSectionProps {
   awbMatches: boolean;
   canShipOrder: boolean;
   isShipping?: boolean;
+  addressForm?: AddressData;
   onShipFieldChange: (field: keyof Omit<ShipFormState, 'selectedLineIds'>, value: string | boolean) => void;
   onShip?: () => void;
   onShipLines?: () => void;
+  onShipmentBooked?: () => void;
 }
 
 export function ShippingSection({
@@ -34,15 +46,21 @@ export function ShippingSection({
   awbMatches,
   canShipOrder,
   isShipping,
+  addressForm,
   onShipFieldChange,
   onShip,
   onShipLines,
+  onShipmentBooked,
 }: ShippingSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
 
   const isShipMode = mode === 'ship';
   const hasPackedLines = categorizedLines.packed.length > 0;
   const hasSelectedLines = shipForm.selectedLineIds.size > 0;
+
+  // Check if this order can use iThink booking (no Shopify tracking or offline order)
+  const canBookViaIThink = !order.shopifyOrderId || order.channel === 'offline';
+  const hasShopifyTracking = !!order.shopifyCache?.trackingNumber;
 
   // Already shipped - show tracking info
   if (order.status === 'shipped' || order.status === 'delivered' || categorizedLines.shipped.length > 0) {
@@ -150,19 +168,60 @@ export function ShippingSection({
         )}
       </div>
 
-      <div className="p-4">
+      <div className="p-4 space-y-4">
         {isShipMode ? (
-          <ShipForm
-            shipForm={shipForm}
-            expectedAwb={expectedAwb}
-            awbMatches={awbMatches}
-            canShipOrder={canShipOrder}
-            hasSelectedLines={hasSelectedLines}
-            isShipping={isShipping}
-            onShipFieldChange={onShipFieldChange}
-            onShip={onShip}
-            onShipLines={onShipLines}
-          />
+          <>
+            {/* iThink Booking Section - for orders without Shopify tracking */}
+            {canBookViaIThink && !hasShopifyTracking && addressForm && (
+              <BookShipmentSection
+                order={order}
+                addressForm={addressForm}
+                onShipmentBooked={onShipmentBooked}
+              />
+            )}
+
+            {/* Manual AWB Entry - always available in ship mode */}
+            {(!canBookViaIThink || hasShopifyTracking || order.awbNumber) && (
+              <ShipForm
+                shipForm={shipForm}
+                expectedAwb={expectedAwb}
+                awbMatches={awbMatches}
+                canShipOrder={canShipOrder}
+                hasSelectedLines={hasSelectedLines}
+                isShipping={isShipping}
+                onShipFieldChange={onShipFieldChange}
+                onShip={onShip}
+                onShipLines={onShipLines}
+              />
+            )}
+
+            {/* Show both options divider if both are available */}
+            {canBookViaIThink && !hasShopifyTracking && !order.awbNumber && (
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-slate-200"></div>
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-white px-3 text-xs text-slate-400">or enter AWB manually</span>
+                </div>
+              </div>
+            )}
+
+            {/* Manual AWB fallback for iThink-eligible orders */}
+            {canBookViaIThink && !hasShopifyTracking && !order.awbNumber && (
+              <ShipForm
+                shipForm={shipForm}
+                expectedAwb={expectedAwb}
+                awbMatches={awbMatches}
+                canShipOrder={canShipOrder}
+                hasSelectedLines={hasSelectedLines}
+                isShipping={isShipping}
+                onShipFieldChange={onShipFieldChange}
+                onShip={onShip}
+                onShipLines={onShipLines}
+              />
+            )}
+          </>
         ) : (
           <div className="text-center py-4">
             <Truck size={32} className="mx-auto text-slate-300 mb-2" />

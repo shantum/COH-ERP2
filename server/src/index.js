@@ -28,13 +28,13 @@ await initDb();
 
 // Import routes
 import productRoutes from './routes/products.js';
-import fabricRoutes from './routes/fabrics.js';
-import inventoryRoutes from './routes/inventory.js';
+import fabricRoutes from './routes/fabrics/index.js';
+import inventoryRoutes from './routes/inventory/index.js';
 import inventoryReconciliationRoutes from './routes/inventory-reconciliation.js';
 import orderRoutes from './routes/orders/index.js';
 import { autoArchiveOldOrders } from './routes/orders/mutations.js';
 import customerRoutes from './routes/customers.js';
-import returnRoutes from './routes/returns.js';
+import returnRoutes from './routes/returns/index.js';
 import feedbackRoutes from './routes/feedback.js';
 import productionRoutes from './routes/production.js';
 import reportRoutes from './routes/reports.js';

@@ -30,12 +30,7 @@ import {
     RtoOrdersGrid,
     CodPendingGrid,
     CancelledOrdersGrid,
-    OrderDetailModal,
-    OrderViewModal,
     CreateOrderModal,
-    EditOrderModal,
-    ShipOrderModal,
-    NotesModal,
     CustomerDetailModal,
     CustomizationModal,
     SummaryPanel,
@@ -76,20 +71,10 @@ export default function Orders() {
     const [archivedSortBy, setArchivedSortBy] = useState<'orderDate' | 'archivedAt'>('archivedAt');
 
     // Modal state
-    // @deprecated - Use unifiedModalOrder instead. Kept for backward compatibility.
-    const [selectedOrder, setSelectedOrder] = useState<any>(null);
-    // @deprecated - Use unifiedModalOrder with 'view' mode instead. Kept for backward compatibility.
-    const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
     const [showCreateOrder, setShowCreateOrder] = useState(false);
-    // @deprecated - Use unifiedModalOrder with 'edit' mode instead. Kept for backward compatibility.
-    const [editingOrder, setEditingOrder] = useState<any>(null);
-    const [notesOrder, setNotesOrder] = useState<any>(null);
-    const [notesText, setNotesText] = useState('');
-    // @deprecated - Use unifiedModalOrder with 'ship' mode instead. Kept for backward compatibility.
-    const [pendingShipOrder, setPendingShipOrder] = useState<any>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [showProcessShippedModal, setShowProcessShippedModal] = useState(false);
-    // New unified modal state
+    // Unified modal state for viewing, editing, and shipping orders
     const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
     const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
 
@@ -186,27 +171,17 @@ export default function Orders() {
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
         onShipSuccess: () => {
-            // Clear legacy modal state (backward compatibility)
-            setSelectedOrder(null);
-            setPendingShipOrder(null);
             setShipForm({ awbNumber: '', courier: '' });
-            // Clear unified modal state
             setUnifiedModalOrder(null);
         },
         onCreateSuccess: () => {
             setShowCreateOrder(false);
         },
         onDeleteSuccess: () => {
-            setSelectedOrder(null);
             setUnifiedModalOrder(null);
         },
         onEditSuccess: () => {
-            setEditingOrder(null);
             setUnifiedModalOrder(null);
-        },
-        onNotesSuccess: () => {
-            setNotesOrder(null);
-            setNotesText('');
         },
         onProcessMarkedShippedSuccess: () => {
             setShowProcessShippedModal(false);
@@ -1019,19 +994,6 @@ export default function Orders() {
             </div>
 
             {/* Modals */}
-            {selectedOrder && (
-                <OrderDetailModal
-                    order={selectedOrder}
-                    shipForm={shipForm}
-                    onShipFormChange={setShipForm}
-                    onShip={() => mutations.ship.mutate({ id: selectedOrder.id, data: shipForm })}
-                    onDelete={() => mutations.deleteOrder.mutate(selectedOrder.id)}
-                    onClose={() => setSelectedOrder(null)}
-                    isShipping={mutations.ship.isPending}
-                    isDeleting={mutations.deleteOrder.isPending}
-                />
-            )}
-
             {showCreateOrder && (
                 <CreateOrderModal
                     allSkus={allSkus || []}
@@ -1040,25 +1002,6 @@ export default function Orders() {
                     onCreate={(data) => mutations.createOrder.mutate(data)}
                     onClose={() => setShowCreateOrder(false)}
                     isCreating={mutations.createOrder.isPending}
-                />
-            )}
-
-            {pendingShipOrder && (
-                <ShipOrderModal
-                    order={pendingShipOrder}
-                    shipForm={shipForm}
-                    onShipFormChange={setShipForm}
-                    onShip={() => mutations.ship.mutate({ id: pendingShipOrder.id, data: shipForm })}
-                    onShipLines={(lineIds) => mutations.shipLines.mutate({
-                        lineIds,
-                        awbNumber: shipForm.awbNumber,
-                        courier: shipForm.courier
-                    })}
-                    onClose={() => {
-                        setPendingShipOrder(null);
-                        setShipForm({ awbNumber: '', courier: '' });
-                    }}
-                    isShipping={mutations.ship.isPending || mutations.shipLines.isPending}
                 />
             )}
 
@@ -1071,47 +1014,11 @@ export default function Orders() {
                 />
             )}
 
-            {editingOrder && (
-                <EditOrderModal
-                    order={editingOrder}
-                    allSkus={allSkus || []}
-                    onUpdateOrder={(data) => mutations.updateOrder.mutate({ id: editingOrder.id, data })}
-                    onUpdateLine={(lineId, data) => mutations.updateLine.mutate({ lineId, data })}
-                    onAddLine={(orderId, data) => mutations.addLine.mutate({ orderId, data })}
-                    onCancelLine={(lineId) => mutations.cancelLine.mutate(lineId)}
-                    onUncancelLine={(lineId) => mutations.uncancelLine.mutate(lineId)}
-                    onClose={() => setEditingOrder(null)}
-                    isUpdating={mutations.updateOrder.isPending}
-                    isAddingLine={mutations.addLine.isPending}
-                />
-            )}
-
-            {notesOrder && (
-                <NotesModal
-                    order={notesOrder}
-                    notesText={notesText}
-                    onNotesChange={setNotesText}
-                    onSave={() => mutations.updateOrderNotes.mutate({ id: notesOrder.id, notes: notesText })}
-                    onClose={() => {
-                        setNotesOrder(null);
-                        setNotesText('');
-                    }}
-                    isSaving={mutations.updateOrderNotes.isPending}
-                />
-            )}
-
             {selectedCustomerId && (
                 <CustomerDetailModal
                     customer={customerDetail}
                     isLoading={customerLoading}
                     onClose={() => setSelectedCustomerId(null)}
-                />
-            )}
-
-            {viewingOrderId && (
-                <OrderViewModal
-                    orderId={viewingOrderId}
-                    onClose={() => setViewingOrderId(null)}
                 />
             )}
 
@@ -1142,7 +1049,7 @@ export default function Orders() {
                 />
             )}
 
-            {/* New Unified Order Modal */}
+            {/* Unified Order Modal - for viewing, editing, and shipping orders */}
             {unifiedModalOrder && (
                 <UnifiedOrderModal
                     order={unifiedModalOrder}

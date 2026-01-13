@@ -3,6 +3,8 @@
  * Shared helpers for order-related formatting, parsing, and data transformations
  */
 
+import { SIZE_ORDER } from '../constants/sizes';
+
 /**
  * Format a date string into separate date and time components
  */
@@ -375,8 +377,6 @@ export function getSizesForVariation(
 ): SizeOption[] {
     if (!allSkus || !variationId) return [];
 
-    const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
-
     return allSkus
         .filter((sku: any) => sku.variation?.id === variationId)
         .map((sku: any) => ({
@@ -385,7 +385,7 @@ export function getSizesForVariation(
             stock: getSkuBalance(inventoryBalance, sku.id),
             mrp: sku.mrp
         }))
-        .sort((a, b) => sizeOrder.indexOf(a.size) - sizeOrder.indexOf(b.size));
+        .sort((a, b) => SIZE_ORDER.indexOf(a.size as any) - SIZE_ORDER.indexOf(b.size as any));
 }
 
 // Default column headers for the orders grid (cleaner, more readable names)
