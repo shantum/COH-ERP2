@@ -47,6 +47,7 @@ npm run db:push
 | Error handling | `server/src/middleware/asyncHandler.ts`, `server/src/utils/errors.ts` |
 | Permissions | `server/src/middleware/permissions.ts`, `client/src/hooks/usePermissions.ts` |
 | Grid state | `client/src/hooks/useGridState.ts` |
+| Order pricing | `client/src/utils/orderPricing.ts` |
 | Frontend | `client/src/services/api.ts`, `types/index.ts` |
 
 ## App-Wide Gotchas
@@ -63,6 +64,8 @@ npm run db:push
 10. **Persistent logs**: `server/logs/server.jsonl`, 24-hour retention
 11. **Dual cache invalidation**: Mutations must invalidate both TanStack Query and tRPC caches (see `useOrdersMutations.ts`)
 12. **tRPC views**: `trpc.orders.list` accepts `view` param matching REST unified views
+13. **Inventory cache**: Direct `prisma.inventoryTransaction.create()` requires `inventoryBalanceCache.invalidate([skuId])`; `queryPatterns.ts` helpers already handle this
+14. **Order pricing**: Use `orderPricing.ts` utilities - exchange orders have `totalAmount=0` but need line-calculated values for shipping
 
 ## Domain-Specific Docs
 

@@ -83,6 +83,21 @@ pending → allocated → picked → packed → [ship] → shipped
 4. **Exchange orders**: Prefix `EXC-`, `isExchange=true`, allows zero/negative totalAmount
 5. **Analytics excludes archives**: But includes archived if totalAmount > 0
 
+## Pricing Calculations
+
+**Single source of truth**: `client/src/utils/orderPricing.ts`
+
+| Function | Use Case |
+|----------|----------|
+| `calculateOrderTotal(order)` | Grid columns, modals, anywhere displaying order value |
+| `getProductMrpForShipping(order)` | iThink Logistics API calls (never returns 0) |
+| `calculateLineTotal(line)` | Single line value (skips cancelled) |
+| `hasValidPricing(order)` | Check if pricing available |
+
+**Priority chain** (for normal orders): stored `totalAmount` -> `shopifyCache.totalPrice` -> calculate from lines -> error
+
+**Exchange order exception**: Always calculate from lines because stored `totalAmount` is typically 0 (the exchange itself has no payment, but items have value for shipping/insurance).
+
 ## Validation Schemas (Zod)
 
 | Schema | Validates |
@@ -105,3 +120,5 @@ pending → allocated → picked → packed → [ship] → shipped
 3. **Zod validation**: Order endpoints use `validate()` middleware
 4. **Search is view-aware**: Same implementation via `buildViewWhereClause()`
 5. **Auto-archive**: Orders >90 days old archived on server startup
+6. **Exchange pricing**: Never use `order.totalAmount` directly for exchanges - use `calculateOrderTotal()` from `orderPricing.ts`
+7. **Shipping API values**: Use `getProductMrpForShipping()` for iThink calls - prevents "Product Amount can't be Negative or Zero" errors
