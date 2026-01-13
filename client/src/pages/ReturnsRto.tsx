@@ -62,7 +62,6 @@ export default function ReturnsRto() {
         type: 'success' | 'error' | 'info';
         message: string;
     } | null>(null);
-    const [isScanning, setIsScanning] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('repacking');
 
     // Selected item for processing/allocation
@@ -163,31 +162,16 @@ export default function ReturnsRto() {
         },
     });
 
-    // Handle scan - add to repacking queue
-    const handleScan = async () => {
+    // Handle scan - add to repacking queue directly (fast path)
+    const handleScan = () => {
         const code = scanInput.trim();
-        if (!code || isScanning) return;
+        if (!code || addToQueueMutation.isPending) return;
 
-        setIsScanning(true);
         setScanFeedback(null);
-
-        try {
-            // First verify SKU exists
-            const res = await inventoryApi.scanLookup(code);
-            const result = res.data as ScanLookupResult;
-
-            // Add to repacking queue
-            await addToQueueMutation.mutateAsync(result.sku.skuCode);
-        } catch (error: any) {
-            setScanFeedback({
-                type: 'error',
-                message: error.response?.data?.error || 'SKU not found',
-            });
-            setScanInput('');
-            inputRef.current?.focus();
-        } finally {
-            setIsScanning(false);
-        }
+        // Call addToQueue directly - it handles SKU validation
+        // This avoids the expensive scanLookup call (5+ queries)
+        addToQueueMutation.mutate(code);
+        setScanInput('');
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -438,16 +422,16 @@ export default function ReturnsRto() {
                                 onKeyDown={handleKeyDown}
                                 placeholder="Scan barcode or enter SKU code..."
                                 className="w-full pl-14 pr-4 py-4 text-xl border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 disabled:bg-gray-50"
-                                disabled={isScanning || addToQueueMutation.isPending}
+                                disabled={addToQueueMutation.isPending}
                                 autoFocus
                             />
                         </div>
                         <button
                             onClick={handleScan}
-                            disabled={!scanInput.trim() || isScanning || addToQueueMutation.isPending}
+                            disabled={!scanInput.trim() || addToQueueMutation.isPending}
                             className="px-8 py-4 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                         >
-                            {isScanning || addToQueueMutation.isPending ? 'Adding...' : 'Add'}
+                            {addToQueueMutation.isPending ? 'Adding...' : 'Add'}
                         </button>
                     </div>
 
