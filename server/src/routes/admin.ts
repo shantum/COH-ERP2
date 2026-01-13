@@ -370,6 +370,41 @@ router.put('/channels', authenticateToken, asyncHandler(async (req: Request, res
     res.json({ success: true, channels });
 }));
 
+// Get sidebar section order
+router.get('/sidebar-order', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const setting = await req.prisma.systemSetting.findUnique({
+        where: { key: 'sidebar_section_order' }
+    });
+
+    // Return null if not configured (frontend will use default)
+    const order = setting?.value ? JSON.parse(setting.value) as string[] : null;
+    res.json(order);
+}));
+
+// Update sidebar section order (admin only)
+router.put('/sidebar-order', authenticateToken, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+    const { order } = req.body as { order: string[] };
+
+    if (!Array.isArray(order)) {
+        throw new ValidationError('Order must be an array of section labels');
+    }
+
+    // Validate all items are strings
+    for (const label of order) {
+        if (typeof label !== 'string') {
+            throw new ValidationError('Each item in order must be a string');
+        }
+    }
+
+    await req.prisma.systemSetting.upsert({
+        where: { key: 'sidebar_section_order' },
+        update: { value: JSON.stringify(order) },
+        create: { key: 'sidebar_section_order', value: JSON.stringify(order) }
+    });
+
+    res.json({ success: true, order });
+}));
+
 // Get tier thresholds
 router.get('/tier-thresholds', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const setting = await req.prisma.systemSetting.findUnique({

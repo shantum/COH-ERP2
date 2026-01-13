@@ -387,7 +387,7 @@ export const repackingApi = {
         returnLineId?: string;
         inspectionNotes?: string;
     }) => api.post('/repacking/queue', data),
-    updateQueueItem: (id: string, data: { status?: string; condition?: string; inspectionNotes?: string; returnRequestId?: string; returnLineId?: string }) =>
+    updateQueueItem: (id: string, data: { status?: string; condition?: string; inspectionNotes?: string; returnRequestId?: string; returnLineId?: string; orderLineId?: string }) =>
         api.put(`/repacking/queue/${id}`, data),
     deleteQueueItem: (id: string) => api.delete(`/repacking/queue/${id}`),
     // Process - move to stock or write-off
@@ -535,6 +535,10 @@ export const adminApi = {
     getChannels: () => api.get('/admin/channels'),
     updateChannels: (channels: { id: string; name: string }[]) =>
         api.put('/admin/channels', { channels }),
+    // Sidebar order
+    getSidebarOrder: () => api.get<string[] | null>('/admin/sidebar-order'),
+    updateSidebarOrder: (order: string[]) =>
+        api.put('/admin/sidebar-order', { order }),
     // Roles
     getRoles: () => api.get('/admin/roles'),
     getRole: (id: string) => api.get(`/admin/roles/${id}`),

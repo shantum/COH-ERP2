@@ -5,8 +5,9 @@
 
 import { useState } from 'react';
 import {
-    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator, RefreshCw
+    Store, Settings as SettingsIcon, FileSpreadsheet, Database, Eye, DollarSign, Terminal, Calculator, RefreshCw, PanelLeft
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 // Tab components
 import {
@@ -19,11 +20,13 @@ import {
     ServerLogsTab,
     CostingTab,
     BackgroundJobsTab,
+    SidebarTab,
 } from '../components/settings/tabs';
 
-type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'costing' | 'database' | 'inspector' | 'logs' | 'jobs';
+type SettingsTab = 'general' | 'shopify' | 'importExport' | 'remittance' | 'costing' | 'database' | 'inspector' | 'logs' | 'jobs' | 'sidebar';
 
 export default function Settings() {
+    const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
 
     return (
@@ -122,6 +125,18 @@ export default function Settings() {
                 >
                     <RefreshCw size={16} /> <span className="hidden sm:inline">Background Jobs</span><span className="sm:hidden">Jobs</span>
                 </button>
+                {user?.role === 'admin' && (
+                    <button
+                        className={`px-3 md:px-4 py-2 font-medium flex items-center gap-1.5 md:gap-2 text-sm whitespace-nowrap ${
+                            activeTab === 'sidebar'
+                                ? 'text-primary-600 border-b-2 border-primary-600'
+                                : 'text-gray-500'
+                        }`}
+                        onClick={() => setActiveTab('sidebar')}
+                    >
+                        <PanelLeft size={16} /> Sidebar
+                    </button>
+                )}
             </div>
 
             {/* Tab Content */}
@@ -134,6 +149,7 @@ export default function Settings() {
             {activeTab === 'inspector' && <InspectorTab />}
             {activeTab === 'logs' && <ServerLogsTab />}
             {activeTab === 'jobs' && <BackgroundJobsTab />}
+            {activeTab === 'sidebar' && <SidebarTab />}
         </div>
     );
 }

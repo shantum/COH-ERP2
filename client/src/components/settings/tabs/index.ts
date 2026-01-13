@@ -12,3 +12,4 @@ export { RemittanceTab } from './RemittanceTab';
 export { ServerLogsTab } from './ServerLogsTab';
 export { CostingTab } from './CostingTab';
 export { BackgroundJobsTab } from './BackgroundJobsTab';
+export { SidebarTab } from './SidebarTab';
