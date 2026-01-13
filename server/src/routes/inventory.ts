@@ -54,6 +54,7 @@ import {
     ValidationError,
     BusinessLogicError,
 } from '../utils/errors.js';
+import { inventoryBalanceCache } from '../services/inventoryBalanceCache.js';
 
 const router: Router = Router();
 
@@ -727,6 +728,9 @@ router.post('/instant-inward', authenticateToken, requirePermission('inventory:i
 
         return { transaction, balance };
     });
+
+    // Invalidate cache for this SKU
+    inventoryBalanceCache.invalidate([sku.id]);
 
     res.status(201).json({
         success: true,
@@ -1723,6 +1727,11 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
         };
     });
 
+    // Invalidate cache if inventory was added
+    if (result.inventoryTxn) {
+        inventoryBalanceCache.invalidate([orderLine.skuId]);
+    }
+
     // Get updated balance
     const balance = await calculateInventoryBalance(req.prisma, orderLine.skuId);
 
@@ -2197,6 +2206,9 @@ router.post('/inward', authenticateToken, requirePermission('inventory:inward'),
         },
     });
 
+    // Invalidate cache for this SKU
+    inventoryBalanceCache.invalidate([skuId]);
+
     // Get updated balance
     const balance = await calculateInventoryBalance(req.prisma, skuId);
 
@@ -2282,6 +2294,9 @@ router.post('/outward', authenticateToken, requirePermission('inventory:outward'
             createdBy: { select: { id: true, name: true } },
         },
     });
+
+    // Invalidate cache for this SKU
+    inventoryBalanceCache.invalidate([skuId]);
 
     // Get updated balance
     const newBalance = await calculateInventoryBalance(req.prisma, skuId);
@@ -2376,6 +2391,9 @@ router.post('/quick-inward', authenticateToken, requirePermission('inventory:inw
 
         return { transaction: updatedTransaction, matchedBatch, balance };
     });
+
+    // Invalidate cache for this SKU
+    inventoryBalanceCache.invalidate([sku.id]);
 
     res.status(201).json({
         transaction: result.transaction,

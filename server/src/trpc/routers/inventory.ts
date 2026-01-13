@@ -272,6 +272,9 @@ const inward = protectedProcedure
             },
         });
 
+        // Invalidate cache for this SKU
+        inventoryBalanceCache.invalidate([skuId]);
+
         // Get updated balance
         const balance = await calculateInventoryBalance(ctx.prisma, skuId, {
             allowNegative: true,
@@ -346,6 +349,9 @@ const outward = protectedProcedure
                 createdById: ctx.user.id,
             },
         });
+
+        // Invalidate cache for this SKU
+        inventoryBalanceCache.invalidate([skuId]);
 
         // Get updated balance
         const balance = await calculateInventoryBalance(ctx.prisma, skuId, {
@@ -430,6 +436,9 @@ const adjust = protectedProcedure
                 createdById: ctx.user.id,
             },
         });
+
+        // Invalidate cache for this SKU
+        inventoryBalanceCache.invalidate([skuId]);
 
         // Get updated balance
         const balance = await calculateInventoryBalance(ctx.prisma, skuId, {
