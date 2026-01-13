@@ -15,6 +15,7 @@ import type { ShopifyOrder, ShopifyCustomer, ShopifyProduct } from './shopify.js
 import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
 import { syncSingleProduct, ensureDefaultFabric } from './productSyncService.js';
 import { syncSingleCustomer } from './customerSyncService.js';
+import { syncLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -176,7 +177,7 @@ class SyncWorker {
 
         // Start processing in background
         this.processJob(job.id).catch(err => {
-            console.error(`Job ${job.id} failed:`, err);
+            syncLogger.error({ jobId: job.id, error: (err as Error).message }, 'Job failed');
         });
 
         return job;
@@ -208,7 +209,7 @@ class SyncWorker {
 
         // Start processing
         this.processJob(jobId).catch(err => {
-            console.error(`Job ${jobId} resume failed:`, err);
+            syncLogger.error({ jobId, error: (err as Error).message }, 'Job resume failed');
         });
 
         return (await prisma.syncJob.findUnique({ where: { id: jobId } }))!;
@@ -293,7 +294,7 @@ class SyncWorker {
                     throw new Error(`Unknown job type: ${job.jobType}`);
             }
         } catch (error) {
-            console.error(`Job ${jobId} error:`, error);
+            syncLogger.error({ jobId, error: (error as Error).message }, 'Job error');
             await prisma.syncJob.update({
                 where: { id: jobId },
                 data: {
@@ -333,7 +334,7 @@ class SyncWorker {
             const threshold = new Date();
             threshold.setMinutes(threshold.getMinutes() - job.staleAfterMins);
             updatedAtMin = threshold.toISOString();
-            console.log(`[Job ${jobId}] UPDATE mode: fetching orders updated since ${updatedAtMin}`);
+            syncLogger.info({ jobId, updatedAtMin }, 'UPDATE mode: fetching recently updated orders');
         } else if (syncMode === 'quick') {
             // QUICK mode: Find most recent order date in DB and fetch newer orders
             const latestOrder = await prisma.order.findFirst({
@@ -343,9 +344,9 @@ class SyncWorker {
             });
             if (latestOrder?.orderDate) {
                 createdAtMin = latestOrder.orderDate.toISOString();
-                console.log(`[Job ${jobId}] QUICK mode: fetching orders created after ${createdAtMin}`);
+                syncLogger.info({ jobId, createdAtMin }, 'QUICK mode: fetching orders since last sync');
             } else {
-                console.log(`[Job ${jobId}] QUICK mode: no existing orders, fetching all`);
+                syncLogger.info({ jobId }, 'QUICK mode: no existing orders, fetching all');
             }
         } else if (job.daysBack) {
             // DEEP or LEGACY mode: Use created_at_min with days filter
@@ -357,13 +358,13 @@ class SyncWorker {
         // For QUICK mode, load existing order IDs upfront for skip logic
         let existingOrderIds = new Set<string>();
         if (syncMode === 'quick') {
-            console.log(`[Job ${jobId}] QUICK mode: loading existing Shopify order IDs...`);
+            syncLogger.debug({ jobId }, 'QUICK mode: loading existing Shopify order IDs');
             const existingOrders = await prisma.order.findMany({
                 where: { shopifyOrderId: { not: null } },
                 select: { shopifyOrderId: true }
             });
             existingOrderIds = new Set(existingOrders.map(o => o.shopifyOrderId!));
-            console.log(`[Job ${jobId}] Found ${existingOrderIds.size} existing orders to skip`);
+            syncLogger.debug({ jobId, count: existingOrderIds.size }, 'Found existing orders to skip');
         }
 
         // Get total count if not set (only for DEEP/LEGACY modes; QUICK/UPDATE are unpredictable)
@@ -380,7 +381,7 @@ class SyncWorker {
             if (!job) return;
         }
 
-        console.log(`[Job ${jobId}] Starting order sync (${syncMode || 'legacy'} mode): ${job.totalRecords || '?'} total, resuming from ID: ${job.lastProcessedId || 'start'}`);
+        syncLogger.info({ jobId, syncMode: syncMode || 'legacy', totalRecords: job.totalRecords, resumeFrom: job.lastProcessedId || 'start' }, 'Starting order sync');
 
         let sinceId = job.lastProcessedId;
 
@@ -391,7 +392,7 @@ class SyncWorker {
             // Check if cancelled
             const currentJob = await prisma.syncJob.findUnique({ where: { id: jobId } });
             if (currentJob?.status === 'cancelled') {
-                console.log(`[Job ${jobId}] Cancelled`);
+                syncLogger.info({ jobId }, 'Job cancelled');
                 return;
             }
 
@@ -417,7 +418,7 @@ class SyncWorker {
 
                 shopifyOrders = await shopifyClient.getOrders(fetchOptions);
             } catch (fetchError: any) {
-                console.error(`[Job ${jobId}] Shopify API error:`, fetchError.response?.data || fetchError.message);
+                syncLogger.error({ jobId, error: fetchError.response?.data || fetchError.message }, 'Shopify API error');
                 throw new Error(`Shopify API: ${fetchError.response?.data?.errors || fetchError.message}`);
             }
 
@@ -425,7 +426,7 @@ class SyncWorker {
                 break;
             }
 
-            console.log(`[Job ${jobId}] Batch ${batchNumber}: processing ${shopifyOrders.length} orders (${syncMode || 'legacy'} mode)`);
+            syncLogger.debug({ jobId, batchNumber, orderCount: shopifyOrders.length, syncMode: syncMode || 'legacy' }, 'Processing batch');
 
             let batchCreated = 0, batchUpdated = 0, batchSkipped = 0, batchErrors = 0;
 
@@ -481,14 +482,14 @@ class SyncWorker {
             if (batchNumber % this.gcInterval === 0) {
                 if (global.gc) {
                     global.gc();
-                    console.log(`[Job ${jobId}] GC triggered after batch ${batchNumber}`);
+                    syncLogger.debug({ jobId, batchNumber }, 'GC triggered');
                 }
             }
 
             // Prisma connection cleanup: Disconnect periodically to release memory
             if (batchNumber % this.disconnectInterval === 0) {
                 await prisma.$disconnect();
-                console.log(`[Job ${jobId}] Prisma disconnected after batch ${batchNumber}`);
+                syncLogger.debug({ jobId, batchNumber }, 'Prisma disconnected');
                 await new Promise(r => setTimeout(r, 500));
             }
 
@@ -507,7 +508,7 @@ class SyncWorker {
             }
         });
 
-        console.log(`[Job ${jobId}] Completed (${syncMode || 'legacy'} mode)`);
+        syncLogger.info({ jobId, syncMode: syncMode || 'legacy' }, 'Order sync completed');
     }
 
     /**
@@ -554,7 +555,7 @@ class SyncWorker {
             if (!job) return;
         }
 
-        console.log(`[Job ${jobId}] Starting customer sync: ${job.totalRecords} total`);
+        syncLogger.info({ jobId, totalRecords: job.totalRecords }, 'Starting customer sync');
 
         let sinceId = job.lastProcessedId;
         let batchNumber = job.currentBatch;
@@ -631,7 +632,7 @@ class SyncWorker {
             data: { status: 'completed', completedAt: new Date() }
         });
 
-        console.log(`[Job ${jobId}] Completed`);
+        syncLogger.info({ jobId }, 'Customer sync completed');
     }
 
     /**
@@ -639,7 +640,7 @@ class SyncWorker {
      * Uses shared productSyncService for single product processing
      */
     private async processProductSync(jobId: string): Promise<void> {
-        console.log(`[Job ${jobId}] Starting product sync`);
+        syncLogger.info({ jobId }, 'Starting product sync');
 
         try {
             const totalCount = await shopifyClient.getProductCount();
@@ -689,7 +690,7 @@ class SyncWorker {
                 data: { status: 'completed', completedAt: new Date() }
             });
 
-            console.log(`[Job ${jobId}] Completed`);
+            syncLogger.info({ jobId }, 'Product sync completed');
         } catch (error) {
             throw error;
         }

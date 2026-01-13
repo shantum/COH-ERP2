@@ -13,6 +13,7 @@ import shopifyClient from './shopify.js';
 import type { ShopifyOrder } from './shopify.js';
 import { cacheShopifyOrder, processFromCache, markCacheProcessed, markCacheError } from './shopifyOrderProcessor.js';
 import prisma from '../lib/prisma.js';
+import { syncLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPES & INTERFACES
@@ -96,7 +97,7 @@ let lastSyncResult: SyncResult | null = null;
  */
 async function runHourlySync(): Promise<SyncResult | null> {
     if (isRunning) {
-        console.log('[Scheduled Sync] Sync already in progress, skipping...');
+        syncLogger.debug('Scheduled sync already in progress, skipping');
         return null;
     }
 
@@ -112,19 +113,19 @@ async function runHourlySync(): Promise<SyncResult | null> {
     };
 
     try {
-        console.log('[Scheduled Sync] Starting hourly sync...');
+        syncLogger.info('Starting hourly sync');
 
         // Reload Shopify config
         await shopifyClient.loadFromDatabase();
 
         if (!shopifyClient.isConfigured()) {
-            console.log('[Scheduled Sync] Shopify not configured, skipping sync');
+            syncLogger.warn('Shopify not configured, skipping sync');
             result.error = 'Shopify not configured';
             return result;
         }
 
         // Step 1: Dump last 24 hours from Shopify to cache
-        console.log(`[Scheduled Sync] Step 1: Fetching orders from last ${LOOKBACK_HOURS} hours...`);
+        syncLogger.info({ lookbackHours: LOOKBACK_HOURS }, 'Step 1: Fetching recent orders');
 
         const since = new Date();
         since.setHours(since.getHours() - LOOKBACK_HOURS);
@@ -132,7 +133,7 @@ async function runHourlySync(): Promise<SyncResult | null> {
         const orders = await shopifyClient.getAllOrders(
             (fetched, total) => {
                 if (fetched % 50 === 0) {
-                    console.log(`[Scheduled Sync] Fetched ${fetched}/${total} orders...`);
+                    syncLogger.debug({ fetched, total }, 'Fetching progress');
                 }
             },
             {
@@ -150,7 +151,7 @@ async function runHourlySync(): Promise<SyncResult | null> {
                 cached++;
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
-                console.error(`[Scheduled Sync] Error caching ${order.name}:`, errorMessage);
+                syncLogger.error({ orderName: order.name, error: errorMessage }, 'Error caching order');
                 skipped++;
             }
         }
@@ -160,10 +161,10 @@ async function runHourlySync(): Promise<SyncResult | null> {
             cached,
             skipped
         };
-        console.log(`[Scheduled Sync] Step 1 complete: ${cached} cached, ${skipped} skipped`);
+        syncLogger.info({ cached, skipped }, 'Step 1 complete');
 
         // Step 2: Process any unprocessed cache entries
-        console.log('[Scheduled Sync] Step 2: Processing unprocessed cache entries...');
+        syncLogger.info('Step 2: Processing unprocessed cache entries');
 
         const unprocessed = await prisma.shopifyOrderCache.findMany({
             where: { processedAt: null },
@@ -196,18 +197,18 @@ async function runHourlySync(): Promise<SyncResult | null> {
             failed,
             errors: errors.length > 0 ? errors : undefined
         };
-        console.log(`[Scheduled Sync] Step 2 complete: ${processed} processed, ${failed} failed`);
+        syncLogger.info({ processed, failed }, 'Step 2 complete');
 
         result.durationMs = Date.now() - startTime;
         lastSyncAt = new Date();
         lastSyncResult = result;
 
-        console.log(`[Scheduled Sync] Completed in ${Math.round(result.durationMs / 1000)}s`);
+        syncLogger.info({ durationMs: result.durationMs }, 'Hourly sync completed');
 
         return result;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('[Scheduled Sync] Error:', error);
+        syncLogger.error({ error: errorMessage }, 'Scheduled sync failed');
         result.error = errorMessage;
         result.durationMs = Date.now() - startTime;
         lastSyncResult = result;
@@ -226,11 +227,11 @@ async function runHourlySync(): Promise<SyncResult | null> {
  */
 function start(): void {
     if (syncInterval) {
-        console.log('[Scheduled Sync] Already running');
+        syncLogger.debug('Scheduler already running');
         return;
     }
 
-    console.log(`[Scheduled Sync] Starting scheduler (every ${SYNC_INTERVAL_MS / 1000 / 60} minutes)`);
+    syncLogger.info({ intervalMinutes: SYNC_INTERVAL_MS / 1000 / 60 }, 'Starting scheduler');
 
     // Run immediately on start
     runHourlySync();
@@ -246,7 +247,7 @@ function stop(): void {
     if (syncInterval) {
         clearInterval(syncInterval);
         syncInterval = null;
-        console.log('[Scheduled Sync] Stopped');
+        syncLogger.info('Scheduler stopped');
     }
 }
 

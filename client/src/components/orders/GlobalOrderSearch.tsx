@@ -84,7 +84,7 @@ export function GlobalOrderSearch({ onSelectOrder }: GlobalOrderSearchProps) {
 
     const handleSelect = (orderId: string, tab: string) => {
         const mappedTab = tabMapping[tab] || 'open';
-        const page = ordersPageTabs.includes(mappedTab) ? 'orders' : 'shipments';
+        const page = (ordersPageTabs as string[]).includes(mappedTab) ? 'orders' : 'shipments';
         onSelectOrder(orderId, mappedTab, page);
         setSearchInput('');
         setIsOpen(false);
@@ -172,9 +172,8 @@ export function GlobalOrderSearch({ onSelectOrder }: GlobalOrderSearchProps) {
                                                     <span className="font-medium text-gray-900">
                                                         #{order.orderNumber}
                                                     </span>
-                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                                        order.paymentMethod === 'COD' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
-                                                    }`}>
+                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${order.paymentMethod === 'COD' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                                                        }`}>
                                                         {order.paymentMethod}
                                                     </span>
                                                 </div>

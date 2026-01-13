@@ -449,9 +449,9 @@ export default function ReturnsRto() {
                                                         <span className="text-xs text-gray-600">
                                                             Return: {item.returnRequestNumber}
                                                         </span>
-                                                    ) : item.inspectionNotes?.startsWith('RTO Order') ? (
+                                                    ) : item.rtoOrderNumber ? (
                                                         <span className="text-xs text-purple-600">
-                                                            {item.inspectionNotes.split(' (')[0]}
+                                                            RTO: #{item.rtoOrderNumber}
                                                         </span>
                                                     ) : (
                                                         <span className="text-xs text-gray-400 italic">Unallocated</span>
@@ -574,7 +574,7 @@ function AllocationModalContent({
     const returnMatches = matchData?.matches.filter(m => m.source === 'return') || [];
     const rtoMatches = matchData?.matches.filter(m => m.source === 'rto') || [];
 
-    const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string, orderNumber?: string) => {
+    const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string) => {
         setIsLoading(true);
         try {
             if (type === 'return') {
@@ -583,9 +583,9 @@ function AllocationModalContent({
                     returnLineId: lineId,
                 });
             } else {
-                // For RTO, store reference in inspectionNotes (no dedicated field yet)
+                // For RTO, use the proper orderLineId field
                 await repackingApi.updateQueueItem(item.queueItemId || item.id, {
-                    inspectionNotes: `RTO Order #${orderNumber} (Line: ${lineId})`,
+                    orderLineId: lineId,
                 });
             }
             onSuccess();
@@ -631,20 +631,23 @@ function AllocationModalContent({
                                         Pending Returns
                                     </h4>
                                     <div className="space-y-2">
-                                        {returnMatches.map((match) => (
-                                            <button
-                                                key={match.data.lineId}
-                                                onClick={() => handleAllocate('return', match.data.lineId, match.data.requestId)}
-                                                disabled={isLoading}
-                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
-                                            >
-                                                <div className="flex justify-between">
-                                                    <span className="font-medium">{match.data.requestNumber}</span>
-                                                    <span className="text-sm text-gray-500">Qty: {match.data.qty}</span>
-                                                </div>
-                                                <p className="text-sm text-gray-600">{match.data.reasonCategory}</p>
-                                            </button>
-                                        ))}
+                                        {returnMatches.map((match) => {
+                                            const data = match.data as any; // Type assertion for return matches
+                                            return (
+                                                <button
+                                                    key={data.lineId}
+                                                    onClick={() => handleAllocate('return', data.lineId, data.requestId)}
+                                                    disabled={isLoading}
+                                                    className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
+                                                >
+                                                    <div className="flex justify-between">
+                                                        <span className="font-medium">{data.requestNumber}</span>
+                                                        <span className="text-sm text-gray-500">Qty: {data.qty}</span>
+                                                    </div>
+                                                    <p className="text-sm text-gray-600">{data.reasonCategory}</p>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -657,25 +660,28 @@ function AllocationModalContent({
                                         Pending RTO Orders
                                     </h4>
                                     <div className="space-y-2">
-                                        {rtoMatches.map((match) => (
-                                            <button
-                                                key={match.data.lineId}
-                                                onClick={() => handleAllocate('rto', match.data.lineId, undefined, match.data.orderNumber)}
-                                                disabled={isLoading}
-                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
-                                            >
-                                                <div className="flex justify-between">
-                                                    <span className="font-medium">Order #{match.data.orderNumber}</span>
-                                                    <span className="text-sm text-gray-500">Qty: {match.data.qty}</span>
-                                                </div>
-                                                <p className="text-sm text-gray-600">{match.data.customerName}</p>
-                                                {match.data.atWarehouse && (
-                                                    <span className="inline-block mt-1 px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
-                                                        At Warehouse
-                                                    </span>
-                                                )}
-                                            </button>
-                                        ))}
+                                        {rtoMatches.map((match) => {
+                                            const data = match.data as any; // Type assertion for RTO matches
+                                            return (
+                                                <button
+                                                    key={data.lineId}
+                                                    onClick={() => handleAllocate('rto', data.lineId)}
+                                                    disabled={isLoading}
+                                                    className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                                                >
+                                                    <div className="flex justify-between">
+                                                        <span className="font-medium">Order #{data.orderNumber}</span>
+                                                        <span className="text-sm text-gray-500">Qty: {data.qty}</span>
+                                                    </div>
+                                                    <p className="text-sm text-gray-600">{data.customerName}</p>
+                                                    {data.atWarehouse && (
+                                                        <span className="inline-block mt-1 px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                                            At Warehouse
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}

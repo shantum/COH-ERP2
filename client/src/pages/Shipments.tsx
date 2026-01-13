@@ -7,11 +7,10 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { RefreshCw, Archive } from 'lucide-react';
-import { shopifyApi, trackingApi, ordersApi } from '../services/api';
+import { shopifyApi, trackingApi, ordersApi, customersApi } from '../services/api';
 
 // Custom hooks
 import { useShipmentsData } from '../hooks/useShipmentsData';
-import type { OrderTab } from '../hooks/useOrdersData';
 import { useShipmentsMutations } from '../hooks/useShipmentsMutations';
 
 // Components
@@ -68,40 +67,18 @@ export default function Shipments() {
         shippedOrders,
         shippedPagination,
         rtoOrders,
-        rtoCount,
+        rtoTotalCount,
         codPendingOrders,
-        codPendingCount,
+        codPendingTotalCount,
         codPendingTotalAmount,
         archivedOrders,
-        archivedCount,
+        archivedTotalCount,
         shippedSummary,
         loadingShippedSummary,
         rtoSummary,
         loadingRtoSummary,
-        customerDetail,
-        customerLoading,
         isLoading,
-    } = useShipmentsData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedLimit, archivedSortBy });
-
-    // Unified modal handlers
-    const openUnifiedModal = useCallback((orderId: string, mode: 'view' | 'edit' = 'view') => {
-        // Find the order in the current tab's data
-        let order: Order | undefined;
-        if (tab === 'shipped') {
-            order = shippedOrders?.find((o: any) => o.id === orderId);
-        } else if (tab === 'rto') {
-            order = rtoOrders?.find((o: any) => o.id === orderId);
-        } else if (tab === 'cod-pending') {
-            order = codPendingOrders?.find((o: any) => o.id === orderId);
-        } else if (tab === 'archived') {
-            order = archivedOrders?.find((o: any) => o.id === orderId);
-        }
-
-        if (order) {
-            setUnifiedModalOrder(order);
-            setUnifiedModalMode(mode);
-        }
-    }, [tab, shippedOrders, rtoOrders, codPendingOrders, archivedOrders]);
+    } = useShipmentsData({ activeTab: tab, shippedPage, shippedDays, archivedDays, archivedLimit, archivedSortBy });
 
     // Handler for grids that pass full order
     const handleViewOrder = useCallback((order: Order) => {
@@ -118,7 +95,7 @@ export default function Shipments() {
 
     // Mutations hook with callbacks
     const mutations = useShipmentsMutations({
-        onEditSuccess: () => {
+        onRtoSuccess: () => {
             setUnifiedModalOrder(null);
         },
     });
@@ -196,8 +173,15 @@ export default function Shipments() {
         },
     });
 
+    // Query for customer detail when selected
+    const { data: customerDetail, isLoading: customerLoading } = useQuery({
+        queryKey: ['customerDetail', selectedCustomerId],
+        queryFn: () => customersApi.getById(selectedCustomerId!).then((r: any) => r.data),
+        enabled: !!selectedCustomerId,
+    });
+
     // Handler for GlobalOrderSearch - navigate to /orders for open/cancelled
-    const handleSearchSelect = useCallback((orderId: string, selectedTab: OrderTab, page: 'orders' | 'shipments') => {
+    const handleSearchSelect = useCallback((orderId: string, selectedTab: string, page: 'orders' | 'shipments') => {
         if (page === 'orders') {
             // Navigate to orders page with the selected tab
             navigate(`/orders?tab=${selectedTab}&orderId=${orderId}`);
@@ -219,9 +203,9 @@ export default function Shipments() {
     // Tab configuration for cleaner rendering
     const tabs = [
         { id: 'shipped' as const, label: 'Shipped', count: shippedPagination.total },
-        { id: 'rto' as const, label: 'RTO', count: rtoCount, highlight: true },
-        { id: 'cod-pending' as const, label: 'COD Pending', count: codPendingCount, highlight: true },
-        { id: 'archived' as const, label: 'Archived', count: archivedCount },
+        { id: 'rto' as const, label: 'RTO', count: rtoTotalCount, highlight: true },
+        { id: 'cod-pending' as const, label: 'COD Pending', count: codPendingTotalCount, highlight: true },
+        { id: 'archived' as const, label: 'Archived', count: archivedTotalCount },
     ];
 
     return (
@@ -244,23 +228,21 @@ export default function Shipments() {
                         {tabs.map((t) => (
                             <button
                                 key={t.id}
-                                className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
-                                    tab === t.id
-                                        ? 'text-primary-600'
-                                        : 'text-gray-500 hover:text-gray-700'
-                                }`}
+                                className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${tab === t.id
+                                    ? 'text-primary-600'
+                                    : 'text-gray-500 hover:text-gray-700'
+                                    }`}
                                 onClick={() => setTab(t.id)}
                             >
                                 <span className="flex items-center gap-1.5">
                                     {t.label}
                                     {t.count > 0 && (
-                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${
-                                            tab === t.id
-                                                ? 'bg-primary-100 text-primary-700'
-                                                : t.highlight
-                                                    ? 'bg-amber-100 text-amber-700'
-                                                    : 'bg-gray-100 text-gray-500'
-                                        }`}>
+                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${tab === t.id
+                                            ? 'bg-primary-100 text-primary-700'
+                                            : t.highlight
+                                                ? 'bg-amber-100 text-amber-700'
+                                                : 'bg-gray-100 text-gray-500'
+                                            }`}>
                                             {t.count}
                                         </span>
                                     )}
@@ -296,13 +278,12 @@ export default function Shipments() {
                             <button
                                 onClick={() => trackingSyncMutation.mutate()}
                                 disabled={trackingSyncMutation.isPending}
-                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
-                                    syncResult?.success
-                                        ? 'bg-green-100 text-green-700'
-                                        : syncResult && !syncResult.success
+                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${syncResult?.success
+                                    ? 'bg-green-100 text-green-700'
+                                    : syncResult && !syncResult.success
                                         ? 'bg-red-100 text-red-700'
                                         : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
-                                } disabled:opacity-50`}
+                                    } disabled:opacity-50`}
                                 title="Sync tracking status"
                             >
                                 <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
@@ -329,13 +310,12 @@ export default function Shipments() {
                             <button
                                 onClick={() => trackingSyncMutation.mutate()}
                                 disabled={trackingSyncMutation.isPending}
-                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
-                                    syncResult?.success
-                                        ? 'bg-green-100 text-green-700'
-                                        : syncResult && !syncResult.success
+                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${syncResult?.success
+                                    ? 'bg-green-100 text-green-700'
+                                    : syncResult && !syncResult.success
                                         ? 'bg-red-100 text-red-700'
                                         : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
-                                } disabled:opacity-50`}
+                                    } disabled:opacity-50`}
                                 title="Sync tracking status"
                             >
                                 <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
@@ -350,13 +330,12 @@ export default function Shipments() {
                             <button
                                 onClick={() => trackingSyncMutation.mutate()}
                                 disabled={trackingSyncMutation.isPending}
-                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
-                                    syncResult?.success
-                                        ? 'bg-green-100 text-green-700'
-                                        : syncResult && !syncResult.success
+                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${syncResult?.success
+                                    ? 'bg-green-100 text-green-700'
+                                    : syncResult && !syncResult.success
                                         ? 'bg-red-100 text-red-700'
                                         : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
-                                } disabled:opacity-50`}
+                                    } disabled:opacity-50`}
                                 title="Sync tracking status"
                             >
                                 <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
@@ -375,161 +354,161 @@ export default function Shipments() {
 
                 {/* Shipped Orders with Summary Panel and Grid */}
                 {!isLoading && tab === 'shipped' && (
-                <div className="p-4 space-y-4">
-                    <SummaryPanel
-                        type="shipped"
-                        data={shippedSummary}
-                        isLoading={loadingShippedSummary}
-                    />
-                    <ShippedOrdersGrid
-                        orders={shippedOrders}
-                        onUnship={(id) => mutations.unship.mutate(id)}
-                        onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
-                        onMarkRto={(id) => mutations.markRto.mutate(id)}
-                        onArchive={(id) => mutations.archiveOrder.mutate(id)}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onTrack={(awb, orderNumber) => {
-                            setTrackingAwb(awb);
-                            setTrackingOrderNumber(orderNumber);
-                        }}
-                        isUnshipping={mutations.unship.isPending}
-                        isMarkingDelivered={mutations.markDelivered.isPending}
-                        isMarkingRto={mutations.markRto.isPending}
-                        isArchiving={mutations.archiveOrder.isPending}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                    {/* Pagination Controls */}
-                    {shippedPagination.totalPages > 1 && (
-                        <div className="flex items-center justify-between border-t pt-4 mt-4">
-                            <div className="text-sm text-gray-500">
-                                Showing {((shippedPage - 1) * 100) + 1} - {Math.min(shippedPage * 100, shippedPagination.total)} of {shippedPagination.total} orders
+                    <div className="p-4 space-y-4">
+                        <SummaryPanel
+                            type="shipped"
+                            data={shippedSummary}
+                            isLoading={loadingShippedSummary}
+                        />
+                        <ShippedOrdersGrid
+                            orders={shippedOrders}
+                            onUnship={(id) => mutations.unship.mutate(id)}
+                            onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
+                            onMarkRto={(id) => mutations.markRto.mutate(id)}
+                            onArchive={(id) => mutations.archiveOrder.mutate(id)}
+                            onViewOrder={handleViewOrder}
+                            onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                            onTrack={(awb, orderNumber) => {
+                                setTrackingAwb(awb);
+                                setTrackingOrderNumber(orderNumber);
+                            }}
+                            isUnshipping={mutations.unship.isPending}
+                            isMarkingDelivered={mutations.markDelivered.isPending}
+                            isMarkingRto={mutations.markRto.isPending}
+                            isArchiving={mutations.archiveOrder.isPending}
+                            shopDomain={shopifyConfig?.shopDomain}
+                        />
+                        {/* Pagination Controls */}
+                        {shippedPagination.totalPages > 1 && (
+                            <div className="flex items-center justify-between border-t pt-4 mt-4">
+                                <div className="text-sm text-gray-500">
+                                    Showing {((shippedPage - 1) * 100) + 1} - {Math.min(shippedPage * 100, shippedPagination.total)} of {shippedPagination.total} orders
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => setShippedPage(1)}
+                                        disabled={shippedPage === 1}
+                                        className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                    >
+                                        First
+                                    </button>
+                                    <button
+                                        onClick={() => setShippedPage(p => Math.max(1, p - 1))}
+                                        disabled={shippedPage === 1}
+                                        className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                    >
+                                        Prev
+                                    </button>
+                                    <span className="px-3 py-1 text-sm">
+                                        Page {shippedPage} of {shippedPagination.totalPages}
+                                    </span>
+                                    <button
+                                        onClick={() => setShippedPage(p => Math.min(shippedPagination.totalPages, p + 1))}
+                                        disabled={shippedPage >= shippedPagination.totalPages}
+                                        className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                    >
+                                        Next
+                                    </button>
+                                    <button
+                                        onClick={() => setShippedPage(shippedPagination.totalPages)}
+                                        disabled={shippedPage >= shippedPagination.totalPages}
+                                        className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                    >
+                                        Last
+                                    </button>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => setShippedPage(1)}
-                                    disabled={shippedPage === 1}
-                                    className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    First
-                                </button>
-                                <button
-                                    onClick={() => setShippedPage(p => Math.max(1, p - 1))}
-                                    disabled={shippedPage === 1}
-                                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Prev
-                                </button>
-                                <span className="px-3 py-1 text-sm">
-                                    Page {shippedPage} of {shippedPagination.totalPages}
-                                </span>
-                                <button
-                                    onClick={() => setShippedPage(p => Math.min(shippedPagination.totalPages, p + 1))}
-                                    disabled={shippedPage >= shippedPagination.totalPages}
-                                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Next
-                                </button>
-                                <button
-                                    onClick={() => setShippedPage(shippedPagination.totalPages)}
-                                    disabled={shippedPage >= shippedPagination.totalPages}
-                                    className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Last
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
+                        )}
+                    </div>
                 )}
 
                 {/* RTO Orders */}
                 {!isLoading && tab === 'rto' && (
-                <div className="p-4 space-y-4">
-                    <SummaryPanel
-                        type="rto"
-                        data={rtoSummary}
-                        isLoading={loadingRtoSummary}
-                    />
-                    <RtoOrdersGrid
-                        orders={rtoOrders}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onTrack={(awb, orderNumber) => {
-                            setTrackingAwb(awb);
-                            setTrackingOrderNumber(orderNumber);
-                        }}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                </div>
+                    <div className="p-4 space-y-4">
+                        <SummaryPanel
+                            type="rto"
+                            data={rtoSummary}
+                            isLoading={loadingRtoSummary}
+                        />
+                        <RtoOrdersGrid
+                            orders={rtoOrders}
+                            onViewOrder={handleViewOrder}
+                            onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                            onTrack={(awb, orderNumber) => {
+                                setTrackingAwb(awb);
+                                setTrackingOrderNumber(orderNumber);
+                            }}
+                            shopDomain={shopifyConfig?.shopDomain}
+                        />
+                    </div>
                 )}
 
                 {/* COD Pending Orders */}
                 {!isLoading && tab === 'cod-pending' && (
-                <div className="p-4 space-y-4">
-                    {codPendingTotalAmount > 0 && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                            <span className="text-sm text-amber-800">
-                                Total pending COD: <strong>₹{codPendingTotalAmount.toLocaleString()}</strong> from {codPendingCount} orders
-                            </span>
-                        </div>
-                    )}
-                    <CodPendingGrid
-                        orders={codPendingOrders}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onTrack={(awb, orderNumber) => {
-                            setTrackingAwb(awb);
-                            setTrackingOrderNumber(orderNumber);
-                        }}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                </div>
+                    <div className="p-4 space-y-4">
+                        {codPendingTotalAmount > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                <span className="text-sm text-amber-800">
+                                    Total pending COD: <strong>₹{codPendingTotalAmount.toLocaleString()}</strong> from {codPendingTotalCount} orders
+                                </span>
+                            </div>
+                        )}
+                        <CodPendingGrid
+                            orders={codPendingOrders}
+                            onViewOrder={handleViewOrder}
+                            onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                            onTrack={(awb, orderNumber) => {
+                                setTrackingAwb(awb);
+                                setTrackingOrderNumber(orderNumber);
+                            }}
+                            shopDomain={shopifyConfig?.shopDomain}
+                        />
+                    </div>
                 )}
 
                 {/* Archived Orders Grid */}
                 {!isLoading && tab === 'archived' && (
-                <div className="p-4 space-y-4">
-                    {/* Period selector */}
-                    <div className="flex items-center gap-4">
-                        <label className="text-sm text-gray-600">Period:</label>
-                        <select
-                            value={archivedDays}
-                            onChange={(e) => setArchivedDays(Number(e.target.value))}
-                            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                        >
-                            <option value={30}>Last 30 days</option>
-                            <option value={90}>Last 90 days</option>
-                            <option value={180}>Last 6 months</option>
-                            <option value={365}>Last year</option>
-                            <option value={0}>All time</option>
-                        </select>
-                        <label className="text-sm text-gray-600">Load:</label>
-                        <select
-                            value={archivedLimit}
-                            onChange={(e) => setArchivedLimit(Number(e.target.value))}
-                            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                        >
-                            <option value={100}>100 orders</option>
-                            <option value={500}>500 orders</option>
-                            <option value={1000}>1,000 orders</option>
-                            <option value={2500}>2,500 orders</option>
-                        </select>
+                    <div className="p-4 space-y-4">
+                        {/* Period selector */}
+                        <div className="flex items-center gap-4">
+                            <label className="text-sm text-gray-600">Period:</label>
+                            <select
+                                value={archivedDays}
+                                onChange={(e) => setArchivedDays(Number(e.target.value))}
+                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
+                            >
+                                <option value={30}>Last 30 days</option>
+                                <option value={90}>Last 90 days</option>
+                                <option value={180}>Last 6 months</option>
+                                <option value={365}>Last year</option>
+                                <option value={0}>All time</option>
+                            </select>
+                            <label className="text-sm text-gray-600">Load:</label>
+                            <select
+                                value={archivedLimit}
+                                onChange={(e) => setArchivedLimit(Number(e.target.value))}
+                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
+                            >
+                                <option value={100}>100 orders</option>
+                                <option value={500}>500 orders</option>
+                                <option value={1000}>1,000 orders</option>
+                                <option value={2500}>2,500 orders</option>
+                            </select>
+                        </div>
+                        <ArchivedOrdersGrid
+                            orders={archivedOrders}
+                            totalCount={archivedTotalCount}
+                            onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
+                            onViewOrder={handleViewOrder}
+                            onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                            isRestoring={mutations.unarchiveOrder.isPending}
+                            shopDomain={shopifyConfig?.shopDomain}
+                            sortBy={archivedSortBy}
+                            onSortChange={setArchivedSortBy}
+                            pageSize={archivedLimit}
+                            onPageSizeChange={setArchivedLimit}
+                        />
                     </div>
-                    <ArchivedOrdersGrid
-                        orders={archivedOrders}
-                        totalCount={archivedCount}
-                        onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        isRestoring={mutations.unarchiveOrder.isPending}
-                        shopDomain={shopifyConfig?.shopDomain}
-                        sortBy={archivedSortBy}
-                        onSortChange={setArchivedSortBy}
-                        pageSize={archivedLimit}
-                        onPageSizeChange={setArchivedLimit}
-                    />
-                </div>
                 )}
             </div>
 

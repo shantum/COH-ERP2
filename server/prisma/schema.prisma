@@ -1117,3 +1117,20 @@ model InventoryReconciliationItem {
   @@index([reconciliationId])
   @@index([skuId])
 }
+
+// ============================================
+// PINCODE DATA (for geographic analysis)
+// ============================================
+
+model Pincode {
+  id        String   @id @default(uuid())
+  pincode   String   @unique  // 6-digit pincode
+  district  String             // District name
+  state     String             // State name
+  region    String?            // Region name (optional)
+  division  String?            // Division name (optional)
+  createdAt DateTime @default(now())
+
+  @@index([state])
+  @@index([district])
+}

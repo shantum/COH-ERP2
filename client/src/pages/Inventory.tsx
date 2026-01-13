@@ -17,6 +17,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
+import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp } from 'lucide-react';
 import { trpc } from '../services/trpc';
@@ -236,7 +237,7 @@ export default function Inventory() {
             width: 100,
             cellStyle: { textTransform: 'capitalize' },
         },
-    ], []);
+    ] as ColDef[], []);
 
     return (
         <div className="space-y-4">
@@ -347,12 +348,11 @@ export default function Inventory() {
                                     {mostStockedProducts.map((product, index) => (
                                         <div key={product.productId} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
                                             {/* Rank Badge */}
-                                            <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
-                                                index === 0 ? 'bg-amber-100 text-amber-700' :
-                                                index === 1 ? 'bg-gray-200 text-gray-600' :
-                                                index === 2 ? 'bg-orange-100 text-orange-700' :
-                                                'bg-gray-100 text-gray-500'
-                                            }`}>
+                                            <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${index === 0 ? 'bg-amber-100 text-amber-700' :
+                                                    index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                        index === 2 ? 'bg-orange-100 text-orange-700' :
+                                                            'bg-gray-100 text-gray-500'
+                                                }`}>
                                                 {index + 1}
                                             </div>
 
@@ -419,12 +419,11 @@ export default function Inventory() {
                                     {demandData.data.map((product: any, index: number) => (
                                         <div key={product.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
                                             {/* Rank Badge */}
-                                            <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
-                                                index === 0 ? 'bg-green-100 text-green-700' :
-                                                index === 1 ? 'bg-gray-200 text-gray-600' :
-                                                index === 2 ? 'bg-emerald-100 text-emerald-700' :
-                                                'bg-gray-100 text-gray-500'
-                                            }`}>
+                                            <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${index === 0 ? 'bg-green-100 text-green-700' :
+                                                    index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                        index === 2 ? 'bg-emerald-100 text-emerald-700' :
+                                                            'bg-gray-100 text-gray-500'
+                                                }`}>
                                                 {index + 1}
                                             </div>
 
@@ -479,41 +478,37 @@ export default function Inventory() {
                     <div className="flex gap-2">
                         <button
                             onClick={() => setStockFilter('all')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                stockFilter === 'all'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'all'
                                     ? 'bg-blue-600 text-white'
                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
+                                }`}
                         >
                             All
                         </button>
                         <button
                             onClick={() => setStockFilter('in_stock')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                stockFilter === 'in_stock'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'in_stock'
                                     ? 'bg-green-600 text-white'
                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
+                                }`}
                         >
                             In Stock
                         </button>
                         <button
                             onClick={() => setStockFilter('low_stock')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                stockFilter === 'low_stock'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'low_stock'
                                     ? 'bg-amber-600 text-white'
                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
+                                }`}
                         >
                             Low Stock
                         </button>
                         <button
                             onClick={() => setStockFilter('out_of_stock')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                stockFilter === 'out_of_stock'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'out_of_stock'
                                     ? 'bg-red-600 text-white'
                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
+                                }`}
                         >
                             Out of Stock
                         </button>

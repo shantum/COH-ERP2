@@ -2,9 +2,11 @@
  * Centralized logger using Pino
  * Replaces scattered console.log statements with structured logging
  */
-import pino, { Logger, Level, DestinationStream } from 'pino';
+import pino from 'pino';
+import type { Logger, Level, DestinationStream } from 'pino';
 import type { Request, Response, NextFunction } from 'express';
-import logBuffer, { LogLevel } from './logBuffer.js';
+import logBuffer from './logBuffer.js';
+import type { LogLevel } from './logBuffer.js';
 
 // Determine if we're in development
 const isDev = process.env.NODE_ENV !== 'production';

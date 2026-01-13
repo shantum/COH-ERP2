@@ -85,7 +85,7 @@ export default function OrderSearch() {
 
     const handleSelectOrder = (orderId: string, tab: string) => {
         const mappedTab = tabMapping[tab] || 'open';
-        const page = ordersPageTabs.includes(mappedTab) ? 'orders' : 'shipments';
+        const page = (ordersPageTabs as string[]).includes(mappedTab) ? 'orders' : 'shipments';
         navigate(`/${page}?tab=${mappedTab}&orderId=${orderId}`);
     };
 
@@ -182,11 +182,10 @@ export default function OrderSearch() {
                                                 <span className="font-semibold text-gray-900 text-lg">
                                                     #{order.orderNumber}
                                                 </span>
-                                                <span className={`text-xs px-2 py-1 rounded font-medium ${
-                                                    order.paymentMethod === 'COD'
+                                                <span className={`text-xs px-2 py-1 rounded font-medium ${order.paymentMethod === 'COD'
                                                         ? 'bg-amber-100 text-amber-700'
                                                         : 'bg-green-100 text-green-700'
-                                                }`}>
+                                                    }`}>
                                                     {order.paymentMethod}
                                                 </span>
                                                 <span className="text-sm font-medium text-gray-900">

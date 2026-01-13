@@ -30,6 +30,7 @@ import {
     BusinessLogicError,
 } from '../../utils/errors.js';
 import { updateCustomerTier } from '../../utils/tierUtils.js';
+import { orderLogger } from '../../utils/logger.js';
 
 const router: Router = Router();
 
@@ -546,7 +547,7 @@ router.put(
             });
         });
 
-        console.log(`[Hold] Order ${order.orderNumber} placed on hold: ${reason}`);
+        orderLogger.info({ orderNumber: order.orderNumber, reason }, 'Order placed on hold');
         res.json(updated);
     })
 );
@@ -590,7 +591,7 @@ router.put(
             });
         });
 
-        console.log(`[Release] Order ${order.orderNumber} released from hold`);
+        orderLogger.info({ orderNumber: order.orderNumber }, 'Order released from hold');
         res.json(updated);
     })
 );
@@ -656,7 +657,7 @@ router.put(
             });
         });
 
-        console.log(`[Hold] Line ${lineId} placed on hold: ${reason}`);
+        orderLogger.info({ lineId, reason }, 'Line placed on hold');
         res.json(updated);
     })
 );
@@ -700,7 +701,7 @@ router.put(
             });
         });
 
-        console.log(`[Release] Line ${lineId} released from hold`);
+        orderLogger.info({ lineId }, 'Line released from hold');
         res.json(updated);
     })
 );
@@ -748,7 +749,7 @@ router.post(
             include: { orderLines: true },
         });
 
-        console.log(`[Manual Archive] Order ${order.orderNumber} archived`);
+        orderLogger.info({ orderNumber: order.orderNumber }, 'Order manually archived');
         res.json(updated);
     })
 );
@@ -883,17 +884,19 @@ export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number
         totalArchived += legacyResult.count;
 
         if (totalArchived > 0) {
-            console.log(
-                `[Auto-Archive] Archived ${totalArchived} orders: ` +
-                    `${prepaidResult.count} prepaid, ${codResult.count} COD, ` +
-                    `${rtoResult.count} RTO, ${cancelledResult.count} cancelled, ` +
-                    `${legacyResult.count} legacy`
-            );
+            orderLogger.info({
+                total: totalArchived,
+                prepaid: prepaidResult.count,
+                cod: codResult.count,
+                rto: rtoResult.count,
+                cancelled: cancelledResult.count,
+                legacy: legacyResult.count
+            }, 'Auto-archive completed');
         }
 
         return totalArchived;
     } catch (error) {
-        console.error('Auto-archive error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Auto-archive error');
         return 0;
     }
 }
@@ -1012,7 +1015,7 @@ router.post(
             .map((o) => {
                 const daysToDeliver = Math.ceil(
                     (new Date(o.deliveredAt!).getTime() - new Date(o.shippedAt!).getTime()) /
-                        (1000 * 60 * 60 * 24)
+                    (1000 * 60 * 60 * 24)
                 );
                 return { orderNumber: o.orderNumber, paymentMethod: o.paymentMethod, daysToDeliver };
             });
@@ -1020,13 +1023,16 @@ router.post(
         const avgDaysToDeliver =
             deliveryStats.length > 0
                 ? (deliveryStats.reduce((sum, s) => sum + s.daysToDeliver, 0) / deliveryStats.length).toFixed(
-                      1
-                  )
+                    1
+                )
                 : null;
 
-        console.log(
-            `[Auto-Archive] Archived ${result.count} orders (${prepaidOrders.length} prepaid, ${codOrders.length} COD). Avg delivery time: ${avgDaysToDeliver} days`
-        );
+        orderLogger.info({
+            archived: result.count,
+            prepaid: prepaidOrders.length,
+            cod: codOrders.length,
+            avgDaysToDeliver
+        }, 'Auto-archive before-date completed');
 
         res.json({
             message: `Archived ${result.count} delivered orders`,
@@ -1374,9 +1380,11 @@ router.post(
                 customizationNotes: string | null;
             };
 
-            console.log(
-                `[Customize] Order ${orderLine.order.orderNumber}: Created custom SKU ${customSku.skuCode} for line ${lineId}`
-            );
+            orderLogger.info({
+                orderNumber: orderLine.order.orderNumber,
+                customSkuCode: customSku.skuCode,
+                lineId
+            }, 'Custom SKU created for order line');
 
             res.json({
                 id: orderLine.id,
@@ -1438,9 +1446,14 @@ router.delete(
             const forceMsg = result.forcedCleanup
                 ? ` (force-deleted ${result.deletedTransactions} inventory txns, ${result.deletedBatches} batches)`
                 : '';
-            console.log(
-                `[Uncustomize] Order ${orderLine.order.orderNumber}: Removed custom SKU ${result.deletedCustomSkuCode} from line ${lineId}${forceMsg}`
-            );
+            orderLogger.info({
+                orderNumber: orderLine.order.orderNumber,
+                deletedCustomSkuCode: result.deletedCustomSkuCode,
+                lineId,
+                forcedCleanup: result.forcedCleanup,
+                deletedTransactions: result.deletedTransactions,
+                deletedBatches: result.deletedBatches
+            }, 'Custom SKU removed from order line');
 
             res.json({
                 id: orderLine.id,
@@ -1545,7 +1558,7 @@ router.post(
             migratedLines += order.orderLines.length;
         }
 
-        console.log(`[Migration] Migrated tracking data for ${migratedOrders} orders (${migratedLines} lines)`);
+        orderLogger.info({ migratedOrders, migratedLines }, 'Tracking data migration completed');
 
         res.json({
             message: 'Migration completed',

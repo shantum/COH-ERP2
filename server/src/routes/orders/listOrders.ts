@@ -17,6 +17,7 @@ import {
     getViewConfig,
 } from '../../utils/orderViews.js';
 import { filterConfidentialFields } from '../../middleware/permissions.js';
+import { orderLogger } from '../../utils/logger.js';
 
 const router: Router = Router();
 
@@ -359,7 +360,7 @@ router.get('/', async (req: Request, res: Response) => {
 
         res.json(response);
     } catch (error) {
-        console.error('Get orders error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get orders error');
         res.status(500).json({ error: 'Failed to fetch orders' });
     }
 });
@@ -480,7 +481,7 @@ router.get('/search-all', async (req: Request, res: Response) => {
         });
 
     } catch (error) {
-        console.error('Search all error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Search all error');
         res.status(500).json({ error: 'Search failed' });
     }
 });
@@ -583,7 +584,7 @@ router.get('/rto/summary', async (req: Request, res: Response) => {
         const filtered = filterConfidentialFields(summary, req.userPermissions);
         res.json(filtered);
     } catch (error) {
-        console.error('Get RTO summary error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get RTO summary error');
         res.status(500).json({ error: 'Failed to fetch RTO summary' });
     }
 });
@@ -665,7 +666,7 @@ router.get('/shipped/summary', async (req: Request, res: Response) => {
             total: orders.length,
         });
     } catch (error) {
-        console.error('Get shipped summary error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get shipped summary error');
         res.status(500).json({ error: 'Failed to fetch shipped summary' });
     }
 });
@@ -752,7 +753,7 @@ router.get('/archived/analytics', async (req: Request, res: Response) => {
         const filtered = filterConfidentialFields(analytics, req.userPermissions);
         res.json(filtered);
     } catch (error) {
-        console.error('Get archived analytics error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get archived analytics error');
         res.status(500).json({ error: 'Failed to fetch archived analytics' });
     }
 });
@@ -868,7 +869,7 @@ router.get('/status/archived', async (req: Request, res: Response) => {
         const filteredOrders = filterConfidentialFields(transformedOrders, req.userPermissions);
         res.json({ orders: filteredOrders, totalCount, limit: take, offset: skip, sortBy });
     } catch (error) {
-        console.error('Get archived orders error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get archived orders error');
         res.status(500).json({ error: 'Failed to fetch archived orders' });
     }
 });
@@ -937,7 +938,7 @@ router.get('/status/cancelled', async (req: Request, res: Response) => {
         const filteredRows = filterConfidentialFields(rows, req.userPermissions);
         res.json(filteredRows);
     } catch (error) {
-        console.error('Get cancelled lines error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get cancelled lines error');
         res.status(500).json({ error: 'Failed to fetch cancelled lines' });
     }
 });
@@ -1285,7 +1286,7 @@ router.get('/analytics', async (req: Request, res: Response) => {
             revenue,
         });
     } catch (error) {
-        console.error('Orders analytics error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Orders analytics error');
         res.status(500).json({ error: 'Failed to fetch orders analytics' });
     }
 });
@@ -1452,7 +1453,7 @@ router.get('/:id', async (req: Request, res: Response) => {
                     noteAttributes: raw.note_attributes || [],
                 };
             } catch (e) {
-                console.error('Error parsing Shopify raw data:', e);
+                orderLogger.error({ error: (e as Error).message }, 'Error parsing Shopify raw data');
             }
         }
 
@@ -1466,7 +1467,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         const filtered = filterConfidentialFields(orderData, req.userPermissions);
         res.json(filtered);
     } catch (error) {
-        console.error('Get order error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Get order error');
         res.status(500).json({ error: 'Failed to fetch order' });
     }
 });
@@ -1575,7 +1576,7 @@ router.get('/dashboard-stats', async (req: Request, res: Response) => {
             completed,
         });
     } catch (error) {
-        console.error('Dashboard stats error:', error);
+        orderLogger.error({ error: (error as Error).message }, 'Dashboard stats error');
         res.status(500).json({ error: 'Failed to fetch dashboard stats' });
     }
 });

@@ -5,6 +5,7 @@
 
 import axios, { AxiosRequestConfig } from 'axios';
 import prisma from '../lib/prisma.js';
+import { shippingLogger } from '../utils/logger.js';
 
 // ============================================================================
 // Request Types
@@ -262,13 +263,15 @@ class IThinkLogisticsClient {
         try {
             const settings = await prisma.systemSetting.findMany({
                 where: {
-                    key: { in: [
-                        'ithink_access_token',
-                        'ithink_secret_key',
-                        'ithink_pickup_address_id',
-                        'ithink_return_address_id',
-                        'ithink_default_logistics'
-                    ] }
+                    key: {
+                        in: [
+                            'ithink_access_token',
+                            'ithink_secret_key',
+                            'ithink_pickup_address_id',
+                            'ithink_return_address_id',
+                            'ithink_default_logistics'
+                        ]
+                    }
                 }
             });
 
@@ -286,7 +289,7 @@ class IThinkLogisticsClient {
                 }
             }
         } catch (error) {
-            console.error('Error loading iThink Logistics config:', (error as Error).message);
+            shippingLogger.error({ error: (error as Error).message }, 'Error loading iThink Logistics config');
         }
     }
 
@@ -505,7 +508,7 @@ class IThinkLogisticsClient {
             }
         };
 
-        console.log(`[iThink] Creating order ${orderNumber} with ${logistics || this.defaultLogistics}`);
+        shippingLogger.info({ orderNumber, logistics: logistics || this.defaultLogistics }, 'Creating iThink order');
 
         const response = await axios.post(`${this.orderBaseUrl}/order/add.json`, requestData, {
             headers: { 'Content-Type': 'application/json' },
@@ -513,12 +516,12 @@ class IThinkLogisticsClient {
         });
 
         // Log full response for debugging
-        console.log(`[iThink] Response:`, JSON.stringify(response.data, null, 2));
+        shippingLogger.debug({ orderNumber, response: response.data }, 'iThink response received');
 
         // Handle top-level error response
         if (response.data.status === 'error' || response.data.status_code === 400 || response.data.status_code === 500) {
             const errorMsg = response.data.message || response.data.html_message || 'Order creation failed';
-            console.error(`[iThink] Error response:`, JSON.stringify(response.data));
+            shippingLogger.error({ orderNumber, error: errorMsg }, 'iThink error response');
             throw new Error(`iThink API error: ${errorMsg}`);
         }
 
@@ -553,7 +556,7 @@ class IThinkLogisticsClient {
             throw new Error(`No AWB number in iThink response: ${JSON.stringify(result)}`);
         }
 
-        console.log(`[iThink] Order ${orderNumber} created successfully. AWB: ${result.waybill}`);
+        shippingLogger.info({ orderNumber, awbNumber: result.waybill }, 'iThink order created successfully');
 
         return {
             success: true,
@@ -612,7 +615,7 @@ class IThinkLogisticsClient {
             timeout: 30000
         });
 
-        console.log(`[iThink] Shipping label response:`, JSON.stringify(response.data, null, 2));
+        shippingLogger.debug({ awbNumbers: awbList, response: response.data }, 'iThink shipping label response');
 
         if (response.data.status !== 'success' || response.data.status_code !== 200) {
             const errorMsg = response.data.message || response.data.html_message || 'Label generation failed';
@@ -650,7 +653,7 @@ class IThinkLogisticsClient {
             timeout: 30000
         });
 
-        console.log(`[iThink] Pincode check response:`, JSON.stringify(response.data, null, 2));
+        shippingLogger.debug({ pincode, response: response.data }, 'iThink pincode check response');
 
         if (response.data.status !== 'success' || response.data.status_code !== 200) {
             const errorMsg = response.data.message || response.data.html_message || 'Pincode check failed';
@@ -744,7 +747,7 @@ class IThinkLogisticsClient {
             timeout: 30000
         });
 
-        console.log(`[iThink] Rate check response:`, JSON.stringify(response.data, null, 2));
+        shippingLogger.debug({ fromPincode, toPincode, response: response.data }, 'iThink rate check response');
 
         if (response.data.status !== 'success' || response.data.status_code !== 200) {
             const errorMsg = response.data.message || response.data.html_message || 'Rate check failed';
@@ -800,7 +803,7 @@ class IThinkLogisticsClient {
             throw new Error('Maximum 100 AWB numbers per cancellation request');
         }
 
-        console.log(`[iThink] Cancelling ${awbList.length} shipment(s): ${awbList.join(', ')}`);
+        shippingLogger.info({ awbList, count: awbList.length }, 'Cancelling iThink shipments');
 
         const response = await axios.post(`${this.orderBaseUrl}/order/cancel.json`, {
             data: {
@@ -813,7 +816,7 @@ class IThinkLogisticsClient {
             timeout: 30000
         });
 
-        console.log(`[iThink] Cancel response:`, JSON.stringify(response.data, null, 2));
+        shippingLogger.debug({ awbList, response: response.data }, 'iThink cancel response');
 
         // Handle error response
         if (response.data.status === 'error' || response.data.status_code === 400) {
@@ -943,11 +946,11 @@ class IThinkLogisticsClient {
 
         // RTO status detection - comprehensive check
         const isRtoText = textLower.includes('rto') ||
-                          textLower.includes('return to origin') ||
-                          textLower.includes('returned to origin') ||
-                          textLower.includes('return to shipper') ||
-                          textLower.includes('rtod') ||
-                          textLower.includes('rts');  // Return to Shipper
+            textLower.includes('return to origin') ||
+            textLower.includes('returned to origin') ||
+            textLower.includes('return to shipper') ||
+            textLower.includes('rtod') ||
+            textLower.includes('rts');  // Return to Shipper
 
         const isRtoCode = ['RTO', 'RTP', 'RTI', 'RTD', 'RTOUD', 'RTOOFD', 'RTS'].includes(codeUpper);
 

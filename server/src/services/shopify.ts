@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
+import { shopifyLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPES & INTERFACES
@@ -333,7 +334,7 @@ class ShopifyClient {
             const adminMatch = cleanDomain.match(/admin\.shopify\.com\/store\/([^\/]+)/);
             if (adminMatch) {
                 cleanDomain = `${adminMatch[1]}.myshopify.com`;
-                console.log('Converted admin URL to:', cleanDomain);
+                shopifyLogger.debug({ cleanDomain }, 'Converted admin URL');
             }
 
             // If it doesn't have .myshopify.com, assume it's just the store name
@@ -342,7 +343,7 @@ class ShopifyClient {
             }
 
             const baseURL = `https://${cleanDomain}/admin/api/${this.apiVersion}`;
-            console.log('Shopify API baseURL:', baseURL);
+            shopifyLogger.debug({ baseURL }, 'Shopify API initialized');
 
             this.client = axios.create({
                 baseURL,
@@ -378,7 +379,7 @@ class ShopifyClient {
 
             this.initializeClient();
         } catch (error) {
-            console.error('Failed to load Shopify config from database:', error);
+            shopifyLogger.error({ error: (error as Error).message }, 'Failed to load Shopify config from database');
         }
     }
 
@@ -450,7 +451,7 @@ class ShopifyClient {
         // If we have a retry-after time in the future, wait
         if (this.rateLimitState.retryAfter && Date.now() < this.rateLimitState.retryAfter) {
             const waitTime = this.rateLimitState.retryAfter - Date.now();
-            console.log(`[Shopify] Rate limited, waiting ${Math.ceil(waitTime / 1000)}s...`);
+            shopifyLogger.debug({ waitMs: waitTime }, 'Rate limited, waiting');
             await new Promise(resolve => setTimeout(resolve, waitTime + 100));
             this.rateLimitState.retryAfter = null;
         }
@@ -498,7 +499,7 @@ class ShopifyClient {
                     const retryAfterHeader = axiosError.response?.headers['retry-after'];
                     const retryAfter = retryAfterHeader ? parseFloat(retryAfterHeader as string) : null;
                     const waitTime = retryAfter ? retryAfter * 1000 : baseDelay * Math.pow(2, attempt);
-                    console.warn(`[Shopify] Rate limited (429), retrying in ${Math.ceil(waitTime / 1000)}s (attempt ${attempt + 1}/${maxRetries + 1})`);
+                    shopifyLogger.warn({ waitMs: waitTime, attempt: attempt + 1, maxRetries: maxRetries + 1 }, 'Rate limited (429), retrying');
                     await new Promise(resolve => setTimeout(resolve, waitTime));
                     continue;
                 }
@@ -506,7 +507,7 @@ class ShopifyClient {
                 // 5xx errors - retry with exponential backoff
                 if (status && status >= 500 && attempt < maxRetries) {
                     const waitTime = baseDelay * Math.pow(2, attempt);
-                    console.warn(`[Shopify] Server error (${status}), retrying in ${Math.ceil(waitTime / 1000)}s (attempt ${attempt + 1}/${maxRetries + 1})`);
+                    shopifyLogger.warn({ status, waitMs: waitTime, attempt: attempt + 1, maxRetries: maxRetries + 1 }, 'Server error, retrying');
                     await new Promise(resolve => setTimeout(resolve, waitTime));
                     continue;
                 }
@@ -514,7 +515,7 @@ class ShopifyClient {
                 // Network errors - retry with backoff
                 if (!axiosError.response && attempt < maxRetries) {
                     const waitTime = baseDelay * Math.pow(2, attempt);
-                    console.warn(`[Shopify] Network error, retrying in ${Math.ceil(waitTime / 1000)}s (attempt ${attempt + 1}/${maxRetries + 1}): ${axiosError.message}`);
+                    shopifyLogger.warn({ error: axiosError.message, waitMs: waitTime, attempt: attempt + 1, maxRetries: maxRetries + 1 }, 'Network error, retrying');
                     await new Promise(resolve => setTimeout(resolve, waitTime));
                     continue;
                 }
@@ -852,7 +853,7 @@ class ShopifyClient {
             );
             return response.data.metafields || [];
         } catch (error) {
-            console.error(`Failed to fetch metafields for product ${productId}:`, (error as Error).message);
+            shopifyLogger.error({ productId, error: (error as Error).message }, 'Failed to fetch metafields for product');
             return [];
         }
     }
@@ -936,12 +937,12 @@ class ShopifyClient {
         paidAt: Date = new Date()
     ): Promise<MarkPaidResult> {
         if (!this.isConfigured()) {
-            console.error('[COD Sync] Shopify not configured');
+            shopifyLogger.error('Shopify not configured for COD sync');
             return { success: false, error: 'Shopify is not configured', shouldRetry: false };
         }
 
         if (!shopifyOrderId) {
-            console.error('[COD Sync] No Shopify order ID provided');
+            shopifyLogger.error('No Shopify order ID provided for COD sync');
             return { success: false, error: 'No Shopify order ID provided', shouldRetry: false };
         }
 
@@ -964,7 +965,7 @@ class ShopifyClient {
                 { maxRetries: 2 } // Limit retries for payment operations
             );
 
-            console.log(`[COD Sync] Successfully marked order ${shopifyOrderId} as paid: $${amount}`);
+            shopifyLogger.info({ shopifyOrderId, amount }, 'Order marked as paid');
 
             return {
                 success: true,
@@ -980,15 +981,14 @@ class ShopifyClient {
             const shouldRetry = status === 429 || (status !== undefined && status >= 500) || !axiosError.response;
 
             // Structured error logging for debugging
-            console.error(`[COD Sync] Failed to mark order ${shopifyOrderId} as paid:`, {
+            shopifyLogger.error({
                 shopifyOrderId,
                 amount,
                 utr,
                 httpStatus: status,
-                errorMessage: typeof errorMessage === 'object' ? JSON.stringify(errorMessage) : errorMessage,
-                shouldRetry,
-                requestData: transactionData,
-            });
+                error: typeof errorMessage === 'object' ? JSON.stringify(errorMessage) : errorMessage,
+                shouldRetry
+            }, 'Failed to mark order as paid');
 
             return {
                 success: false,
@@ -1013,7 +1013,7 @@ class ShopifyClient {
             );
             return response.data.transactions || [];
         } catch (error) {
-            console.error(`Failed to get transactions for order ${shopifyOrderId}:`, (error as Error).message);
+            shopifyLogger.error({ shopifyOrderId, error: (error as Error).message }, 'Failed to get transactions for order');
             return [];
         }
     }
@@ -1068,7 +1068,7 @@ class ShopifyClient {
 const shopifyClient = new ShopifyClient();
 
 // Load configuration from database on startup
-shopifyClient.loadFromDatabase().catch(console.error);
+shopifyClient.loadFromDatabase().catch(err => shopifyLogger.error({ error: err.message }, 'Failed to load Shopify config'));
 
 export default shopifyClient;
 

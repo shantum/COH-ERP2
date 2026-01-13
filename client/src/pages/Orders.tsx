@@ -433,10 +433,12 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
+        onArchiveOrder: () => { }, // Not used on Orders page
         allocatingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
+        isArchiving: false, // Not used on Orders page
         isDeletingOrder: mutations.deleteOrder.isPending,
     });
 
@@ -463,7 +465,7 @@ export default function Orders() {
                                 // Find the order and open it in the unified modal
                                 const order = [...(openOrders || []), ...(cancelledOrders || [])].find(o => o.id === orderId);
                                 if (order) {
-                                    setUnifiedModalOrder(order);
+                                    setUnifiedModalOrder(order as unknown as Order);
                                     setUnifiedModalMode('view');
                                 }
                             }
@@ -508,23 +510,19 @@ export default function Orders() {
                         {tabs.map((t) => (
                             <button
                                 key={t.id}
-                                className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${
-                                    tab === t.id
+                                className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${tab === t.id
                                         ? 'text-primary-600'
                                         : 'text-gray-500 hover:text-gray-700'
-                                }`}
+                                    }`}
                                 onClick={() => setTab(t.id)}
                             >
                                 <span className="flex items-center gap-1.5">
                                     {t.label}
                                     {t.count > 0 && (
-                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${
-                                            tab === t.id
+                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${tab === t.id
                                                 ? 'bg-primary-100 text-primary-700'
-                                                : t.highlight
-                                                    ? 'bg-amber-100 text-amber-700'
-                                                    : 'bg-gray-100 text-gray-500'
-                                        }`}>
+                                                : 'bg-gray-100 text-gray-500'
+                                            }`}>
                                             {t.filteredCount !== undefined && t.filteredCount !== null ? `${t.filteredCount}/${t.count}` : t.count}
                                         </span>
                                     )}
@@ -642,15 +640,15 @@ export default function Orders() {
 
                 {/* Cancelled Orders */}
                 {!isLoading && tab === 'cancelled' && (
-                <div className="p-4">
-                    <CancelledOrdersGrid
-                        orders={cancelledOrders || []}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onRestore={(id) => mutations.uncancelOrder.mutate(id)}
-                        isRestoring={mutations.uncancelOrder.isPending}
-                    />
-                </div>
+                    <div className="p-4">
+                        <CancelledOrdersGrid
+                            orders={cancelledOrders || []}
+                            onViewOrder={handleViewOrder}
+                            onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
+                            onRestore={(id) => mutations.uncancelOrder.mutate(id)}
+                            isRestoring={mutations.uncancelOrder.isPending}
+                        />
+                    </div>
                 )}
             </div>
 

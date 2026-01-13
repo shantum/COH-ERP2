@@ -527,6 +527,20 @@ export const importExportApi = {
     },
 };
 
+// Pincodes
+export const pincodeApi = {
+    upload: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post('/pincodes/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    lookup: (pincode: string) => api.get(`/pincodes/lookup/${pincode}`),
+    batchLookup: (pincodes: string[]) => api.post('/pincodes/lookup', { pincodes }),
+    getStats: () => api.get('/pincodes/stats'),
+};
+
 // Admin
 export const adminApi = {
     getStats: () => api.get('/admin/stats'),

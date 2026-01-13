@@ -911,6 +911,8 @@ export interface QueuePanelItem {
   condition?: string;
   inspectionNotes?: string;
   returnRequestNumber?: string;
+  orderLineId?: string;
+  rtoOrderNumber?: string;
   // For click-to-process
   lineId?: string;
   orderId?: string;
