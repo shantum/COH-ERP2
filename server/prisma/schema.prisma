@@ -530,12 +530,13 @@ model OrderLine {
   // Shipping address (optional, falls back to Order.shippingAddress if null)
   shippingAddress   String?   // JSON stored as string
 
-  order              Order               @relation(fields: [orderId], references: [id])
-  sku                Sku                 @relation(fields: [skuId], references: [id])
-  productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
-  returnRequestLines ReturnRequestLine[]
-  rtoInwardedBy      User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
-  customizedBy       User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
+  order               Order               @relation(fields: [orderId], references: [id])
+  sku                 Sku                 @relation(fields: [skuId], references: [id])
+  productionBatch     ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
+  returnRequestLines  ReturnRequestLine[]
+  repackingQueueItems RepackingQueueItem[]
+  rtoInwardedBy       User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
+  customizedBy        User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
 
   @@index([orderId])
   @@index([skuId])
@@ -810,6 +811,7 @@ model RepackingQueueItem {
   qty             Int       @default(1)
   returnRequestId String?   // Link to return that created this
   returnLineId    String?   // Specific return line
+  orderLineId     String?   // Link to RTO order line
   status          String    @default("pending") // pending, inspecting, repacking, ready, write_off
   condition       String    // unused, used, damaged, defective, destroyed
   inspectionNotes String?
@@ -821,11 +823,13 @@ model RepackingQueueItem {
 
   sku           Sku            @relation(fields: [skuId], references: [id])
   returnRequest ReturnRequest? @relation(fields: [returnRequestId], references: [id])
+  orderLine     OrderLine?     @relation(fields: [orderLineId], references: [id])
   processedBy   User?          @relation("RepackingProcessor", fields: [processedById], references: [id])
 
   @@index([skuId])
   @@index([status])
   @@index([returnRequestId])
+  @@index([orderLineId])
   @@index([skuId, status]) // Performance: scan-lookup repacking checks
 }
 

@@ -36,6 +36,7 @@ import {
 } from '../utils/queryPatterns.js';
 import type { PrismaTransactionClient } from '../utils/queryPatterns.js';
 import type { PrismaClient } from '@prisma/client';
+import { shippingLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -336,9 +337,13 @@ export async function shipOrderLines(
 
     // Log summary
     const orderNumber = lines[0]?.order?.orderNumber || 'unknown';
-    console.log(
-        `[ShipOrderService] Order ${orderNumber}: shipped=${shipped.length}, skipped=${skipped.length}, errors=${errors.length}, orderUpdated=${orderUpdated}`
-    );
+    shippingLogger.info({
+        orderNumber,
+        shipped: shipped.length,
+        skipped: skipped.length,
+        errors: errors.length,
+        orderUpdated
+    }, 'Shipment processed');
 
     return {
         shipped,

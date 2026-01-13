@@ -13,6 +13,7 @@ import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder
 import scheduledSync from '../services/scheduledSync.js';
 import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
+import { shopifyLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -134,9 +135,7 @@ router.post('/test-connection', authenticateToken, asyncHandler(async (req: Requ
     await shopifyClient.loadFromDatabase();
 
     const client = shopifyClient as unknown as { shopDomain: string | undefined; accessToken: string | undefined };
-    console.log('Testing Shopify connection...');
-    console.log('Shop domain:', client.shopDomain);
-    console.log('Token configured:', !!client.accessToken);
+    shopifyLogger.info({ shopDomain: client.shopDomain, hasToken: !!client.accessToken }, 'Testing connection');
 
     if (!shopifyClient.isConfigured()) {
         res.json({
@@ -161,7 +160,7 @@ router.post('/test-connection', authenticateToken, asyncHandler(async (req: Requ
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify test connection error:', axiosError.response?.data || axiosError.message);
+        shopifyLogger.error({ error: axiosError.message, response: axiosError.response?.data, status: axiosError.response?.status }, 'Connection test failed');
 
         let errorMessage = axiosError.message;
         const status = axiosError.response?.status;
@@ -222,7 +221,7 @@ router.get('/status', authenticateToken, asyncHandler(async (req: Request, res: 
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify status check error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Status check failed');
         res.json({
             connected: false,
             message: axiosError.response?.data?.errors || axiosError.message,
@@ -259,7 +258,7 @@ router.post('/sync/products', authenticateToken, asyncHandler(async (req: Reques
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify product sync error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Product sync failed');
         throw new ExternalServiceError(
             axiosError.response?.data?.errors as string || axiosError.message,
             'Shopify'
@@ -285,9 +284,9 @@ router.post('/preview/products', authenticateToken, asyncHandler(async (req: Req
         let shopifyProducts: ShopifyProduct[];
         if (fetchAll) {
             // Fetch ALL products for debugging
-            console.log('Fetching ALL products from Shopify for preview...');
+            shopifyLogger.debug('Fetching all products for preview');
             shopifyProducts = await shopifyClient.getAllProducts();
-            console.log(`Fetched ${shopifyProducts.length} products`);
+            shopifyLogger.debug({ count: shopifyProducts.length }, 'Fetched products');
         } else {
             shopifyProducts = await shopifyClient.getProducts({ limit: Math.min(limit, 250) });
         }
@@ -337,7 +336,7 @@ router.post('/preview/products', authenticateToken, asyncHandler(async (req: Req
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify product preview error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Product preview failed');
         throw new ExternalServiceError(
             axiosError.response?.data?.errors as string || axiosError.message,
             'Shopify'
@@ -376,7 +375,7 @@ router.post('/preview/orders', authenticateToken, asyncHandler(async (req: Reque
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify order preview error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Order preview failed');
         throw new ExternalServiceError(
             axiosError.response?.data?.errors as string || axiosError.message,
             'Shopify'
@@ -411,7 +410,7 @@ router.post('/preview/customers', authenticateToken, asyncHandler(async (req: Re
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify customer preview error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Customer preview failed');
         throw new ExternalServiceError(
             axiosError.response?.data?.errors as string || axiosError.message,
             'Shopify'
@@ -460,7 +459,7 @@ router.post('/sync/customers', authenticateToken, asyncHandler(async (req: Reque
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Shopify customer sync error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Customer sync failed');
         throw new ExternalServiceError(
             axiosError.response?.data?.errors as string || axiosError.message,
             'Shopify'
@@ -487,7 +486,7 @@ router.post('/sync/customers/all', authenticateToken, asyncHandler(async (req: R
         });
     } catch (error) {
         const axiosError = error as AxiosErrorLike;
-        console.error('Bulk customer sync error:', error);
+        shopifyLogger.error({ error: axiosError.message }, 'Bulk customer sync failed');
         throw new ExternalServiceError(
             axiosError.response?.data?.errors as string || axiosError.message,
             'Shopify'
@@ -534,7 +533,7 @@ async function backfillPaymentMethod(prisma: PrismaClient, batchSize = 5000): Pr
         take: batchSize
     });
 
-    console.log(`[Backfill PaymentMethod] Found ${ordersToBackfill.length} orders to process`);
+    shopifyLogger.info({ count: ordersToBackfill.length }, 'Backfill PaymentMethod: starting');
 
     const results: BackfillPaymentMethodResults = {
         updated: 0,
@@ -552,7 +551,7 @@ async function backfillPaymentMethod(prisma: PrismaClient, batchSize = 5000): Pr
             });
 
             if (!cachedOrder?.rawData) {
-                console.log(`No cached data for order ${order.orderNumber}`);
+                shopifyLogger.debug({ orderNumber: order.orderNumber }, 'No cached data for order');
                 results.noCache++;
                 continue;
             }
@@ -562,7 +561,7 @@ async function backfillPaymentMethod(prisma: PrismaClient, batchSize = 5000): Pr
             // Calculate payment method using shared utility
             const paymentMethod = detectPaymentMethod(shopifyOrder);
 
-            console.log(`  Order ${order.orderNumber}: Financial=${shopifyOrder.financial_status} => ${paymentMethod}`);
+            shopifyLogger.debug({ orderNumber: order.orderNumber, financialStatus: shopifyOrder.financial_status, paymentMethod }, 'Order payment method detected');
 
             // Update order (ERP-owned fields only)
             await prisma.order.update({
@@ -575,7 +574,7 @@ async function backfillPaymentMethod(prisma: PrismaClient, batchSize = 5000): Pr
             results.updated++;
         } catch (orderError) {
             const err = orderError as Error;
-            console.error(`Error processing ${order.orderNumber}: ${err.message}`);
+            shopifyLogger.error({ orderNumber: order.orderNumber, error: err.message }, 'Error processing order backfill');
             results.errors.push(`Order ${order.orderNumber}: ${err.message}`);
         }
     }
@@ -598,7 +597,7 @@ async function backfillCacheFields(prisma: PrismaClient, batchSize = 5000): Prom
         take: batchSize
     });
 
-    console.log(`[Backfill CacheFields] Found ${cacheEntries.length} cache entries to process`);
+    shopifyLogger.info({ count: cacheEntries.length }, 'Backfill CacheFields: starting');
 
     if (cacheEntries.length === 0) {
         return { updated: 0, errors: [], total: 0, remaining: 0 };
@@ -659,13 +658,13 @@ async function backfillCacheFields(prisma: PrismaClient, batchSize = 5000): Prom
                 results.updated++;
             } catch (entryError) {
                 const err = entryError as Error;
-                console.error(`Error processing cache ${entry.id}: ${err.message}`);
+                shopifyLogger.error({ cacheId: entry.id, error: err.message }, 'Error processing cache entry');
                 results.errors.push(`Cache ${entry.id}: ${err.message}`);
             }
         }));
 
         // Log progress
-        console.log(`Backfill progress: ${Math.min(i + parallelBatchSize, cacheEntries.length)}/${cacheEntries.length}`);
+        shopifyLogger.debug({ processed: Math.min(i + parallelBatchSize, cacheEntries.length), total: cacheEntries.length }, 'Backfill progress');
     }
 
     // Check remaining
@@ -683,8 +682,7 @@ async function backfillCacheFields(prisma: PrismaClient, batchSize = 5000): Prom
  * These fields are now owned by Order table (awbNumber, trackingStatus, deliveredAt)
  */
 async function backfillTrackingFields(prisma: PrismaClient, batchSize = 5000): Promise<BackfillTrackingFieldsResults> {
-    console.log('[Backfill TrackingFields] DEPRECATED - Tracking fields removed from cache schema');
-    console.log('Tracking data is now managed in Order table (awbNumber, trackingStatus, deliveredAt)');
+    shopifyLogger.warn('Backfill TrackingFields is DEPRECATED - tracking fields removed from cache schema');
     return { updated: 0, errors: [], total: 0, remaining: 0, deprecated: true };
 }
 
@@ -706,7 +704,7 @@ async function backfillOrderFields(prisma: PrismaClient, batchSize = 5000): Prom
         return { updated: 0, errors: [], total: 0, remaining: 0 };
     }
 
-    console.log(`[Backfill OrderFields] Found ${ordersToBackfill.length} orders with null totalAmount`);
+    shopifyLogger.info({ count: ordersToBackfill.length }, 'Backfill OrderFields: starting');
 
     // Convert BigInt to String for cache lookup (raw query returns BigInt, cache uses String IDs)
     const shopifyIds = ordersToBackfill.map((o) => String(o.shopifyOrderId));
@@ -715,7 +713,7 @@ async function backfillOrderFields(prisma: PrismaClient, batchSize = 5000): Prom
         select: { id: true, rawData: true },
     });
 
-    console.log(`[Backfill OrderFields] Found ${cacheEntries.length} cache entries for ${shopifyIds.length} orders`);
+    shopifyLogger.debug({ cacheEntries: cacheEntries.length, orders: shopifyIds.length }, 'Found cache entries for orders');
 
     const cacheMap = new Map(cacheEntries.map((c) => [c.id, c]));
 
@@ -757,7 +755,7 @@ async function backfillOrderFields(prisma: PrismaClient, batchSize = 5000): Prom
         }
     }
 
-    console.log(`[Backfill OrderFields] Debug: noCache=${noCache}, noRawData=${noRawData}, noTotalPrice=${noTotalPrice}`);
+    shopifyLogger.debug({ noCache, noRawData, noTotalPrice }, 'Backfill OrderFields debug stats');
 
     // Count remaining using raw query to handle null values
     const [{ count: remaining }] = await prisma.$queryRaw<[{ count: number }]>`
@@ -766,7 +764,7 @@ async function backfillOrderFields(prisma: PrismaClient, batchSize = 5000): Prom
         AND ("totalAmount" IS NULL OR "totalAmount" = 0)
     `;
 
-    console.log(`[Backfill OrderFields] Updated ${updated} orders, ${remaining} remaining`);
+    shopifyLogger.info({ updated, remaining }, 'Backfill OrderFields completed');
     return { updated, errors, total: ordersToBackfill.length, remaining };
 }
 
@@ -795,38 +793,38 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
         batchSize?: number;
     };
 
-    console.log(`[Unified Backfill] Starting with fields: ${fields.join(', ')}, batchSize: ${batchSize}`);
+    shopifyLogger.info({ fields, batchSize }, 'Unified backfill starting');
 
     const results: Record<string, BackfillPaymentMethodResults | BackfillCacheFieldsResults | BackfillTrackingFieldsResults | BackfillOrderFieldsResults> = {};
     const shouldBackfillAll = fields.includes('all');
 
     // Backfill payment method in Order table
     if (shouldBackfillAll || fields.includes('paymentMethod')) {
-        console.log('[Unified Backfill] Running paymentMethod backfill...');
+        shopifyLogger.debug('Running paymentMethod backfill');
         results.paymentMethod = await backfillPaymentMethod(req.prisma, batchSize);
     }
 
     // Backfill extracted fields in ShopifyOrderCache
     if (shouldBackfillAll || fields.includes('cacheFields')) {
-        console.log('[Unified Backfill] Running cacheFields backfill...');
+        shopifyLogger.debug('Running cacheFields backfill');
         results.cacheFields = await backfillCacheFields(req.prisma, batchSize);
     }
 
     // Backfill tracking fields in ShopifyOrderCache
     if (shouldBackfillAll || fields.includes('trackingFields')) {
-        console.log('[Unified Backfill] Running trackingFields backfill...');
+        shopifyLogger.debug('Running trackingFields backfill');
         results.trackingFields = await backfillTrackingFields(req.prisma, batchSize);
     }
 
     // Backfill order fields (totalAmount) from ShopifyOrderCache.rawData
     if (shouldBackfillAll || fields.includes('orderFields')) {
-        console.log('[Unified Backfill] Running orderFields backfill (totalAmount)...');
+        shopifyLogger.debug('Running orderFields backfill');
         results.orderFields = await backfillOrderFields(req.prisma, batchSize);
     }
 
     const totalUpdated = Object.values(results).reduce((sum, r) => sum + (r.updated || 0), 0);
 
-    console.log(`[Unified Backfill] Complete. Total updated: ${totalUpdated}`);
+    shopifyLogger.info({ totalUpdated }, 'Unified backfill completed');
 
     res.json({
         success: true,
@@ -842,7 +840,7 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
 // DEPRECATED: Use POST /sync/backfill with { fields: ['paymentMethod'] }
 // Backfill payment method from ShopifyOrderCache (no API calls!)
 router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    console.warn('[DEPRECATED] /sync/backfill-from-cache is deprecated. Use /sync/backfill with { fields: ["paymentMethod"] }');
+    shopifyLogger.warn('DEPRECATED: /sync/backfill-from-cache - Use /sync/backfill with fields: ["paymentMethod"]');
 
     const results = await backfillPaymentMethod(req.prisma, 5000);
 
@@ -858,7 +856,7 @@ router.post('/sync/backfill-from-cache', authenticateToken, asyncHandler(async (
 // DEPRECATED: Use POST /sync/backfill with { fields: ['cacheFields'] }
 // Backfill extracted fields in ShopifyOrderCache from rawData
 router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    console.warn('[DEPRECATED] /sync/backfill-cache-fields is deprecated. Use /sync/backfill with { fields: ["cacheFields"] }');
+    shopifyLogger.warn('DEPRECATED: /sync/backfill-cache-fields - Use /sync/backfill with fields: ["cacheFields"]');
 
     const batchSize = parseInt(req.query.batchSize as string) || 5000;
     const results = await backfillCacheFields(req.prisma, batchSize);
@@ -875,7 +873,7 @@ router.post('/sync/backfill-cache-fields', authenticateToken, asyncHandler(async
 // DEPRECATED: Use POST /sync/backfill with { fields: ['trackingFields'] }
 // Backfill tracking fields from existing rawData (for newly added schema fields)
 router.post('/sync/backfill-tracking-fields', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    console.warn('[DEPRECATED] /sync/backfill-tracking-fields is deprecated. Use /sync/backfill with { fields: ["trackingFields"] }');
+    shopifyLogger.warn('DEPRECATED: /sync/backfill-tracking-fields - Use /sync/backfill with fields: ["trackingFields"]');
 
     const batchSize = parseInt(req.query.batchSize as string) || 5000;
     const results = await backfillTrackingFields(req.prisma, batchSize);

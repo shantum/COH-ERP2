@@ -77,14 +77,16 @@ interface StreamConfig {
 // Create a multistream logger that outputs to both console and buffer
 const streams: StreamConfig[] = isDev
     ? [
-        { level: 'debug', stream: pino.transport({
-            target: 'pino-pretty',
-            options: {
-                colorize: true,
-                translateTime: 'SYS:standard',
-                ignore: 'pid,hostname',
-            }
-        })},
+        {
+            level: 'debug', stream: pino.transport({
+                target: 'pino-pretty',
+                options: {
+                    colorize: true,
+                    translateTime: 'SYS:standard',
+                    ignore: 'pid,hostname',
+                }
+            })
+        },
         { level: 'debug', stream: bufferStream }
     ]
     : [
@@ -107,6 +109,16 @@ export const syncLogger: Logger = logger.child({ module: 'sync' });
 export const orderLogger: Logger = logger.child({ module: 'orders' });
 export const inventoryLogger: Logger = logger.child({ module: 'inventory' });
 export const authLogger: Logger = logger.child({ module: 'auth' });
+
+// Additional domain-specific loggers
+export const trackingLogger: Logger = logger.child({ module: 'tracking' });
+export const shippingLogger: Logger = logger.child({ module: 'shipping' });
+export const importExportLogger: Logger = logger.child({ module: 'import-export' });
+export const reconciliationLogger: Logger = logger.child({ module: 'reconciliation' });
+export const productionLogger: Logger = logger.child({ module: 'production' });
+export const fabricLogger: Logger = logger.child({ module: 'fabrics' });
+export const customerLogger: Logger = logger.child({ module: 'customers' });
+export const remittanceLogger: Logger = logger.child({ module: 'remittance' });
 
 // Export the base logger as default
 export default logger;

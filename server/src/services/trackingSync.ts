@@ -13,6 +13,7 @@ import prisma from '../lib/prisma.js';
 import ithinkClient from './ithinkLogistics.js';
 import { recomputeOrderStatus } from '../utils/orderStatus.js';
 import { updateCustomerTier } from '../utils/tierUtils.js';
+import { trackingLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPES
@@ -287,14 +288,14 @@ async function updateLineTracking(
         // Set terminal status for delivered orders
         orderUpdateData.terminalStatus = 'delivered';
         orderUpdateData.terminalAt = lineUpdateData.deliveredAt || new Date();
-        console.log(`[Tracking Sync] Order ${orderInfo.orderNumber} terminal status -> delivered`);
+        trackingLogger.info({ orderNumber: orderInfo.orderNumber, terminalStatus: 'delivered' }, 'Order reached terminal status');
     }
 
     if (trackingData.internalStatus === 'rto_delivered') {
         if (orderInfo.orderStatus === 'shipped' || orderInfo.orderStatus === 'delivered') {
             orderUpdateData.status = 'returned';
             statusChanged = true;
-            console.log(`[Tracking Sync] Order ${orderInfo.orderNumber} status -> returned (RTO delivered)`);
+            trackingLogger.info({ orderNumber: orderInfo.orderNumber, newStatus: 'returned' }, 'Order status changed (RTO delivered)');
         }
     }
 
@@ -302,7 +303,7 @@ async function updateLineTracking(
         if (orderInfo.orderStatus === 'shipped') {
             orderUpdateData.status = 'cancelled';
             statusChanged = true;
-            console.log(`[Tracking Sync] Order ${orderInfo.orderNumber} status -> cancelled`);
+            trackingLogger.info({ orderNumber: orderInfo.orderNumber, newStatus: 'cancelled' }, 'Order status changed');
         }
     }
 
@@ -321,7 +322,7 @@ async function updateLineTracking(
                 where: { id: orderInfo.customerId },
                 data: { rtoCount: { increment: 1 } },
             });
-            console.log(`[Tracking Sync] Incremented rtoCount for customer ${orderInfo.customerId}`);
+            trackingLogger.info({ customerId: orderInfo.customerId }, 'Incremented customer rtoCount');
         }
     }
     if (lineUpdateData.rtoReceivedAt) {
@@ -354,7 +355,7 @@ async function updateLineTracking(
  */
 async function runTrackingSync(): Promise<SyncResult | null> {
     if (isRunning) {
-        console.log('[Tracking Sync] Sync already in progress, skipping...');
+        trackingLogger.debug('Sync already in progress, skipping');
         return null;
     }
 
@@ -375,13 +376,13 @@ async function runTrackingSync(): Promise<SyncResult | null> {
     };
 
     try {
-        console.log('[Tracking Sync] Starting tracking sync (line-centric)...');
+        trackingLogger.info('Starting tracking sync (line-centric)');
 
         // Load iThink credentials
         await ithinkClient.loadFromDatabase();
 
         if (!ithinkClient.isConfigured()) {
-            console.log('[Tracking Sync] iThink Logistics not configured, skipping sync');
+            trackingLogger.warn('iThink Logistics not configured, skipping sync');
             result.error = 'iThink Logistics not configured';
             return result;
         }
@@ -392,11 +393,11 @@ async function runTrackingSync(): Promise<SyncResult | null> {
         result.awbsChecked = awbNumbers.length;
 
         if (awbNumbers.length === 0) {
-            console.log('[Tracking Sync] No AWBs need tracking updates');
+            trackingLogger.debug('No AWBs need tracking updates');
             return result;
         }
 
-        console.log(`[Tracking Sync] Found ${awbNumbers.length} AWBs to check`);
+        trackingLogger.info({ count: awbNumbers.length }, 'Found AWBs to check');
 
         // Process in batches
         for (let i = 0; i < awbNumbers.length; i += BATCH_SIZE) {
@@ -404,7 +405,10 @@ async function runTrackingSync(): Promise<SyncResult | null> {
             result.apiCalls++;
 
             try {
-                console.log(`[Tracking Sync] Fetching batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(awbNumbers.length / BATCH_SIZE)}`);
+                trackingLogger.debug({
+                    batch: Math.floor(i / BATCH_SIZE) + 1,
+                    totalBatches: Math.ceil(awbNumbers.length / BATCH_SIZE)
+                }, 'Fetching batch');
 
                 const trackingResults = await ithinkClient.trackShipments(batch) as Record<string, RawTrackingData>;
 
@@ -469,15 +473,15 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                             if (newStatus?.startsWith('rto_')) {
                                 result.rto++;
                                 if (newStatus === 'rto_delivered') {
-                                    console.log(`[Tracking Sync] AWB ${awb} (Order ${orderInfo.orderNumber}) RTO delivered`);
+                                    trackingLogger.info({ awb, orderNumber: orderInfo.orderNumber }, 'RTO delivered');
                                 } else if (newStatus === 'rto_in_transit') {
-                                    console.log(`[Tracking Sync] AWB ${awb} (Order ${orderInfo.orderNumber}) RTO in transit`);
+                                    trackingLogger.info({ awb, orderNumber: orderInfo.orderNumber }, 'RTO in transit');
                                 }
                             }
                         }
                     } catch (err) {
                         const error = err as Error;
-                        console.error(`[Tracking Sync] Error updating AWB ${awb}:`, error.message);
+                        trackingLogger.error({ awb, error: error.message }, 'Failed to update AWB tracking');
                         result.errors++;
                     }
                 }
@@ -488,7 +492,7 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                 }
             } catch (err) {
                 const error = err as Error;
-                console.error(`[Tracking Sync] Error fetching batch:`, error.message);
+                trackingLogger.error({ error: error.message }, 'Error fetching batch');
                 result.errors++;
             }
         }
@@ -497,13 +501,18 @@ async function runTrackingSync(): Promise<SyncResult | null> {
         lastSyncAt = new Date();
         lastSyncResult = result;
 
-        console.log(`[Tracking Sync] Completed in ${Math.round(result.durationMs / 1000)}s - ` +
-            `${result.updated} updated, ${result.delivered} delivered, ${result.rto} RTO`);
+        trackingLogger.info({
+            durationMs: result.durationMs,
+            updated: result.updated,
+            delivered: result.delivered,
+            rto: result.rto,
+            errors: result.errors
+        }, 'Tracking sync completed');
 
         return result;
     } catch (error) {
         const err = error as Error;
-        console.error('[Tracking Sync] Error:', err);
+        trackingLogger.error({ error: err.message }, 'Tracking sync failed');
         result.error = err.message;
         result.durationMs = Date.now() - startTime;
         lastSyncResult = result;
@@ -518,11 +527,11 @@ async function runTrackingSync(): Promise<SyncResult | null> {
  */
 function start(): void {
     if (syncInterval) {
-        console.log('[Tracking Sync] Already running');
+        trackingLogger.debug('Scheduler already running');
         return;
     }
 
-    console.log(`[Tracking Sync] Starting scheduler (every ${SYNC_INTERVAL_MS / 1000 / 60} minutes)`);
+    trackingLogger.info({ intervalMinutes: SYNC_INTERVAL_MS / 1000 / 60 }, 'Starting scheduler');
 
     // Run 2 minutes after startup (let server stabilize)
     setTimeout(() => {
@@ -540,7 +549,7 @@ function stop(): void {
     if (syncInterval) {
         clearInterval(syncInterval);
         syncInterval = null;
-        console.log('[Tracking Sync] Stopped');
+        trackingLogger.info('Scheduler stopped');
     }
 }
 

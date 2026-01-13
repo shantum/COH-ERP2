@@ -1123,8 +1123,14 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
                     qty: true,
                     condition: true,
                     inspectionNotes: true,
+                    orderLineId: true,
                     sku: { select: skuSelect },
-                    returnRequest: { select: { requestNumber: true } }
+                    returnRequest: { select: { requestNumber: true } },
+                    orderLine: {
+                        select: {
+                            order: { select: { orderNumber: true } }
+                        }
+                    }
                 },
                 skip,
                 take
@@ -1148,7 +1154,9 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
                 queueItemId: r.id,
                 condition: r.condition,
                 inspectionNotes: r.inspectionNotes,
-                returnRequestNumber: r.returnRequest?.requestNumber
+                returnRequestNumber: r.returnRequest?.requestNumber,
+                orderLineId: r.orderLineId,
+                rtoOrderNumber: r.orderLine?.order?.orderNumber
             };
         });
 

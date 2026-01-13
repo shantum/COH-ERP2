@@ -217,7 +217,7 @@ router.post('/queue', authenticateToken, asyncHandler(async (req: Request, res: 
 // Update repacking queue item status or allocation
 router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const { status, condition, inspectionNotes, returnRequestId, returnLineId } = req.body;
+    const { status, condition, inspectionNotes, returnRequestId, returnLineId, orderLineId } = req.body;
 
     const item = await req.prisma.repackingQueueItem.update({
         where: { id },
@@ -227,6 +227,7 @@ router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, re
             ...(inspectionNotes !== undefined && { inspectionNotes }),
             ...(returnRequestId !== undefined && { returnRequestId }),
             ...(returnLineId !== undefined && { returnLineId }),
+            ...(orderLineId !== undefined && { orderLineId }),
         },
         include: {
             sku: {
@@ -240,6 +241,16 @@ router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, re
                     requestType: true,
                 },
             },
+            orderLine: {
+                select: {
+                    id: true,
+                    order: {
+                        select: {
+                            orderNumber: true,
+                        },
+                    },
+                },
+            },
         },
     });
 
@@ -249,6 +260,7 @@ router.put('/queue/:id', authenticateToken, asyncHandler(async (req: Request, re
         colorName: item.sku?.variation?.colorName,
         size: item.sku?.size,
         skuCode: item.sku?.skuCode,
+        rtoOrderNumber: item.orderLine?.order?.orderNumber,
     });
 }));
 
