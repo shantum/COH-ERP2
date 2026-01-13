@@ -4,16 +4,17 @@
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, RefreshCw, Archive, Truck, Save } from 'lucide-react';
-import { shopifyApi, trackingApi, ordersApi } from '../services/api';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { Plus, Archive, Truck, Save } from 'lucide-react';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
-import type { OrderTab } from '../hooks/useOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useAuth } from '../hooks/useAuth';
+
+// Local types (simplified to 2 tabs)
+type OrderTab = 'open' | 'cancelled';
 
 // Utilities
 import {
@@ -25,16 +26,10 @@ import {
 // Components
 import {
     OrdersGrid,
-    ShippedOrdersGrid,
-    ArchivedOrdersGrid,
-    RtoOrdersGrid,
-    CodPendingGrid,
     CancelledOrdersGrid,
     CreateOrderModal,
     CustomerDetailModal,
     CustomizationModal,
-    SummaryPanel,
-    TrackingModal,
     ProcessShippedModal,
     UnifiedOrderModal,
     GlobalOrderSearch,
@@ -44,6 +39,7 @@ import type { Order } from '../types';
 export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
+    const navigate = useNavigate();
 
     // Tab state - persisted in URL for back/forward navigation and refresh
     const [searchParams, setSearchParams] = useSearchParams();
@@ -56,19 +52,18 @@ export default function Orders() {
         }, { replace: true }); // Use replace to avoid polluting browser history
     }, [setSearchParams]);
 
+    // Redirect old tab URLs to Shipments page
+    useEffect(() => {
+        const tabParam = searchParams.get('tab');
+        if (tabParam && ['shipped', 'rto', 'cod-pending', 'archived'].includes(tabParam)) {
+            navigate(`/shipments?tab=${tabParam}`, { replace: true });
+        }
+    }, [searchParams, navigate]);
+
     // Filter state (per-tab filtering, separate from GlobalOrderSearch)
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
-
-    // Shipped orders pagination state
-    const [shippedPage, setShippedPage] = useState(1);
-    const [shippedDays, setShippedDays] = useState(30);
-
-    // Archived orders period and limit state (0 = all time)
-    const [archivedDays, setArchivedDays] = useState(90);
-    const [archivedLimit, setArchivedLimit] = useState(100);
-    const [archivedSortBy, setArchivedSortBy] = useState<'orderDate' | 'archivedAt'>('archivedAt');
 
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
@@ -82,10 +77,6 @@ export default function Orders() {
     const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
     // Optimistic updates handle button state - use empty set for grid interface compatibility
     const allocatingLines = new Set<string>();
-
-    // Tracking modal state
-    const [trackingAwb, setTrackingAwb] = useState<string | null>(null);
-    const [trackingOrderNumber, setTrackingOrderNumber] = useState<string | null>(null);
 
     // Customization modal state
     const [customizingLine, setCustomizingLine] = useState<{
@@ -103,23 +94,10 @@ export default function Orders() {
         notes?: string;
     } | null>(null);
 
-    // Data hooks
+    // Data hooks - only open and cancelled orders needed
     const {
         openOrders,
-        shippedOrders,
-        shippedPagination,
-        rtoOrders,
-        rtoTotalCount,
-        codPendingOrders,
-        codPendingTotalCount,
-        codPendingTotalAmount,
         cancelledOrders,
-        archivedOrders,
-        archivedTotalCount,
-        shippedSummary,
-        loadingShippedSummary,
-        rtoSummary,
-        loadingRtoSummary,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -128,7 +106,7 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId, shippedPage, shippedDays, archivedDays, archivedLimit, archivedSortBy });
+    } = useOrdersData({ activeTab: tab, selectedCustomerId });
 
     // Unified modal handlers (must be after openOrders is available)
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' = 'view') => {
@@ -160,14 +138,6 @@ export default function Orders() {
         openUnifiedModal(order, 'ship');
     }, [openUnifiedModal]);
 
-    // Shopify config for external links (needed for shipped, rto, cod-pending, and archived tabs)
-    const { data: shopifyConfig } = useQuery({
-        queryKey: ['shopifyConfig'],
-        queryFn: () => shopifyApi.getConfig().then(r => r.data),
-        enabled: tab === 'shipped' || tab === 'rto' || tab === 'cod-pending' || tab === 'archived',
-        staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-    });
-
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
         onShipSuccess: () => {
@@ -188,84 +158,10 @@ export default function Orders() {
         },
     });
 
-    // iThink sync state for real-time feedback
-    const [syncResult, setSyncResult] = useState<{
-        success: boolean;
-        updated: number;
-        delivered: number;
-        rto: number;
-        errors: number;
-    } | null>(null);
-
-    // Timer ref for sync result cleanup
-    const syncResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-    // Cleanup timer on unmount
-    useEffect(() => {
-        return () => {
-            if (syncResultTimerRef.current) {
-                clearTimeout(syncResultTimerRef.current);
-            }
-        };
-    }, []);
-
-    // Tracking sync mutation - uses the main triggerSync endpoint
-    const trackingSyncMutation = useMutation({
-        mutationFn: () => trackingApi.triggerSync(),
-        onSuccess: (response) => {
-            const result = response.data;
-            setSyncResult({
-                success: true,
-                updated: result.updated || 0,
-                delivered: result.delivered || 0,
-                rto: result.rto || 0,
-                errors: result.errors || 0,
-            });
-            queryClient.invalidateQueries({ queryKey: ['openOrders'] });
-            queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
-            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
-            queryClient.invalidateQueries({ queryKey: ['rtoOrders'] });
-            queryClient.invalidateQueries({ queryKey: ['codPendingOrders'] });
-            // Clear result after 5 seconds
-            if (syncResultTimerRef.current) clearTimeout(syncResultTimerRef.current);
-            syncResultTimerRef.current = setTimeout(() => setSyncResult(null), 5000);
-        },
-        onError: () => {
-            setSyncResult({
-                success: false,
-                updated: 0,
-                delivered: 0,
-                rto: 0,
-                errors: 1,
-            });
-            if (syncResultTimerRef.current) clearTimeout(syncResultTimerRef.current);
-            syncResultTimerRef.current = setTimeout(() => setSyncResult(null), 5000);
-        },
-    });
-
-    // Archive delivered orders mutation (prepaid + paid COD)
-    const archivePrepaidMutation = useMutation({
-        mutationFn: () => ordersApi.archiveDeliveredPrepaid(),
-        onSuccess: (response) => {
-            const result = response.data;
-            const breakdown = [];
-            if (result.prepaid > 0) breakdown.push(`${result.prepaid} prepaid`);
-            if (result.cod > 0) breakdown.push(`${result.cod} COD`);
-            const breakdownText = breakdown.length > 0 ? ` (${breakdown.join(', ')})` : '';
-            alert(`Archive complete!\n${result.archived} orders archived${breakdownText}\nAvg delivery time: ${result.avgDaysToDeliver || 'N/A'} days`);
-            queryClient.invalidateQueries({ queryKey: ['shippedOrders'] });
-            queryClient.invalidateQueries({ queryKey: ['shippedSummary'] });
-            queryClient.invalidateQueries({ queryKey: ['archivedOrders'] });
-        },
-        onError: (error: any) => {
-            alert(`Archive failed: ${error.response?.data?.error || error.message}`);
-        },
-    });
-
-    // Compute customer stats
+    // Compute customer stats (no shipped orders needed for open view)
     const customerStats = useMemo(
-        () => computeCustomerStats(openOrders, shippedOrders),
-        [openOrders, shippedOrders]
+        () => computeCustomerStats(openOrders, []),
+        [openOrders]
     );
 
     // Flatten and filter orders for grid
@@ -315,9 +211,6 @@ export default function Orders() {
 
         return rows;
     }, [openRows, dateRange, tab, allocatedFilter, productionFilter]);
-
-    // Shipped orders are now unfiltered - use AG-Grid's quick filter or GlobalOrderSearch
-    const filteredShippedOrders = shippedOrders;
 
     const uniqueOpenOrderCount = new Set(filteredOpenRows.map((r) => r.orderId)).size;
 
@@ -535,7 +428,6 @@ export default function Orders() {
         onViewOrder: handleViewOrderById,
         onEditOrder: handleEditOrderUnified,
         onCancelOrder: (id, reason) => mutations.cancelOrder.mutate({ id, reason }),
-        onArchiveOrder: (id) => mutations.archiveOrder.mutate(id),
         onDeleteOrder: (id) => mutations.deleteOrder.mutate(id),
         onCancelLine: (lineId) => mutations.cancelLine.mutate(lineId),
         onUncancelLine: (lineId) => mutations.uncancelLine.mutate(lineId),
@@ -548,18 +440,13 @@ export default function Orders() {
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
-        isArchiving: mutations.archiveOrder.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
     });
 
-    // Tab configuration for cleaner rendering
+    // Tab configuration - only 2 tabs now
     const tabs = [
         { id: 'open' as const, label: 'Open', count: openOrders?.length || 0, filteredCount: dateRange ? uniqueOpenOrderCount : null },
-        { id: 'shipped' as const, label: 'Shipped', count: shippedPagination.total },
-        { id: 'rto' as const, label: 'RTO', count: rtoTotalCount, highlight: true },
-        { id: 'cod-pending' as const, label: 'COD Pending', count: codPendingTotalCount, highlight: true },
         { id: 'cancelled' as const, label: 'Cancelled', count: cancelledOrders?.length || 0 },
-        { id: 'archived' as const, label: 'Archived', count: archivedTotalCount || archivedOrders?.length || 0 },
     ];
 
     return (
@@ -569,19 +456,20 @@ export default function Orders() {
                 <h1 className="text-xl md:text-2xl font-bold text-gray-900">Orders</h1>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <GlobalOrderSearch
-                        onSelectOrder={(orderId, selectedTab) => {
-                            // Navigate to the tab where the order is found
-                            setTab(selectedTab);
-                            // Find the order and open it in the unified modal
-                            // The order data will be fetched when opening the modal
-                            ordersApi.getAll({ view: selectedTab === 'cod-pending' ? 'cod_pending' : selectedTab, search: orderId.slice(0, 8) })
-                                .then(res => {
-                                    const order = res.data.orders?.find((o: Order) => o.id === orderId);
-                                    if (order) {
-                                        setUnifiedModalOrder(order);
-                                        setUnifiedModalMode('view');
-                                    }
-                                });
+                        onSelectOrder={(orderId, selectedTab, page) => {
+                            if (page === 'shipments') {
+                                // Navigate to Shipments page
+                                navigate(`/shipments?tab=${selectedTab}&orderId=${orderId}`);
+                            } else {
+                                // Stay on Orders page
+                                setTab(selectedTab as OrderTab);
+                                // Find the order and open it in the unified modal
+                                const order = [...(openOrders || []), ...(cancelledOrders || [])].find(o => o.id === orderId);
+                                if (order) {
+                                    setUnifiedModalOrder(order);
+                                    setUnifiedModalMode('view');
+                                }
+                            }
                         }}
                     />
                     <button
@@ -690,21 +578,6 @@ export default function Orders() {
                             </select>
                         </div>
                         <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => trackingSyncMutation.mutate()}
-                                disabled={trackingSyncMutation.isPending}
-                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
-                                    syncResult?.success
-                                        ? 'bg-green-100 text-green-700'
-                                        : syncResult && !syncResult.success
-                                        ? 'bg-red-100 text-red-700'
-                                        : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
-                                } disabled:opacity-50`}
-                                title="Sync tracking status"
-                            >
-                                <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
-                                {trackingSyncMutation.isPending ? 'Syncing' : syncResult?.success ? `${syncResult.updated} synced` : 'Sync'}
-                            </button>
                             {markedShippedCount > 0 && (
                                 <button
                                     onClick={() => setShowProcessShippedModal(true)}
@@ -750,55 +623,6 @@ export default function Orders() {
                         </div>
                     </div>
                 )}
-                {tab === 'shipped' && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
-                        <select
-                            value={shippedDays}
-                            onChange={(e) => {
-                                setShippedDays(Number(e.target.value));
-                                setShippedPage(1);
-                            }}
-                            className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                        >
-                            <option value={7}>Last 7 days</option>
-                            <option value={14}>Last 14 days</option>
-                            <option value={30}>Last 30 days</option>
-                            <option value={60}>Last 60 days</option>
-                            <option value={90}>Last 90 days</option>
-                            <option value={180}>Last 180 days</option>
-                            <option value={365}>Last 365 days</option>
-                        </select>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => trackingSyncMutation.mutate()}
-                                disabled={trackingSyncMutation.isPending}
-                                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md transition-all ${
-                                    syncResult?.success
-                                        ? 'bg-green-100 text-green-700'
-                                        : syncResult && !syncResult.success
-                                        ? 'bg-red-100 text-red-700'
-                                        : 'bg-white border border-gray-200 hover:bg-gray-100 text-gray-600'
-                                } disabled:opacity-50`}
-                                title="Sync tracking status"
-                            >
-                                <RefreshCw size={12} className={trackingSyncMutation.isPending ? 'animate-spin' : ''} />
-                                {trackingSyncMutation.isPending ? 'Syncing' : syncResult?.success ? `${syncResult.updated} synced` : 'Sync'}
-                            </button>
-                            <button
-                                onClick={() => {
-                                    if (confirm('Archive all delivered orders?')) {
-                                        archivePrepaidMutation.mutate();
-                                    }
-                                }}
-                                disabled={archivePrepaidMutation.isPending}
-                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-white border border-gray-200 hover:bg-gray-100 text-gray-600 disabled:opacity-50"
-                            >
-                                <Archive size={12} />
-                                {archivePrepaidMutation.isPending ? 'Archiving' : 'Archive'}
-                            </button>
-                        </div>
-                    </div>
-                )}
 
                 {/* Loading */}
                 {isLoading && (
@@ -819,120 +643,6 @@ export default function Orders() {
                     </div>
                 )}
 
-                {/* Shipped Orders with Summary Panel and Grid */}
-                {!isLoading && tab === 'shipped' && (
-                <div className="p-4 space-y-4">
-                    <SummaryPanel
-                        type="shipped"
-                        data={shippedSummary}
-                        isLoading={loadingShippedSummary}
-                    />
-                    <ShippedOrdersGrid
-                        orders={filteredShippedOrders}
-                        onUnship={(id) => mutations.unship.mutate(id)}
-                        onMarkDelivered={(id) => mutations.markDelivered.mutate(id)}
-                        onMarkRto={(id) => mutations.markRto.mutate(id)}
-                        onArchive={(id) => mutations.archiveOrder.mutate(id)}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onTrack={(awb, orderNumber) => {
-                            setTrackingAwb(awb);
-                            setTrackingOrderNumber(orderNumber);
-                        }}
-                        isUnshipping={mutations.unship.isPending}
-                        isMarkingDelivered={mutations.markDelivered.isPending}
-                        isMarkingRto={mutations.markRto.isPending}
-                        isArchiving={mutations.archiveOrder.isPending}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                    {/* Pagination Controls */}
-                    {shippedPagination.totalPages > 1 && (
-                        <div className="flex items-center justify-between border-t pt-4 mt-4">
-                            <div className="text-sm text-gray-500">
-                                Showing {((shippedPage - 1) * 100) + 1} - {Math.min(shippedPage * 100, shippedPagination.total)} of {shippedPagination.total} orders
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => setShippedPage(1)}
-                                    disabled={shippedPage === 1}
-                                    className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    First
-                                </button>
-                                <button
-                                    onClick={() => setShippedPage(p => Math.max(1, p - 1))}
-                                    disabled={shippedPage === 1}
-                                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Prev
-                                </button>
-                                <span className="px-3 py-1 text-sm">
-                                    Page {shippedPage} of {shippedPagination.totalPages}
-                                </span>
-                                <button
-                                    onClick={() => setShippedPage(p => Math.min(shippedPagination.totalPages, p + 1))}
-                                    disabled={shippedPage >= shippedPagination.totalPages}
-                                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Next
-                                </button>
-                                <button
-                                    onClick={() => setShippedPage(shippedPagination.totalPages)}
-                                    disabled={shippedPage >= shippedPagination.totalPages}
-                                    className="px-2 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                                >
-                                    Last
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-                )}
-
-                {/* RTO Orders */}
-                {!isLoading && tab === 'rto' && (
-                <div className="p-4 space-y-4">
-                    <SummaryPanel
-                        type="rto"
-                        data={rtoSummary}
-                        isLoading={loadingRtoSummary}
-                    />
-                    <RtoOrdersGrid
-                        orders={rtoOrders}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onTrack={(awb, orderNumber) => {
-                            setTrackingAwb(awb);
-                            setTrackingOrderNumber(orderNumber);
-                        }}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                </div>
-                )}
-
-                {/* COD Pending Orders */}
-                {!isLoading && tab === 'cod-pending' && (
-                <div className="p-4 space-y-4">
-                    {codPendingTotalAmount > 0 && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                            <span className="text-sm text-amber-800">
-                                Total pending COD: <strong>₹{codPendingTotalAmount.toLocaleString()}</strong> from {codPendingTotalCount} orders
-                            </span>
-                        </div>
-                    )}
-                    <CodPendingGrid
-                        orders={codPendingOrders}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        onTrack={(awb, orderNumber) => {
-                            setTrackingAwb(awb);
-                            setTrackingOrderNumber(orderNumber);
-                        }}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                </div>
-                )}
-
                 {/* Cancelled Orders */}
                 {!isLoading && tab === 'cancelled' && (
                 <div className="p-4">
@@ -942,52 +652,6 @@ export default function Orders() {
                         onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
                         onRestore={(id) => mutations.uncancelOrder.mutate(id)}
                         isRestoring={mutations.uncancelOrder.isPending}
-                        shopDomain={shopifyConfig?.shopDomain}
-                    />
-                </div>
-                )}
-
-                {/* Archived Orders Grid */}
-                {!isLoading && tab === 'archived' && (
-                <div className="p-4 space-y-4">
-                    {/* Period selector */}
-                    <div className="flex items-center gap-4">
-                        <label className="text-sm text-gray-600">Period:</label>
-                        <select
-                            value={archivedDays}
-                            onChange={(e) => setArchivedDays(Number(e.target.value))}
-                            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                        >
-                            <option value={30}>Last 30 days</option>
-                            <option value={90}>Last 90 days</option>
-                            <option value={180}>Last 6 months</option>
-                            <option value={365}>Last year</option>
-                            <option value={0}>All time</option>
-                        </select>
-                        <label className="text-sm text-gray-600">Load:</label>
-                        <select
-                            value={archivedLimit}
-                            onChange={(e) => setArchivedLimit(Number(e.target.value))}
-                            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-100"
-                        >
-                            <option value={100}>100 orders</option>
-                            <option value={500}>500 orders</option>
-                            <option value={1000}>1,000 orders</option>
-                            <option value={2500}>2,500 orders</option>
-                        </select>
-                    </div>
-                    <ArchivedOrdersGrid
-                        orders={archivedOrders}
-                        totalCount={archivedTotalCount}
-                        onRestore={(id) => mutations.unarchiveOrder.mutate(id)}
-                        onViewOrder={handleViewOrder}
-                        onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                        isRestoring={mutations.unarchiveOrder.isPending}
-                        shopDomain={shopifyConfig?.shopDomain}
-                        sortBy={archivedSortBy}
-                        onSortChange={setArchivedSortBy}
-                        pageSize={archivedLimit}
-                        onPageSizeChange={setArchivedLimit}
                     />
                 </div>
                 )}
@@ -1019,17 +683,6 @@ export default function Orders() {
                     customer={customerDetail}
                     isLoading={customerLoading}
                     onClose={() => setSelectedCustomerId(null)}
-                />
-            )}
-
-            {trackingAwb && (
-                <TrackingModal
-                    awbNumber={trackingAwb}
-                    orderNumber={trackingOrderNumber || undefined}
-                    onClose={() => {
-                        setTrackingAwb(null);
-                        setTrackingOrderNumber(null);
-                    }}
                 />
             )}
 

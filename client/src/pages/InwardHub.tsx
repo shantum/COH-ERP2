@@ -1,4 +1,10 @@
 /**
+ * @deprecated This page has been split into two separate pages:
+ * - /inventory-inward (Production, Adjustments)
+ * - /returns-rto (Returns, RTO, Repacking)
+ *
+ * This file is kept for reference only. Route redirects to /inventory-inward.
+ *
  * Inward Hub - Mode-Based Entry Point
  *
  * Users must select an inward type (mode) before scanning.

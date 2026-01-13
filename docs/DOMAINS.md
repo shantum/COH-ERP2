@@ -53,7 +53,7 @@
 
 ### Shopify
 - **Scope**: Sync, webhooks, cache management, COD payment sync
-- **Key Files**: `routes/shopify.ts`, `services/shopify.ts`, `shopifyOrderProcessor.ts`
+- **Key Files**: `routes/shopify.ts`, `routes/webhooks.ts`, `services/shopify.ts`, `shopifyOrderProcessor.ts`
 - **Touches**: Orders (synced data), Remittance (COD sync)
 - **[Read →](domains/shopify.md)**
 

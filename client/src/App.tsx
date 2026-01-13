@@ -10,14 +10,18 @@ import './index.css';
 // Lazy load pages for code splitting (40-50% faster initial load)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Catalog = lazy(() => import('./pages/Catalog'));
+const Inventory = lazy(() => import('./pages/Inventory'));
 const Fabrics = lazy(() => import('./pages/Fabrics'));
 const FabricReconciliation = lazy(() => import('./pages/FabricReconciliation'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
 const Orders = lazy(() => import('./pages/Orders'));
+const OrderSearch = lazy(() => import('./pages/OrderSearch'));
+const Shipments = lazy(() => import('./pages/Shipments'));
 const Customers = lazy(() => import('./pages/Customers'));
 const Returns = lazy(() => import('./pages/Returns'));
 const Production = lazy(() => import('./pages/Production'));
-const InwardHub = lazy(() => import('./pages/InwardHub'));
+const InventoryInward = lazy(() => import('./pages/InventoryInward'));
+const ReturnsRto = lazy(() => import('./pages/ReturnsRto'));
 const Picklist = lazy(() => import('./pages/Picklist'));
 const Ledgers = lazy(() => import('./pages/Ledgers'));
 const Analytics = lazy(() => import('./pages/Analytics'));
@@ -75,20 +79,24 @@ function App() {
                 }>
                   <Route index element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Dashboard /></ErrorBoundary></Suspense>} />
                   <Route path="catalog" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Catalog /></ErrorBoundary></Suspense>} />
+                  <Route path="inventory" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Inventory /></ErrorBoundary></Suspense>} />
                   {/* Redirects for old routes (bookmark compatibility) */}
                   <Route path="products" element={<Navigate to="/catalog" replace />} />
-                  <Route path="inventory" element={<Navigate to="/catalog" replace />} />
                   <Route path="fabrics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Fabrics /></ErrorBoundary></Suspense>} />
                   <Route path="fabric-reconciliation" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><FabricReconciliation /></ErrorBoundary></Suspense>} />
                   <Route path="inventory-count" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><InventoryReconciliation /></ErrorBoundary></Suspense>} />
                   <Route path="orders" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Orders /></ErrorBoundary></Suspense>} />
+                  <Route path="order-search" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><OrderSearch /></ErrorBoundary></Suspense>} />
+                  <Route path="shipments" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Shipments /></ErrorBoundary></Suspense>} />
                   <Route path="customers" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Customers /></ErrorBoundary></Suspense>} />
                   <Route path="returns" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Returns /></ErrorBoundary></Suspense>} />
                   <Route path="production" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Production /></ErrorBoundary></Suspense>} />
-                  <Route path="inward-hub" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><InwardHub /></ErrorBoundary></Suspense>} />
+                  <Route path="inventory-inward" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><InventoryInward /></ErrorBoundary></Suspense>} />
+                  <Route path="returns-rto" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><ReturnsRto /></ErrorBoundary></Suspense>} />
                   {/* Redirects for old routes (bookmark compatibility) */}
-                  <Route path="production-inward" element={<Navigate to="/inward-hub" replace />} />
-                  <Route path="return-inward" element={<Navigate to="/inward-hub" replace />} />
+                  <Route path="inward-hub" element={<Navigate to="/inventory-inward" replace />} />
+                  <Route path="production-inward" element={<Navigate to="/inventory-inward" replace />} />
+                  <Route path="return-inward" element={<Navigate to="/returns-rto" replace />} />
                   <Route path="picklist" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Picklist /></ErrorBoundary></Suspense>} />
                   <Route path="ledgers" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Ledgers /></ErrorBoundary></Suspense>} />
                   <Route path="analytics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Analytics /></ErrorBoundary></Suspense>} />

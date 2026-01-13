@@ -7,7 +7,7 @@
 | Aspect | Value |
 |--------|-------|
 | Routes | `server/src/routes/fabrics/` (modular) |
-| Key Files | `queryPatterns.ts` (calculateFabricBalance, getEffectiveFabricConsumption) |
+| Key Files | `utils/queryPatterns.ts` (calculateFabricBalance, getEffectiveFabricConsumption) |
 | Related | Production (outward), Products (fabricTypeId) |
 
 ## Route Structure

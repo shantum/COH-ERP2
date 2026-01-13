@@ -7,28 +7,59 @@
 | Aspect | Value |
 |--------|-------|
 | Routes | `server/src/routes/inventory/` (modular) |
-| Page | `pages/InwardHub.tsx` (67 lines, mode orchestrator only) |
-| Components | `components/inward/*.tsx` (10 modular components) |
+| Pages | `Inventory.tsx` (SKU lookup), `InventoryInward.tsx` (scan-first), `ReturnsRto.tsx` (scan-first) |
+| Components | `components/inward/*.tsx` (9 modular components) |
 | Related | Orders (reserved/sales), Production (inward), Returns (RTO inward) |
+
+## Frontend Pages
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| **Inventory** | `/inventory` | Fast SKU lookup with stock filters (In Stock, Low Stock, Out of Stock) |
+| **Inventory Inward** | `/inventory-inward` | Scan-first workflow for Production and Adjustments |
+| **Returns & RTO** | `/returns-rto` | Scan-first workflow for Returns, RTO, Repacking |
+| ~~InwardHub~~ | ~~`/inward-hub`~~ | **@deprecated** - redirects to `/inventory-inward` |
 
 ## Route Structure
 
 ```
 routes/inventory/
-├── index.ts        # Router composition
-├── types.ts        # Shared types, helpers
-├── balance.ts      # Balance queries, stock alerts
-├── pending.ts      # Inward hub, pending queues, RTO processing
-└── transactions.ts # Inward/outward operations
+├── index.ts         # Router composition
+├── types.ts         # Type definitions (RtoCondition, PendingSource, etc.)
+├── balance.ts       # Balance queries, stock alerts
+├── pending.ts       # Inward hub, pending queues, RTO processing
+└── transactions.ts  # Inward/outward operations
 ```
 
-## InwardHub Architecture
+## Scan-First Workflow (New)
 
-Refactored from 2000+ line monolith to modular components. Each mode is self-contained with own scan handling, queue management, transaction creation, and UI state.
+Replaces the old mode-selection workflow. Optimized for warehouse speed.
+
+**Flow**:
+1. Scan SKU barcode -> instant inward as "received" (unallocated)
+2. Item appears in Recent Inwards table
+3. User assigns source later (Production/RTO/Return/Adjustment) via allocation modal
+
+**API Endpoints** (in `routes/inventory/pending.ts`):
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /instant-inward` | Creates immediate inward transaction, no forms |
+| `GET /transaction-matches/:id` | Returns allocation options for a transaction |
+| `POST /allocate-transaction` | Links transaction to production job, RTO order, or marks as adjustment |
+
+**Why Scan-First?**
+- No mode selection = fewer clicks
+- Immediate feedback = warehouse workers know scan registered
+- Allocation can happen in batch later by admin
+- Handles edge cases (wrong mode selected) gracefully
+
+## Legacy InwardHub Architecture
+
+> **@deprecated**: Old mode-selection workflow. Kept in `InwardHub.tsx` for reference.
+
+Each mode was self-contained with own scan handling, queue management, transaction creation, and UI state.
 
 **Layout**: `ModeSelector` → `InwardModeHeader` + `[Mode]Inward` + `PendingQueuePanel` + `RecentInwardsTable`
-
-**Shared pattern across all modes**: Scanner input → lookup → queue → process
 
 | Component | Purpose |
 |-----------|---------|
@@ -37,20 +68,23 @@ Refactored from 2000+ line monolith to modular components. Each mode is self-con
 | `PendingQueuePanel.tsx` | Pending items queue for current mode |
 | `RecentInwardsTable.tsx` | Recent transactions table filtered by mode |
 | `ProductionInward.tsx` | Production batch completion workflow |
-| `RtoInward.tsx` | RTO processing with condition handling (good/damaged) |
+| `RtoInward.tsx` | RTO processing with condition handling (good/unopened/damaged/wrong_product) |
 | `ReturnsInward.tsx` | Customer returns processing |
 | `RepackingInward.tsx` | Repacking workflow from QC queue |
 | `AdjustmentsInward.tsx` | Manual stock adjustments (any SKU) |
 
-## Inward Hub Modes
+**Exports**: `components/inward/index.ts` re-exports all components + `InwardMode` type.
 
-| Mode | Source | Validation | Action |
-|------|--------|------------|--------|
-| Production | `production` | Must match pending batch | Creates inward |
-| Returns | `returns` | Must match return ticket | Sends to QC queue |
-| RTO | `rto` | Must match RTO order line | Inward (good) or write-off |
-| Repacking | `repacking` | Must match QC queue item | Inward (ready) or write-off |
-| Adjustments | `adjustments` | Any valid SKU | Manual stock adjustment |
+## Inward Source Types
+
+| Source | When Used | Validation |
+|--------|-----------|------------|
+| `production` | Production batch completion | Links to production job |
+| `rto` | RTO order received back | Links to RTO order line |
+| `return` | Customer return received | Links to return ticket |
+| `repacking` | Item repacked after QC | Links to QC queue item |
+| `adjustment` | Manual stock correction | No external link required |
+| `received` | Scan-first unallocated | Pending allocation |
 
 ## Balance Formula
 
@@ -61,10 +95,12 @@ Available = Balance - SUM(reserved)
 
 ## Transaction Types
 
+Defined in `utils/queryPatterns.ts` as `TXN_TYPE` and `TXN_REASON`.
+
 | Type | When Created | Reason Values |
 |------|--------------|---------------|
-| `inward` | Production complete, RTO good, return receipt | production, return_receipt, adjustment |
-| `outward` | Order shipped | sale, damage, adjustment |
+| `inward` | Production complete, RTO good, return receipt | production, return_receipt, rto_received, adjustment |
+| `outward` | Order shipped, damage, write-off | sale, damage, adjustment, transfer, write_off |
 | `reserved` | Order allocated | order_allocation |
 
 ## RTO Inward Conditions
@@ -101,3 +137,6 @@ Available = Balance - SUM(reserved)
 6. **Mode validation**: Each inward mode only accepts scans matching its source queue
 7. **Source filter mapping**: `returns` → `return_receipt`, `rto` → `rto_received`, `repacking` → `repack_complete`
 8. **Cache invalidation required**: `inventoryBalanceCache` (5-min staleness) must be manually invalidated after direct `prisma.inventoryTransaction.create()` calls. Use `inventoryBalanceCache.invalidate([skuId])`. The `queryPatterns.ts` helpers (`createReservedTransaction`, `createSaleTransaction`, `releaseReservedInventory`) already handle this - only direct Prisma calls need manual invalidation.
+9. **Scan-first vs mode-selection**: `/inventory-inward` and `/returns-rto` use scan-first (faster); old `InwardHub` used mode-selection (deprecated)
+10. **Instant inward unallocated**: `POST /instant-inward` creates transactions with source='received' - must be allocated later
+11. **Inventory page filters**: Client-side filtering via AG-Grid quick filter + stock status buttons (all/in_stock/low_stock/out_of_stock)

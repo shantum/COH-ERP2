@@ -49,8 +49,11 @@ npm run db:push
 | Grid state | `client/src/hooks/useGridState.ts` |
 | Shared components | `client/src/components/common/` (ProductSearch, CustomerSearch) |
 | Constants | `client/src/constants/` (queryKeys, sizes) |
-| Catalog utils | `client/src/utils/catalogAggregations.ts`, `catalogColumns.ts` |
+| Catalog utils | `client/src/utils/catalogAggregations.ts`, `catalogColumns.tsx` |
 | Frontend | `client/src/services/api.ts`, `types/index.ts` |
+| Orders hooks | `client/src/hooks/useOrdersData.ts`, `useOrdersMutations.ts` |
+| Shipments hooks | `client/src/hooks/useShipmentsData.ts`, `useShipmentsMutations.ts` |
+| Sidebar/Layout | `client/src/components/Layout.tsx` (collapsible sidebar) |
 
 ## App-Wide Gotchas
 
@@ -60,7 +63,7 @@ npm run db:push
 4. **AsyncHandler**: Wrap async routes with `asyncHandler()`; don't use with streaming
 5. **Permission wildcards**: `products:*` matches all; checked via `hasPermission()`
 6. **Query keys centralized**: Use `queryKeys` from `constants/queryKeys.ts`
-7. **Map caching**: Use `getInventoryMap()`/`getFabricMap()` for O(1) lookups
+7. **Map caching**: Build Map from arrays for O(1) lookups in loops (pattern in `orderHelpers.ts`)
 8. **Optimistic updates**: Use `context.skipped` pattern to prevent stale cache
 9. **AG-Grid shared**: Theme, formatters in `utils/agGridHelpers.ts`
 10. **Persistent logs**: `server/logs/server.jsonl`, 24-hour retention
@@ -68,6 +71,10 @@ npm run db:push
 12. **tRPC views**: `trpc.orders.list` accepts `view` param matching REST unified views
 13. **Inventory cache**: Direct `prisma.inventoryTransaction.create()` requires `inventoryBalanceCache.invalidate([skuId])`; `queryPatterns.ts` helpers already handle this
 14. **Order pricing**: Use `orderPricing.ts` utilities - exchange orders have `totalAmount=0` but need line-calculated values for shipping
+15. **Orders vs Shipments pages**: `/orders` = Open + Cancelled tabs; `/shipments` = Shipped + RTO + COD Pending + Archived tabs. Old URLs like `/orders?tab=shipped` auto-redirect
+16. **Hook separation**: `useOrdersData`/`useOrdersMutations` for Orders page; `useShipmentsData`/`useShipmentsMutations` for Shipments page
+17. **Scan-first inward**: `/inventory-inward` and `/returns-rto` use instant-inward API, assign source later. Faster than mode-selection workflow
+18. **Sidebar collapse**: Uses `localStorage.getItem('sidebar-collapsed')`. Hover expands when collapsed
 
 ## Domain-Specific Docs
 
@@ -86,6 +93,8 @@ For detailed documentation on specific domains, see `docs/domains/`:
 | Customers | [customers.md](docs/domains/customers.md) | Tiers, LTV, RTO risk |
 | Admin | [admin.md](docs/domains/admin.md) | Auth, permissions, settings |
 | Frontend | [frontend.md](docs/domains/frontend.md) | Hooks, AG-Grid patterns |
+| Production | [production.md](docs/domains/production.md) | Job completion, fabric consumption |
+| Tracking | [tracking.md](docs/domains/tracking.md) | iThink status sync, terminal states |
 
 ## Environment
 
@@ -124,7 +133,7 @@ routes/domain.ts → routes/domain/
 
 ## Session Cleanup
 
-Run `.claude/agents/session-cleanup.md` after: 3+ features, 5+ files modified, major refactors.
+After 3+ features, 5+ files modified, or major refactors: run `doc-optimizer` agent to update docs.
 
 ## Shell Tips
 

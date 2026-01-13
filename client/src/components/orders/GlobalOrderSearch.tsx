@@ -29,17 +29,22 @@ interface TabResult {
 }
 
 interface GlobalOrderSearchProps {
-    onSelectOrder: (orderId: string, tab: OrderTab) => void;
+    onSelectOrder: (orderId: string, tab: OrderTab, page: 'orders' | 'shipments') => void;
 }
 
 // Map API tab names to OrderTab type
 const tabMapping: Record<string, OrderTab> = {
     open: 'open',
+    cancelled: 'cancelled',
     shipped: 'shipped',
     rto: 'rto',
     cod_pending: 'cod-pending',
     archived: 'archived',
 };
+
+// Tabs that belong to the Orders page (open, cancelled)
+// All other tabs (shipped, rto, cod-pending, archived) go to Shipments page
+const ordersPageTabs: OrderTab[] = ['open', 'cancelled'];
 
 export function GlobalOrderSearch({ onSelectOrder }: GlobalOrderSearchProps) {
     const [searchInput, setSearchInput] = useState('');
@@ -76,7 +81,8 @@ export function GlobalOrderSearch({ onSelectOrder }: GlobalOrderSearchProps) {
 
     const handleSelect = (orderId: string, tab: string) => {
         const mappedTab = tabMapping[tab] || 'open';
-        onSelectOrder(orderId, mappedTab);
+        const page = ordersPageTabs.includes(mappedTab) ? 'orders' : 'shipments';
+        onSelectOrder(orderId, mappedTab, page);
         setSearchInput('');
         setIsOpen(false);
     };

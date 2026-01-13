@@ -15,12 +15,14 @@
 ```
 routes/returns/
 ├── index.ts    # Router composition
-├── types.ts    # Status validation, helpers
-├── tickets.ts  # Return request CRUD
+├── types.ts    # Status validation, state machine, helpers
+├── tickets.ts  # Return request CRUD, listing
 ├── receive.ts  # Item receipt, condition handling
-├── shipping.ts # Reverse/forward shipping
-└── qc.ts       # QC workflow, analytics
+├── shipping.ts # Reverse/forward shipping, replacement
+└── qc.ts       # QC workflow
 ```
+
+**Note**: `routes/repacking.ts` handles repacking queue processing (separate from returns routes).
 
 ## RTO vs Return Distinction
 
@@ -34,15 +36,18 @@ routes/returns/
 ## Return Ticket Status Flow
 
 ```
-requested → reverse_initiated → in_transit → received → resolved
+requested → reverse_initiated → in_transit → received → processing → resolved
                                                 ↓
                                     [items to repacking queue]
 ```
 
-**Valid transitions**:
+**Valid transitions** (from `routes/returns/types.ts`):
 - `requested` → reverse_initiated, in_transit, cancelled
+- `reverse_initiated` → in_transit, received, cancelled
 - `in_transit` → received, cancelled
-- `received` → resolved, cancelled
+- `received` → processing, resolved, cancelled, reverse_initiated (undo)
+- `processing` → resolved, cancelled
+- Terminal states: `resolved`, `cancelled`, `completed`
 
 ## RTO Processing Flow
 

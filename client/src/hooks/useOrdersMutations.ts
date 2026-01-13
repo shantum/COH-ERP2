@@ -857,23 +857,6 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to restore order')
     });
 
-    const archiveOrder = useMutation({
-        mutationFn: (id: string) => ordersApi.archive(id),
-        onSuccess: () => {
-            invalidateShippedOrders(); // Can archive from shipped
-            invalidateArchivedOrders();
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to archive order')
-    });
-
-    const unarchiveOrder = useMutation({
-        mutationFn: (id: string) => ordersApi.unarchive(id),
-        onSuccess: () => {
-            invalidateShippedOrders(); // Returns to shipped
-            invalidateArchivedOrders();
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to restore order')
-    });
 
     // Order line mutations - only affects open orders
     const cancelLine = useMutation({
@@ -999,8 +982,6 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // Order status
         cancelOrder,
         uncancelOrder,
-        archiveOrder,
-        unarchiveOrder,
 
         // Order lines
         cancelLine,

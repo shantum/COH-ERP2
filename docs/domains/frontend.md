@@ -18,7 +18,7 @@
 Type-safe API client with full inference from server routers.
 
 **Files**:
-- `services/trpc.ts` - Client with auth integration
+- `services/trpc.ts` - Client with auth integration (httpBatchLink, superjson transformer)
 - `providers/TRPCProvider.tsx` - React provider (shares QueryClient with TanStack Query)
 - `services/index.ts` - Central export for both clients
 
@@ -28,7 +28,8 @@ import { trpc } from '@/services/trpc';
 
 // Queries
 const { data } = trpc.orders.list.useQuery({ view: 'open', limit: 500 });
-const { data: inventory } = trpc.inventory.getAllBalances.useQuery({ includeCustomSkus: true });
+// Optimized inventory - fetches only SKUs in open orders
+const { data: inventory } = trpc.inventory.getBalances.useQuery({ skuIds: openOrderSkuIds });
 
 // Mutations with cache invalidation
 const utils = trpc.useUtils();
@@ -37,16 +38,19 @@ const createMutation = trpc.orders.create.useMutation({
 });
 ```
 
-**Migration Status** (Phase 12):
+**tRPC Migration Status**:
 
 | Domain | tRPC | Axios | Notes |
 |--------|------|-------|-------|
 | Orders list (6 views) | Yes | - | `trpc.orders.list.useQuery()` |
-| Orders create/allocate/ship | Yes | - | Key mutations migrated |
-| Inventory balance | Yes | - | `trpc.inventory.getAllBalances` |
+| Orders create | Yes | - | `trpc.orders.create.useMutation()` |
+| Orders allocate | Yes | - | `trpc.orders.allocate.useMutation()` |
+| Orders ship (lines) | Yes | - | `trpc.orders.ship.useMutation()` |
+| Inventory balance | Yes | - | `trpc.inventory.getBalances({ skuIds })` |
 | Products list | Yes | - | For SKU dropdown |
 | Customers list/get | Yes | - | `trpc.customers.list/get` |
 | Order summaries | - | Yes | Pending tRPC procedures |
+| Pick/Pack/Unallocate | - | Yes | Use `ordersApi` methods |
 | Supporting (fabrics, production) | - | Yes | Different API domains |
 
 ## Dual Cache Invalidation
@@ -68,15 +72,22 @@ const invalidateTab = (tab: string, debounce = false) => {
 
 ## Page-to-Domain Mapping
 
-| Page | Backend Domain |
-|------|----------------|
-| `Orders.tsx` | Orders (6 tabs) |
-| `Returns.tsx`, `ReturnInward.tsx` | Returns |
-| `InwardHub.tsx` | Inventory (mode-based: Production, Returns, RTO, Repacking, Adjustments) |
-| `Production.tsx` | Production |
-| `Catalog.tsx` | Catalog |
-| `Fabrics.tsx` | Fabrics |
-| `Customers.tsx` | Customers |
+| Page | Route | Backend Domain |
+|------|-------|----------------|
+| `Orders.tsx` | `/orders` | Orders (Open, Cancelled tabs) |
+| `Shipments.tsx` | `/shipments` | Orders (Shipped, RTO, COD Pending, Archived tabs) |
+| `OrderSearch.tsx` | `/order-search` | Orders (GlobalOrderSearch full page) |
+| `Inventory.tsx` | `/inventory` | Inventory (SKU lookup, stock filters) |
+| `InventoryInward.tsx` | `/inventory-inward` | Inventory (scan-first: Production, Adjustments) |
+| `ReturnsRto.tsx` | `/returns-rto` | Inventory (scan-first: Returns, RTO, Repacking) |
+| `Returns.tsx` | `/returns` | Returns |
+| `Production.tsx` | `/production` | Production |
+| `Catalog.tsx` | `/catalog` | Catalog |
+| `Fabrics.tsx` | `/fabrics` | Fabrics |
+| `Customers.tsx` | `/customers` | Customers |
+| `InwardHub.tsx` | `/inward-hub` | **@deprecated** - redirects to `/inventory-inward` |
+
+**URL Backward Compatibility**: Old tab URLs like `/orders?tab=shipped` redirect to `/shipments?tab=shipped`
 
 ## Performance Patterns
 
@@ -85,6 +96,7 @@ const invalidateTab = (tab: string, debounce = false) => {
 // Active tab loads immediately via tRPC
 // Remaining tabs load sequentially: Open -> Shipped -> RTO -> COD Pending -> Cancelled -> Archived
 // Each tab enabled when previous completes: enabled: activeTab === 'rto' || shippedOrdersQuery.isSuccess
+// Inventory balance only fetches SKUs in open orders (openOrderSkuIds) - reduces ~3MB to ~50-100KB
 ```
 
 **O(1) map caching** (`orderHelpers.ts`):
@@ -183,10 +195,17 @@ Located in `constants/`:
 
 | Hook | Purpose |
 |------|---------|
-| `useOrdersData` | All 6 tabs with sequential loading (tRPC) |
-| `useOrdersMutations` | Order actions with optimistic updates (mixed tRPC/Axios) |
+| `useOrdersData` | Open + Cancelled tabs for Orders page (tRPC) |
+| `useOrdersMutations` | Pre-shipment mutations: allocate, pick, pack, ship, cancel (mixed tRPC/Axios) |
+| `useShipmentsData` | Shipped, RTO, COD Pending, Archived tabs for Shipments page (tRPC) |
+| `useShipmentsMutations` | Post-shipment mutations: archive, unarchive, markDelivered, markRto, receiveRto, unship |
 | `useGridState` | AG-Grid column state with localStorage + server sync |
 | `usePermissions` | Permission checking |
+
+**Hook Split Pattern**: When a page is split (Orders -> Orders + Shipments), split the hooks too:
+- Data hooks fetch tab-specific data with sequential background loading
+- Mutation hooks contain only mutations relevant to that page's tabs
+- Both use dual cache invalidation (Axios + tRPC)
 
 ## AG-Grid Utilities
 
@@ -203,15 +222,24 @@ const {
   visibleColumns,
   columnOrder,
   columnWidths,
+  pageSize,
   handleToggleColumn,
   handleResetAll,
   handleColumnMoved,
   handleColumnResized,
+  handlePageSizeChange,
   isManager,
   hasUnsavedChanges,
+  isSavingPrefs,
   savePreferencesToServer
-} = useGridState('gridId', defaultColumns);
+} = useGridState({ gridId: 'gridId', allColumnIds, defaultPageSize: 100, defaultHiddenColumns: [] });
 ```
+
+**Helper functions** (exported from `useGridState.ts`):
+- `getColumnOrderFromApi(api)` - Extract column order from AG-Grid API
+- `applyColumnVisibility(columnDefs, visibleColumns)` - Apply visibility to column defs
+- `orderColumns(columnDefs, columnOrder)` - Reorder columns based on saved order
+- `applyColumnWidths(columnDefs, columnWidths)` - Apply saved widths to column defs
 
 ## Query Keys
 
@@ -242,6 +270,14 @@ pages/Catalog.tsx (944 lines, down from 2376)
 
 Use this pattern when a page exceeds ~1500 lines.
 
+## Collapsible Sidebar
+
+Located in `components/Layout.tsx`. Features:
+- Toggle button at bottom of sidebar (desktop only)
+- `localStorage.getItem('sidebar-collapsed')` persists preference
+- Hover expansion: collapsed sidebar expands on mouse enter
+- Icons remain visible when collapsed with tooltips
+
 ## Gotchas
 
 1. **Dual cache**: Mutations must invalidate both Axios and tRPC caches
@@ -257,3 +293,6 @@ Use this pattern when a page exceeds ~1500 lines.
 11. **tRPC errors**: Different shape than Axios - use `err.message` not `err.response?.data?.error`
 12. **SIZE_ORDER**: Import from `constants/sizes.ts`, not local definition
 13. **UnifiedOrderModal**: Use for all order operations (view/edit/ship), not legacy modals
+14. **Page split mutations**: When splitting pages, ensure all mutation references are updated (e.g., remove `archiveOrder` from Orders.tsx after moving to useShipmentsMutations)
+15. **URL-based tab state**: Use `useSearchParams` for tab state - cleaner than local state, enables deep linking and refresh
+16. **GlobalOrderSearch routing**: Includes page navigation logic to route between Orders and Shipments pages based on order status

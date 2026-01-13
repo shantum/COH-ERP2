@@ -11,6 +11,19 @@
 | Key Files | `orderViews.ts`, `queryPatterns.ts`, `validation.ts`, `shipOrderService.ts` |
 | Related | Inventory (reserved/sales), Shopify (cache), Customers (LTV), Shipping |
 
+## Frontend Pages (Split)
+
+Orders are managed across two pages:
+
+| Page | Route | Tabs | Hooks |
+|------|-------|------|-------|
+| **Orders** | `/orders` | Open, Cancelled | `useOrdersData`, `useOrdersMutations` |
+| **Shipments** | `/shipments` | Shipped, RTO, COD Pending, Archived | `useShipmentsData`, `useShipmentsMutations` |
+
+**URL Compatibility**: Old URLs like `/orders?tab=shipped` redirect to `/shipments?tab=shipped`
+
+**GlobalOrderSearch**: Cross-page search component navigates to correct page based on order status
+
 ## File Structure
 
 ```
@@ -23,14 +36,14 @@ orders/
 
 ## Dual API Pattern
 
-Orders support both REST and tRPC. Frontend gradually migrating to tRPC for type safety.
+Orders support both REST and tRPC. Frontend uses tRPC for type safety where available.
 
 | API | Endpoint | Example |
 |-----|----------|---------|
 | REST | `GET /api/orders?view=open` | Axios, legacy code |
 | tRPC | `trpc.orders.list.useQuery({ view: 'open' })` | Type-safe, new code |
 
-**tRPC Procedures**:
+**tRPC Procedures** (`server/src/trpc/routers/orders.ts`):
 
 | Procedure | Input | Notes |
 |-----------|-------|-------|
@@ -40,7 +53,7 @@ Orders support both REST and tRPC. Frontend gradually migrating to tRPC for type
 | `allocate` | `{ lineIds[] }` | Batch allocation with inventory check |
 | `ship` | `{ lineIds[], awbNumber, courier }` | Uses ShipOrderService |
 
-**Migration Status**: Read queries (6) and key mutations (create, allocate, ship) migrated. Other mutations (30+) still use Axios due to complex optimistic updates.
+**Migration Status**: 5 procedures migrated (2 queries + 3 mutations). Other mutations still use REST due to complex optimistic updates.
 
 ## Unified Views API
 
@@ -66,14 +79,16 @@ Orders support both REST and tRPC. Frontend gradually migrating to tRPC for type
 ## Line Status Machine
 
 ```
-pending → allocated → picked → packed → [ship] → shipped
-            ↓
-    (creates reserved)
+pending → allocated → picked → packed → [mark-shipped*] → shipped
+            ↓                              ↓
+    (creates reserved)         (visual only, AWB entry)
+
+* mark-shipped: Spreadsheet workflow step, converted to shipped via process-marked-shipped
 ```
 
 **Inventory deduction**: Only lines with `allocatedAt` set get inventory deducted on ship. Unallocated orders (migration imports) skip inventory automatically.
 
-**Undo actions**: unallocate (deletes reserved), unpick, unpack, unship (reverses sale + recreates reserved)
+**Undo actions**: unallocate (deletes reserved), unpick, unpack, unmark-shipped, unship (reverses sale + recreates reserved)
 
 ## Business Rules
 
@@ -122,3 +137,6 @@ pending → allocated → picked → packed → [ship] → shipped
 5. **Auto-archive**: Orders >90 days old archived on server startup
 6. **Exchange pricing**: Never use `order.totalAmount` directly for exchanges - use `calculateOrderTotal()` from `orderPricing.ts`
 7. **Shipping API values**: Use `getProductMrpForShipping()` for iThink calls - prevents "Product Amount can't be Negative or Zero" errors
+8. **Orders vs Shipments split**: Pre-shipment actions (allocate, pick, pack, ship) in Orders page; post-shipment actions (archive, deliver, RTO) in Shipments page
+9. **Hook separation**: After splitting pages, update all mutation references - e.g., `archiveOrder` moved from `useOrdersMutations` to `useShipmentsMutations`
+10. **Tab URL state**: Both pages use `useSearchParams` for tab persistence - enables direct linking to specific tabs

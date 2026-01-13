@@ -49,13 +49,16 @@ validateShipment(prisma, orderLineIds, options)
 | `POST /fulfillment/:id/ship-lines` | Ship specific lines | Partial shipment |
 | `POST /fulfillment/process-marked-shipped` | Batch commit | Lines with status=marked_shipped |
 | `POST /fulfillment/:id/migration-ship` | Onboarding (admin) | skipInventory=true |
+| `POST /fulfillment/migrate-shopify-fulfilled` | Batch Shopify migration | Admin only, batched |
+| `POST /fulfillment/:id/unship` | Revert to open | Reverses sale, recreates reserved |
 
 ## Business Rules
 
-1. **Lines must be packed**: Standard ship requires all lines in `packed` status
+1. **Lines must be packed**: Standard ship requires `packed` or `marked_shipped` status
 2. **Allocated lines only**: Inventory deducted only for lines with `allocatedAt` set
 3. **Migration exception**: Use `migration-ship` for onboarding orders (skips inventory)
 4. **No bulk status update**: Cannot set `lineStatus='shipped'` via bulk-update
+5. **Idempotent**: Already-shipped lines are skipped (safe to retry)
 
 ## Inventory Deduction Logic
 
@@ -79,4 +82,5 @@ if (line.allocatedAt) {
 2. **Unallocated skip**: Lines without `allocatedAt` don't affect inventory
 3. **Removed systems**: Quick-ship, auto-ship, bulk-update to shipped (all bypassed proper handling)
 4. **Migration-ship**: Admin only, use for onboarding historical orders
-5. **Validate first**: Use `validateShipment()` for pre-checks without committing
+5. **Validate first**: Use `validateShipment(prisma, lineIds, options)` outside transaction for pre-checks
+6. **Cancelled lines skipped**: Service auto-skips cancelled lines (no error thrown)

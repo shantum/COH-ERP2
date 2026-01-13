@@ -6,7 +6,7 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/shopify.ts` |
+| Routes | `server/src/routes/shopify.ts`, `server/src/routes/webhooks.ts` |
 | Key Files | `services/shopify.ts` (ShopifyClient), `services/shopifyOrderProcessor.ts` |
 | Related | Orders (synced data), Remittance (COD payment sync) |
 
@@ -31,20 +31,23 @@ COD Remittance ──→ Transaction API ──→ Shopify (mark paid)
 
 | Field | Owner | Location |
 |-------|-------|----------|
-| `discountCodes`, `tags`, `customerNotes` | Shopify | ShopifyOrderCache.rawData |
-| `totalPrice`, `subtotalPrice` | Shopify | ShopifyOrderCache (generated columns) |
-| `paymentMethod`, `awbNumber`, `courier`, `status` | ERP | Order |
+| `discountCodes`, `tags`, `customerNotes` | Shopify | ShopifyOrderCache (extracted) |
+| `totalPrice`, `subtotalPrice`, `totalTax`, `totalDiscounts` | Shopify | ShopifyOrderCache (generated) |
+| `customerEmail`, `customerPhone`, `shippingAddress` | Shopify | ShopifyOrderCache (generated) |
+| `paymentMethod`, `awbNumber`, `courier`, `status`, `trackingStatus` | ERP | Order |
 | `shippedAt`, `deliveredAt` | Both | Order & Cache |
+
+**Generated columns**: PostgreSQL `GENERATED ALWAYS AS ... STORED` - auto-computed from rawData, no backfills needed.
 
 **Access pattern**: `Order` with `include: { shopifyCache: true }`
 
 ## Sync Modes
 
-| Mode | Use Case | Query |
-|------|----------|-------|
-| `deep` | Initial setup, recovery | All orders, paginated |
-| `quick` | Daily catch-up | `created_at_min` = latest DB date |
-| `update` | Hourly refresh | `updated_at_min` = 2 hours ago |
+| Mode | Use Case | Filter | Options |
+|------|----------|--------|---------|
+| `deep` | Initial setup, recovery | All orders, paginated | `days?: number` |
+| `quick` | Daily catch-up | Missing orders after latest DB order date | - |
+| `update` | Hourly refresh | `updated_at_min` = staleAfterMins ago | `staleAfterMins: number` (required) |
 
 ## Payment Method Detection
 
@@ -71,15 +74,18 @@ await shopifyClient.markOrderAsPaid(shopifyOrderId, amount, utr, paidAt);
 
 | Path | Purpose |
 |------|---------|
-| `GET/PUT /config` | Shopify credentials (token masked) |
-| `POST /sync/jobs/start` | Start sync job (`syncMode: deep|quick|update`) |
-| `POST /sync/backfill` | Data correction (`fields: [paymentMethod, cacheFields, orderFields]`) |
-| `POST /webhooks/shopify/orders` | Unified order webhook |
+| `GET/PUT /api/shopify/config` | Shopify credentials (token encrypted) |
+| `POST /api/shopify/sync/jobs/start` | Start sync job (`syncMode: deep|quick|update`) |
+| `POST /api/shopify/sync/backfill` | Data correction (`fields: [all, paymentMethod, cacheFields, orderFields]`) |
+| `POST /api/webhooks/shopify/orders` | Unified order webhook (handles create/update/cancel/fulfill via X-Shopify-Topic) |
+| `POST /api/webhooks/shopify/products/*` | Product webhooks (create/update/delete) |
+| `POST /api/webhooks/shopify/customers/*` | Customer webhooks (create/update) |
 
 ## Database Tables
 
-- `ShopifyOrderCache` - Raw JSON + generated columns
+- `ShopifyOrderCache` - Raw JSON + 40+ generated columns (amounts, customer, shipping, timestamps)
 - `ShopifyProductCache` - Product catalog
+- `ShopifyInventoryCache` - Inventory levels per SKU
 - `SyncJob` - Job tracking
 - `WebhookLog`, `FailedWebhookQueue` - Webhook audit
 

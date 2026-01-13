@@ -7,7 +7,8 @@
 | Aspect | Value |
 |--------|-------|
 | Routes | `server/src/routes/admin.ts`, `auth.ts` |
-| Key Files | `middleware/auth.ts`, `middleware/permissions.ts`, `utils/permissions.ts` |
+| Key Files | `middleware/auth.ts`, `middleware/permissions.ts` |
+| Frontend | `hooks/usePermissions.ts` |
 | Related | All domains (permission-gated) |
 
 ## Authentication Flow
@@ -30,17 +31,7 @@ GET /auth/me (with Bearer token)
 
 ## Permission System
 
-**Role hierarchy** (from `permissions.ts`):
-
-| Role | Access Level |
-|------|-------------|
-| `owner` | `*` wildcard (everything) |
-| `manager` | All views + most edits |
-| `operations` | Order/inventory workflow |
-| `warehouse` | Inventory only |
-| `production` | Production only |
-| `accounts` | Financial data |
-| `viewer` | Read-only |
+**Roles are database-driven** - permissions stored as JSON array in `Role.permissions` field. No hardcoded hierarchy.
 
 **Permission format**: `domain:action` or `domain:action:scope`
 
@@ -50,7 +41,22 @@ products:*            # Domain wildcard
 *                     # Global wildcard (owner only)
 ```
 
-**Effective permissions**: `rolePermissions + grantedOverrides - deniedOverrides`
+**Permission resolution** (from `middleware/permissions.ts`):
+1. Load user's `userRole.permissions` array from database
+2. Fallback: Legacy `role='admin'` users get `*` wildcard if no `roleId`
+3. Apply overrides: `rolePermissions + grantedOverrides - deniedOverrides`
+
+**Checking permissions**:
+```typescript
+// Server: middleware/permissions.ts
+hasPermission(userPermissions, 'orders:ship')  // Single check
+hasAnyPermission(userPermissions, 'orders:ship', 'orders:*')  // Any match
+requirePermission('orders:ship')  // Express middleware
+
+// Client: hooks/usePermissions.ts
+const { hasPermission, isManager, isOwner } = usePermissions();
+// isManager = roleName === 'Owner' || roleName === 'Manager'
+```
 
 ## System Settings
 
@@ -98,3 +104,5 @@ products:*            # Domain wildcard
 6. **requireAdmin deprecated**: Use `requirePermission('users:*')` instead
 7. **Grid prefs precedence**: Server preferences override localStorage on page load
 8. **Logs persistent**: `server/logs/server.jsonl`, 24-hour retention
+9. **PermissionAuditLog silently fails**: Table may not exist; errors caught in `logAuditEvent()`
+10. **isManager check (frontend)**: Based on `roleName` string match, not permission check

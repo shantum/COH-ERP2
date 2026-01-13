@@ -9,3 +9,4 @@ export { default as ReturnsInward } from './ReturnsInward';
 export { default as RtoInward } from './RtoInward';
 export { default as RepackingInward } from './RepackingInward';
 export { default as AdjustmentsInward } from './AdjustmentsInward';
+export { default as AllocationModal } from './AllocationModal';

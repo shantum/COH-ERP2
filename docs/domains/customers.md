@@ -6,9 +6,9 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/customers.ts`, `reports.ts` |
-| Key Files | `tierUtils.ts` (getCustomerStatsMap, calculateTier) |
-| Related | Orders (LTV source), Shopify (customer sync) |
+| Routes | `server/src/routes/customers.ts` |
+| Key Files | `utils/tierUtils.ts` (calculateTier, calculateLTV, getCustomerStatsMap, updateCustomerTier) |
+| Related | Orders (LTV source), Shopify (customer sync), Reports (top-customers) |
 
 ## Tier System
 
@@ -30,7 +30,7 @@ LTV = SUM(order.totalAmount) WHERE:
   - totalAmount > 0 (excludes zero-value exchanges)
 ```
 
-**Tier updates triggered by**: Order delivery, RTO initiation, manual batch update
+**Tier updates triggered by**: Order delivery, RTO initiation, batch update via `updateAllCustomerTiers()`
 
 ## RTO Risk Scoring
 
@@ -47,7 +47,8 @@ rtoCount = orders.filter(o =>
 
 ```javascript
 // For displaying customer stats on order grids
-import { getCustomerStatsMap, enrichOrdersWithCustomerStats } from 'tierUtils.ts';
+import { getCustomerStatsMap } from 'utils/tierUtils.ts';
+import { enrichOrdersWithCustomerStats } from 'utils/queryPatterns.ts';
 
 // Option 1: Enrich orders
 const enriched = await enrichOrdersWithCustomerStats(prisma, orders);
@@ -60,18 +61,36 @@ const stats = statsMap[customerId]; // { ltv, orderCount, rtoCount }
 
 ## Key Endpoints
 
+**Customer routes** (`/api/customers`):
+
 | Path | Purpose |
 |------|---------|
-| `GET /customers` | List with metrics (tier params: platinum, gold, silver, bronze) |
-| `GET /customers/:id` | Full profile with affinity analysis |
-| `GET /customers/:id/addresses` | Past addresses for autofill |
-| `GET /reports/top-customers` | Dashboard card with top products |
+| `GET /` | List with metrics (filter: tier, search; multi-word AND search) |
+| `GET /:id` | Full profile with affinity analysis (product/color/fabric) |
+| `GET /:id/addresses` | Past addresses for autofill (ERP + Shopify) |
+| `POST /` | Create customer |
+| `PUT /:id` | Update customer |
+
+**Analytics routes** (`/api/customers/analytics`):
+
+| Path | Purpose |
+|------|---------|
+| `GET /overview` | KPIs: repeat rate, AOV, avg frequency, avg LTV |
+| `GET /high-value` | Top customers by LTV (limit param) |
+| `GET /frequent-returners` | Customers with >20% return rate (min 2 orders) |
+| `GET /at-risk` | Silver+ tier with 90+ days no order |
+
+**Reports routes** (`/api/reports`):
+
+| Path | Purpose |
+|------|---------|
+| `GET /top-customers` | Dashboard card with city, top products |
 
 ## Cross-Domain
 
-- **← Orders**: LTV calculated from order totals
-- **← Shopify**: Customer data synced
-- **→ Orders**: RTO count displayed in grid for risk assessment
+- **Orders**: LTV calculated from order totals
+- **Shopify**: Customer data synced (email, defaultAddress)
+- **Orders grid**: RTO count displayed for risk assessment
 
 ## Gotchas
 
@@ -79,5 +98,7 @@ const stats = statsMap[customerId]; // { ltv, orderCount, rtoCount }
 2. **RTO excludes prepaid**: Only COD RTOs count toward risk
 3. **LTV excludes zero-value**: Exchanges and giveaways don't inflate value
 4. **Unshipped orders count**: Query uses `OR[trackingStatus=null OR NOT IN rto_*]`
-5. **Tier auto-update**: Triggered on delivery and RTO, not order creation
+5. **Tier auto-update**: Triggered on delivery and RTO via `updateCustomerTier()`
 6. **Phone fallback**: Uses `customer.phone || mostRecentOrder.customerPhone`
+7. **Batch tier updates**: Use `updateAllCustomerTiers()` with 5000-customer chunks to avoid bind variable limits
+8. **Search multi-word**: All words must match across name/email/phone (AND logic)
