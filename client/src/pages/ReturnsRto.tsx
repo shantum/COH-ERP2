@@ -43,11 +43,11 @@ const WRITE_OFF_REASONS = [
     { value: 'other', label: 'Other' },
 ];
 
-// Condition options when adding to queue
+// Condition options for processing
 const ITEM_CONDITIONS = [
-    { value: 'good', label: 'Good' },
-    { value: 'used', label: 'Used' },
-    { value: 'damaged', label: 'Damaged' },
+    { value: 'good', label: 'Good', description: 'Item is in sellable condition' },
+    { value: 'used', label: 'Used', description: 'Item was used but can be resold' },
+    { value: 'damaged', label: 'Damaged', description: 'Item is damaged' },
 ];
 
 type TabType = 'repacking' | 'returns' | 'rto';
@@ -71,12 +71,10 @@ export default function ReturnsRto() {
     const [showAllocateModal, setShowAllocateModal] = useState(false);
 
     // QC processing state
+    const [itemCondition, setItemCondition] = useState('good');
     const [qcDecision, setQcDecision] = useState<'ready' | 'write_off'>('ready');
     const [writeOffReason, setWriteOffReason] = useState('defective');
     const [qcNotes, setQcNotes] = useState('');
-
-    // Add to queue state
-    const [addCondition, setAddCondition] = useState('good');
 
     // Pagination
     const [pageSize, setPageSize] = useState(50);
@@ -136,13 +134,12 @@ export default function ReturnsRto() {
         currentPage * pageSize
     );
 
-    // Add to repacking queue mutation (scan-first)
+    // Add to repacking queue mutation (scan-first, no condition yet)
     const addToQueueMutation = useMutation({
         mutationFn: async (skuCode: string) => {
             return repackingApi.addToQueue({
                 skuCode,
                 qty: 1,
-                condition: addCondition,
             });
         },
         onSuccess: (_, skuCode) => {
@@ -232,6 +229,28 @@ export default function ReturnsRto() {
         },
     });
 
+    // Delete from queue mutation
+    const deleteFromQueueMutation = useMutation({
+        mutationFn: async (itemId: string) => {
+            return repackingApi.deleteQueueItem(itemId);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
+
+            setScanFeedback({
+                type: 'success',
+                message: 'Item removed from queue',
+            });
+        },
+        onError: (error: any) => {
+            setScanFeedback({
+                type: 'error',
+                message: error.response?.data?.error || 'Failed to remove item',
+            });
+        },
+    });
+
     // RTO inward mutation (for RTO tab processing)
     const rtoInwardMutation = useMutation({
         mutationFn: async (data: { lineId: string; condition: string; notes?: string }) => {
@@ -263,6 +282,7 @@ export default function ReturnsRto() {
         setShowProcessModal(false);
         setShowAllocateModal(false);
         setSelectedItem(null);
+        setItemCondition('good');
         setQcDecision('ready');
         setWriteOffReason('defective');
         setQcNotes('');
@@ -272,10 +292,18 @@ export default function ReturnsRto() {
     // Handle process click from queue
     const handleProcessClick = (item: QueuePanelItem) => {
         setSelectedItem(item);
+        setItemCondition(item.condition || 'good');
         setQcDecision('ready');
         setWriteOffReason('defective');
         setQcNotes('');
         setShowProcessModal(true);
+    };
+
+    // Handle delete from queue
+    const handleDeleteClick = (item: QueuePanelItem) => {
+        if (confirm(`Remove ${item.skuCode} from queue?`)) {
+            deleteFromQueueMutation.mutate(item.queueItemId || item.id);
+        }
     };
 
     // Handle allocate click from repacking queue
@@ -398,7 +426,7 @@ export default function ReturnsRto() {
                         </div>
                     )}
 
-                    {/* Scan Input with Condition */}
+                    {/* Scan Input - Fast scan, no selections */}
                     <div className="flex items-center gap-3">
                         <div className="relative flex-1">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={24} />
@@ -414,26 +442,17 @@ export default function ReturnsRto() {
                                 autoFocus
                             />
                         </div>
-                        <select
-                            value={addCondition}
-                            onChange={(e) => setAddCondition(e.target.value)}
-                            className="px-4 py-4 text-lg border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-                        >
-                            {ITEM_CONDITIONS.map((c) => (
-                                <option key={c.value} value={c.value}>{c.label}</option>
-                            ))}
-                        </select>
                         <button
                             onClick={handleScan}
                             disabled={!scanInput.trim() || isScanning || addToQueueMutation.isPending}
-                            className="px-6 py-4 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                            className="px-8 py-4 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                         >
-                            {isScanning || addToQueueMutation.isPending ? 'Adding...' : 'Add to Queue'}
+                            {isScanning || addToQueueMutation.isPending ? 'Adding...' : 'Add'}
                         </button>
                     </div>
 
                     <p className="text-sm text-gray-500 mt-2">
-                        Scan to add items to the repacking queue. Allocate to return/RTO orders later.
+                        Scan items quickly. Set condition and allocate when processing.
                     </p>
                 </div>
 
@@ -545,7 +564,11 @@ export default function ReturnsRto() {
                                             <td className="px-4 py-3 text-gray-600">{item.colorName} / {item.size}</td>
                                             <td className="px-4 py-3 text-center font-semibold">{item.qty}</td>
                                             <td className="px-4 py-3">
-                                                {activeTab === 'repacking' && item.condition && getConditionBadge(item.condition)}
+                                                {activeTab === 'repacking' && (
+                                                    item.condition
+                                                        ? getConditionBadge(item.condition)
+                                                        : <span className="text-xs text-gray-400 italic">Pending</span>
+                                                )}
                                                 {activeTab === 'rto' && <span className="font-medium">{item.orderNumber}</span>}
                                                 {activeTab === 'returns' && <span className="font-mono text-xs">{item.requestNumber}</span>}
                                             </td>
@@ -572,15 +595,27 @@ export default function ReturnsRto() {
                                             )}
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center justify-center gap-2">
-                                                    {activeTab === 'repacking' && !item.returnRequestNumber && (
-                                                        <button
-                                                            onClick={() => handleAllocateClick(item)}
-                                                            className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-                                                            title="Link to return/RTO"
-                                                        >
-                                                            <Link size={14} className="inline mr-1" />
-                                                            Allocate
-                                                        </button>
+                                                    {activeTab === 'repacking' && (
+                                                        <>
+                                                            {!item.returnRequestNumber && (
+                                                                <button
+                                                                    onClick={() => handleAllocateClick(item)}
+                                                                    className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                                                                    title="Link to return/RTO"
+                                                                >
+                                                                    <Link size={14} className="inline mr-1" />
+                                                                    Allocate
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                onClick={() => handleDeleteClick(item)}
+                                                                disabled={deleteFromQueueMutation.isPending}
+                                                                className="px-2 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors disabled:opacity-50"
+                                                                title="Remove from queue"
+                                                            >
+                                                                <X size={14} />
+                                                            </button>
+                                                        </>
                                                     )}
                                                     <button
                                                         onClick={() => handleProcessClick(item)}
@@ -648,7 +683,45 @@ export default function ReturnsRto() {
                                 <p className="font-mono text-sm text-gray-500 mt-1">{selectedItem.skuCode}</p>
                                 <div className="flex items-center gap-2 mt-2">
                                     <span className="text-sm">Qty: <strong>{selectedItem.qty}</strong></span>
-                                    {selectedItem.condition && getConditionBadge(selectedItem.condition)}
+                                </div>
+                            </div>
+
+                            {/* Condition Selection */}
+                            <div className="mb-4">
+                                <label className="text-sm font-medium text-gray-700 block mb-2">Item Condition</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {ITEM_CONDITIONS.map((c) => (
+                                        <label
+                                            key={c.value}
+                                            className={`flex flex-col items-center p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                                                itemCondition === c.value
+                                                    ? c.value === 'damaged'
+                                                        ? 'border-red-500 bg-red-50'
+                                                        : c.value === 'used'
+                                                        ? 'border-yellow-500 bg-yellow-50'
+                                                        : 'border-green-500 bg-green-50'
+                                                    : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="itemCondition"
+                                                value={c.value}
+                                                checked={itemCondition === c.value}
+                                                onChange={(e) => {
+                                                    setItemCondition(e.target.value);
+                                                    // Auto-set QC decision based on condition
+                                                    if (e.target.value === 'damaged') {
+                                                        setQcDecision('write_off');
+                                                    } else {
+                                                        setQcDecision('ready');
+                                                    }
+                                                }}
+                                                className="sr-only"
+                                            />
+                                            <span className="font-medium text-sm">{c.label}</span>
+                                        </label>
+                                    ))}
                                 </div>
                             </div>
 
