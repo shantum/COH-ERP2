@@ -10,6 +10,8 @@
 | Grid | AG-Grid with custom theme |
 | API Clients | tRPC (type-safe, preferred) + Axios (legacy) |
 | Key Files | `services/trpc.ts`, `hooks/useGridState.ts`, `services/api.ts` |
+| Shared Components | `components/common/` (ProductSearch, CustomerSearch, modals) |
+| Constants | `constants/` (queryKeys, sizes) |
 
 ## tRPC Client (Preferred)
 
@@ -154,6 +156,29 @@ Always check tRPC router types for correct field names:
 | Inventory | `totalReserved` | `reservedBalance` |
 | Orders | `trackingStatus` | `status` (different meaning) |
 
+## Shared Components
+
+Located in `components/common/`:
+
+| Component | Purpose | Previously |
+|-----------|---------|------------|
+| `ProductSearch.tsx` | SKU/product autocomplete with inventory | Was duplicated in 3 files |
+| `CustomerSearch.tsx` | Customer autocomplete with tier display | Was duplicated in 3 files |
+| `ConfirmModal.tsx` | Confirmation dialog | - |
+| `FormModal.tsx` | Generic form modal | - |
+| `InfoModal.tsx` | Information display modal | - |
+
+**Order Modals**: Use `UnifiedOrderModal` with `mode='view'|'edit'|'ship'`. Deprecated modals removed: EditOrderModal, ShipOrderModal, OrderViewModal, OrderDetailModal, NotesModal.
+
+## Constants
+
+Located in `constants/`:
+
+| File | Exports | Notes |
+|------|---------|-------|
+| `queryKeys.ts` | `queryKeys`, `invalidateTab` | Centralized cache keys |
+| `sizes.ts` | `SIZE_ORDER`, `sortBySizeOrder()` | Was duplicated in 8 files |
+
 ## Custom Hooks
 
 | Hook | Purpose |
@@ -201,6 +226,22 @@ queryClient.invalidateQueries(queryKeys.orders.open);
 trpcUtils.orders.list.invalidate({ view: 'open', limit: 500 });
 ```
 
+## Catalog Component Pattern
+
+Large page split into extracted utilities and components:
+
+```
+pages/Catalog.tsx (944 lines, down from 2376)
+├── utils/catalogAggregations.ts  # aggregateByVariation, aggregateByProduct
+├── utils/catalogColumns.ts       # AG-Grid column definitions
+└── components/catalog/
+    ├── CatalogFilters.tsx        # Filter controls
+    ├── EditModal.tsx             # Edit dialog
+    └── FabricEditPopover.tsx     # Fabric assignment
+```
+
+Use this pattern when a page exceeds ~1500 lines.
+
 ## Gotchas
 
 1. **Dual cache**: Mutations must invalidate both Axios and tRPC caches
@@ -214,3 +255,5 @@ trpcUtils.orders.list.invalidate({ view: 'open', limit: 500 });
 9. **Column sync**: Managers can sync preferences for all users via server
 10. **Pinned columns**: Set `pinned: 'right'` to keep Actions visible after resize
 11. **tRPC errors**: Different shape than Axios - use `err.message` not `err.response?.data?.error`
+12. **SIZE_ORDER**: Import from `constants/sizes.ts`, not local definition
+13. **UnifiedOrderModal**: Use for all order operations (view/edit/ship), not legacy modals

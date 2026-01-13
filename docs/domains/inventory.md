@@ -6,10 +6,21 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/inventory.ts` |
+| Routes | `server/src/routes/inventory/` (modular) |
 | Page | `pages/InwardHub.tsx` (67 lines, mode orchestrator only) |
 | Components | `components/inward/*.tsx` (10 modular components) |
 | Related | Orders (reserved/sales), Production (inward), Returns (RTO inward) |
+
+## Route Structure
+
+```
+routes/inventory/
+├── index.ts        # Router composition
+├── types.ts        # Shared types, helpers
+├── balance.ts      # Balance queries, stock alerts
+├── pending.ts      # Inward hub, pending queues, RTO processing
+└── transactions.ts # Inward/outward operations
+```
 
 ## InwardHub Architecture
 

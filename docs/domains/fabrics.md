@@ -6,9 +6,21 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `server/src/routes/fabrics.ts` |
+| Routes | `server/src/routes/fabrics/` (modular) |
 | Key Files | `queryPatterns.ts` (calculateFabricBalance, getEffectiveFabricConsumption) |
 | Related | Production (outward), Products (fabricTypeId) |
+
+## Route Structure
+
+```
+routes/fabrics/
+├── index.ts          # Router composition
+├── types.ts          # Shared types, helpers
+├── colors.ts         # Fabric color operations
+├── fabricTypes.ts    # Fabric type CRUD
+├── transactions.ts   # Fabric transactions, balance
+└── reconciliation.ts # Reconciliation workflow
+```
 
 ## Data Model
 

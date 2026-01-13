@@ -2,7 +2,7 @@
 
 > Routing document for finding domain-specific documentation. For app-wide patterns, see `CLAUDE.md`.
 
-**Last updated**: January 12, 2026
+**Last updated**: January 13, 2026
 
 ---
 
@@ -41,13 +41,13 @@
 
 ### Inventory
 - **Scope**: SKU ledger, transactions, balances, mode-based Inward Hub
-- **Key Files**: `routes/inventory.ts`, `components/inward/` (10 components)
+- **Key Files**: `routes/inventory/` (balance, pending, transactions, types), `components/inward/` (10 components)
 - **Touches**: Orders (reserved/sales), Production (inward), Returns (RTO)
 - **[Read →](domains/inventory.md)**
 
 ### Returns & RTO
 - **Scope**: Customer returns + carrier RTOs (two distinct workflows)
-- **Key Files**: `routes/returns.ts`, `routes/repacking.ts`
+- **Key Files**: `routes/returns/` (tickets, receive, shipping, qc, types), `routes/repacking.ts`
 - **Touches**: Inventory (inward/write-off), Customers (RTO risk)
 - **[Read →](domains/returns.md)**
 
@@ -77,7 +77,7 @@
 
 ### Fabrics
 - **Scope**: Fabric inventory, cost inheritance, reorder analysis
-- **Key Files**: `routes/fabrics.ts`, `queryPatterns.ts`
+- **Key Files**: `routes/fabrics/` (colors, fabricTypes, transactions, reconciliation, types), `queryPatterns.ts`
 - **Touches**: Production (outward), Products (fabricTypeId)
 - **[Read →](domains/fabrics.md)**
 
@@ -100,8 +100,8 @@
 - **[Read →](domains/admin.md)** | **[Deep dive: PERMISSIONS_PLAN.md](PERMISSIONS_PLAN.md)**
 
 ### Frontend
-- **Scope**: React patterns, hooks, AG-Grid utilities
-- **Key Files**: `hooks/useGridState.ts`, `utils/agGridHelpers.ts`
+- **Scope**: React patterns, hooks, AG-Grid utilities, shared components
+- **Key Files**: `hooks/useGridState.ts`, `utils/agGridHelpers.ts`, `components/common/`, `constants/`
 - **[Read →](domains/frontend.md)**
 
 ---

@@ -6,9 +6,21 @@
 
 | Aspect | Value |
 |--------|-------|
-| Routes | `returns.ts` (tickets), `inventory.ts` (RTO inward), `repacking.ts` (QC) |
+| Routes | `routes/returns/` (modular), `routes/inventory/` (RTO inward), `routes/repacking.ts` (QC) |
 | Key Files | `queryPatterns.ts`, `tierUtils.ts`, `orderViews.ts` |
 | Related | Inventory (inward/write-off), Orders (RTO view), Customers (RTO risk) |
+
+## Route Structure
+
+```
+routes/returns/
+├── index.ts    # Router composition
+├── types.ts    # Status validation, helpers
+├── tickets.ts  # Return request CRUD
+├── receive.ts  # Item receipt, condition handling
+├── shipping.ts # Reverse/forward shipping
+└── qc.ts       # QC workflow, analytics
+```
 
 ## RTO vs Return Distinction
 

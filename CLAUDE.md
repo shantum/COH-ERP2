@@ -38,7 +38,7 @@ npm run db:push
 
 | Purpose | Location |
 |---------|----------|
-| Routes (REST) | `server/src/routes/*.ts` (orders/ is modular) |
+| Routes (REST) | `server/src/routes/` - modular directories for orders/, inventory/, returns/, fabrics/ |
 | tRPC routers | `server/src/trpc/routers/_app.ts` (combines 6 routers) |
 | tRPC client | `client/src/services/trpc.ts`, `client/src/providers/TRPCProvider.tsx` |
 | Shipping service | `server/src/services/shipOrderService.ts` |
@@ -47,7 +47,9 @@ npm run db:push
 | Error handling | `server/src/middleware/asyncHandler.ts`, `server/src/utils/errors.ts` |
 | Permissions | `server/src/middleware/permissions.ts`, `client/src/hooks/usePermissions.ts` |
 | Grid state | `client/src/hooks/useGridState.ts` |
-| Order pricing | `client/src/utils/orderPricing.ts` |
+| Shared components | `client/src/components/common/` (ProductSearch, CustomerSearch) |
+| Constants | `client/src/constants/` (queryKeys, sizes) |
+| Catalog utils | `client/src/utils/catalogAggregations.ts`, `catalogColumns.ts` |
 | Frontend | `client/src/services/api.ts`, `types/index.ts` |
 
 ## App-Wide Gotchas
@@ -103,6 +105,22 @@ For detailed documentation on specific domains, see `docs/domains/`:
 | Refactoring | `systems-simplifier` | Reduce complexity, consolidate |
 | Documentation | `doc-optimizer` | Keep docs concise and current |
 | Cleanup | `code-cleanup-auditor` | Find dead code, unused imports |
+
+## Refactoring Patterns
+
+**Route Splitting** (when file > 1500 lines):
+```
+routes/domain.ts → routes/domain/
+├── index.ts        # Router composition, re-exports
+├── types.ts        # Shared types, helpers
+├── [feature].ts    # Feature-specific handlers
+```
+
+**Component Consolidation**: Extract duplicated components to `components/common/`
+
+**Constants**: Centralize repeated values in `constants/` (e.g., SIZE_ORDER was in 8 files)
+
+**Deprecation**: Mark `@deprecated` before removal, migrate callers first
 
 ## Session Cleanup
 
