@@ -206,6 +206,11 @@ export interface ShopifyOrderCache {
   trackingNumber: string | null; // Shopify's tracked tracking number from fulfillment
   trackingCompany: string | null; // Courier name from Shopify fulfillment
   shippedAt: string | null; // When Shopify marked as fulfilled
+  // Generated columns (auto-extracted from rawData by PostgreSQL)
+  totalPrice: number | null; // Order total from rawData.total_price
+  subtotalPrice: number | null; // Subtotal from rawData.subtotal_price
+  totalTax: number | null; // Tax from rawData.total_tax
+  totalDiscounts: number | null; // Discounts from rawData.total_discounts
 }
 
 export interface Order {

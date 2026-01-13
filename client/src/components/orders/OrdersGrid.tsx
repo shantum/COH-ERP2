@@ -79,6 +79,7 @@ import type {
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Check, X, Undo2, Truck, CheckCircle, AlertCircle, Settings, Wrench, Calendar, ChevronRight, ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
+import { calculateOrderTotal } from '../../utils/orderPricing';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 import { compactThemeSmall } from '../../utils/agGridHelpers';
 import { TrackingStatusBadge } from '../common/grid/TrackingStatusBadge';
@@ -876,10 +877,7 @@ export function OrdersGrid({
                 width: 80,
                 valueGetter: (params: ValueGetterParams) => {
                     if (!params.data?.isFirstLine) return null;
-                    // Prefer shopifyCache.totalPrice (generated column), fallback to Order.totalAmount
-                    return params.data.order?.shopifyCache?.totalPrice
-                        ?? params.data.order?.totalAmount
-                        ?? 0;
+                    return calculateOrderTotal(params.data.order).total;
                 },
                 valueFormatter: (params: ValueFormatterParams) => {
                     if (!params.data?.isFirstLine || params.value === null) return '';

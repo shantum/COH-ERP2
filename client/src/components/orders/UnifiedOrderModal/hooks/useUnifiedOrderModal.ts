@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { customersApi } from '../../../../services/api';
+import { calculateOrderTotal } from '../../../../utils/orderPricing';
 import type { Order } from '../../../../types';
 import type {
   ModalMode,
@@ -225,10 +226,11 @@ export function useUnifiedOrderModal({ order, initialMode }: UseUnifiedOrderModa
     return order.orderLines?.filter(l => l.lineStatus !== 'cancelled') || [];
   }, [order.orderLines]);
 
-  // Calculate order total from active lines
+  // Calculate order total using shared pricing utility
+  // Handles exchange orders correctly (always calculates from lines)
   const orderTotal = useMemo(() => {
-    return activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-  }, [activeLines]);
+    return calculateOrderTotal(order).total;
+  }, [order]);
 
   // Total items count
   const totalItems = useMemo(() => {
