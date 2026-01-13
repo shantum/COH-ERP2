@@ -1122,6 +1122,7 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
                     skuId: true,
                     qty: true,
                     condition: true,
+                    inspectionNotes: true,
                     sku: { select: skuSelect },
                     returnRequest: { select: { requestNumber: true } }
                 },
@@ -1146,6 +1147,7 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
                 source: 'repacking',
                 queueItemId: r.id,
                 condition: r.condition,
+                inspectionNotes: r.inspectionNotes,
                 returnRequestNumber: r.returnRequest?.requestNumber
             };
         });

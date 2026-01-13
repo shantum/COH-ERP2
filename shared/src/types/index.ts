@@ -903,6 +903,14 @@ export interface QueuePanelItem {
   atWarehouse?: boolean;
   daysInRto?: number;
   customerName?: string;
+  orderNumber?: string;
+  // Returns-specific
+  requestNumber?: string;
+  // Repacking-specific
+  queueItemId?: string;
+  condition?: string;
+  inspectionNotes?: string;
+  returnRequestNumber?: string;
   // For click-to-process
   lineId?: string;
   orderId?: string;

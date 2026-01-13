@@ -449,6 +449,10 @@ export default function ReturnsRto() {
                                                         <span className="text-xs text-gray-600">
                                                             Return: {item.returnRequestNumber}
                                                         </span>
+                                                    ) : item.inspectionNotes?.startsWith('RTO Order') ? (
+                                                        <span className="text-xs text-purple-600">
+                                                            {item.inspectionNotes.split(' (')[0]}
+                                                        </span>
                                                     ) : (
                                                         <span className="text-xs text-gray-400 italic">Unallocated</span>
                                                     )}
@@ -570,18 +574,20 @@ function AllocationModalContent({
     const returnMatches = matchData?.matches.filter(m => m.source === 'return') || [];
     const rtoMatches = matchData?.matches.filter(m => m.source === 'rto') || [];
 
-    const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string) => {
-        if (type === 'rto') {
-            // RTO items should be processed via Inventory Inward, not linked here
-            return;
-        }
-
+    const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string, orderNumber?: string) => {
         setIsLoading(true);
         try {
-            await repackingApi.updateQueueItem(item.queueItemId || item.id, {
-                returnRequestId: requestId,
-                returnLineId: lineId,
-            });
+            if (type === 'return') {
+                await repackingApi.updateQueueItem(item.queueItemId || item.id, {
+                    returnRequestId: requestId,
+                    returnLineId: lineId,
+                });
+            } else {
+                // For RTO, store reference in inspectionNotes (no dedicated field yet)
+                await repackingApi.updateQueueItem(item.queueItemId || item.id, {
+                    inspectionNotes: `RTO Order #${orderNumber} (Line: ${lineId})`,
+                });
+            }
             onSuccess();
         } catch (error) {
             console.error('Failed to allocate:', error);
@@ -643,21 +649,20 @@ function AllocationModalContent({
                                 </div>
                             )}
 
-                            {/* RTO Matches - Info only, processed via Inventory Inward */}
+                            {/* RTO Matches */}
                             {rtoMatches.length > 0 && (
                                 <div>
                                     <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                                         <Truck size={16} className="text-purple-600" />
                                         Pending RTO Orders
                                     </h4>
-                                    <p className="text-xs text-gray-500 mb-2">
-                                        RTO items should be processed via Inventory Inward
-                                    </p>
                                     <div className="space-y-2">
                                         {rtoMatches.map((match) => (
-                                            <div
+                                            <button
                                                 key={match.data.lineId}
-                                                className="w-full p-3 text-left border border-gray-200 rounded-lg bg-gray-50"
+                                                onClick={() => handleAllocate('rto', match.data.lineId, undefined, match.data.orderNumber)}
+                                                disabled={isLoading}
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
                                             >
                                                 <div className="flex justify-between">
                                                     <span className="font-medium">Order #{match.data.orderNumber}</span>
@@ -669,7 +674,7 @@ function AllocationModalContent({
                                                         At Warehouse
                                                     </span>
                                                 )}
-                                            </div>
+                                            </button>
                                         ))}
                                     </div>
                                 </div>
