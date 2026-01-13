@@ -16,6 +16,7 @@ import { parse } from 'csv-parse/sync';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { calculateAllInventoryBalances } from '../utils/queryPatterns.js';
+import { reconciliationLogger } from '../utils/logger.js';
 
 const router: Router = Router();
 
@@ -343,7 +344,7 @@ router.post('/reconciliation/:id/submit', authenticateToken, asyncHandler(async 
         });
     }
 
-    console.log(`Reconciliation Submit: Processing ${itemsToProcess.length} adjustments...`);
+    reconciliationLogger.info({ count: itemsToProcess.length }, 'Processing adjustments');
 
     // Batch create all transactions in a single database transaction
     const transactions: Array<{
@@ -388,7 +389,7 @@ router.post('/reconciliation/:id/submit', authenticateToken, asyncHandler(async 
             }
         }, { timeout: 60000 }); // 60 second timeout for batch
 
-        console.log(`Reconciliation Submit: Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(itemsToProcess.length / BATCH_SIZE)} complete`);
+        reconciliationLogger.debug({ batch: Math.floor(i / BATCH_SIZE) + 1, totalBatches: Math.ceil(itemsToProcess.length / BATCH_SIZE) }, 'Batch complete');
     }
 
     // Mark reconciliation as submitted
@@ -397,7 +398,7 @@ router.post('/reconciliation/:id/submit', authenticateToken, asyncHandler(async 
         data: { status: 'submitted' },
     });
 
-    console.log(`Reconciliation Submit: Complete - ${transactions.length} adjustments created`);
+    reconciliationLogger.info({ count: transactions.length }, 'Reconciliation adjustments created');
 
     res.json({
         id: reconciliation.id,
@@ -467,12 +468,11 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
     }
 
     // Debug: log file size and first few hundred chars
-    console.log(`CSV Upload: File size ${file.buffer.length} bytes, content length ${csvContent.length} chars`);
-    console.log(`CSV Upload: First 500 chars: ${JSON.stringify(csvContent.slice(0, 500))}`);
+    reconciliationLogger.debug({ fileSize: file.buffer.length, contentLength: csvContent.length }, 'CSV file received');
 
     // Count lines in raw content
     const rawLines = csvContent.split(/\r?\n/).filter(line => line.trim());
-    console.log(`CSV Upload: Raw line count: ${rawLines.length}`);
+    reconciliationLogger.debug({ rawLineCount: rawLines.length }, 'CSV raw line count');
 
     // Auto-detect delimiter by checking first line
     const firstLine = csvContent.split(/\r?\n/)[0] || '';
@@ -500,9 +500,9 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
     // Log parsed column headers for debugging
     if (records.length > 0) {
         const columns = Object.keys(records[0]);
-        console.log(`CSV Upload: Parsed ${records.length} rows with columns: ${columns.join(', ')}`);
+        reconciliationLogger.debug({ recordCount: records.length, columns }, 'CSV parsed');
     } else {
-        console.log('CSV Upload: No records parsed from file');
+        reconciliationLogger.debug('No records parsed from CSV file');
     }
 
     // Build SKU code -> item mapping (case-insensitive)
@@ -576,7 +576,7 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
 
     // Bulk update using raw SQL for performance
     if (results.updates && results.updates.length > 0) {
-        console.log(`CSV Upload: Bulk updating ${results.updates.length} items...`);
+        reconciliationLogger.debug({ count: results.updates.length }, 'CSV bulk updating items');
 
         // Use VALUES clause for efficient bulk update
         const BATCH_SIZE = 1000;
@@ -596,19 +596,25 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
                 WHERE t."id" = v.id
             `);
 
-            console.log(`CSV Upload: Updated batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(results.updates.length / BATCH_SIZE)}`);
+            reconciliationLogger.debug({ batch: Math.floor(i / BATCH_SIZE) + 1, totalBatches: Math.ceil(results.updates.length / BATCH_SIZE) }, 'CSV batch updated');
         }
         results.updated = results.updates.length;
-        console.log(`CSV Upload: Bulk update complete`);
+        reconciliationLogger.debug('CSV bulk update complete');
     }
 
     // Clean up internal field before response
     delete results.updates;
 
     // Log summary for debugging
-    console.log(`CSV Upload Summary: ${results.total} rows, ${results.matched} matched, ${results.updated} updated, ${results.notFound.length} not found, ${results.errors.length} errors`);
+    reconciliationLogger.info({
+        total: results.total,
+        matched: results.matched,
+        updated: results.updated,
+        notFound: results.notFound.length,
+        errors: results.errors.length
+    }, 'CSV upload complete');
     if (results.notFound.length > 0) {
-        console.log(`CSV Upload: First 20 not found SKUs: ${results.notFound.slice(0, 20).join(', ')}`);
+        reconciliationLogger.debug({ notFoundSkus: results.notFound.slice(0, 20) }, 'CSV SKUs not found');
     }
 
     // Limit arrays in response to prevent frontend crash

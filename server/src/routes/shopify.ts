@@ -911,7 +911,7 @@ router.post('/sync/reprocess-cache', authenticateToken, asyncHandler(async (req:
         return;
     }
 
-    console.log(`Reprocessing ${failedEntries.length} cached orders...`);
+    shopifyLogger.info({ count: failedEntries.length }, 'Reprocessing cached orders');
 
     let succeeded = 0;
     let failed = 0;
@@ -925,14 +925,14 @@ router.post('/sync/reprocess-cache', authenticateToken, asyncHandler(async (req:
             // Mark as successfully processed
             await markCacheProcessed(req.prisma, entry.id);
             succeeded++;
-            console.log(`Reprocessed: ${entry.orderNumber} -> ${result.action}`);
+            shopifyLogger.debug({ orderNumber: entry.orderNumber, action: result.action }, 'Reprocessed order');
         } catch (error) {
             const err = error as Error;
             // Update error in cache
             await markCacheError(req.prisma, entry.id, err.message);
             failed++;
             errors.push({ orderId: entry.id, orderNumber: entry.orderNumber, error: err.message });
-            console.error(`Reprocess failed for ${entry.orderNumber}: ${err.message}`);
+            shopifyLogger.error({ orderNumber: entry.orderNumber, error: err.message }, 'Reprocess failed');
         }
     }
 
@@ -1062,7 +1062,7 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
         options.created_at_min = d.toISOString();
     }
 
-    console.log('[Full Dump] Starting full order dump from Shopify...');
+    shopifyLogger.info({ daysBack }, 'Full Dump: starting order dump from Shopify');
     let cached = 0;
     let skipped = 0;
     const startTime = Date.now();
@@ -1071,12 +1071,12 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
         // Fetch all orders with progress callback
         const allOrders = await shopifyClient.getAllOrders(
             (fetched, total) => {
-                console.log(`[Full Dump] Fetched ${fetched}/${total} orders...`);
+                shopifyLogger.debug({ fetched, total }, 'Full Dump: fetching progress');
             },
             options
         );
 
-        console.log(`[Full Dump] Fetched ${allOrders.length} orders, caching...`);
+        shopifyLogger.info({ count: allOrders.length }, 'Full Dump: fetched orders, caching');
 
         // Cache each order
         for (const order of allOrders) {
@@ -1085,13 +1085,13 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
                 cached++;
             } catch (err) {
                 const error = err as Error;
-                console.error(`[Full Dump] Error caching order ${order.name}:`, error.message);
+                shopifyLogger.error({ orderName: order.name, error: error.message }, 'Full Dump: error caching order');
                 skipped++;
             }
         }
 
         const duration = Math.round((Date.now() - startTime) / 1000);
-        console.log(`[Full Dump] Complete: ${cached} cached, ${skipped} skipped in ${duration}s`);
+        shopifyLogger.info({ cached, skipped, durationSeconds: duration }, 'Full Dump: completed');
 
         res.json({
             message: 'Full dump complete',
@@ -1102,7 +1102,7 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
         });
     } catch (error) {
         const err = error as Error;
-        console.error('Full dump error:', error);
+        shopifyLogger.error({ error: err.message }, 'Full Dump: failed');
         throw new ExternalServiceError(err.message, 'Shopify');
     }
 }));
@@ -1169,7 +1169,7 @@ router.post('/sync/process-cache', authenticateToken, asyncHandler(async (req: R
         return;
     }
 
-    console.log(`[Process Cache] Processing ${unprocessed.length} cached orders...`);
+    shopifyLogger.info({ count: unprocessed.length }, 'Process Cache: starting');
 
     let processed = 0;
     let failed = 0;
@@ -1190,7 +1190,7 @@ router.post('/sync/process-cache', authenticateToken, asyncHandler(async (req: R
         }
     }
 
-    console.log(`[Process Cache] Complete: ${processed} processed, ${failed} failed`);
+    shopifyLogger.info({ processed, failed }, 'Process Cache: completed');
 
     res.json({
         message: 'Processing complete',
