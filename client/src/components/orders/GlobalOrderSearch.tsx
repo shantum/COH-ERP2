@@ -9,6 +9,9 @@ import { Search, X, ChevronRight, Loader2 } from 'lucide-react';
 import { ordersApi } from '../../services/api';
 import { useDebounce } from '../../hooks/useDebounce';
 import type { OrderTab } from '../../hooks/useOrdersData';
+import type { ShipmentTab } from '../../hooks/useShipmentsData';
+
+type AllTabs = OrderTab | ShipmentTab;
 
 interface SearchResult {
     id: string;
@@ -29,11 +32,11 @@ interface TabResult {
 }
 
 interface GlobalOrderSearchProps {
-    onSelectOrder: (orderId: string, tab: OrderTab, page: 'orders' | 'shipments') => void;
+    onSelectOrder: (orderId: string, tab: AllTabs, page: 'orders' | 'shipments') => void;
 }
 
-// Map API tab names to OrderTab type
-const tabMapping: Record<string, OrderTab> = {
+// Map API tab names to tab types
+const tabMapping: Record<string, AllTabs> = {
     open: 'open',
     cancelled: 'cancelled',
     shipped: 'shipped',

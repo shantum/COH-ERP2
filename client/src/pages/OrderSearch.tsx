@@ -16,6 +16,9 @@ import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
 import { ordersApi } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import type { OrderTab } from '../hooks/useOrdersData';
+import type { ShipmentTab } from '../hooks/useShipmentsData';
+
+type AllTabs = OrderTab | ShipmentTab;
 
 interface SearchResult {
     id: string;
@@ -35,8 +38,8 @@ interface TabResult {
     orders: SearchResult[];
 }
 
-// Map API tab names to OrderTab type
-const tabMapping: Record<string, OrderTab> = {
+// Map API tab names to tab types
+const tabMapping: Record<string, AllTabs> = {
     open: 'open',
     cancelled: 'cancelled',
     shipped: 'shipped',

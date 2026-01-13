@@ -118,7 +118,7 @@ export function CatalogFilters({
                 <div className="flex flex-wrap items-center gap-2">
                     <select
                         value={filter.gender}
-                        onChange={(e) => setFilter(f => ({ ...f, gender: e.target.value, productId: '' }))}
+                        onChange={(e) => setFilter((f: typeof filter) => ({ ...f, gender: e.target.value, productId: '' }))}
                         className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all"
                     >
                         <option value="">All Genders</option>
@@ -129,7 +129,7 @@ export function CatalogFilters({
 
                     <select
                         value={filter.category}
-                        onChange={(e) => setFilter(f => ({ ...f, category: e.target.value, productId: '' }))}
+                        onChange={(e) => setFilter((f: typeof filter) => ({ ...f, category: e.target.value, productId: '' }))}
                         className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all"
                     >
                         <option value="">All Categories</option>
@@ -140,7 +140,7 @@ export function CatalogFilters({
 
                     <select
                         value={filter.productId}
-                        onChange={(e) => setFilter(f => ({ ...f, productId: e.target.value }))}
+                        onChange={(e) => setFilter((f: typeof filter) => ({ ...f, productId: e.target.value }))}
                         className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all max-w-[180px]"
                     >
                         <option value="">All Products</option>
@@ -151,7 +151,7 @@ export function CatalogFilters({
 
                     <select
                         value={filter.status}
-                        onChange={(e) => setFilter(f => ({ ...f, status: e.target.value }))}
+                        onChange={(e) => setFilter((f: typeof filter) => ({ ...f, status: e.target.value }))}
                         className={`text-sm border rounded-lg px-3 py-2 bg-white hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all ${
                             filter.status === 'below_target' ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
                         }`}

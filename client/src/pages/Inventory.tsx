@@ -172,7 +172,7 @@ export default function Inventory() {
             headerName: 'Size',
             field: 'size',
             width: 80,
-            cellStyle: { textAlign: 'center' },
+            cellStyle: { textAlign: 'center' as const },
         },
         {
             headerName: 'Available',

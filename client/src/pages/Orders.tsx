@@ -3,7 +3,7 @@
  * Uses extracted hooks, utilities, and components for maintainability
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Archive, Truck, Save } from 'lucide-react';
@@ -73,8 +73,6 @@ export default function Orders() {
     const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
     const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
 
-    // Shipping form state
-    const [shipForm, setShipForm] = useState({ awbNumber: '', courier: '' });
     // Optimistic updates handle button state - use empty set for grid interface compatibility
     const allocatingLines = new Set<string>();
 
@@ -141,7 +139,6 @@ export default function Orders() {
     // Mutations hook with callbacks
     const mutations = useOrdersMutations({
         onShipSuccess: () => {
-            setShipForm({ awbNumber: '', courier: '' });
             setUnifiedModalOrder(null);
         },
         onCreateSuccess: () => {

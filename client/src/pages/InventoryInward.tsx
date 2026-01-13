@@ -20,7 +20,6 @@ import {
     Factory,
     RefreshCw,
     Wrench,
-    ChevronDown,
     X,
     ExternalLink,
 } from 'lucide-react';

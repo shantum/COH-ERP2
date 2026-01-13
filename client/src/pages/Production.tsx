@@ -3,7 +3,7 @@ import { productionApi } from '../services/api';
 import { trpc } from '../services/trpc';
 import { useState, useMemo } from 'react';
 import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, Search } from 'lucide-react';
-import { SIZE_ORDER, sortBySizeOrder } from '../constants/sizes';
+import { sortBySizeOrder } from '../constants/sizes';
 
 // Default date range for production batches (14 days past to 45 days future)
 const getDefaultDateRange = () => {

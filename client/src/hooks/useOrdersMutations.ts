@@ -93,7 +93,6 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const invalidateRtoOrders = () => invalidateTab('rto');
     const invalidateCodPendingOrders = () => invalidateTab('cod_pending');
     const invalidateCancelledOrders = () => invalidateTab('cancelled');
-    const invalidateArchivedOrders = () => invalidateTab('archived');
     const debouncedInvalidateOpenOrders = () => invalidateTab('open', true);
 
     // Keep invalidateAll for operations that truly affect multiple tabs (creation, deletion)

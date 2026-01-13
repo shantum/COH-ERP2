@@ -3,7 +3,7 @@
  * Handles shipped, RTO, COD pending, and archived orders
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { RefreshCw, Archive } from 'lucide-react';
