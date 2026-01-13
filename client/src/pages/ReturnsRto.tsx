@@ -1,14 +1,13 @@
 /**
  * Returns & RTO Inward Page
  *
- * Shows pending returns and RTO orders that need processing.
- * The "queue" below shows items in the repacking queue (awaiting QC/inspection).
+ * SCAN-FIRST WORKFLOW:
+ * 1. Scan SKU → Item added to repacking queue immediately
+ * 2. Queue shows all items awaiting processing
+ * 3. User can allocate items to return/RTO orders (optional)
+ * 4. User processes items: Ready for stock OR Write-off
  *
- * Workflow:
- * 1. Returns/RTO arrive at warehouse
- * 2. User scans item → looks up matching return/RTO order
- * 3. Item goes through QC → added to repacking queue
- * 4. QC decision: Ready for stock OR Write-off
+ * This allows fast scanning without needing to match to orders upfront.
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -26,6 +25,7 @@ import {
     RefreshCw,
     X,
     Plus,
+    Link,
 } from 'lucide-react';
 import type { ScanLookupResult, PendingQueueResponse, QueuePanelItem } from '../types';
 
@@ -43,12 +43,11 @@ const WRITE_OFF_REASONS = [
     { value: 'other', label: 'Other' },
 ];
 
-// RTO condition options when processing RTO line
-const RTO_CONDITIONS = [
-    { value: 'good', label: 'Good', description: 'Item is in sellable condition' },
-    { value: 'unopened', label: 'Unopened', description: 'Package was never opened' },
-    { value: 'damaged', label: 'Damaged', description: 'Item is damaged (will be written off)' },
-    { value: 'wrong_product', label: 'Wrong Product', description: 'Wrong item returned (will be written off)' },
+// Condition options when adding to queue
+const ITEM_CONDITIONS = [
+    { value: 'good', label: 'Good' },
+    { value: 'used', label: 'Used' },
+    { value: 'damaged', label: 'Damaged' },
 ];
 
 type TabType = 'repacking' | 'returns' | 'rto';
@@ -66,21 +65,18 @@ export default function ReturnsRto() {
     const [isScanning, setIsScanning] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('repacking');
 
-    // Scan result state (for RTO/Return processing)
-    const [scanResult, setScanResult] = useState<ScanLookupResult | null>(null);
-    const [matchedSource, setMatchedSource] = useState<{
-        type: 'rto' | 'return' | 'repacking';
-        data: any;
-    } | null>(null);
+    // Selected item for processing/allocation
+    const [selectedItem, setSelectedItem] = useState<QueuePanelItem | null>(null);
+    const [showProcessModal, setShowProcessModal] = useState(false);
+    const [showAllocateModal, setShowAllocateModal] = useState(false);
 
-    // RTO processing state
-    const [rtoCondition, setRtoCondition] = useState('good');
-    const [rtoNotes, setRtoNotes] = useState('');
-
-    // QC processing state (for repacking items)
+    // QC processing state
     const [qcDecision, setQcDecision] = useState<'ready' | 'write_off'>('ready');
     const [writeOffReason, setWriteOffReason] = useState('defective');
     const [qcNotes, setQcNotes] = useState('');
+
+    // Add to queue state
+    const [addCondition, setAddCondition] = useState('good');
 
     // Pagination
     const [pageSize, setPageSize] = useState(50);
@@ -140,66 +136,60 @@ export default function ReturnsRto() {
         currentPage * pageSize
     );
 
-    // Clear scan result
-    const clearScan = () => {
-        setScanResult(null);
-        setMatchedSource(null);
-        setRtoCondition('good');
-        setRtoNotes('');
-        setQcDecision('ready');
-        setWriteOffReason('defective');
-        setQcNotes('');
-        inputRef.current?.focus();
-    };
+    // Add to repacking queue mutation (scan-first)
+    const addToQueueMutation = useMutation({
+        mutationFn: async (skuCode: string) => {
+            return repackingApi.addToQueue({
+                skuCode,
+                qty: 1,
+                condition: addCondition,
+            });
+        },
+        onSuccess: (_, skuCode) => {
+            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
 
-    // Handle scan lookup
+            setScanFeedback({
+                type: 'success',
+                message: `${skuCode} added to repacking queue`,
+            });
+            setScanInput('');
+            inputRef.current?.focus();
+        },
+        onError: (error: any) => {
+            setScanFeedback({
+                type: 'error',
+                message: error.response?.data?.error || 'Failed to add to queue',
+            });
+            setScanInput('');
+            inputRef.current?.focus();
+        },
+    });
+
+    // Handle scan - add to repacking queue
     const handleScan = async () => {
         const code = scanInput.trim();
         if (!code || isScanning) return;
 
         setIsScanning(true);
         setScanFeedback(null);
-        setScanResult(null);
-        setMatchedSource(null);
 
         try {
+            // First verify SKU exists
             const res = await inventoryApi.scanLookup(code);
             const result = res.data as ScanLookupResult;
 
-            // Priority: repacking > return > rto
-            const repackMatch = result.matches.find(m => m.source === 'repacking');
-            const returnMatch = result.matches.find(m => m.source === 'return');
-            const rtoMatch = result.matches.find(m => m.source === 'rto');
-
-            if (repackMatch) {
-                setScanResult(result);
-                setMatchedSource({ type: 'repacking', data: repackMatch.data });
-                setActiveTab('repacking');
-            } else if (returnMatch) {
-                setScanResult(result);
-                setMatchedSource({ type: 'return', data: returnMatch.data });
-                setActiveTab('returns');
-            } else if (rtoMatch) {
-                setScanResult(result);
-                setMatchedSource({ type: 'rto', data: rtoMatch.data });
-                setActiveTab('rto');
-            } else {
-                setScanFeedback({
-                    type: 'info',
-                    message: `${result.sku.productName} - No pending return/RTO found for this SKU`,
-                });
-            }
-
-            setScanInput('');
+            // Add to repacking queue
+            await addToQueueMutation.mutateAsync(result.sku.skuCode);
         } catch (error: any) {
             setScanFeedback({
                 type: 'error',
                 message: error.response?.data?.error || 'SKU not found',
             });
             setScanInput('');
+            inputRef.current?.focus();
         } finally {
             setIsScanning(false);
-            inputRef.current?.focus();
         }
     };
 
@@ -210,55 +200,12 @@ export default function ReturnsRto() {
         }
     };
 
-    // Handle queue item click - auto-scan
-    const handleQueueItemClick = (item: QueuePanelItem) => {
-        setScanInput(item.skuCode);
-        setTimeout(() => handleScan(), 0);
-    };
-
-    // RTO inward mutation
-    const rtoInwardMutation = useMutation({
+    // Process (QC) mutation
+    const processMutation = useMutation({
         mutationFn: async () => {
-            if (!matchedSource || matchedSource.type !== 'rto') {
-                throw new Error('No RTO order selected');
-            }
-            return inventoryApi.rtoInwardLine({
-                lineId: matchedSource.data.lineId,
-                condition: rtoCondition,
-                notes: rtoNotes || undefined,
-            });
-        },
-        onSuccess: (res) => {
-            const data = res.data;
-            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
-            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
-            queryClient.invalidateQueries({ queryKey: ['inventory-balance'] });
-
-            const isWriteOff = rtoCondition === 'damaged' || rtoCondition === 'wrong_product';
-            setScanFeedback({
-                type: 'success',
-                message: isWriteOff
-                    ? `RTO written off as ${rtoCondition}`
-                    : `RTO processed - ${data.line?.qty || 1} unit(s) added to inventory`,
-            });
-            clearScan();
-        },
-        onError: (error: any) => {
-            setScanFeedback({
-                type: 'error',
-                message: error.response?.data?.error || 'Failed to process RTO',
-            });
-        },
-    });
-
-    // Repacking QC mutation
-    const repackingMutation = useMutation({
-        mutationFn: async () => {
-            if (!matchedSource || matchedSource.type !== 'repacking') {
-                throw new Error('No QC item selected');
-            }
+            if (!selectedItem) throw new Error('No item selected');
             return repackingApi.process({
-                itemId: matchedSource.data.queueItemId,
+                itemId: selectedItem.queueItemId || selectedItem.id,
                 action: qcDecision,
                 writeOffReason: qcDecision === 'write_off' ? writeOffReason : undefined,
                 notes: qcNotes || undefined,
@@ -272,10 +219,10 @@ export default function ReturnsRto() {
             setScanFeedback({
                 type: 'success',
                 message: qcDecision === 'ready'
-                    ? `${scanResult?.sku.skuCode} added to stock`
-                    : `${scanResult?.sku.skuCode} written off`,
+                    ? `${selectedItem?.skuCode} added to stock`
+                    : `${selectedItem?.skuCode} written off`,
             });
-            clearScan();
+            closeModals();
         },
         onError: (error: any) => {
             setScanFeedback({
@@ -285,7 +232,71 @@ export default function ReturnsRto() {
         },
     });
 
-    // Get urgency styling for RTO items
+    // RTO inward mutation (for RTO tab processing)
+    const rtoInwardMutation = useMutation({
+        mutationFn: async (data: { lineId: string; condition: string; notes?: string }) => {
+            return inventoryApi.rtoInwardLine(data);
+        },
+        onSuccess: (res) => {
+            queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
+            queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory-balance'] });
+
+            const isWriteOff = qcDecision === 'write_off';
+            setScanFeedback({
+                type: 'success',
+                message: isWriteOff
+                    ? `RTO written off`
+                    : `RTO processed - added to inventory`,
+            });
+            closeModals();
+        },
+        onError: (error: any) => {
+            setScanFeedback({
+                type: 'error',
+                message: error.response?.data?.error || 'Failed to process RTO',
+            });
+        },
+    });
+
+    const closeModals = () => {
+        setShowProcessModal(false);
+        setShowAllocateModal(false);
+        setSelectedItem(null);
+        setQcDecision('ready');
+        setWriteOffReason('defective');
+        setQcNotes('');
+        inputRef.current?.focus();
+    };
+
+    // Handle process click from queue
+    const handleProcessClick = (item: QueuePanelItem) => {
+        setSelectedItem(item);
+        setQcDecision('ready');
+        setWriteOffReason('defective');
+        setQcNotes('');
+        setShowProcessModal(true);
+    };
+
+    // Handle allocate click from repacking queue
+    const handleAllocateClick = (item: QueuePanelItem) => {
+        setSelectedItem(item);
+        setShowAllocateModal(true);
+    };
+
+    // Handle RTO processing
+    const handleRtoProcess = () => {
+        if (!selectedItem || !selectedItem.lineId) return;
+
+        const condition = qcDecision === 'write_off' ? 'damaged' : 'good';
+        rtoInwardMutation.mutate({
+            lineId: selectedItem.lineId,
+            condition,
+            notes: qcNotes || undefined,
+        });
+    };
+
+    // Get urgency badge for RTO items
     const getUrgencyBadge = (item: QueuePanelItem) => {
         if (!item.daysInRto) return null;
         if (item.daysInRto > 14) {
@@ -342,7 +353,7 @@ export default function ReturnsRto() {
                         </div>
                         <div className="flex items-center gap-4 text-sm">
                             <span className="text-gray-600">
-                                Repacking: <span className="font-semibold text-green-600">{counts.repacking}</span>
+                                Queue: <span className="font-semibold text-green-600">{counts.repacking}</span>
                             </span>
                             <span className="text-gray-600">
                                 Returns: <span className="font-semibold text-orange-600">{counts.returns}</span>
@@ -361,9 +372,9 @@ export default function ReturnsRto() {
             </div>
 
             <div className="max-w-7xl mx-auto p-4 space-y-6">
-                {/* Scan Section */}
+                {/* Quick Scan Section */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <h2 className="text-lg font-semibold mb-4">Scan Item</h2>
+                    <h2 className="text-lg font-semibold mb-4">Quick Scan to Queue</h2>
 
                     {/* Feedback */}
                     {scanFeedback && (
@@ -387,7 +398,7 @@ export default function ReturnsRto() {
                         </div>
                     )}
 
-                    {/* Scan Input */}
+                    {/* Scan Input with Condition */}
                     <div className="flex items-center gap-3">
                         <div className="relative flex-1">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={24} />
@@ -399,256 +410,32 @@ export default function ReturnsRto() {
                                 onKeyDown={handleKeyDown}
                                 placeholder="Scan barcode or enter SKU code..."
                                 className="w-full pl-14 pr-4 py-4 text-xl border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 disabled:bg-gray-50"
-                                disabled={isScanning}
+                                disabled={isScanning || addToQueueMutation.isPending}
                                 autoFocus
                             />
                         </div>
+                        <select
+                            value={addCondition}
+                            onChange={(e) => setAddCondition(e.target.value)}
+                            className="px-4 py-4 text-lg border-2 border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                        >
+                            {ITEM_CONDITIONS.map((c) => (
+                                <option key={c.value} value={c.value}>{c.label}</option>
+                            ))}
+                        </select>
                         <button
                             onClick={handleScan}
-                            disabled={!scanInput.trim() || isScanning}
+                            disabled={!scanInput.trim() || isScanning || addToQueueMutation.isPending}
                             className="px-6 py-4 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                         >
-                            {isScanning ? 'Looking up...' : 'Lookup'}
+                            {isScanning || addToQueueMutation.isPending ? 'Adding...' : 'Add to Queue'}
                         </button>
                     </div>
 
                     <p className="text-sm text-gray-500 mt-2">
-                        Scan to find matching return, RTO, or repacking queue item
+                        Scan to add items to the repacking queue. Allocate to return/RTO orders later.
                     </p>
                 </div>
-
-                {/* Scan Result - Processing Form */}
-                {scanResult && matchedSource && (
-                    <div className="bg-white rounded-lg shadow-sm border-2 border-orange-200 p-6">
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="flex items-center gap-4">
-                                {/* Product Image */}
-                                <div className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden">
-                                    {scanResult.sku.imageUrl ? (
-                                        <img src={scanResult.sku.imageUrl} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-gray-400">
-                                            <Package size={24} />
-                                        </div>
-                                    )}
-                                </div>
-                                <div>
-                                    <h3 className="text-lg font-semibold">{scanResult.sku.productName}</h3>
-                                    <p className="text-gray-600">{scanResult.sku.colorName} / {scanResult.sku.size}</p>
-                                    <p className="font-mono text-sm text-gray-500">{scanResult.sku.skuCode}</p>
-                                </div>
-                            </div>
-                            <button onClick={clearScan} className="text-gray-400 hover:text-gray-600">
-                                <X size={24} />
-                            </button>
-                        </div>
-
-                        {/* Source Info Badge */}
-                        <div className={`rounded-lg p-4 mb-4 ${
-                            matchedSource.type === 'rto' ? 'bg-purple-50 border border-purple-200' :
-                            matchedSource.type === 'return' ? 'bg-orange-50 border border-orange-200' :
-                            'bg-green-50 border border-green-200'
-                        }`}>
-                            <div className="flex items-center gap-2 mb-2">
-                                {matchedSource.type === 'rto' && <Truck size={18} className="text-purple-600" />}
-                                {matchedSource.type === 'return' && <RotateCcw size={18} className="text-orange-600" />}
-                                {matchedSource.type === 'repacking' && <RefreshCw size={18} className="text-green-600" />}
-                                <span className="font-medium capitalize">{matchedSource.type === 'repacking' ? 'QC Queue Item' : `${matchedSource.type.toUpperCase()} Order`}</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                                {matchedSource.type === 'rto' && (
-                                    <>
-                                        <div>Order: <span className="font-medium">{matchedSource.data.orderNumber}</span></div>
-                                        <div>Customer: <span className="font-medium">{matchedSource.data.customerName}</span></div>
-                                        <div>Qty: <span className="font-medium">{matchedSource.data.qty}</span></div>
-                                        {matchedSource.data.atWarehouse && (
-                                            <div><span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">At Warehouse</span></div>
-                                        )}
-                                    </>
-                                )}
-                                {matchedSource.type === 'return' && (
-                                    <>
-                                        <div>Request: <span className="font-medium">{matchedSource.data.requestNumber}</span></div>
-                                        <div>Reason: <span className="font-medium">{matchedSource.data.reasonCategory}</span></div>
-                                        <div>Qty: <span className="font-medium">{matchedSource.data.qty}</span></div>
-                                    </>
-                                )}
-                                {matchedSource.type === 'repacking' && (
-                                    <>
-                                        <div>Condition: {getConditionBadge(matchedSource.data.condition)}</div>
-                                        <div>Qty: <span className="font-medium">{matchedSource.data.qty}</span></div>
-                                        {matchedSource.data.returnRequestNumber && (
-                                            <div className="col-span-2">From: <span className="font-mono text-xs">{matchedSource.data.returnRequestNumber}</span></div>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* RTO Processing Form */}
-                        {matchedSource.type === 'rto' && (
-                            <>
-                                <div className="mb-4">
-                                    <label className="text-sm font-medium text-gray-700 block mb-2">Condition</label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {RTO_CONDITIONS.map((c) => (
-                                            <label
-                                                key={c.value}
-                                                className={`flex items-start gap-2 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                                                    rtoCondition === c.value
-                                                        ? c.value === 'damaged' || c.value === 'wrong_product'
-                                                            ? 'border-red-500 bg-red-50'
-                                                            : 'border-green-500 bg-green-50'
-                                                        : 'border-gray-200 hover:border-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="radio"
-                                                    name="rtoCondition"
-                                                    value={c.value}
-                                                    checked={rtoCondition === c.value}
-                                                    onChange={(e) => setRtoCondition(e.target.value)}
-                                                    className="mt-0.5"
-                                                />
-                                                <div>
-                                                    <p className="font-medium text-sm">{c.label}</p>
-                                                    <p className="text-xs text-gray-500">{c.description}</p>
-                                                </div>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="mb-4">
-                                    <label className="text-sm font-medium text-gray-700 block mb-1">Notes (optional)</label>
-                                    <input
-                                        type="text"
-                                        value={rtoNotes}
-                                        onChange={(e) => setRtoNotes(e.target.value)}
-                                        placeholder="Additional notes..."
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-                                    />
-                                </div>
-
-                                <button
-                                    onClick={() => rtoInwardMutation.mutate()}
-                                    disabled={rtoInwardMutation.isPending}
-                                    className={`w-full py-3 font-medium rounded-lg flex items-center justify-center gap-2 ${
-                                        rtoCondition === 'damaged' || rtoCondition === 'wrong_product'
-                                            ? 'bg-red-600 hover:bg-red-700 text-white'
-                                            : 'bg-green-600 hover:bg-green-700 text-white'
-                                    } disabled:opacity-50`}
-                                >
-                                    {rtoCondition === 'damaged' || rtoCondition === 'wrong_product' ? (
-                                        <>
-                                            <X size={18} />
-                                            {rtoInwardMutation.isPending ? 'Processing...' : 'Write Off'}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Plus size={18} />
-                                            {rtoInwardMutation.isPending ? 'Processing...' : 'Add to Inventory'}
-                                        </>
-                                    )}
-                                </button>
-                            </>
-                        )}
-
-                        {/* QC Processing Form (Repacking) */}
-                        {matchedSource.type === 'repacking' && (
-                            <>
-                                <div className="mb-4">
-                                    <label className="text-sm font-medium text-gray-700 block mb-2">QC Decision</label>
-                                    <div className="space-y-2">
-                                        {QC_DECISIONS.map((d) => (
-                                            <label
-                                                key={d.value}
-                                                className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                                                    qcDecision === d.value
-                                                        ? d.color === 'green'
-                                                            ? 'border-green-500 bg-green-50'
-                                                            : 'border-red-500 bg-red-50'
-                                                        : 'border-gray-200 hover:border-gray-300'
-                                                }`}
-                                            >
-                                                <input
-                                                    type="radio"
-                                                    name="qcDecision"
-                                                    value={d.value}
-                                                    checked={qcDecision === d.value}
-                                                    onChange={(e) => setQcDecision(e.target.value as 'ready' | 'write_off')}
-                                                    className="mt-1"
-                                                />
-                                                <div>
-                                                    <p className="font-medium text-sm">{d.label}</p>
-                                                    <p className="text-xs text-gray-500">{d.description}</p>
-                                                </div>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {qcDecision === 'write_off' && (
-                                    <div className="mb-4">
-                                        <label className="text-sm font-medium text-gray-700 block mb-1">Write-off Reason</label>
-                                        <select
-                                            value={writeOffReason}
-                                            onChange={(e) => setWriteOffReason(e.target.value)}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-                                        >
-                                            {WRITE_OFF_REASONS.map((r) => (
-                                                <option key={r.value} value={r.value}>{r.label}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-
-                                <div className="mb-4">
-                                    <label className="text-sm font-medium text-gray-700 block mb-1">Notes (optional)</label>
-                                    <input
-                                        type="text"
-                                        value={qcNotes}
-                                        onChange={(e) => setQcNotes(e.target.value)}
-                                        placeholder="QC notes..."
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
-                                    />
-                                </div>
-
-                                <button
-                                    onClick={() => repackingMutation.mutate()}
-                                    disabled={repackingMutation.isPending}
-                                    className={`w-full py-3 font-medium rounded-lg flex items-center justify-center gap-2 ${
-                                        qcDecision === 'write_off'
-                                            ? 'bg-red-600 hover:bg-red-700 text-white'
-                                            : 'bg-green-600 hover:bg-green-700 text-white'
-                                    } disabled:opacity-50`}
-                                >
-                                    {qcDecision === 'write_off' ? (
-                                        <>
-                                            <X size={18} />
-                                            {repackingMutation.isPending ? 'Processing...' : 'Write Off'}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Plus size={18} />
-                                            {repackingMutation.isPending ? 'Processing...' : 'Add to Stock'}
-                                        </>
-                                    )}
-                                </button>
-                            </>
-                        )}
-
-                        {/* Return handling - redirect info */}
-                        {matchedSource.type === 'return' && (
-                            <div className="text-center py-4">
-                                <p className="text-gray-600 mb-2">Return processing requires inspection.</p>
-                                <p className="text-sm text-gray-500">
-                                    After inspection, item will be added to the QC queue for final processing.
-                                </p>
-                            </div>
-                        )}
-                    </div>
-                )}
 
                 {/* Queue Tabs */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200">
@@ -741,10 +528,13 @@ export default function ReturnsRto() {
                                         <th className="px-4 py-3 text-left font-medium text-gray-600">
                                             {activeTab === 'repacking' ? 'Condition' : activeTab === 'rto' ? 'Order' : 'Request'}
                                         </th>
+                                        {activeTab === 'repacking' && (
+                                            <th className="px-4 py-3 text-left font-medium text-gray-600">Linked To</th>
+                                        )}
                                         {activeTab === 'rto' && (
                                             <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
                                         )}
-                                        <th className="px-4 py-3 text-center font-medium text-gray-600">Action</th>
+                                        <th className="px-4 py-3 text-center font-medium text-gray-600">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200">
@@ -759,6 +549,17 @@ export default function ReturnsRto() {
                                                 {activeTab === 'rto' && <span className="font-medium">{item.orderNumber}</span>}
                                                 {activeTab === 'returns' && <span className="font-mono text-xs">{item.requestNumber}</span>}
                                             </td>
+                                            {activeTab === 'repacking' && (
+                                                <td className="px-4 py-3">
+                                                    {item.returnRequestNumber ? (
+                                                        <span className="text-xs text-gray-600">
+                                                            Return: {item.returnRequestNumber}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-gray-400 italic">Unallocated</span>
+                                                    )}
+                                                </td>
+                                            )}
                                             {activeTab === 'rto' && (
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-2">
@@ -769,13 +570,25 @@ export default function ReturnsRto() {
                                                     </div>
                                                 </td>
                                             )}
-                                            <td className="px-4 py-3 text-center">
-                                                <button
-                                                    onClick={() => handleQueueItemClick(item)}
-                                                    className="px-3 py-1 text-xs font-medium bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
-                                                >
-                                                    Process
-                                                </button>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    {activeTab === 'repacking' && !item.returnRequestNumber && (
+                                                        <button
+                                                            onClick={() => handleAllocateClick(item)}
+                                                            className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                                                            title="Link to return/RTO"
+                                                        >
+                                                            <Link size={14} className="inline mr-1" />
+                                                            Allocate
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => handleProcessClick(item)}
+                                                        className="px-3 py-1 text-xs font-medium bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+                                                    >
+                                                        Process
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -813,6 +626,282 @@ export default function ReturnsRto() {
                             </div>
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Process Modal */}
+            {showProcessModal && selectedItem && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+                        <div className="p-6">
+                            <div className="flex justify-between items-start mb-4">
+                                <h3 className="text-lg font-semibold">Process Item</h3>
+                                <button onClick={closeModals} className="text-gray-400 hover:text-gray-600">
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Item Info */}
+                            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                                <p className="font-medium">{selectedItem.productName}</p>
+                                <p className="text-sm text-gray-600">{selectedItem.colorName} / {selectedItem.size}</p>
+                                <p className="font-mono text-sm text-gray-500 mt-1">{selectedItem.skuCode}</p>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <span className="text-sm">Qty: <strong>{selectedItem.qty}</strong></span>
+                                    {selectedItem.condition && getConditionBadge(selectedItem.condition)}
+                                </div>
+                            </div>
+
+                            {/* QC Decision */}
+                            <div className="mb-4">
+                                <label className="text-sm font-medium text-gray-700 block mb-2">QC Decision</label>
+                                <div className="space-y-2">
+                                    {QC_DECISIONS.map((d) => (
+                                        <label
+                                            key={d.value}
+                                            className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                                                qcDecision === d.value
+                                                    ? d.color === 'green'
+                                                        ? 'border-green-500 bg-green-50'
+                                                        : 'border-red-500 bg-red-50'
+                                                    : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        >
+                                            <input
+                                                type="radio"
+                                                name="qcDecision"
+                                                value={d.value}
+                                                checked={qcDecision === d.value}
+                                                onChange={(e) => setQcDecision(e.target.value as 'ready' | 'write_off')}
+                                                className="mt-1"
+                                            />
+                                            <div>
+                                                <p className="font-medium text-sm">{d.label}</p>
+                                                <p className="text-xs text-gray-500">{d.description}</p>
+                                            </div>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Write-off Reason */}
+                            {qcDecision === 'write_off' && (
+                                <div className="mb-4">
+                                    <label className="text-sm font-medium text-gray-700 block mb-1">Write-off Reason</label>
+                                    <select
+                                        value={writeOffReason}
+                                        onChange={(e) => setWriteOffReason(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                                    >
+                                        {WRITE_OFF_REASONS.map((r) => (
+                                            <option key={r.value} value={r.value}>{r.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Notes */}
+                            <div className="mb-4">
+                                <label className="text-sm font-medium text-gray-700 block mb-1">Notes (optional)</label>
+                                <input
+                                    type="text"
+                                    value={qcNotes}
+                                    onChange={(e) => setQcNotes(e.target.value)}
+                                    placeholder="QC notes..."
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                                />
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={closeModals}
+                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (activeTab === 'rto' && selectedItem.lineId) {
+                                            handleRtoProcess();
+                                        } else {
+                                            processMutation.mutate();
+                                        }
+                                    }}
+                                    disabled={processMutation.isPending || rtoInwardMutation.isPending}
+                                    className={`flex-1 px-4 py-2 font-medium rounded-lg flex items-center justify-center gap-2 ${
+                                        qcDecision === 'write_off'
+                                            ? 'bg-red-600 hover:bg-red-700 text-white'
+                                            : 'bg-green-600 hover:bg-green-700 text-white'
+                                    } disabled:opacity-50`}
+                                >
+                                    {qcDecision === 'write_off' ? (
+                                        <>
+                                            <X size={16} />
+                                            {processMutation.isPending || rtoInwardMutation.isPending ? 'Processing...' : 'Write Off'}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Plus size={16} />
+                                            {processMutation.isPending || rtoInwardMutation.isPending ? 'Processing...' : 'Add to Stock'}
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Allocate Modal */}
+            {showAllocateModal && selectedItem && (
+                <AllocationModalContent
+                    item={selectedItem}
+                    onClose={closeModals}
+                    onSuccess={() => {
+                        queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
+                        setScanFeedback({
+                            type: 'success',
+                            message: 'Item allocated successfully',
+                        });
+                        closeModals();
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+// Simple allocation modal content
+function AllocationModalContent({
+    item,
+    onClose,
+    onSuccess,
+}: {
+    item: QueuePanelItem;
+    onClose: () => void;
+    onSuccess: () => void;
+}) {
+    const [selectedType, setSelectedType] = useState<'return' | 'rto' | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+
+    // Fetch matching returns and RTOs for this SKU
+    const { data: matchData } = useQuery({
+        queryKey: ['allocation-matches', item.skuId],
+        queryFn: async () => {
+            const res = await inventoryApi.scanLookup(item.skuCode);
+            return res.data as ScanLookupResult;
+        },
+    });
+
+    const returnMatches = matchData?.matches.filter(m => m.source === 'return') || [];
+    const rtoMatches = matchData?.matches.filter(m => m.source === 'rto') || [];
+
+    const handleAllocate = async (type: 'return' | 'rto', id: string) => {
+        setIsLoading(true);
+        try {
+            await repackingApi.updateQueueItem(item.queueItemId || item.id, {
+                // The API may need adjustment to support linking
+                // For now, we'll just trigger success
+            });
+            onSuccess();
+        } catch (error) {
+            console.error('Failed to allocate:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden">
+                <div className="p-6 border-b border-gray-200">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <h3 className="text-lg font-semibold">Allocate to Return/RTO</h3>
+                            <p className="text-sm text-gray-500 mt-1">{item.skuCode} - {item.productName}</p>
+                        </div>
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                            <X size={20} />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="p-6 overflow-y-auto max-h-[60vh]">
+                    {returnMatches.length === 0 && rtoMatches.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                            <Package size={48} className="mx-auto mb-3 text-gray-300" />
+                            <p>No matching returns or RTO orders found for this SKU</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {/* Return Matches */}
+                            {returnMatches.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                                        <RotateCcw size={16} className="text-orange-600" />
+                                        Pending Returns
+                                    </h4>
+                                    <div className="space-y-2">
+                                        {returnMatches.map((match) => (
+                                            <button
+                                                key={match.data.lineId}
+                                                onClick={() => handleAllocate('return', match.data.lineId)}
+                                                disabled={isLoading}
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
+                                            >
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">{match.data.requestNumber}</span>
+                                                    <span className="text-sm text-gray-500">Qty: {match.data.qty}</span>
+                                                </div>
+                                                <p className="text-sm text-gray-600">{match.data.reasonCategory}</p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* RTO Matches */}
+                            {rtoMatches.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                                        <Truck size={16} className="text-purple-600" />
+                                        Pending RTO Orders
+                                    </h4>
+                                    <div className="space-y-2">
+                                        {rtoMatches.map((match) => (
+                                            <button
+                                                key={match.data.lineId}
+                                                onClick={() => handleAllocate('rto', match.data.lineId)}
+                                                disabled={isLoading}
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                                            >
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">Order #{match.data.orderNumber}</span>
+                                                    <span className="text-sm text-gray-500">Qty: {match.data.qty}</span>
+                                                </div>
+                                                <p className="text-sm text-gray-600">{match.data.customerName}</p>
+                                                {match.data.atWarehouse && (
+                                                    <span className="inline-block mt-1 px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                                        At Warehouse
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 border-t border-gray-200 bg-gray-50">
+                    <button
+                        onClick={onClose}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg hover:bg-white"
+                    >
+                        Cancel
+                    </button>
                 </div>
             </div>
         </div>

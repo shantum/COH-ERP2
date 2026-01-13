@@ -18,7 +18,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Package, Search, TrendingUp, Warehouse } from 'lucide-react';
+import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp } from 'lucide-react';
 import { trpc } from '../services/trpc';
 import { reportsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -47,6 +47,7 @@ export default function Inventory() {
     const [searchInput, setSearchInput] = useState('');
     const [stockFilter, setStockFilter] = useState<StockFilter>('all');
     const [demandDays, setDemandDays] = useState<DemandPeriod>(30);
+    const [analyticsExpanded, setAnalyticsExpanded] = useState(false);
 
     // Auto-focus search on page load
     useEffect(() => {
@@ -300,138 +301,162 @@ export default function Inventory() {
                 </div>
             </div>
 
-            {/* Analytics Cards */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Most Stocked Products Card */}
-                <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-3">
-                        <Warehouse size={18} className="text-blue-600" />
-                        <h2 className="text-sm font-semibold text-gray-900">Most Stocked Products</h2>
-                        <span className="text-xs text-gray-500 ml-auto">by available inventory</span>
+            {/* Analytics Section (Collapsible) */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                {/* Collapse Header */}
+                <button
+                    onClick={() => setAnalyticsExpanded(!analyticsExpanded)}
+                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <Warehouse size={16} className="text-blue-600" />
+                            <TrendingUp size={16} className="text-green-600" />
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">Analytics</span>
+                        <span className="text-xs text-gray-500">Most stocked & highest demand products</span>
                     </div>
-
-                    {isLoading ? (
-                        <div className="space-y-2">
-                            {[...Array(5)].map((_, i) => (
-                                <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />
-                            ))}
-                        </div>
-                    ) : mostStockedProducts.length === 0 ? (
-                        <p className="text-gray-500 text-center py-6 text-sm">No inventory data</p>
+                    {analyticsExpanded ? (
+                        <ChevronUp size={18} className="text-gray-400" />
                     ) : (
-                        <div className="space-y-2">
-                            {mostStockedProducts.map((product, index) => (
-                                <div key={product.productId} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50">
-                                    {/* Rank Badge */}
-                                    <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
-                                        index === 0 ? 'bg-amber-100 text-amber-700' :
-                                        index === 1 ? 'bg-gray-200 text-gray-600' :
-                                        index === 2 ? 'bg-orange-100 text-orange-700' :
-                                        'bg-gray-100 text-gray-500'
-                                    }`}>
-                                        {index + 1}
-                                    </div>
-
-                                    {/* Product Image */}
-                                    {product.imageUrl ? (
-                                        <img src={product.imageUrl} alt={product.productName} className="w-10 h-10 rounded object-cover flex-shrink-0" />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                            <Package size={16} className="text-gray-400" />
-                                        </div>
-                                    )}
-
-                                    {/* Product Details */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="font-medium text-gray-900 text-sm truncate">{product.productName}</div>
-                                        <div className="text-xs text-gray-500 mt-0.5">
-                                            {product.colors.map((c, i) => (
-                                                <span key={c.colorName}>
-                                                    {i > 0 && ' · '}
-                                                    {c.colorName}: {c.available}
-                                                </span>
-                                            ))}
-                                            {product.colors.length < (mostStockedProducts.find(p => p.productId === product.productId)?.colors.length || 0) && ' ...'}
-                                        </div>
-                                    </div>
-
-                                    {/* Total Count */}
-                                    <div className="text-right flex-shrink-0">
-                                        <div className="text-sm font-semibold text-blue-600">{product.totalAvailable.toLocaleString()}</div>
-                                        <div className="text-xs text-gray-500">pcs</div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <ChevronDown size={18} className="text-gray-400" />
                     )}
-                </div>
+                </button>
 
-                {/* Highest Demand Card */}
-                <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-3">
-                        <TrendingUp size={18} className="text-green-600" />
-                        <h2 className="text-sm font-semibold text-gray-900">Highest Demand</h2>
-                        <select
-                            value={demandDays}
-                            onChange={(e) => setDemandDays(Number(e.target.value) as DemandPeriod)}
-                            className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value={14}>14 days</option>
-                            <option value={30}>30 days</option>
-                            <option value={60}>60 days</option>
-                            <option value={90}>90 days</option>
-                        </select>
+                {/* Collapsible Content */}
+                {analyticsExpanded && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 pt-0 border-t border-gray-100">
+                        {/* Most Stocked Products Card */}
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Warehouse size={18} className="text-blue-600" />
+                                <h2 className="text-sm font-semibold text-gray-900">Most Stocked Products</h2>
+                                <span className="text-xs text-gray-500 ml-auto">by available inventory</span>
+                            </div>
+
+                            {isLoading ? (
+                                <div className="space-y-2">
+                                    {[...Array(5)].map((_, i) => (
+                                        <div key={i} className="h-12 bg-gray-200 rounded animate-pulse" />
+                                    ))}
+                                </div>
+                            ) : mostStockedProducts.length === 0 ? (
+                                <p className="text-gray-500 text-center py-6 text-sm">No inventory data</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {mostStockedProducts.map((product, index) => (
+                                        <div key={product.productId} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
+                                            {/* Rank Badge */}
+                                            <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
+                                                index === 0 ? 'bg-amber-100 text-amber-700' :
+                                                index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                index === 2 ? 'bg-orange-100 text-orange-700' :
+                                                'bg-gray-100 text-gray-500'
+                                            }`}>
+                                                {index + 1}
+                                            </div>
+
+                                            {/* Product Image */}
+                                            {product.imageUrl ? (
+                                                <img src={product.imageUrl} alt={product.productName} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                            ) : (
+                                                <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                                    <Package size={16} className="text-gray-400" />
+                                                </div>
+                                            )}
+
+                                            {/* Product Details */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-gray-900 text-sm truncate">{product.productName}</div>
+                                                <div className="text-xs text-gray-500 mt-0.5">
+                                                    {product.colors.map((c, i) => (
+                                                        <span key={c.colorName}>
+                                                            {i > 0 && ' · '}
+                                                            {c.colorName}: {c.available}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Total Count */}
+                                            <div className="text-right flex-shrink-0">
+                                                <div className="text-sm font-semibold text-blue-600">{product.totalAvailable.toLocaleString()}</div>
+                                                <div className="text-xs text-gray-500">pcs</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Highest Demand Card */}
+                        <div className="bg-gray-50 rounded-lg p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <TrendingUp size={18} className="text-green-600" />
+                                <h2 className="text-sm font-semibold text-gray-900">Highest Demand</h2>
+                                <select
+                                    value={demandDays}
+                                    onChange={(e) => setDemandDays(Number(e.target.value) as DemandPeriod)}
+                                    className="ml-auto text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value={14}>14 days</option>
+                                    <option value={30}>30 days</option>
+                                    <option value={60}>60 days</option>
+                                    <option value={90}>90 days</option>
+                                </select>
+                            </div>
+
+                            {demandLoading ? (
+                                <div className="space-y-2">
+                                    {[...Array(5)].map((_, i) => (
+                                        <div key={i} className="h-12 bg-gray-200 rounded animate-pulse" />
+                                    ))}
+                                </div>
+                            ) : !demandData?.data?.length ? (
+                                <p className="text-gray-500 text-center py-6 text-sm">No sales data for this period</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {demandData.data.map((product: any, index: number) => (
+                                        <div key={product.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
+                                            {/* Rank Badge */}
+                                            <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
+                                                index === 0 ? 'bg-green-100 text-green-700' :
+                                                index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                index === 2 ? 'bg-emerald-100 text-emerald-700' :
+                                                'bg-gray-100 text-gray-500'
+                                            }`}>
+                                                {index + 1}
+                                            </div>
+
+                                            {/* Product Image */}
+                                            {product.imageUrl ? (
+                                                <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                            ) : (
+                                                <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                                    <Package size={16} className="text-gray-400" />
+                                                </div>
+                                            )}
+
+                                            {/* Product Details */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-gray-900 text-sm truncate">{product.name}</div>
+                                                <div className="text-xs text-gray-500 mt-0.5">
+                                                    {product.orderCount} orders · {product.category || 'uncategorized'}
+                                                </div>
+                                            </div>
+
+                                            {/* Units Sold */}
+                                            <div className="text-right flex-shrink-0">
+                                                <div className="text-sm font-semibold text-green-600">{product.units.toLocaleString()}</div>
+                                                <div className="text-xs text-gray-500">sold</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
-
-                    {demandLoading ? (
-                        <div className="space-y-2">
-                            {[...Array(5)].map((_, i) => (
-                                <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />
-                            ))}
-                        </div>
-                    ) : !demandData?.data?.length ? (
-                        <p className="text-gray-500 text-center py-6 text-sm">No sales data for this period</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {demandData.data.map((product: any, index: number) => (
-                                <div key={product.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-50">
-                                    {/* Rank Badge */}
-                                    <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
-                                        index === 0 ? 'bg-green-100 text-green-700' :
-                                        index === 1 ? 'bg-gray-200 text-gray-600' :
-                                        index === 2 ? 'bg-emerald-100 text-emerald-700' :
-                                        'bg-gray-100 text-gray-500'
-                                    }`}>
-                                        {index + 1}
-                                    </div>
-
-                                    {/* Product Image */}
-                                    {product.imageUrl ? (
-                                        <img src={product.imageUrl} alt={product.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center flex-shrink-0">
-                                            <Package size={16} className="text-gray-400" />
-                                        </div>
-                                    )}
-
-                                    {/* Product Details */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="font-medium text-gray-900 text-sm truncate">{product.name}</div>
-                                        <div className="text-xs text-gray-500 mt-0.5">
-                                            {product.orderCount} orders · {product.category || 'uncategorized'}
-                                        </div>
-                                    </div>
-
-                                    {/* Units Sold */}
-                                    <div className="text-right flex-shrink-0">
-                                        <div className="text-sm font-semibold text-green-600">{product.units.toLocaleString()}</div>
-                                        <div className="text-xs text-gray-500">sold</div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                )}
             </div>
 
             {/* Search and Filters Bar */}
@@ -504,7 +529,7 @@ export default function Inventory() {
             {/* AG-Grid Container */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="table-scroll-container">
-                    <div style={{ minWidth: '1000px', height: 'calc(100vh - 520px)', minHeight: '400px' }}>
+                    <div style={{ minWidth: '1000px', height: analyticsExpanded ? 'calc(100vh - 580px)' : 'calc(100vh - 340px)', minHeight: '400px' }}>
                         <AgGridReact
                             ref={gridRef}
                             theme={compactThemeSmall}
