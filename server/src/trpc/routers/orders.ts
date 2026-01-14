@@ -13,7 +13,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
-import { CreateOrderSchema } from '@coh/shared';
+import { CreateOrderSchema, MarkPaymentPaidSchema } from '@coh/shared';
 import {
     buildViewWhereClause,
     enrichOrdersForView,
@@ -222,6 +222,8 @@ const create = protectedProcedure
             isExchange,
             originalOrderId,
             shipByDate,
+            paymentMethod,
+            paymentStatus,
         } = input;
 
         // Validate originalOrderId exists if provided
@@ -278,6 +280,8 @@ const create = protectedProcedure
                     isExchange: isExchange || false,
                     originalOrderId: originalOrderId || null,
                     shipByDate: shipByDate ? new Date(shipByDate) : null,
+                    paymentMethod: paymentMethod || 'Prepaid',
+                    paymentStatus: paymentStatus || 'pending',
                     orderLines: {
                         create: lines.map((line: { skuId: string; qty: number; unitPrice?: number; shippingAddress?: string | null }) => ({
                             sku: { connect: { id: line.skuId } },
@@ -510,6 +514,64 @@ const ship = protectedProcedure
     });
 
 // ============================================
+// MARK PAYMENT PAID PROCEDURE
+// ============================================
+
+/**
+ * Mark order payment as paid
+ * For offline orders, confirms payment has been received
+ */
+const markPaid = protectedProcedure
+    .input(
+        z.object({
+            orderId: z.string().uuid('Invalid order ID'),
+            notes: z.string().optional(),
+        })
+    )
+    .mutation(async ({ input, ctx }) => {
+        const { orderId, notes } = input;
+
+        // Fetch order to validate it exists
+        const existingOrder = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            select: { id: true, paymentStatus: true, internalNotes: true },
+        });
+
+        if (!existingOrder) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        // Check if already paid
+        if (existingOrder.paymentStatus === 'paid') {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: 'Order payment is already marked as paid',
+            });
+        }
+
+        // Update order
+        const updatedOrder = await ctx.prisma.order.update({
+            where: { id: orderId },
+            data: {
+                paymentStatus: 'paid',
+                paymentConfirmedAt: new Date(),
+                paymentConfirmedBy: ctx.user.id,
+                internalNotes: notes
+                    ? `${existingOrder.internalNotes || ''}\n[Payment Confirmed by ${ctx.user.email}] ${notes}`.trim()
+                    : existingOrder.internalNotes,
+            },
+            include: {
+                orderLines: true,
+            },
+        });
+
+        return updatedOrder;
+    });
+
+// ============================================
 // EXPORT ROUTER
 // ============================================
 
@@ -522,4 +584,5 @@ export const ordersRouter = router({
     create,
     allocate,
     ship,
+    markPaid,
 });

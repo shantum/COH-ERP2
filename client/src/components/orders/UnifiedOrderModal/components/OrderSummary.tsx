@@ -199,19 +199,34 @@ export function OrderSummary({ order, calculatedTotal, totalItems }: OrderSummar
           </div>
         )}
 
-        {/* Payment Method */}
-        <div className="flex items-center justify-between pt-3 mt-1 border-t border-slate-100">
-          <span className="text-sm text-slate-500 flex items-center gap-1.5">
-            <CreditCard size={13} className="text-slate-400" />
-            Payment
-          </span>
-          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-            isCod
-              ? 'bg-amber-100 text-amber-700 border border-amber-200'
-              : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-          }`}>
-            {paymentMethod}
-          </span>
+        {/* Payment Method and Status */}
+        <div className="space-y-2 pt-3 mt-1 border-t border-slate-100">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-500 flex items-center gap-1.5">
+              <CreditCard size={13} className="text-slate-400" />
+              Payment Method
+            </span>
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isCod
+                ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                : 'bg-blue-100 text-blue-700 border border-blue-200'
+              }`}>
+              {paymentMethod}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-500">
+              Payment Status
+            </span>
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${order.paymentStatus === 'paid' || shopify?.financialStatus === 'paid'
+                ? 'bg-green-100 text-green-700 border border-green-200'
+                : order.paymentStatus === 'refunded' || shopify?.financialStatus === 'refunded'
+                  ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                  : 'bg-amber-100 text-amber-700 border border-amber-200'
+              }`}>
+              {order.paymentStatus || shopify?.financialStatus || 'pending'}
+            </span>
+          </div>
         </div>
       </div>
     </div>

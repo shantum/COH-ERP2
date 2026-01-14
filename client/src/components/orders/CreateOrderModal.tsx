@@ -174,6 +174,7 @@ export function CreateOrderModal({
         channel: 'offline',
         isExchange: false,
         paymentMethod: 'Prepaid' as 'Prepaid' | 'COD',
+        paymentStatus: 'pending' as 'pending' | 'paid',
         shipByDate: '',
     });
     const [orderLines, setOrderLines] = useState<OrderLine[]>([]);
@@ -478,11 +479,10 @@ export function CreateOrderModal({
                                             <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                         )}
                                         <input
-                                            className={`w-full pl-9 pr-8 py-2.5 text-sm border rounded-lg outline-none transition-all ${
-                                                orderForm.customerId
-                                                    ? 'border-green-200 bg-green-50 focus:bg-white focus:border-green-400 focus:ring-2 focus:ring-green-100'
-                                                    : 'border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
-                                            }`}
+                                            className={`w-full pl-9 pr-8 py-2.5 text-sm border rounded-lg outline-none transition-all ${orderForm.customerId
+                                                ? 'border-green-200 bg-green-50 focus:bg-white focus:border-green-400 focus:ring-2 focus:ring-green-100'
+                                                : 'border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
+                                                }`}
                                             placeholder="Search or enter name..."
                                             value={orderForm.customerName}
                                             onChange={(e) => handleCustomerFieldChange('customerName', e.target.value)}
@@ -575,26 +575,54 @@ export function CreateOrderModal({
                                     <button
                                         type="button"
                                         onClick={() => setOrderForm(f => ({ ...f, paymentMethod: 'Prepaid' }))}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-                                            orderForm.paymentMethod === 'Prepaid'
-                                                ? 'bg-green-500 text-white shadow-sm'
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
-                                        }`}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${orderForm.paymentMethod === 'Prepaid'
+                                            ? 'bg-green-500 text-white shadow-sm'
+                                            : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
+                                            }`}
                                     >
                                         Prepaid
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => setOrderForm(f => ({ ...f, paymentMethod: 'COD' }))}
-                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-                                            orderForm.paymentMethod === 'COD'
-                                                ? 'bg-amber-500 text-white shadow-sm'
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
-                                        }`}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${orderForm.paymentMethod === 'COD'
+                                            ? 'bg-amber-500 text-white shadow-sm'
+                                            : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
+                                            }`}
                                     >
                                         COD
                                     </button>
                                 </div>
+                            </div>
+
+                            {/* Payment Status Row */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Payment Status</label>
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setOrderForm(f => ({ ...f, paymentStatus: 'pending' }))}
+                                            className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${orderForm.paymentStatus === 'pending'
+                                                    ? 'bg-amber-500 text-white shadow-sm'
+                                                    : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
+                                                }`}
+                                        >
+                                            Pending
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setOrderForm(f => ({ ...f, paymentStatus: 'paid' }))}
+                                            className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${orderForm.paymentStatus === 'paid'
+                                                    ? 'bg-green-500 text-white shadow-sm'
+                                                    : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300'
+                                                }`}
+                                        >
+                                            Paid
+                                        </button>
+                                    </div>
+                                </div>
+                                <div></div> {/* Empty column for alignment */}
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">
@@ -604,11 +632,10 @@ export function CreateOrderModal({
                                         <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                         <input
                                             type="email"
-                                            className={`w-full pl-9 pr-3 py-2.5 text-sm border rounded-lg outline-none transition-all ${
-                                                orderForm.customerId && orderForm.customerEmail
-                                                    ? 'border-green-200 bg-green-50/50'
-                                                    : 'border-gray-200 bg-gray-50'
-                                            } focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100`}
+                                            className={`w-full pl-9 pr-3 py-2.5 text-sm border rounded-lg outline-none transition-all ${orderForm.customerId && orderForm.customerEmail
+                                                ? 'border-green-200 bg-green-50/50'
+                                                : 'border-gray-200 bg-gray-50'
+                                                } focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100`}
                                             placeholder="email@example.com"
                                             value={orderForm.customerEmail}
                                             onChange={(e) => handleCustomerFieldChange('customerEmail', e.target.value)}
@@ -625,11 +652,10 @@ export function CreateOrderModal({
                                     <div className="relative">
                                         <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                                         <input
-                                            className={`w-full pl-9 pr-3 py-2.5 text-sm border rounded-lg outline-none transition-all ${
-                                                orderForm.customerId && orderForm.customerPhone
-                                                    ? 'border-green-200 bg-green-50/50'
-                                                    : 'border-gray-200 bg-gray-50'
-                                            } focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100`}
+                                            className={`w-full pl-9 pr-3 py-2.5 text-sm border rounded-lg outline-none transition-all ${orderForm.customerId && orderForm.customerPhone
+                                                ? 'border-green-200 bg-green-50/50'
+                                                : 'border-gray-200 bg-gray-50'
+                                                } focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100`}
                                             placeholder="+91 98765 43210"
                                             value={orderForm.customerPhone}
                                             onChange={(e) => handleCustomerFieldChange('customerPhone', e.target.value)}
@@ -662,11 +688,10 @@ export function CreateOrderModal({
                                 <button
                                     type="button"
                                     onClick={() => setIsAddressExpanded(!isAddressExpanded)}
-                                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
-                                        hasAddressData
-                                            ? 'bg-green-50 border-green-200 hover:border-green-300'
-                                            : 'bg-gray-50 border-gray-200 hover:border-gray-300'
-                                    }`}
+                                    className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${hasAddressData
+                                        ? 'bg-green-50 border-green-200 hover:border-green-300'
+                                        : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                                        }`}
                                 >
                                     <div className="flex items-center gap-2 min-w-0">
                                         <MapPin size={14} className={hasAddressData ? 'text-green-500' : 'text-gray-400'} />
@@ -707,11 +732,10 @@ export function CreateOrderModal({
                                                                     key={idx}
                                                                     type="button"
                                                                     onClick={() => handleSelectPastAddress(addr)}
-                                                                    className={`group relative w-full p-3 rounded-lg border text-left transition-all ${
-                                                                        isSelected
-                                                                            ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
-                                                                            : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
-                                                                    }`}
+                                                                    className={`group relative w-full p-3 rounded-lg border text-left transition-all ${isSelected
+                                                                        ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
+                                                                        : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
+                                                                        }`}
                                                                 >
                                                                     <div className="flex items-start gap-2">
                                                                         <div className={`mt-0.5 p-1 rounded ${isSelected ? 'bg-blue-100' : 'bg-gray-100 group-hover:bg-blue-100'}`}>
@@ -723,11 +747,10 @@ export function CreateOrderModal({
                                                                             </p>
                                                                             <p className="text-xs text-gray-500 truncate">{addrLine}</p>
                                                                             <div className="flex items-center gap-2 mt-1">
-                                                                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                                                                    (addr as any).source === 'shopify'
-                                                                                        ? 'bg-green-100 text-green-700'
-                                                                                        : 'bg-gray-100 text-gray-600'
-                                                                                }`}>
+                                                                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${(addr as any).source === 'shopify'
+                                                                                    ? 'bg-green-100 text-green-700'
+                                                                                    : 'bg-gray-100 text-gray-600'
+                                                                                    }`}>
                                                                                     {(addr as any).source === 'shopify' ? 'Shopify' : 'Order'}
                                                                                 </span>
                                                                                 {(addr as any).lastUsed && (
@@ -964,11 +987,10 @@ export function CreateOrderModal({
                             <button
                                 type="submit"
                                 disabled={isCreating || orderLines.length === 0}
-                                className={`flex-1 px-4 py-2.5 text-sm font-medium text-white rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                                    orderForm.isExchange
-                                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
-                                        : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
-                                }`}
+                                className={`flex-1 px-4 py-2.5 text-sm font-medium text-white rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${orderForm.isExchange
+                                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
+                                    : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
+                                    }`}
                             >
                                 {isCreating ? (
                                     <span className="flex items-center justify-center gap-2">

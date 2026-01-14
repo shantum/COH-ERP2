@@ -51,6 +51,20 @@ export const ShipOrderSchema = z.object({
 export type ShipOrderInput = z.infer<typeof ShipOrderSchema>;
 
 // ============================================
+// MARK PAYMENT PAID SCHEMA
+// ============================================
+
+/**
+ * Mark order payment as paid validation schema
+ * Used for confirming payment receipt for offline orders
+ */
+export const MarkPaymentPaidSchema = z.object({
+    notes: z.string().optional(),
+});
+
+export type MarkPaymentPaidInput = z.infer<typeof MarkPaymentPaidSchema>;
+
+// ============================================
 // CREATE ORDER SCHEMA
 // ============================================
 
@@ -80,6 +94,7 @@ export const CreateOrderSchema = z.object({
     orderDate: z.string().datetime().optional(),
     shipByDate: z.string().optional().nullable(), // Optional shipping deadline (YYYY-MM-DD or ISO datetime)
     paymentMethod: z.enum(['Prepaid', 'COD']).default('Prepaid'),
+    paymentStatus: z.enum(['pending', 'paid']).default('pending').optional(),
     // totalAmount can be 0 or negative for exchange orders
     totalAmount: z.number().optional(),
     internalNotes: z.string().optional().nullable(),
@@ -118,6 +133,8 @@ export const UpdateOrderSchema = z.object({
     internalNotes: z.string().optional().nullable(),
     totalAmount: z.number().positive('Total amount must be positive').optional(),
     shipByDate: z.string().optional().nullable(), // Accepts YYYY-MM-DD or ISO datetime
+    paymentMethod: z.enum(['Prepaid', 'COD']).optional(),
+    paymentStatus: z.enum(['pending', 'paid', 'partially_paid', 'refunded', 'partially_refunded']).optional(),
     isExchange: z.boolean().optional(),
 });
 

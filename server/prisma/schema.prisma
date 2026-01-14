@@ -1,4 +1,3 @@
-// Creatures of Habit ERP - Database Schema (PostgreSQL)
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,185 +7,154 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================
-// USERS & AUTH
-// ============================================
-
 model Role {
   id          String   @id @default(uuid())
-  name        String   @unique  // owner, manager, operations, warehouse, etc.
+  name        String   @unique
   displayName String
   description String?
-  permissions Json     // Array of permission strings
-  isBuiltIn   Boolean  @default(false)  // Prevents deletion of system roles
+  permissions Json
+  isBuiltIn   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  users User[]
+  users       User[]
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  roleId    String?
-  role      String   @default("staff")  // DEPRECATED: Kept for migration, use roleId
-  isActive  Boolean  @default(true)
-  tokenVersion Int    @default(0)  // Increment to invalidate all user tokens
-  mustChangePassword Boolean @default(false)  // Force password change after admin reset
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  userRole               Role?                     @relation(fields: [roleId], references: [id])
-  permissionOverrides    UserPermissionOverride[]
-  inventoryTransactions  InventoryTransaction[]
-  fabricTransactions     FabricTransaction[]
-  returnStatusHistory    ReturnStatusHistory[]
-  processedRepackItems   RepackingQueueItem[]   @relation("RepackingProcessor")
-  createdWriteOffs       WriteOffLog[]          @relation("WriteOffCreator")
-  rtoInwardedLines       OrderLine[]            @relation("RtoInwardedBy")
-  customizedLines        OrderLine[]            @relation("CustomizedBy")
+  id                    String                   @id @default(uuid())
+  email                 String                   @unique
+  password              String
+  name                  String
+  role                  String                   @default("staff")
+  isActive              Boolean                  @default(true)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  mustChangePassword    Boolean                  @default(false)
+  roleId                String?
+  tokenVersion          Int                      @default(0)
+  fabricTransactions    FabricTransaction[]
+  inventoryTransactions InventoryTransaction[]
+  customizedLines       OrderLine[]              @relation("CustomizedBy")
+  rtoInwardedLines      OrderLine[]              @relation("RtoInwardedBy")
+  processedRepackItems  RepackingQueueItem[]     @relation("RepackingProcessor")
+  returnStatusHistory   ReturnStatusHistory[]
+  userRole              Role?                    @relation(fields: [roleId], references: [id])
+  permissionOverrides   UserPermissionOverride[]
+  createdWriteOffs      WriteOffLog[]            @relation("WriteOffCreator")
 
   @@index([roleId])
 }
 
 model UserPermissionOverride {
-  id           String   @id @default(uuid())
-  userId       String
-  permission   String   // e.g., "products:view:cost"
-  granted      Boolean  // true = explicitly grant, false = explicitly deny
-  createdAt    DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  userId     String
+  permission String
+  granted    Boolean
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, permission])
   @@index([userId])
 }
 
-
-// ============================================
-// PRODUCTS HIERARCHY
-// ============================================
-
 model Product {
-  id                        String   @id @default(uuid())
-  name                      String
-  styleCode                 String?  @unique // Style identifier (e.g., "LMD" for Linen Midi Dress)
-  category                  String   // dress, top, bottom, outerwear, accessory
-  productType               String   // basic, seasonal, limited
-  gender                    String   @default("unisex") // mens, womens, unisex
-  fabricTypeId              String?  // Default fabric type for this product (e.g., "Linen 60 Lea")
-  baseProductionTimeMins    Int      @default(60)
-  defaultFabricConsumption  Float?   // Default fabric consumption for SKUs (fallback)
-  trimsCost                 Float?   // Default trims cost (₹) - cascades to variations/SKUs
-  liningCost                Float?   // Default lining cost (₹) - cascades to variations/SKUs (only applies when hasLining=true)
-  packagingCost             Float?   // Default packaging cost (₹) - cascades to variations/SKUs (null = use global default)
-  imageUrl                  String?  // Main product image URL (from Shopify)
-  isActive                  Boolean  @default(true)
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
-
-  // Shopify integration
-  // NOTE: shopifyProductId is the primary/first Shopify product ID (for backward compat)
-  // Multiple Shopify products can link to one ERP product (e.g., each color is a separate Shopify product)
-  shopifyProductId  String?   @unique  // Primary Shopify product ID
-  shopifyProductIds String[]  @default([])  // All linked Shopify product IDs
-  shopifyHandle     String?   // Shopify handle (URL slug) of primary product
-
-  // Return/exchange stats (aggregated from SKUs)
-  returnCount   Int @default(0)
-  exchangeCount Int @default(0)
-  writeOffCount Int @default(0)
-
-  fabricType FabricType? @relation(fields: [fabricTypeId], references: [id])
-  variations Variation[]
+  id                       String      @id @default(uuid())
+  name                     String
+  styleCode                String?     @unique
+  category                 String
+  productType              String
+  gender                   String      @default("unisex")
+  fabricTypeId             String?
+  baseProductionTimeMins   Int         @default(60)
+  defaultFabricConsumption Float?
+  imageUrl                 String?
+  isActive                 Boolean     @default(true)
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+  shopifyProductId         String?     @unique
+  shopifyHandle            String?
+  exchangeCount            Int         @default(0)
+  returnCount              Int         @default(0)
+  writeOffCount            Int         @default(0)
+  trimsCost                Float?
+  packagingCost            Float?
+  liningCost               Float?
+  shopifyProductIds        String[]    @default([])
+  fabricType               FabricType? @relation(fields: [fabricTypeId], references: [id])
+  variations               Variation[]
 
   @@index([fabricTypeId])
   @@index([category])
   @@index([shopifyHandle])
-  @@index([name])  // For title-based product matching
+  @@index([name])
 }
 
 model Variation {
-  id            String  @id @default(uuid())
-  productId     String
-  colorName     String  // e.g., "Mustard", "Wildflower Blue"
-  standardColor String? // e.g., "Yellow", "Blue" - for analytics/grouping
-  colorHex      String?
-  fabricId      String
-  imageUrl      String? // Color-specific image URL (from Shopify)
-  hasLining     Boolean @default(false) // Whether this color variant has lining
-  trimsCost     Float?  // Override trims cost for this variation (null = inherit from Product)
-  liningCost    Float?  // Override lining cost for this variation (null = inherit from Product)
-  packagingCost Float?  // Override packaging cost for this variation (null = inherit from Product)
-  laborMinutes  Float?  // Override labor minutes for this variation (null = inherit from Product.baseProductionTimeMins)
-  isActive      Boolean @default(true)
-
-  // Shopify source tracking (which Shopify product this color came from)
-  shopifySourceProductId String?  // Shopify product ID for this specific color
-  shopifySourceHandle    String?  // Handle for reference (e.g., "linen-polo-indigo")
-
-  product Product @relation(fields: [productId], references: [id])
-  fabric  Fabric  @relation(fields: [fabricId], references: [id])
-  skus    Sku[]
+  id                     String  @id @default(uuid())
+  productId              String
+  colorName              String
+  standardColor          String?
+  colorHex               String?
+  fabricId               String
+  imageUrl               String?
+  isActive               Boolean @default(true)
+  hasLining              Boolean @default(false)
+  trimsCost              Float?
+  packagingCost          Float?
+  liningCost             Float?
+  laborMinutes           Float?
+  shopifySourceProductId String?
+  shopifySourceHandle    String?
+  skus                   Sku[]
+  fabric                 Fabric  @relation(fields: [fabricId], references: [id])
+  product                Product @relation(fields: [productId], references: [id])
 
   @@unique([productId, colorName])
   @@index([productId])
   @@index([fabricId])
-  @@index([shopifySourceProductId])  // For reverse lookups
+  @@index([shopifySourceProductId])
 }
 
 model Sku {
-  id                String  @id @default(uuid())
-  skuCode           String  @unique // Also used as barcode for scanning
-  variationId       String
-  size              String  // XS, S, M, L, XL, 2XL, 3XL, 4XL, Free
-  fabricConsumption Float   @default(1.5)
-  mrp               Float
-  trimsCost         Float?  // Override trims cost for this SKU (null = inherit from Variation/Product)
-  liningCost        Float?  // Override lining cost for this SKU (null = inherit from Variation/Product)
-  packagingCost     Float?  // Override packaging cost for this SKU (null = inherit from Variation/Product)
-  laborMinutes      Float?  // Override labor minutes for this SKU (null = inherit from Variation/Product)
-  targetStockQty    Int     @default(10)
-  targetStockMethod String  @default("day14") // day7, day14, day28, manual
-  isActive          Boolean @default(true)
-
-  // Shopify integration
+  id                     String                        @id @default(uuid())
+  skuCode                String                        @unique
+  variationId            String
+  size                   String
+  fabricConsumption      Float                         @default(1.5)
+  mrp                    Float
+  targetStockQty         Int                           @default(10)
+  targetStockMethod      String                        @default("day14")
+  isActive               Boolean                       @default(true)
   shopifyInventoryItemId String?
   shopifyVariantId       String?
-
-  // Return/exchange stats
-  returnCount   Int @default(0)
-  exchangeCount Int @default(0)
-  writeOffCount Int @default(0)
-
-  // Custom SKU tracking
-  isCustomSku         Boolean  @default(false)  // True for custom pieces
-  parentSkuId         String?                    // Links to base SKU
-  parentSku           Sku?     @relation("CustomSkus", fields: [parentSkuId], references: [id])
-  customSkus          Sku[]    @relation("CustomSkus")
-  customizationCount  Int      @default(0)       // Counter for next C01, C02...
-
-  // Customization details (only set for custom SKUs)
-  customizationType   String?   // 'length', 'size', 'measurements', 'other'
-  customizationValue  String?   // e.g., "-2 inches"
-  customizationNotes  String?
-  linkedOrderLineId   String?   @unique          // The order line this was made for
-
-  variation             Variation              @relation(fields: [variationId], references: [id])
-  inventoryTransactions InventoryTransaction[]
-  orderLines            OrderLine[]
-  productionBatches     ProductionBatch[]
-  skuCosting            SkuCosting?
-  returnRequestLines    ReturnRequestLine[]    @relation("ReturnedSku")
-  exchangeRequestLines  ReturnRequestLine[]    @relation("ExchangeSku")
-  replacementItems      ReplacementItem[]      // NEW: When this SKU is wanted as replacement
-  feedbackProductLinks  FeedbackProductLink[]
-  shopifyInventoryCache ShopifyInventoryCache?
-  repackingQueueItems   RepackingQueueItem[]
-  writeOffLogs          WriteOffLog[]
-  reconciliationItems   InventoryReconciliationItem[]
+  exchangeCount          Int                           @default(0)
+  returnCount            Int                           @default(0)
+  writeOffCount          Int                           @default(0)
+  customizationCount     Int                           @default(0)
+  customizationNotes     String?
+  customizationType      String?
+  customizationValue     String?
+  isCustomSku            Boolean                       @default(false)
+  linkedOrderLineId      String?                       @unique
+  parentSkuId            String?
+  trimsCost              Float?
+  packagingCost          Float?
+  liningCost             Float?
+  laborMinutes           Float?
+  feedbackProductLinks   FeedbackProductLink[]
+  reconciliationItems    InventoryReconciliationItem[]
+  inventoryTransactions  InventoryTransaction[]
+  orderLines             OrderLine[]
+  productionBatches      ProductionBatch[]
+  repackingQueueItems    RepackingQueueItem[]
+  replacementItems       ReplacementItem[]
+  exchangeRequestLines   ReturnRequestLine[]           @relation("ExchangeSku")
+  returnRequestLines     ReturnRequestLine[]           @relation("ReturnedSku")
+  shopifyInventoryCache  ShopifyInventoryCache?
+  parentSku              Sku?                          @relation("CustomSkus", fields: [parentSkuId], references: [id])
+  customSkus             Sku[]                         @relation("CustomSkus")
+  variation              Variation                     @relation(fields: [variationId], references: [id])
+  skuCosting             SkuCosting?
+  writeOffLogs           WriteOffLog[]
 
   @@index([variationId])
   @@index([parentSkuId])
@@ -203,103 +171,90 @@ model SkuCosting {
   otherCost       Float    @default(0)
   totalCogs       Float
   lastUpdated     DateTime @default(now())
-
-  sku Sku @relation(fields: [skuId], references: [id])
+  sku             Sku      @relation(fields: [skuId], references: [id])
 }
 
 model CostConfig {
   id                   String   @id @default(uuid())
   laborRatePerMin      Float    @default(2.50)
   defaultPackagingCost Float    @default(50)
-  // GST configuration for catalog pricing
-  gstThreshold         Float    @default(2500)  // Price threshold for GST rate change
-  gstRateAbove         Float    @default(18)    // GST % for prices >= threshold (e.g., 18%)
-  gstRateBelow         Float    @default(5)     // GST % for prices < threshold (e.g., 5%)
   lastUpdated          DateTime @default(now())
+  gstRateAbove         Float    @default(18)
+  gstRateBelow         Float    @default(5)
+  gstThreshold         Float    @default(2500)
 }
 
-// ============================================
-// FABRIC MANAGEMENT
-// ============================================
-
 model FabricType {
-  id              String  @id @default(uuid())
-  name            String  @unique
-  composition     String?
-  unit            String  // meter, kg
-  avgShrinkagePct Float   @default(0)
-
-  // Default values inherited by all colors of this fabric type
-  defaultCostPerUnit  Float? // Cost per unit (₹) - inherited by colors
-  defaultLeadTimeDays Int?   // Lead time in days - inherited by colors
-  defaultMinOrderQty  Float? // Minimum order quantity - inherited by colors
-
-  fabrics  Fabric[]
-  products Product[]
+  id                  String    @id @default(uuid())
+  name                String    @unique
+  composition         String?
+  unit                String
+  avgShrinkagePct     Float     @default(0)
+  defaultCostPerUnit  Float?
+  defaultLeadTimeDays Int?
+  defaultMinOrderQty  Float?
+  fabrics             Fabric[]
+  products            Product[]
 }
 
 model Fabric {
-  id            String  @id @default(uuid())
-  fabricTypeId  String
-  name          String
-  colorName     String  // e.g., "Mustard", "Ocean Blue"
-  standardColor String? // e.g., "Yellow", "Blue" - for analytics/grouping
-  colorHex      String?
-  // Cost/lead time fields: null = inherit from FabricType, value = override
-  costPerUnit   Float?  // null = inherit from fabricType.defaultCostPerUnit
-  supplierId    String?
-  leadTimeDays  Int?    // null = inherit from fabricType.defaultLeadTimeDays
-  minOrderQty   Float?  // null = inherit from fabricType.defaultMinOrderQty
-  isActive      Boolean @default(true)
-
-  fabricType   FabricType          @relation(fields: [fabricTypeId], references: [id])
-  supplier     Supplier?           @relation(fields: [supplierId], references: [id])
-  variations          Variation[]
-  transactions        FabricTransaction[]
+  id                  String                     @id @default(uuid())
+  fabricTypeId        String
+  name                String
+  colorName           String
+  standardColor       String?
+  colorHex            String?
+  costPerUnit         Float?
+  supplierId          String?
+  leadTimeDays        Int?
+  minOrderQty         Float?
+  isActive            Boolean                    @default(true)
+  fabricType          FabricType                 @relation(fields: [fabricTypeId], references: [id])
+  supplier            Supplier?                  @relation(fields: [supplierId], references: [id])
   fabricOrders        FabricOrder[]
   reconciliationItems FabricReconciliationItem[]
+  transactions        FabricTransaction[]
+  variations          Variation[]
 
   @@index([fabricTypeId])
   @@index([supplierId])
 }
 
 model Supplier {
-  id          String   @id @default(uuid())
-  name        String
-  contactName String?
-  email       String?
-  phone       String?
-  address     String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
+  id                 String              @id @default(uuid())
+  name               String
+  contactName        String?
+  email              String?
+  phone              String?
+  address            String?
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
   fabrics            Fabric[]
   fabricOrders       FabricOrder[]
   fabricTransactions FabricTransaction[]
 }
 
 model FabricTransaction {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   fabricId    String
-  txnType     String   // inward, outward
+  txnType     String
   qty         Float
-  unit        String   // meter, kg
-  reason      String   // supplier_receipt, production, shrinkage, damage, adjustment
-  costPerUnit Float?   // Cost per unit for inward transactions
-  supplierId  String?  // Supplier for inward transactions
+  unit        String
+  reason      String
+  costPerUnit Float?
+  supplierId  String?
   referenceId String?
   notes       String?
   createdById String
-  createdAt   DateTime @default(now())
-
-  fabric    Fabric    @relation(fields: [fabricId], references: [id])
-  createdBy User      @relation(fields: [createdById], references: [id])
-  supplier  Supplier? @relation(fields: [supplierId], references: [id])
+  createdAt   DateTime  @default(now())
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  fabric      Fabric    @relation(fields: [fabricId], references: [id])
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
 
   @@index([fabricId])
   @@index([txnType])
   @@index([createdAt])
-  @@index([fabricId, createdAt])  // Compound: fabric transaction history
+  @@index([fabricId, createdAt])
 }
 
 model FabricOrder {
@@ -307,166 +262,129 @@ model FabricOrder {
   fabricId     String
   supplierId   String
   qtyOrdered   Float
-  unit         String    // meter, kg
+  unit         String
   costPerUnit  Float
   totalCost    Float
   orderDate    DateTime  @default(now())
   expectedDate DateTime?
   receivedDate DateTime?
   qtyReceived  Float?
-  status       String    @default("ordered") // ordered, partial, received, cancelled
+  status       String    @default("ordered")
   notes        String?
-
-  fabric   Fabric   @relation(fields: [fabricId], references: [id])
-  supplier Supplier @relation(fields: [supplierId], references: [id])
+  fabric       Fabric    @relation(fields: [fabricId], references: [id])
+  supplier     Supplier  @relation(fields: [supplierId], references: [id])
 
   @@index([fabricId])
   @@index([supplierId])
   @@index([status])
 }
 
-// ============================================
-// INVENTORY
-// ============================================
-
 model InventoryTransaction {
   id                String   @id @default(uuid())
   skuId             String
-  txnType           String   // inward, outward
+  txnType           String
   qty               Int
-  reason            String   // production, sale, return_receipt, damage, adjustment, transfer
+  reason            String
   referenceId       String?
   notes             String?
   warehouseLocation String?
   createdById       String
   createdAt         DateTime @default(now())
-
-  sku       Sku  @relation(fields: [skuId], references: [id])
-  createdBy User @relation(fields: [createdById], references: [id])
+  createdBy         User     @relation(fields: [createdById], references: [id])
+  sku               Sku      @relation(fields: [skuId], references: [id])
 
   @@index([skuId])
   @@index([txnType])
   @@index([createdAt])
-  @@index([skuId, reason, createdAt])  // Compound: balance lookups by reason
-  @@index([skuId, txnType])            // Compound: balance calculations (groupBy txnType)
-  @@index([referenceId])               // Release/unallocation lookups
+  @@index([skuId, reason, createdAt])
+  @@index([skuId, txnType])
+  @@index([referenceId])
 }
 
-// ============================================
-// CUSTOMERS
-// ============================================
-
 model Customer {
-  id                String    @id @default(uuid())
-  shopifyCustomerId String?   @unique
-  email             String    @unique
+  id                String          @id @default(uuid())
+  shopifyCustomerId String?         @unique
+  email             String          @unique
   phone             String?
   firstName         String?
   lastName          String?
-  defaultAddress    String?   // JSON stored as string
-  tags              String?   // Comma-separated
-  acceptsMarketing  Boolean   @default(false)
+  defaultAddress    String?
+  tags              String?
+  acceptsMarketing  Boolean         @default(false)
   firstOrderDate    DateTime?
   lastOrderDate     DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  exchangeCount     Int             @default(0)
+  returnCount       Int             @default(0)
+  rtoCount          Int             @default(0)
+  tier              String          @default("bronze")
+  feedback          Feedback[]
+  orders            Order[]
+  returnRequests    ReturnRequest[]
 
-  // Return/exchange/RTO stats
-  returnCount   Int @default(0)
-  exchangeCount Int @default(0)
-  rtoCount      Int @default(0)
-
-  // Loyalty tier (auto-calculated from LTV)
-  tier          String  @default("bronze")  // bronze, silver, gold, platinum
-
-  orders         Order[]
-  returnRequests ReturnRequest[]
-  feedback       Feedback[]
-
-  @@index([createdAt])  // Customer list sorting
+  @@index([createdAt])
 }
 
-// ============================================
-// ORDERS
-// ============================================
-
 model Order {
-  id              String    @id @default(uuid())
-  orderNumber     String    @unique
-  shopifyOrderId  String?   @unique
-  channel         String    @default("shopify") // shopify, amazon, offline, custom
-  customerId      String?
-  customerName    String
-  customerEmail   String?
-  customerPhone   String?
-  shippingAddress String?   // JSON stored as string
-  orderDate       DateTime  @default(now())
-  shipByDate      DateTime?  // Optional deadline for shipping
-  // customerNotes: Read from shopifyCache.customerNotes (Shopify-owned field)
-  internalNotes   String?
-  paymentMethod   String?   // ERP-owned: COD, Prepaid, etc. (can be edited after order creation)
-  status          String    @default("open") // open, on_hold, partially_on_hold, partially_shipped, shipped, delivered, cancelled, archived
-  isArchived      Boolean   @default(false)
-  archivedAt      DateTime?
-
-  // Order-level hold (blocks all lines)
-  isOnHold        Boolean   @default(false)
-  holdReason      String?   // fraud_review, address_issue, payment_issue, customer_request, other
-  holdNotes       String?
-  holdAt          DateTime?
-  awbNumber       String?   // ERP-owned: Tracking number for shipment
-  courier         String?   // ERP-owned: Courier/logistics partner
-  shippedAt       DateTime? // ERP-owned: When order was shipped
-  deliveredAt     DateTime? // ERP-owned: When order was delivered
-  rtoInitiatedAt  DateTime?  // When RTO was initiated (failed delivery)
-  rtoReceivedAt   DateTime?  // When RTO package was received back
-
-  // Terminal status tracking (source of truth for archive eligibility)
-  terminalStatus  String?    // delivered, rto_received, cancelled
-  terminalAt      DateTime?  // When order reached terminal status
-
-  totalAmount     Float
-
-  // iThink Logistics tracking fields
-  trackingStatus       String?   // in_transit, out_for_delivery, delivered, delivery_delayed, rto_initiated, rto_in_transit, rto_delivered
-  expectedDeliveryDate DateTime? // Expected delivery date from courier
-  deliveryAttempts     Int       @default(0) // OFD count - number of delivery attempts
-  lastScanStatus       String?   // Latest tracking scan status text
-  lastScanLocation     String?   // Latest tracking scan location
-  lastScanAt           DateTime? // When the last scan occurred
-  lastTrackingUpdate   DateTime? // When we last fetched tracking from API
-  courierStatusCode    String?   // Raw status code from courier (e.g., IT, OFD, DL, UD)
-
-  // COD Remittance fields
-  codRemittedAt     DateTime? // When COD was remitted by logistics partner
-  codRemittanceUtr  String?   // Bank UTR reference for COD remittance
-  codRemittedAmount Float?    // Actual COD amount remitted
-
-  // COD Shopify sync status
-  codShopifySyncStatus String?   // pending, synced, failed, manual_review
-  codShopifySyncError  String?   // Error message if sync failed
-  codShopifySyncedAt   DateTime? // When payment was synced to Shopify
-
-  // discountCode: REMOVED - Read from shopifyCache.discountCodes (Shopify-owned field)
-  createdAt       DateTime  @default(now())
-  syncedAt        DateTime?
-  // shopifyFulfillmentStatus: REMOVED - Read from shopifyCache.fulfillmentStatus (Shopify-owned field)
-  // shopifyData: REMOVED - Use shopifyCache.rawData instead (Shopify-owned field)
-
-  // Partial cancellation tracking
-  partiallyCancelled Boolean @default(false)  // True if any line is cancelled but order has active lines
-
-  // Exchange order tracking
-  isExchange       Boolean   @default(false)  // True for exchange orders
-  originalOrderId  String?                     // Optional link to original order being exchanged
-
-  customer         Customer?           @relation(fields: [customerId], references: [id])
-  shopifyCache     ShopifyOrderCache?  @relation(fields: [shopifyOrderId], references: [id])
-  orderLines       OrderLine[]
-  returnRequests   ReturnRequest[]     @relation("OriginalOrder")
-  exchangeRequests ReturnRequest[]     @relation("ExchangeOrder")
-  originalOrder    Order?              @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
-  exchangeOrders   Order[]             @relation("ExchangeOriginalOrder")
+  id                   String             @id @default(uuid())
+  orderNumber          String             @unique
+  shopifyOrderId       String?            @unique
+  channel              String             @default("shopify")
+  customerId           String?
+  customerName         String
+  customerEmail        String?
+  customerPhone        String?
+  shippingAddress      String?
+  orderDate            DateTime           @default(now())
+  internalNotes        String?
+  paymentMethod        String?
+  status               String             @default("open")
+  isArchived           Boolean            @default(false)
+  archivedAt           DateTime?
+  awbNumber            String?
+  courier              String?
+  shippedAt            DateTime?
+  deliveredAt          DateTime?
+  totalAmount          Float
+  createdAt            DateTime           @default(now())
+  syncedAt             DateTime?
+  rtoInitiatedAt       DateTime?
+  rtoReceivedAt        DateTime?
+  courierStatusCode    String?
+  deliveryAttempts     Int                @default(0)
+  expectedDeliveryDate DateTime?
+  lastScanAt           DateTime?
+  lastScanLocation     String?
+  lastScanStatus       String?
+  lastTrackingUpdate   DateTime?
+  trackingStatus       String?
+  codRemittanceUtr     String?
+  codRemittedAmount    Float?
+  codRemittedAt        DateTime?
+  codShopifySyncError  String?
+  codShopifySyncStatus String?
+  codShopifySyncedAt   DateTime?
+  holdAt               DateTime?
+  holdNotes            String?
+  holdReason           String?
+  isOnHold             Boolean            @default(false)
+  isExchange           Boolean            @default(false)
+  originalOrderId      String?
+  shipByDate           DateTime?
+  terminalAt           DateTime?
+  terminalStatus       String?
+  partiallyCancelled   Boolean            @default(false)
+  paymentConfirmedAt   DateTime?
+  paymentConfirmedBy   String?
+  paymentStatus        String?            @default("pending")
+  customer             Customer?          @relation(fields: [customerId], references: [id])
+  originalOrder        Order?             @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
+  exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
+  shopifyCache         ShopifyOrderCache? @relation(fields: [shopifyOrderId], references: [id])
+  orderLines           OrderLine[]
+  exchangeRequests     ReturnRequest[]    @relation("ExchangeOrder")
+  returnRequests       ReturnRequest[]    @relation("OriginalOrder")
 
   @@index([customerId])
   @@index([status])
@@ -475,243 +393,203 @@ model Order {
   @@index([isExchange])
   @@index([originalOrderId])
   @@index([shipByDate])
-  @@index([status, orderDate])      // Compound: filter by status + sort by date
-  @@index([customerId, orderDate])  // Compound: customer order history
-  @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)
-  @@index([status, isArchived, orderDate]) // Compound: open orders with date sort
-  @@index([terminalStatus])         // Terminal status filtering
-  @@index([terminalAt])             // Terminal date filtering for archive
-  @@index([terminalStatus, terminalAt]) // Compound: archive queue queries
-  @@index([shippedAt])              // Shipped orders sorting
-  @@index([status, shippedAt])      // Compound: shipped view filtering
+  @@index([status, orderDate])
+  @@index([customerId, orderDate])
+  @@index([status, isArchived])
+  @@index([status, isArchived, orderDate])
+  @@index([terminalStatus])
+  @@index([terminalAt])
+  @@index([terminalStatus, terminalAt])
+  @@index([shippedAt])
+  @@index([status, shippedAt])
 }
 
 model OrderLine {
-  id                String    @id @default(uuid())
-  orderId           String
-  shopifyLineId     String?
-  skuId             String
-  qty               Int
-  unitPrice         Float
-  lineStatus        String    @default("pending") // pending, allocated, picked, packed, shipped
-  allocatedAt       DateTime?
-  pickedAt          DateTime?
-  packedAt          DateTime?
-  shippedAt         DateTime?
-  inventoryTxnId    String?
-  productionBatchId String?
-  notes             String?
-
-  // Customization tracking
-  isCustomized      Boolean   @default(false)
-  isNonReturnable   Boolean   @default(false)
-  originalSkuId     String?                       // Preserves reference to base SKU
-  customizedAt      DateTime?
-  customizedById    String?
-
-  // RTO Reconciliation fields (only populated for RTO orders)
-  rtoCondition      String?   // null, unopened, good, damaged, wrong_product
-  rtoInwardedAt     DateTime?
-  rtoInwardedById   String?
-  rtoNotes          String?
-
-  // Line-level hold (allows partial order holds)
-  isOnHold          Boolean   @default(false)
-  holdReason        String?   // size_confirmation, stock_issue, customization, customer_request, other
-  holdNotes         String?
-  holdAt            DateTime?
-
-  // Line-level tracking (enables multi-AWB shipping)
-  awbNumber         String?
-  courier           String?
-  trackingStatus    String?   // in_transit, out_for_delivery, delivered, rto_initiated, rto_delivered
-  deliveredAt       DateTime?
-  rtoInitiatedAt    DateTime?
-  rtoReceivedAt     DateTime?
+  id                 String              @id @default(uuid())
+  orderId            String
+  shopifyLineId      String?
+  skuId              String
+  qty                Int
+  unitPrice          Float
+  lineStatus         String              @default("pending")
+  allocatedAt        DateTime?
+  pickedAt           DateTime?
+  packedAt           DateTime?
+  shippedAt          DateTime?
+  inventoryTxnId     String?
+  productionBatchId  String?
+  notes              String?
+  rtoCondition       String?
+  rtoInwardedAt      DateTime?
+  rtoInwardedById    String?
+  rtoNotes           String?
+  customizedAt       DateTime?
+  customizedById     String?
+  isCustomized       Boolean             @default(false)
+  isNonReturnable    Boolean             @default(false)
+  originalSkuId      String?
+  awbNumber          String?
+  courier            String?
+  deliveredAt        DateTime?
+  holdAt             DateTime?
+  holdNotes          String?
+  holdReason         String?
+  isOnHold           Boolean             @default(false)
   lastTrackingUpdate DateTime?
-
-  // Line-level refund (enables partial refunds)
-  refundAmount      Float?
-  refundReason      String?   // quality_issue, size_issue, customer_request, damaged, other
-  refundedAt        DateTime?
-  refundNotes       String?
-
-  // Shipping address (optional, falls back to Order.shippingAddress if null)
-  shippingAddress   String?   // JSON stored as string
-
-  order               Order               @relation(fields: [orderId], references: [id])
-  sku                 Sku                 @relation(fields: [skuId], references: [id])
-  productionBatch     ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
-  returnRequestLines  ReturnRequestLine[]
-  repackingQueueItems RepackingQueueItem[]
-  rtoInwardedBy       User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
-  customizedBy        User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
+  refundAmount       Float?
+  refundNotes        String?
+  refundReason       String?
+  refundedAt         DateTime?
+  rtoInitiatedAt     DateTime?
+  rtoReceivedAt      DateTime?
+  trackingStatus     String?
+  shippingAddress    String?
+  customizedBy       User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
+  order              Order               @relation(fields: [orderId], references: [id])
+  productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
+  rtoInwardedBy      User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
+  sku                Sku                 @relation(fields: [skuId], references: [id])
+  returnRequestLines ReturnRequestLine[]
 
   @@index([orderId])
   @@index([skuId])
   @@index([lineStatus])
   @@index([productionBatchId])
-  @@index([lineStatus, orderId])  // Compound: filter lines by status within order
+  @@index([lineStatus, orderId])
   @@index([rtoInwardedById])
   @@index([customizedById])
-  @@index([awbNumber])            // Fast lookup for tracking webhooks
-  @@index([skuId, rtoCondition])  // Performance: scan-lookup RTO checks
-  @@index([orderId, rtoCondition]) // Performance: RTO count queries
+  @@index([awbNumber])
+  @@index([skuId, rtoCondition])
+  @@index([orderId, rtoCondition])
 }
 
-// ============================================
-// RETURNS & EXCHANGES
-// ============================================
-
 model ReturnRequest {
-  id              String   @id @default(uuid())
-  requestNumber   String   @unique
-  requestType     String   // DEPRECATED: Use resolutionType. Kept for backward compat. Values: return, exchange
-  originalOrderId String
-  customerId      String?
-  status          String   @default("pending_pickup") // pending_pickup, in_transit, received, processing, completed, cancelled
-  reasonCategory  String   // size_issue, color_mismatch, quality_defect, wrong_item, changed_mind, damaged_in_transit, other
-  reasonDetails   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  // NEW: Resolution type (replaces requestType)
-  // refund = full refund, exchange_same = same value item, exchange_up = higher value (+pay), exchange_down = lower value (+refund diff)
-  resolution      String   @default("refund") // refund, exchange_same, exchange_up, exchange_down
-
-  // Value tracking
-  returnValue       Float?    // Value of items being returned
-  replacementValue  Float?    // Value of replacement items (0 for refund)
-  valueDifference   Float?    // Positive = customer pays, Negative = refund difference
-
-  // Resolution outcomes
-  refundAmount        Float?    // Amount to refund (full or difference)
-  refundProcessedAt   DateTime? // When refund was issued
-  paymentAmount       Float?    // Amount customer needs to pay (for exchange_up)
-  paymentCollectedAt  DateTime? // When payment was collected
+  id                  String                @id @default(uuid())
+  requestNumber       String                @unique
+  requestType         String
+  originalOrderId     String
+  customerId          String?
+  status              String                @default("pending_pickup")
+  reasonCategory      String
+  reasonDetails       String?
   resolutionNotes     String?
-
-  // Exchange order linking
-  exchangeOrderId    String?   // Links to the replacement order
-
-  // Shipment tracking timestamps
-  reverseInTransitAt DateTime? // NEW: When reverse pickup confirmed (allows early-ship)
-  reverseReceived    Boolean   @default(false)  // Customer's return received at warehouse
-  reverseReceivedAt  DateTime?
-  forwardShippedAt   DateTime? // NEW: When replacement shipped
-  forwardDelivered   Boolean   @default(false)  // Replacement delivered to customer
-  forwardDeliveredAt DateTime?
-
-  originalOrder       Order                 @relation("OriginalOrder", fields: [originalOrderId], references: [id])
-  exchangeOrder       Order?                @relation("ExchangeOrder", fields: [exchangeOrderId], references: [id])
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  exchangeOrderId     String?
+  forwardDelivered    Boolean               @default(false)
+  forwardDeliveredAt  DateTime?
+  reverseReceived     Boolean               @default(false)
+  reverseReceivedAt   DateTime?
+  forwardShippedAt    DateTime?
+  paymentAmount       Float?
+  paymentCollectedAt  DateTime?
+  refundAmount        Float?
+  refundProcessedAt   DateTime?
+  replacementValue    Float?
+  resolution          String                @default("refund")
+  returnValue         Float?
+  reverseInTransitAt  DateTime?
+  valueDifference     Float?
+  repackingQueueItems RepackingQueueItem[]
+  replacementItems    ReplacementItem[]
   customer            Customer?             @relation(fields: [customerId], references: [id])
+  exchangeOrder       Order?                @relation("ExchangeOrder", fields: [exchangeOrderId], references: [id])
+  originalOrder       Order                 @relation("OriginalOrder", fields: [originalOrderId], references: [id])
   lines               ReturnRequestLine[]
-  replacementItems    ReplacementItem[]     // NEW: Items customer wants as replacement
   shipping            ReturnShipping[]
   statusHistory       ReturnStatusHistory[]
-  repackingQueueItems RepackingQueueItem[]
 
   @@index([originalOrderId])
   @@index([customerId])
   @@index([status])
   @@index([resolution])
   @@index([exchangeOrderId])
-  @@index([status, createdAt])       // Compound: pending returns dashboard
-  @@index([customerId, status])      // Compound: customer returns lookup
+  @@index([status, createdAt])
+  @@index([customerId, status])
 }
 
 model ReturnRequestLine {
-  id                  String  @id @default(uuid())
+  id                  String        @id @default(uuid())
   requestId           String
   originalOrderLineId String?
   skuId               String
   qty                 Int
-  unitPrice           Float?  // Price of item being returned (for value calc)
-  exchangeSkuId       String? // DEPRECATED: Use ReplacementItem model instead
-  exchangeQty         Int?    // DEPRECATED: Use ReplacementItem model instead
-  itemCondition       String? // good, used, damaged, wrong_product (set when received)
+  exchangeSkuId       String?
+  exchangeQty         Int?
+  itemCondition       String?
   inspectionNotes     String?
-
-  request           ReturnRequest @relation(fields: [requestId], references: [id])
-  originalOrderLine OrderLine?    @relation(fields: [originalOrderLineId], references: [id])
-  sku               Sku           @relation("ReturnedSku", fields: [skuId], references: [id])
-  exchangeSku       Sku?          @relation("ExchangeSku", fields: [exchangeSkuId], references: [id])
+  unitPrice           Float?
+  exchangeSku         Sku?          @relation("ExchangeSku", fields: [exchangeSkuId], references: [id])
+  originalOrderLine   OrderLine?    @relation(fields: [originalOrderLineId], references: [id])
+  request             ReturnRequest @relation(fields: [requestId], references: [id])
+  sku                 Sku           @relation("ReturnedSku", fields: [skuId], references: [id])
 
   @@index([requestId])
   @@index([skuId])
-  @@index([skuId, itemCondition]) // Performance: scan-lookup return checks
+  @@index([skuId, itemCondition])
 }
 
-// NEW: Tracks what the customer wants as replacement (for exchanges)
 model ReplacementItem {
-  id            String  @id @default(uuid())
-  requestId     String
-  skuId         String
-  qty           Int
-  unitPrice     Float   // Price of replacement item
-
-  request ReturnRequest @relation(fields: [requestId], references: [id])
-  sku     Sku           @relation(fields: [skuId], references: [id])
+  id        String        @id @default(uuid())
+  requestId String
+  skuId     String
+  qty       Int
+  unitPrice Float
+  request   ReturnRequest @relation(fields: [requestId], references: [id])
+  sku       Sku           @relation(fields: [skuId], references: [id])
 
   @@index([requestId])
   @@index([skuId])
 }
 
 model ReturnShipping {
-  id                String    @id @default(uuid())
+  id                String        @id @default(uuid())
   requestId         String
-  direction         String    // reverse, forward
+  direction         String
   courier           String?
   awbNumber         String?
-  pickupAddress     String?   // JSON stored as string
+  pickupAddress     String?
   pickupScheduledAt DateTime?
   pickedUpAt        DateTime?
   receivedAt        DateTime?
   shippedAt         DateTime?
   deliveredAt       DateTime?
-  status            String    @default("scheduled") // scheduled, picked_up, in_transit, delivered, failed
+  status            String        @default("scheduled")
   notes             String?
-
-  request ReturnRequest @relation(fields: [requestId], references: [id])
+  request           ReturnRequest @relation(fields: [requestId], references: [id])
 
   @@index([requestId])
 }
 
 model ReturnStatusHistory {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   requestId   String
   fromStatus  String
   toStatus    String
   changedById String
   notes       String?
-  createdAt   DateTime @default(now())
-
-  request   ReturnRequest @relation(fields: [requestId], references: [id])
-  changedBy User          @relation(fields: [changedById], references: [id])
+  createdAt   DateTime      @default(now())
+  changedBy   User          @relation(fields: [changedById], references: [id])
+  request     ReturnRequest @relation(fields: [requestId], references: [id])
 
   @@index([requestId])
 }
 
-// ============================================
-// CUSTOMER FEEDBACK
-// ============================================
-
 model Feedback {
-  id           String   @id @default(uuid())
+  id           String                @id @default(uuid())
   customerId   String?
   orderId      String?
   orderLineId  String?
-  source       String   // post_delivery, review_request, support, manual, shopify_review
-  feedbackType String   // rating, review, complaint, suggestion, praise
-  status       String   @default("new") // new, acknowledged, actioned, resolved, archived
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
+  source       String
+  feedbackType String
+  status       String                @default("new")
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
   customer     Customer?             @relation(fields: [customerId], references: [id])
-  ratings      FeedbackRating[]
   content      FeedbackContent?
   media        FeedbackMedia[]
   productLinks FeedbackProductLink[]
+  ratings      FeedbackRating[]
   tags         FeedbackTag[]
 
   @@index([customerId])
@@ -719,12 +597,11 @@ model Feedback {
 }
 
 model FeedbackRating {
-  id         String @id @default(uuid())
+  id         String   @id @default(uuid())
   feedbackId String
-  dimension  String // overall, quality, fit, comfort, value, packaging
+  dimension  String
   score      Int
-
-  feedback Feedback @relation(fields: [feedbackId], references: [id])
+  feedback   Feedback @relation(fields: [feedbackId], references: [id])
 }
 
 model FeedbackContent {
@@ -735,155 +612,133 @@ model FeedbackContent {
   pros           String?
   cons           String?
   wouldRecommend Boolean?
-
-  feedback Feedback @relation(fields: [feedbackId], references: [id])
+  feedback       Feedback @relation(fields: [feedbackId], references: [id])
 }
 
 model FeedbackMedia {
-  id         String  @id @default(uuid())
+  id         String   @id @default(uuid())
   feedbackId String
   mediaType  String
   url        String
   caption    String?
-
-  feedback Feedback @relation(fields: [feedbackId], references: [id])
+  feedback   Feedback @relation(fields: [feedbackId], references: [id])
 }
 
 model FeedbackProductLink {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   feedbackId  String
   productId   String?
   variationId String?
   skuId       String?
-
-  feedback Feedback @relation(fields: [feedbackId], references: [id])
-  sku      Sku?     @relation(fields: [skuId], references: [id])
+  feedback    Feedback @relation(fields: [feedbackId], references: [id])
+  sku         Sku?     @relation(fields: [skuId], references: [id])
 }
 
 model FeedbackTag {
-  id         String @id @default(uuid())
+  id         String   @id @default(uuid())
   feedbackId String
   tag        String
-
-  feedback Feedback @relation(fields: [feedbackId], references: [id])
+  feedback   Feedback @relation(fields: [feedbackId], references: [id])
 }
 
-// ============================================
-// PRODUCTION
-// ============================================
-
 model Tailor {
-  id                String   @id @default(uuid())
+  id                String            @id @default(uuid())
   name              String
-  specializations   String?  // Comma-separated: dress,top,bottom
-  dailyCapacityMins Int      @default(480)
-  isActive          Boolean  @default(true)
-  createdAt         DateTime @default(now())
-
+  specializations   String?
+  dailyCapacityMins Int               @default(480)
+  isActive          Boolean           @default(true)
+  createdAt         DateTime          @default(now())
   productionBatches ProductionBatch[]
 }
 
 model ProductionBatch {
-  id                String    @id @default(uuid())
-  batchCode         String?   @unique // Human-readable code: YYYYMMDD-001
-  batchDate         DateTime  @default(now())
+  id                String      @id @default(uuid())
+  batchCode         String?     @unique
+  batchDate         DateTime    @default(now())
   tailorId          String?
   skuId             String
   qtyPlanned        Int
-  qtyCompleted      Int       @default(0)
-  priority          String    // order_fulfillment, stock_replenishment
+  qtyCompleted      Int         @default(0)
+  priority          String
   sourceOrderLineId String?
-  status            String    @default("planned") // planned, in_progress, completed, cancelled
+  status            String      @default("planned")
   notes             String?
-  createdAt         DateTime  @default(now())
+  createdAt         DateTime    @default(now())
   completedAt       DateTime?
-
-  tailor     Tailor?     @relation(fields: [tailorId], references: [id])
-  sku        Sku         @relation(fields: [skuId], references: [id])
-  orderLines OrderLine[]
+  orderLines        OrderLine[]
+  sku               Sku         @relation(fields: [skuId], references: [id])
+  tailor            Tailor?     @relation(fields: [tailorId], references: [id])
 
   @@index([skuId])
   @@index([tailorId])
   @@index([batchDate])
   @@index([status])
-  @@index([batchDate, batchCode])  // For efficient batch code generation query
-  @@index([skuId, status])         // Compound: inward-history batch lookups
+  @@index([batchDate, batchCode])
+  @@index([skuId, status])
 }
 
-// ============================================
-// REPACKING & WRITE-OFFS
-// ============================================
-
 model RepackingQueueItem {
-  id              String    @id @default(uuid())
+  id              String         @id @default(uuid())
   skuId           String
-  qty             Int       @default(1)
-  returnRequestId String?   // Link to return that created this
-  returnLineId    String?   // Specific return line
-  orderLineId     String?   // Link to RTO order line
-  status          String    @default("pending") // pending, inspecting, repacking, ready, write_off
-  condition       String    // unused, used, damaged, defective, destroyed
+  qty             Int            @default(1)
+  returnRequestId String?
+  returnLineId    String?
+  status          String         @default("pending")
+  condition       String
   inspectionNotes String?
-  qcComments      String?   // QC comments when accepting/rejecting
-  writeOffReason  String?   // size_issue, quality_defect, destroyed, wrong_product
-  createdAt       DateTime  @default(now())
+  writeOffReason  String?
+  createdAt       DateTime       @default(now())
   processedAt     DateTime?
   processedById   String?
-
-  sku           Sku            @relation(fields: [skuId], references: [id])
-  returnRequest ReturnRequest? @relation(fields: [returnRequestId], references: [id])
-  orderLine     OrderLine?     @relation(fields: [orderLineId], references: [id])
-  processedBy   User?          @relation("RepackingProcessor", fields: [processedById], references: [id])
+  qcComments      String?
+  orderLineId     String?
+  processedBy     User?          @relation("RepackingProcessor", fields: [processedById], references: [id])
+  returnRequest   ReturnRequest? @relation(fields: [returnRequestId], references: [id])
+  sku             Sku            @relation(fields: [skuId], references: [id])
 
   @@index([skuId])
   @@index([status])
   @@index([returnRequestId])
   @@index([orderLineId])
-  @@index([skuId, status]) // Performance: scan-lookup repacking checks
+  @@index([skuId, status])
 }
 
 model WriteOffLog {
   id          String   @id @default(uuid())
   skuId       String
   qty         Int
-  reason      String   // defective, destroyed, wrong_product, expired, other
-  sourceType  String   // return, production, inventory_audit
-  sourceId    String?  // RepackingQueueItem.id or other reference
+  reason      String
+  sourceType  String
+  sourceId    String?
   notes       String?
-  costValue   Float?   // For financial tracking
+  costValue   Float?
   createdById String
   createdAt   DateTime @default(now())
-
-  sku       Sku  @relation(fields: [skuId], references: [id])
-  createdBy User @relation("WriteOffCreator", fields: [createdById], references: [id])
+  createdBy   User     @relation("WriteOffCreator", fields: [createdById], references: [id])
+  sku         Sku      @relation(fields: [skuId], references: [id])
 
   @@index([skuId])
   @@index([reason])
   @@index([createdAt])
 }
 
-// ============================================
-// SHOPIFY INTEGRATION
-// ============================================
-
 model ShopifyInventoryCache {
   skuId                  String   @id
   shopifyInventoryItemId String
   availableQty           Int
   lastSynced             DateTime @default(now())
-
-  sku Sku @relation(fields: [skuId], references: [id])
+  sku                    Sku      @relation(fields: [skuId], references: [id])
 }
 
 model ShopifyProductCache {
-  id              String    @id // shopifyProductId
-  rawData         String    // Complete Shopify product JSON
-  title           String?   // Extracted for quick lookup
-  handle          String?   // Shopify handle
+  id              String    @id
+  rawData         String
+  title           String?
+  handle          String?
   lastWebhookAt   DateTime  @default(now())
-  webhookTopic    String?   // products/create, products/update, etc.
-  processedAt     DateTime? // When synced to Product table
-  processingError String?   // If sync failed, store error
+  webhookTopic    String?
+  processedAt     DateTime?
+  processingError String?
   createdAt       DateTime  @default(now())
 
   @@index([handle])
@@ -891,141 +746,129 @@ model ShopifyProductCache {
   @@index([lastWebhookAt])
 }
 
-
-// ============================================
-// SYSTEM SETTINGS
-// ============================================
-
 model SystemSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
 }
 
-// ============================================
-// BACKGROUND SYNC JOBS
-// ============================================
-
 model SyncJob {
-  id            String    @id @default(uuid())
-  jobType       String    // orders, customers, products
-  status        String    @default("pending") // pending, running, completed, failed, cancelled
-
-  // Configuration
-  dateFilter    String?   // e.g., "last_90_days"
-  daysBack      Int?      // Number of days to sync
-  syncMode      String?   // 'populate' (skip existing) | 'update' (refresh stale) | null (legacy upsert)
-  staleAfterMins Int?     // For update mode: re-sync orders updated in Shopify within last X mins
-
-  // Progress tracking
-  totalRecords  Int?      // Total records to process (from Shopify count)
-  processed     Int       @default(0) // Records processed so far
-  created       Int       @default(0) // Records created
-  updated       Int       @default(0) // Records updated
-  skipped       Int       @default(0) // Records skipped
-  errors        Int       @default(0) // Records with errors
-
-  // Resume capability
-  lastProcessedId String? // Last Shopify ID processed (for resume)
-  currentBatch    Int     @default(0) // Current batch number
-
-  // Error tracking
-  errorLog      String?   // JSON array of errors (truncated)
-  lastError     String?   // Most recent error message
-
-  // Timestamps
-  startedAt     DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  jobType         String
+  status          String    @default("pending")
+  dateFilter      String?
+  daysBack        Int?
+  syncMode        String?
+  staleAfterMins  Int?
+  totalRecords    Int?
+  processed       Int       @default(0)
+  created         Int       @default(0)
+  updated         Int       @default(0)
+  skipped         Int       @default(0)
+  errors          Int       @default(0)
+  lastProcessedId String?
+  currentBatch    Int       @default(0)
+  errorLog        String?
+  lastError       String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([status])
   @@index([jobType])
   @@index([createdAt])
 }
 
-// ============================================
-// SHOPIFY ORDER CACHE
-// ============================================
-
 model ShopifyOrderCache {
-  id                String    @id // shopifyOrderId
-  rawData           String    // Complete Shopify order JSON (kept for rare fields)
-
-  // Extracted fields for quick lookup (no JSON parsing needed)
-  orderNumber       String?
-  financialStatus   String?   // paid, pending, refunded, etc.
-  fulfillmentStatus String?   // unfulfilled, partial, fulfilled
-
-  // Shopify-owned fields (extracted at cache time, read-only from Shopify)
-  discountCodes     String?   // Comma-separated discount codes
-  customerNotes     String?   // Shopify order.note
-  tags              String?   // Comma-separated order tags
-
-  // Tracking info from Shopify fulfillments (read-only snapshot from Shopify)
-  // NOTE: These show Shopify's view, which may differ from ERP workflow
-  // Order table owns the ERP tracking data (awbNumber, courier, trackingStatus)
-  trackingNumber    String?   // AWB from Shopify fulfillment (compare with Order.awbNumber)
-  trackingCompany   String?   // Courier from Shopify (compare with Order.courier)
-  trackingUrl       String?   // Tracking URL from Shopify fulfillment
-  shippedAt         DateTime? // Ship date from Shopify (compare with Order.shippedAt)
-  deliveredAt       DateTime? // Delivery date from Shopify (compare with Order.deliveredAt)
-  shipmentStatus    String?   // Shopify shipment status
-  fulfillmentUpdatedAt DateTime? // Last fulfillment status update from Shopify
-
-  // Payment info from Shopify (read-only)
-  paymentMethod     String?   // COD/Prepaid at time of order (compare with Order.paymentMethod)
-
-  // Shipping address (flattened for common queries)
-  shippingCity      String?
-  shippingState     String?
-  shippingCountry   String?
-
-  // ============================================
-  // GENERATED COLUMNS (auto-extracted from rawData by PostgreSQL)
-  // These are read-only and populated automatically - no backfill needed!
-  // NOTE: Keep minimal to conserve database disk space
-  // ============================================
-
-  // Order amounts (essential for order display)
-  totalPrice           Float?    // rawData.total_price
-  subtotalPrice        Float?    // rawData.subtotal_price
-  totalTax             Float?    // rawData.total_tax
-  totalDiscounts       Float?    // rawData.total_discounts
-
-  // Metadata
-  lastWebhookAt     DateTime  @default(now())
-  webhookTopic      String?   // orders/create, orders/updated, etc.
-  processedAt       DateTime? // When synced to Order table
-  processingError   String?   // If sync failed, store error
-  createdAt         DateTime  @default(now())
-
-  // Multi-instance processing lock
-  processingLock    DateTime? // Expires after 30s to prevent deadlocks
-
-  // Relation to Order
-  order             Order?
+  id                    String    @id
+  rawData               String
+  orderNumber           String?
+  financialStatus       String?
+  fulfillmentStatus     String?
+  lastWebhookAt         DateTime  @default(now())
+  webhookTopic          String?
+  processedAt           DateTime?
+  processingError       String?
+  createdAt             DateTime  @default(now())
+  customerNotes         String?
+  discountCodes         String?
+  paymentMethod         String?
+  shippedAt             DateTime?
+  shippingCity          String?
+  shippingCountry       String?
+  shippingState         String?
+  tags                  String?
+  trackingCompany       String?
+  trackingNumber        String?
+  trackingUrl           String?
+  deliveredAt           DateTime?
+  fulfillmentUpdatedAt  DateTime?
+  shipmentStatus        String?
+  processingLock        DateTime?
+  billingCity           String?
+  billingName           String?
+  billingPhone          String?
+  billingState          String?
+  billingZip            String?
+  buyerAcceptsMarketing Boolean?
+  cancelReason          String?
+  confirmationNumber    String?
+  currency              String?
+  customerEmail         String?
+  customerFirstName     String?
+  customerId            String?
+  customerLastName      String?
+  customerPhone         String?
+  fulfillmentCount      Int?
+  isConfirmed           Boolean?
+  isTaxExempt           Boolean?
+  isTest                Boolean?
+  lineItemCount         Int?
+  paymentGatewayNames   String?
+  refundCount           Int?
+  shippingAddress1      String?
+  shippingAddress2      String?
+  shippingCountryCode   String?
+  shippingLatitude      Float?
+  shippingLongitude     Float?
+  shippingName          String?
+  shippingPhone         String?
+  shippingProvince      String?
+  shippingProvinceCode  String?
+  shippingZip           String?
+  shopifyCancelledAt    DateTime?
+  shopifyClosedAt       DateTime?
+  shopifyCreatedAt      DateTime?
+  shopifyOrderName      String?
+  shopifyProcessedAt    DateTime?
+  shopifyUpdatedAt      DateTime?
+  sourceName            String?
+  totalLineItemsPrice   Float?
+  totalOutstanding      Float?
+  totalShippingPrice    Float?
+  totalPrice            Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'total_price'::text))::numeric")) @db.Decimal
+  subtotalPrice         Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'subtotal_price'::text))::numeric")) @db.Decimal
+  totalTax              Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'total_tax'::text))::numeric")) @db.Decimal
+  totalDiscounts        Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'total_discounts'::text))::numeric")) @db.Decimal
+  order                 Order?
 
   @@index([orderNumber])
   @@index([processedAt])
   @@index([lastWebhookAt])
 }
 
-// ============================================
-// WEBHOOK MANAGEMENT
-// ============================================
-
 model WebhookLog {
-  id              String    @id @default(uuid())
-  webhookId       String    @unique // X-Shopify-Webhook-Id header (deduplication key)
-  topic           String    // orders/create, orders/updated, etc.
-  resourceId      String?   // Shopify resource ID (order/product/customer ID)
-  status          String    @default("received") // received, processing, processed, failed
-  responseCode    Int?      // HTTP response code sent back
-  processingTime  Int?      // ms to process
-  error           String?   // Error message if failed
-  receivedAt      DateTime  @default(now())
-  processedAt     DateTime?
+  id             String    @id @default(uuid())
+  webhookId      String    @unique
+  topic          String
+  resourceId     String?
+  status         String    @default("received")
+  responseCode   Int?
+  processingTime Int?
+  error          String?
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
 
   @@index([webhookId])
   @@index([topic])
@@ -1034,18 +877,18 @@ model WebhookLog {
 }
 
 model FailedSyncItem {
-  id            String    @id @default(uuid())
-  itemType      String    // order, product, customer
-  resourceId    String    // Shopify resource ID
-  rawData       String?   // JSON payload that failed
-  error         String    // Error message
-  retryCount    Int       @default(0)
-  maxRetries    Int       @default(5)
-  nextRetryAt   DateTime? // Exponential backoff
-  status        String    @default("pending") // pending, retrying, resolved, abandoned
-  resolvedAt    DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id          String    @id @default(uuid())
+  itemType    String
+  resourceId  String
+  rawData     String?
+  error       String
+  retryCount  Int       @default(0)
+  maxRetries  Int       @default(5)
+  nextRetryAt DateTime?
+  status      String    @default("pending")
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([itemType, resourceId])
   @@index([status])
@@ -1053,91 +896,75 @@ model FailedSyncItem {
   @@index([itemType])
 }
 
-// ============================================
-// FABRIC RECONCILIATION
-// ============================================
-
 model FabricReconciliation {
-  id            String    @id @default(uuid())
-  reconcileDate DateTime  @default(now())
-  status        String    @default("draft") // draft, submitted
+  id            String                     @id @default(uuid())
+  reconcileDate DateTime                   @default(now())
+  status        String                     @default("draft")
   notes         String?
   createdBy     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  items FabricReconciliationItem[]
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  items         FabricReconciliationItem[]
 
   @@index([status])
   @@index([createdAt])
 }
 
 model FabricReconciliationItem {
-  id               String  @id @default(uuid())
+  id               String               @id @default(uuid())
   reconciliationId String
   fabricId         String
-  systemQty        Float                   // Qty as per system at time of count
-  physicalQty      Float?                  // Qty counted physically
-  variance         Float?                  // physicalQty - systemQty
-  adjustmentReason String?                 // shrinkage, wastage, damaged, found, etc.
+  systemQty        Float
+  physicalQty      Float?
+  variance         Float?
+  adjustmentReason String?
   notes            String?
-  txnId            String? @unique         // Reference to created FabricTransaction
-
-  reconciliation FabricReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
-  fabric         Fabric               @relation(fields: [fabricId], references: [id])
+  txnId            String?              @unique
+  fabric           Fabric               @relation(fields: [fabricId], references: [id])
+  reconciliation   FabricReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
 
   @@index([reconciliationId])
   @@index([fabricId])
 }
 
-// ============================================
-// INVENTORY RECONCILIATION (SKU Count)
-// ============================================
-
 model InventoryReconciliation {
-  id            String    @id @default(uuid())
-  reconcileDate DateTime  @default(now())
-  status        String    @default("draft") // draft, submitted
+  id            String                        @id @default(uuid())
+  reconcileDate DateTime                      @default(now())
+  status        String                        @default("draft")
   notes         String?
   createdBy     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  items InventoryReconciliationItem[]
+  createdAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+  items         InventoryReconciliationItem[]
 
   @@index([status])
   @@index([createdAt])
 }
 
 model InventoryReconciliationItem {
-  id               String  @id @default(uuid())
+  id               String                  @id @default(uuid())
   reconciliationId String
   skuId            String
-  systemQty        Int                     // Qty as per system at time of count
-  physicalQty      Int?                    // Qty counted physically
-  variance         Int?                    // physicalQty - systemQty
-  adjustmentReason String?                 // shrinkage, damaged, found, counting_error, etc.
+  systemQty        Int
+  physicalQty      Int?
+  variance         Int?
+  adjustmentReason String?
   notes            String?
-  txnId            String? @unique         // Reference to created InventoryTransaction
-
-  reconciliation InventoryReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
-  sku            Sku                     @relation(fields: [skuId], references: [id])
+  txnId            String?                 @unique
+  reconciliation   InventoryReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  sku              Sku                     @relation(fields: [skuId], references: [id])
 
   @@index([reconciliationId])
   @@index([skuId])
 }
 
-// ============================================
-// PINCODE DATA (for geographic analysis)
-// ============================================
-
 model Pincode {
   id        String   @id @default(uuid())
-  pincode   String   @unique  // 6-digit pincode
-  district  String             // District name
-  state     String             // State name
-  region    String?            // Region name (optional)
-  division  String?            // Division name (optional)
+  pincode   String   @unique
+  district  String
+  state     String
+  region    String?
+  division  String?
   createdAt DateTime @default(now())
 
   @@index([state])
