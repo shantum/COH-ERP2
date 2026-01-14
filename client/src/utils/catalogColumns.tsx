@@ -200,11 +200,11 @@ export function createColumnDefs({
             colId: 'fabricTypeName',
             headerName: DEFAULT_HEADERS.fabricTypeName,
             width: 120,
-            // Use valueGetter for filtering (returns displayed text)
+            // Use valueGetter for filtering - always show product's fabricTypeName for consistency
             valueGetter: (params: any) => {
                 const row = params.data;
                 if (!row) return '';
-                return row.variationFabricTypeName || row.fabricTypeName || '';
+                return row.fabricTypeName || '';
             },
             filter: 'agTextColumnFilter',
             floatingFilter: true,

@@ -1,8 +1,8 @@
 /**
  * FabricEditPopover Component
  *
- * A popover for editing fabric types and fabrics at different aggregation levels.
- * Supports product-level (fabric type), variation-level (fabric), and SKU-level editing.
+ * Inline editor for fabric type (product-level) and fabric (variation-level).
+ * Used in catalog grid columns.
  */
 
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -14,7 +14,7 @@ export type ViewLevel = 'sku' | 'variation' | 'product' | 'consumption';
 export interface FabricEditPopoverProps {
     row: any;
     viewLevel: ViewLevel;
-    columnType: 'fabricType' | 'fabric'; // Which column this popover is for
+    columnType: 'fabricType' | 'fabric';
     fabricTypes: Array<{ id: string; name: string }>;
     fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string; displayName: string }>;
     onUpdateFabricType: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
@@ -22,7 +22,6 @@ export interface FabricEditPopoverProps {
     rawItems: any[];
 }
 
-// Common select styling for fabric popovers
 const SELECT_CLASS = "w-full text-sm border rounded px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-100";
 
 export function FabricEditPopover({
@@ -39,13 +38,11 @@ export function FabricEditPopover({
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
-    // Local filter state for variation level - allows browsing all fabric types
     const [filterFabricTypeId, setFilterFabricTypeId] = useState<string>('');
 
     // Reset filter when popover opens
     useEffect(() => {
         if (isOpen) {
-            // Default to current fabric's type, or empty to show all
             const currentFabric = fabrics.find(f => f.id === row.fabricId);
             setFilterFabricTypeId(currentFabric?.fabricTypeId || '');
         }
@@ -53,6 +50,7 @@ export function FabricEditPopover({
 
     // Close on click outside
     useEffect(() => {
+        if (!isOpen) return;
         const handleClickOutside = (e: MouseEvent) => {
             if (
                 popoverRef.current &&
@@ -63,11 +61,8 @@ export function FabricEditPopover({
                 setIsOpen(false);
             }
         };
-
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-            return () => document.removeEventListener('mousedown', handleClickOutside);
-        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isOpen]);
 
     const handleOpen = (e: React.MouseEvent) => {
@@ -82,25 +77,18 @@ export function FabricEditPopover({
         setIsOpen(!isOpen);
     };
 
-    // Calculate affected items count for cascading updates
-    const getAffectedCount = (type: 'fabricType' | 'fabric') => {
-        if (type === 'fabricType') {
-            // Count all SKUs under this product
-            return rawItems.filter(item => item.productId === row.productId).length;
-        } else {
-            // Count all SKUs under this variation
-            return rawItems.filter(item => item.variationId === row.variationId).length;
-        }
-    };
+    // Count affected SKUs
+    const skuCountForProduct = useMemo(() =>
+        rawItems.filter(item => item.productId === row.productId).length,
+        [rawItems, row.productId]
+    );
 
-    // Check if values are mixed (for aggregated views)
-    const hasMixedFabricTypes = useMemo(() => {
-        if (viewLevel === 'sku') return false;
-        const productItems = rawItems.filter(item => item.productId === row.productId);
-        const uniqueTypes = new Set(productItems.map(i => i.fabricTypeId));
-        return uniqueTypes.size > 1;
-    }, [viewLevel, rawItems, row.productId]);
+    const skuCountForVariation = useMemo(() =>
+        rawItems.filter(item => item.variationId === row.variationId).length,
+        [rawItems, row.variationId]
+    );
 
+    // Check if variation has mixed fabrics (for aggregated views)
     const hasMixedFabrics = useMemo(() => {
         if (viewLevel === 'sku') return false;
         const variationItems = rawItems.filter(item => item.variationId === row.variationId);
@@ -108,51 +96,38 @@ export function FabricEditPopover({
         return uniqueFabrics.size > 1;
     }, [viewLevel, rawItems, row.variationId]);
 
-    // Filter fabrics by selected fabric type
-    // For variation level: use local filter state (allows browsing all types)
-    // For product/sku level: use product's fabric type
+    // Filter fabrics by type
     const filteredFabrics = useMemo(() => {
-        const typeIdToFilter = viewLevel === 'variation' ? filterFabricTypeId : row.fabricTypeId;
-        if (!typeIdToFilter) return fabrics;
-        return fabrics.filter(f => f.fabricTypeId === typeIdToFilter);
+        const typeId = viewLevel === 'variation' ? filterFabricTypeId : row.fabricTypeId;
+        if (!typeId) return fabrics;
+        return fabrics.filter(f => f.fabricTypeId === typeId);
     }, [fabrics, viewLevel, filterFabricTypeId, row.fabricTypeId]);
 
     const handleFabricTypeChange = (fabricTypeId: string) => {
-        const affectedCount = getAffectedCount('fabricType');
-        if (affectedCount > 1) {
-            const confirmed = window.confirm(
-                `This will update the fabric type for ${affectedCount} SKU${affectedCount > 1 ? 's' : ''}. Continue?`
-            );
-            if (!confirmed) return;
+        if (skuCountForProduct > 1) {
+            if (!window.confirm(`Update fabric type for ${skuCountForProduct} SKUs?`)) return;
         }
-        onUpdateFabricType(row.productId, fabricTypeId || null, affectedCount);
+        onUpdateFabricType(row.productId, fabricTypeId || null, skuCountForProduct);
         setIsOpen(false);
     };
 
     const handleFabricChange = (fabricId: string) => {
         if (!fabricId) return;
-        const affectedCount = getAffectedCount('fabric');
-        if (affectedCount > 1) {
-            const confirmed = window.confirm(
-                `This will update the fabric for ${affectedCount} SKU${affectedCount > 1 ? 's' : ''}. Continue?`
-            );
-            if (!confirmed) return;
+        if (skuCountForVariation > 1) {
+            if (!window.confirm(`Update fabric for ${skuCountForVariation} SKUs?`)) return;
         }
-        onUpdateFabric(row.variationId, fabricId, affectedCount);
+        onUpdateFabric(row.variationId, fabricId, skuCountForVariation);
         setIsOpen(false);
     };
 
-    // Display text - based on column type and view level
-    // For fabric type column:
-    //   - Product view: show product's fabricTypeName (matches the dropdown value)
-    //   - Variation/SKU views: show variation's fabric type (variationFabricTypeName) for clarity
+    // Display text
     const displayText = columnType === 'fabricType'
-        ? (hasMixedFabricTypes
-            ? 'Multiple'
-            : viewLevel === 'product'
-                ? (row.fabricTypeName || 'Not set')
-                : (row.variationFabricTypeName || row.fabricTypeName || 'Not set'))
+        ? (row.fabricTypeName || 'Not set')
         : (hasMixedFabrics ? 'Multiple' : row.fabricName || 'Not set');
+
+    // Determine if editing is available
+    const canEditFabricType = columnType === 'fabricType' && (viewLevel === 'product' || viewLevel === 'sku');
+    const canEditFabric = columnType === 'fabric' && (viewLevel === 'variation' || viewLevel === 'sku');
 
     return (
         <div className="inline-block">
@@ -164,7 +139,7 @@ export function FabricEditPopover({
                         ? 'text-gray-400 hover:text-blue-600 hover:bg-blue-50'
                         : 'text-gray-700 hover:text-blue-600 hover:bg-blue-50'
                 }`}
-                title="Edit fabric"
+                title={columnType === 'fabricType' ? 'Edit fabric type' : 'Edit fabric'}
             >
                 <span className="truncate">{displayText}</span>
                 <Pencil size={10} className="flex-shrink-0 opacity-50" />
@@ -177,79 +152,92 @@ export function FabricEditPopover({
                     style={{ top: popoverPosition.top, left: popoverPosition.left }}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="text-xs font-medium text-gray-500 mb-2">
-                        Edit Fabric - {viewLevel === 'product' ? 'Product Level' : viewLevel === 'variation' ? 'Color Level' : 'SKU Level'}
-                    </div>
-
-                    {/* Fabric Type dropdown - for product/sku level: updates product, for variation: filters fabrics */}
-                    {(viewLevel === 'product' || viewLevel === 'sku') && (
-                        <div className="mb-3">
-                            <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
-                            <select
-                                value={row.fabricTypeId || ''}
-                                onChange={(e) => handleFabricTypeChange(e.target.value)}
-                                className={SELECT_CLASS}
-                            >
-                                <option value="">Not set</option>
-                                {fabricTypes.map(ft => (
-                                    <option key={ft.id} value={ft.id}>{ft.name}</option>
-                                ))}
-                            </select>
-                            {viewLevel === 'product' && (
-                                <p className="text-xs text-gray-400 mt-1">
-                                    Affects {getAffectedCount('fabricType')} SKU(s)
+                    {/* Fabric Type Editor */}
+                    {columnType === 'fabricType' && (
+                        <>
+                            <div className="text-xs font-medium text-gray-500 mb-2">
+                                Edit Fabric Type
+                            </div>
+                            {canEditFabricType ? (
+                                <div>
+                                    <select
+                                        value={row.fabricTypeId || ''}
+                                        onChange={(e) => handleFabricTypeChange(e.target.value)}
+                                        className={SELECT_CLASS}
+                                    >
+                                        <option value="">Not set</option>
+                                        {fabricTypes.map(ft => (
+                                            <option key={ft.id} value={ft.id}>{ft.name}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-gray-400 mt-1">
+                                        Affects {skuCountForProduct} SKU(s)
+                                    </p>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-gray-500">
+                                    Switch to Product view to edit fabric type.
                                 </p>
                             )}
-                        </div>
+                        </>
                     )}
 
-                    {/* Fabric Type filter - for variation level only (filters fabric dropdown, doesn't update product) */}
-                    {viewLevel === 'variation' && (
-                        <div className="mb-3">
-                            <label className="block text-xs text-gray-600 mb-1">
-                                Filter by Fabric Type
-                            </label>
-                            <select
-                                value={filterFabricTypeId}
-                                onChange={(e) => setFilterFabricTypeId(e.target.value)}
-                                className={SELECT_CLASS}
-                            >
-                                <option value="">All fabric types</option>
-                                {fabricTypes.map(ft => (
-                                    <option key={ft.id} value={ft.id}>{ft.name}</option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-gray-400 mt-1">
-                                Filters fabric list below. Edit fabric type in Product view.
-                            </p>
-                        </div>
-                    )}
-
-                    {/* Fabric dropdown - for variation and SKU levels */}
-                    {(viewLevel === 'variation' || viewLevel === 'sku') && (
-                        <div>
-                            <label className="block text-xs text-gray-600 mb-1">Fabric</label>
-                            <select
-                                value={row.fabricId || ''}
-                                onChange={(e) => handleFabricChange(e.target.value)}
-                                className={SELECT_CLASS}
-                            >
-                                <option value="">Select fabric...</option>
-                                {filteredFabrics.map(f => (
-                                    <option key={f.id} value={f.id}>{f.displayName}</option>
-                                ))}
-                            </select>
-                            {viewLevel === 'variation' && (
-                                <p className="text-xs text-gray-400 mt-1">
-                                    Affects {getAffectedCount('fabric')} SKU(s)
+                    {/* Fabric Editor */}
+                    {columnType === 'fabric' && (
+                        <>
+                            <div className="text-xs font-medium text-gray-500 mb-2">
+                                Edit Fabric
+                            </div>
+                            {canEditFabric ? (
+                                <>
+                                    {/* Filter dropdown */}
+                                    <div className="mb-3">
+                                        <label className="block text-xs text-gray-600 mb-1">
+                                            Filter by Type
+                                        </label>
+                                        <select
+                                            value={viewLevel === 'variation' ? filterFabricTypeId : (row.fabricTypeId || '')}
+                                            onChange={(e) => setFilterFabricTypeId(e.target.value)}
+                                            disabled={viewLevel === 'sku'}
+                                            className={SELECT_CLASS}
+                                        >
+                                            <option value="">All types</option>
+                                            {fabricTypes.map(ft => (
+                                                <option key={ft.id} value={ft.id}>{ft.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    {/* Fabric dropdown */}
+                                    <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Fabric</label>
+                                        <select
+                                            value={row.fabricId || ''}
+                                            onChange={(e) => handleFabricChange(e.target.value)}
+                                            className={SELECT_CLASS}
+                                        >
+                                            <option value="">Select fabric...</option>
+                                            {filteredFabrics.map(f => (
+                                                <option key={f.id} value={f.id}>{f.displayName}</option>
+                                            ))}
+                                        </select>
+                                        {skuCountForVariation > 1 && (
+                                            <p className="text-xs text-gray-400 mt-1">
+                                                Affects {skuCountForVariation} SKU(s)
+                                            </p>
+                                        )}
+                                        {filteredFabrics.length === 0 && (filterFabricTypeId || row.fabricTypeId) && (
+                                            <p className="text-xs text-amber-600 mt-1">
+                                                No fabrics for this type
+                                            </p>
+                                        )}
+                                    </div>
+                                </>
+                            ) : (
+                                <p className="text-xs text-gray-500">
+                                    Switch to Color view to edit fabric.
                                 </p>
                             )}
-                            {filteredFabrics.length === 0 && (viewLevel === 'variation' ? filterFabricTypeId : row.fabricTypeId) && (
-                                <p className="text-xs text-amber-600 mt-1">
-                                    No fabrics for this type
-                                </p>
-                            )}
-                        </div>
+                        </>
                     )}
                 </div>,
                 document.body
