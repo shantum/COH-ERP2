@@ -487,6 +487,12 @@ class IThinkLogisticsClient {
             throw new Error(`iThink API error: ${response.data.message || 'Unknown error'}`);
         }
 
+        // Defensive check - ensure data exists
+        if (!response.data.data) {
+            shippingLogger.warn({ awbList, response: response.data }, 'iThink returned success but no data');
+            return {};
+        }
+
         return response.data.data;
     }
 
