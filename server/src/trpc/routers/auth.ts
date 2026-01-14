@@ -10,6 +10,7 @@
 
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+// @ts-ignore - types are available in server context but might fail in client composite build
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { router, publicProcedure, protectedProcedure } from '../index.js';

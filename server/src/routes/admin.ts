@@ -21,6 +21,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { PrismaClient } from '@prisma/client';
+// @ts-ignore - types are available in server context but might fail in client composite build
 import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import { authenticateToken, requireAdmin } from '../middleware/auth.js';
