@@ -1190,11 +1190,8 @@ export async function processCacheBatch(
                 try {
                     const result = await processOrderWithContext(prisma, shopifyOrder, context);
 
-                    // Mark as processed if successful
-                    if (result.action !== 'cache_only' && result.action !== 'skipped') {
-                        await markCacheProcessed(prisma, entry.id);
-                    } else if (result.action === 'skipped' && result.reason !== 'no_matching_skus') {
-                        // Mark skipped (existing unchanged) orders as processed too
+                    // Mark as processed - including skipped orders so they don't get re-processed
+                    if (result.action !== 'cache_only') {
                         await markCacheProcessed(prisma, entry.id);
                     }
 
