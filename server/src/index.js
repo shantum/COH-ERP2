@@ -184,12 +184,10 @@ if (process.env.NODE_ENV === 'production') {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3001;
-console.log(`[DEBUG] PORT from env: ${process.env.PORT}, using: ${PORT}`);
 
 // Bind to 0.0.0.0 for Railway/Docker compatibility
-const server = app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 COH ERP Server running on port ${PORT}`);
-  console.log(`[DEBUG] Server address:`, server.address());
 
   // Auto-archive shipped orders older than 90 days on startup
   await autoArchiveOldOrders(prisma);
