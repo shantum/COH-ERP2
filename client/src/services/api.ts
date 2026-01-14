@@ -239,8 +239,6 @@ export const ordersApi = {
         api.post(`/orders/lines/${lineId}/customize`, data),
     removeCustomization: (lineId: string, options?: { force?: boolean }) =>
         api.delete(`/orders/lines/${lineId}/customize${options?.force ? '?force=true' : ''}`),
-    pickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pick`),
-    unpickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpick`),
     packLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pack`),
     unpackLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpack`),
     // Mark shipped (visual only - no inventory release)
@@ -601,10 +599,15 @@ export const adminApi = {
     triggerBackgroundJob: (jobId: string) => api.post(`/admin/background-jobs/${jobId}/trigger`),
     updateBackgroundJob: (jobId: string, data: { enabled: boolean }) =>
         api.put(`/admin/background-jobs/${jobId}`, data),
-    // Grid column preferences (synced across users)
+    // Grid column preferences - admin defaults (synced across users)
     getGridPreferences: (gridId: string) => api.get(`/admin/grid-preferences/${gridId}`),
     saveGridPreferences: (gridId: string, data: { visibleColumns: string[]; columnOrder: string[]; columnWidths?: Record<string, number> }) =>
         api.put(`/admin/grid-preferences/${gridId}`, data),
+    // Grid column preferences - user-specific
+    getUserGridPreferences: (gridId: string) => api.get(`/admin/grid-preferences/${gridId}/user`),
+    saveUserGridPreferences: (gridId: string, data: { visibleColumns: string[]; columnOrder: string[]; columnWidths: Record<string, number>; adminVersion?: string }) =>
+        api.put(`/admin/grid-preferences/${gridId}/user`, data),
+    deleteUserGridPreferences: (gridId: string) => api.delete(`/admin/grid-preferences/${gridId}/user`),
 };
 
 // Tracking API (iThink Logistics integration)

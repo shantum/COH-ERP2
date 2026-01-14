@@ -22,7 +22,6 @@ const Returns = lazy(() => import('./pages/Returns'));
 const Production = lazy(() => import('./pages/Production'));
 const InventoryInward = lazy(() => import('./pages/InventoryInward'));
 const ReturnsRto = lazy(() => import('./pages/ReturnsRto'));
-const Picklist = lazy(() => import('./pages/Picklist'));
 const Ledgers = lazy(() => import('./pages/Ledgers'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -97,7 +96,6 @@ function App() {
                   <Route path="inward-hub" element={<Navigate to="/inventory-inward" replace />} />
                   <Route path="production-inward" element={<Navigate to="/inventory-inward" replace />} />
                   <Route path="return-inward" element={<Navigate to="/returns-rto" replace />} />
-                  <Route path="picklist" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Picklist /></ErrorBoundary></Suspense>} />
                   <Route path="ledgers" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Ledgers /></ErrorBoundary></Suspense>} />
                   <Route path="analytics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Analytics /></ErrorBoundary></Suspense>} />
                   <Route path="settings" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Settings /></ErrorBoundary></Suspense>} />

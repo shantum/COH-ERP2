@@ -3,9 +3,9 @@
  * Order line status updates and shipping operations
  *
  * ORDER LINE STATUS FLOW:
- * pending -> allocated -> picked -> packed -> [mark-shipped*] -> shipped
- *   | (allocate)     |              |
- * [creates reserve]  [unpick]     [unpack, clear AWB]
+ * pending -> allocated -> packed -> [mark-shipped*] -> shipped
+ *   | (allocate)          |
+ * [creates reserve]     [unpack, clear AWB]
  *   | (unallocate)
  * [releases reserve]
  *
@@ -370,80 +370,8 @@ router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (
 }));
 
 /**
- * POST /lines/:lineId/pick
- * Mark order line as picked (allocated -> picked)
- *
- * WHAT HAPPENS:
- * - Updates lineStatus to 'picked'
- * - Sets pickedAt timestamp
- * - No inventory changes (just status tracking)
- *
- * VALIDATION:
- * - Line must be in 'allocated' status
- *
- * @param {string} req.params.lineId - Order line ID
- * @returns {Object} Updated orderLine record
- *
- * @example
- * POST /fulfillment/lines/abc123/pick
- * // Returns: { id, lineStatus: 'picked', pickedAt: '2025-01-11T...' }
- */
-router.post('/lines/:lineId/pick', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const lineId = req.params.lineId as string;
-
-    const line = await req.prisma.orderLine.findUnique({
-        where: { id: lineId },
-    });
-
-    if (!line) {
-        throw new NotFoundError('Order line not found', 'OrderLine', lineId);
-    }
-
-    if (line.lineStatus !== 'allocated') {
-        throw new BusinessLogicError(
-            `Line must be in allocated status to pick (current: ${line.lineStatus})`,
-            'INVALID_STATUS'
-        );
-    }
-
-    const updated = await req.prisma.orderLine.update({
-        where: { id: lineId },
-        data: { lineStatus: 'picked', pickedAt: new Date() },
-    });
-
-    res.json(updated);
-}));
-
-// Unpick order line (revert to allocated)
-router.post('/lines/:lineId/unpick', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const lineId = req.params.lineId as string;
-
-    const line = await req.prisma.orderLine.findUnique({
-        where: { id: lineId },
-    });
-
-    if (!line) {
-        throw new NotFoundError('Order line not found', 'OrderLine', lineId);
-    }
-
-    if (line.lineStatus !== 'picked') {
-        throw new BusinessLogicError(
-            `Line must be in picked status to unpick (current: ${line.lineStatus})`,
-            'INVALID_STATUS'
-        );
-    }
-
-    const updated = await req.prisma.orderLine.update({
-        where: { id: lineId },
-        data: { lineStatus: 'allocated', pickedAt: null },
-    });
-
-    res.json(updated);
-}));
-
-/**
  * POST /lines/:lineId/pack
- * Mark order line as packed (picked -> packed)
+ * Mark order line as packed (allocated -> packed)
  *
  * WHAT HAPPENS:
  * - Updates lineStatus to 'packed'
@@ -451,7 +379,7 @@ router.post('/lines/:lineId/unpick', authenticateToken, asyncHandler(async (req:
  * - No inventory changes (just status tracking)
  *
  * VALIDATION:
- * - Line must be in 'picked' status
+ * - Line must be in 'allocated' status
  *
  * @param {string} req.params.lineId - Order line ID
  * @returns {Object} Updated orderLine record
@@ -471,9 +399,9 @@ router.post('/lines/:lineId/pack', authenticateToken, asyncHandler(async (req: R
         throw new NotFoundError('Order line not found', 'OrderLine', lineId);
     }
 
-    if (line.lineStatus !== 'picked') {
+    if (line.lineStatus !== 'allocated') {
         throw new BusinessLogicError(
-            `Line must be in picked status to pack (current: ${line.lineStatus})`,
+            `Line must be in allocated status to pack (current: ${line.lineStatus})`,
             'INVALID_STATUS'
         );
     }
@@ -486,7 +414,7 @@ router.post('/lines/:lineId/pack', authenticateToken, asyncHandler(async (req: R
     res.json(updated);
 }));
 
-// Unpack order line (revert to picked)
+// Unpack order line (revert to allocated)
 router.post('/lines/:lineId/unpack', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const lineId = req.params.lineId as string;
 
@@ -508,7 +436,7 @@ router.post('/lines/:lineId/unpack', authenticateToken, asyncHandler(async (req:
     const updated = await req.prisma.orderLine.update({
         where: { id: lineId },
         data: {
-            lineStatus: 'picked',
+            lineStatus: 'allocated',
             packedAt: null,
             // Clear manual AWB and courier when unpacking
             awbNumber: null,
