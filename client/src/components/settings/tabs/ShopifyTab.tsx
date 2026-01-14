@@ -8,8 +8,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { shopifyApi } from '../../../services/api';
 import JsonViewer from '../../JsonViewer';
 import {
-    Key, CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
-    AlertCircle, Package, Webhook, Copy, ExternalLink, Search, Database, Download,
+    CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
+    AlertCircle, Package, Webhook, Copy, ExternalLink, Database, Download,
     Activity, Clock, Zap, Pause
 } from 'lucide-react';
 
@@ -18,8 +18,6 @@ export function ShopifyTab() {
 
     // Config state
     const [shopDomain, setShopDomain] = useState('');
-    const [accessToken, setAccessToken] = useState('');
-    const [showToken, setShowToken] = useState(false);
 
     // Preview state
     const [productPreview, setProductPreview] = useState<any>(null);
@@ -29,11 +27,6 @@ export function ShopifyTab() {
 
     // Full dump state
     const [dumpDays, setDumpDays] = useState(30);
-
-    // Order lookup state
-    const [lookupOrderNumber, setLookupOrderNumber] = useState('');
-    const [lookupResult, setLookupResult] = useState<any>(null);
-    const [lookupError, setLookupError] = useState<string | null>(null);
 
     // Fetch current config
     const { data: config, isLoading: configLoading } = useQuery({
@@ -87,23 +80,6 @@ export function ShopifyTab() {
     });
 
     // Mutations
-    const updateConfigMutation = useMutation({
-        mutationFn: (data: { shopDomain: string; accessToken: string }) =>
-            shopifyApi.updateConfig(data),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['shopifyConfig'] });
-            setAccessToken('');
-            alert('Configuration saved successfully!');
-        },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to save configuration');
-        },
-    });
-
-    const testConnectionMutation = useMutation({
-        mutationFn: () => shopifyApi.testConnection(),
-    });
-
     const previewProductsMutation = useMutation({
         mutationFn: () => shopifyApi.previewProducts(10),
         onSuccess: (res) => setProductPreview(res.data),
@@ -148,19 +124,6 @@ export function ShopifyTab() {
         },
     });
 
-    // Lookup order mutation
-    const lookupOrderMutation = useMutation({
-        mutationFn: (orderNumber: string) => shopifyApi.lookupOrder(orderNumber),
-        onSuccess: (res) => {
-            setLookupResult(res.data);
-            setLookupError(null);
-        },
-        onError: (error: any) => {
-            setLookupResult(null);
-            setLookupError(error.response?.data?.error || 'Order not found');
-        },
-    });
-
     const startJobMutation = useMutation({
         mutationFn: (params: {
             jobType: string;
@@ -199,21 +162,6 @@ export function ShopifyTab() {
         onSuccess: () => refetchScheduler(),
     });
 
-    const handleSaveConfig = () => {
-        if (!shopDomain) {
-            alert('Shop domain is required');
-            return;
-        }
-        if (!accessToken && !config?.hasAccessToken) {
-            alert('Access token is required');
-            return;
-        }
-        updateConfigMutation.mutate({
-            shopDomain,
-            accessToken: accessToken || 'KEEP_EXISTING',
-        });
-    };
-
     if (configLoading) {
         return (
             <div className="flex justify-center p-8">
@@ -224,107 +172,6 @@ export function ShopifyTab() {
 
     return (
         <div className="space-y-6">
-            {/* Configuration Card */}
-            <div className="card">
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <Key size={20} /> Shopify API Configuration
-                </h2>
-
-                <div className="grid gap-4 max-w-xl">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Shop Domain
-                        </label>
-                        <input
-                            type="text"
-                            className="input"
-                            placeholder="yourstore.myshopify.com"
-                            value={shopDomain}
-                            onChange={(e) => setShopDomain(e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                            Your store name or full domain (e.g., yourstore or yourstore.myshopify.com)
-                        </p>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Admin API Access Token
-                        </label>
-                        <div className="relative">
-                            <input
-                                type={showToken ? 'text' : 'password'}
-                                className="input pr-20"
-                                placeholder={config?.hasAccessToken ? '(token saved - enter new to change)' : 'shpat_xxxxx'}
-                                value={accessToken}
-                                onChange={(e) => setAccessToken(e.target.value)}
-                            />
-                            <button
-                                type="button"
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-gray-700"
-                                onClick={() => setShowToken(!showToken)}
-                            >
-                                {showToken ? 'Hide' : 'Show'}
-                            </button>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                            Create in Shopify Admin → Settings → Apps → Develop apps → Configure Admin API scopes
-                        </p>
-                    </div>
-
-                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <p className="text-sm font-medium text-blue-800 mb-1">Required API Scopes:</p>
-                        <ul className="text-sm text-blue-700 list-disc list-inside">
-                            <li><code className="bg-blue-100 px-1 rounded">read_products</code> - to import products</li>
-                            <li><code className="bg-blue-100 px-1 rounded">read_orders</code> - to import orders</li>
-                            <li><code className="bg-blue-100 px-1 rounded">read_customers</code> - to import customers</li>
-                        </ul>
-                    </div>
-
-                    <div className="flex gap-2">
-                        <button
-                            className="btn btn-primary"
-                            onClick={handleSaveConfig}
-                            disabled={updateConfigMutation.isPending}
-                        >
-                            {updateConfigMutation.isPending ? 'Saving...' : 'Save Configuration'}
-                        </button>
-                        <button
-                            className="btn btn-secondary"
-                            onClick={() => testConnectionMutation.mutate()}
-                            disabled={testConnectionMutation.isPending || !config?.hasAccessToken}
-                        >
-                            {testConnectionMutation.isPending ? (
-                                <RefreshCw size={16} className="animate-spin" />
-                            ) : (
-                                'Test Connection'
-                            )}
-                        </button>
-                    </div>
-
-                    {/* Connection Test Result */}
-                    {testConnectionMutation.data && (
-                        <div className={`p-3 rounded-lg ${testConnectionMutation.data.data.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-                            <div className="flex items-center gap-2">
-                                {testConnectionMutation.data.data.success ? (
-                                    <CheckCircle size={20} className="text-green-600" />
-                                ) : (
-                                    <XCircle size={20} className="text-red-600" />
-                                )}
-                                <span className={testConnectionMutation.data.data.success ? 'text-green-800' : 'text-red-800'}>
-                                    {testConnectionMutation.data.data.message}
-                                </span>
-                            </div>
-                            {testConnectionMutation.data.data.stats && (
-                                <div className="mt-2 text-sm text-green-700">
-                                    Orders: {testConnectionMutation.data.data.stats.totalOrders} | Customers: {testConnectionMutation.data.data.stats.totalCustomers}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
-
             {/* Sync Status Card */}
             {config?.hasAccessToken && (
                 <div className="card">
@@ -720,65 +567,6 @@ export function ShopifyTab() {
                         </div>
                     </div>
 
-                    {/* Order Lookup */}
-                    <div className="border rounded-lg p-4 bg-gray-50">
-                        <h3 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                            <Search size={18} /> Order Lookup
-                        </h3>
-                        <p className="text-sm text-gray-600 mb-3">
-                            Look up raw Shopify order data from cache by order number.
-                        </p>
-
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                className="input flex-1"
-                                placeholder="Enter order number (e.g., 63965)"
-                                value={lookupOrderNumber}
-                                onChange={(e) => setLookupOrderNumber(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && lookupOrderNumber) {
-                                        lookupOrderMutation.mutate(lookupOrderNumber);
-                                    }
-                                }}
-                            />
-                            <button
-                                className="btn btn-secondary flex items-center gap-2"
-                                onClick={() => lookupOrderMutation.mutate(lookupOrderNumber)}
-                                disabled={lookupOrderMutation.isPending || !lookupOrderNumber}
-                            >
-                                <Search size={16} />
-                                {lookupOrderMutation.isPending ? 'Searching...' : 'Lookup'}
-                            </button>
-                        </div>
-
-                        {lookupError && (
-                            <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700 flex items-center gap-2">
-                                <XCircle size={16} />
-                                {lookupError}
-                            </div>
-                        )}
-
-                        {lookupResult && (
-                            <div className="mt-3 border rounded-lg overflow-hidden bg-white">
-                                <div className="bg-gray-100 px-3 py-2 text-sm font-medium flex justify-between items-center">
-                                    <span>
-                                        Order {lookupResult.orderNumber} | Status: {lookupResult.financialStatus} |
-                                        {lookupResult.processedAt ? (
-                                            <span className="text-green-600 ml-1">Processed</span>
-                                        ) : (
-                                            <span className="text-yellow-600 ml-1">Pending</span>
-                                        )}
-                                    </span>
-                                    <button onClick={() => setLookupResult(null)} className="text-gray-400 hover:text-gray-600">
-                                        <XCircle size={16} />
-                                    </button>
-                                </div>
-                                <JsonViewer data={lookupResult.rawData} rootName="shopifyOrder" />
-                            </div>
-                        )}
-                    </div>
-
                     {/* Preview button */}
                     <div className="mt-4 flex justify-end">
                         <button
@@ -855,117 +643,55 @@ export function ShopifyTab() {
                         <Webhook size={20} /> Webhook Endpoints
                     </h2>
                     <p className="text-sm text-gray-600 mb-4">
-                        Configure these webhooks in Shopify Admin to receive real-time updates. Go to{' '}
-                        <span className="font-medium">Settings → Notifications → Webhooks</span>.
+                        Configure these in Shopify Admin → Settings → Notifications → Webhooks.
+                        All events for each type use a single unified endpoint.
                     </p>
 
-                    <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Your API Base URL</label>
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                className="input flex-1 font-mono text-sm bg-gray-50"
-                                value={window.location.origin + '/api/webhooks'}
-                                readOnly
-                            />
-                            <button
-                                className="btn btn-secondary flex items-center gap-1"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(window.location.origin + '/api/webhooks');
-                                    setCopiedWebhook('base');
-                                    setTimeout(() => setCopiedWebhook(null), 2000);
-                                }}
-                            >
-                                {copiedWebhook === 'base' ? <CheckCircle size={16} className="text-green-600" /> : <Copy size={16} />}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-4 py-2 text-left font-medium text-gray-700">Shopify Topic</th>
-                                    <th className="px-4 py-2 text-left font-medium text-gray-700">Endpoint URL</th>
-                                    <th className="px-4 py-2 text-left font-medium text-gray-700">Description</th>
-                                    <th className="px-4 py-2 w-12"></th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                                {[
-                                    { topic: 'orders/create', path: '/shopify/orders', desc: 'New order placed', unified: true },
-                                    { topic: 'orders/updated', path: '/shopify/orders', desc: 'Order modified', unified: true },
-                                    { topic: 'orders/cancelled', path: '/shopify/orders', desc: 'Order cancelled', unified: true },
-                                    { topic: 'orders/fulfilled', path: '/shopify/orders', desc: 'Order shipped/fulfilled', unified: true },
-                                    { topic: 'products/create', path: '/shopify/products/create', desc: 'New product created' },
-                                    { topic: 'products/update', path: '/shopify/products/update', desc: 'Product modified' },
-                                    { topic: 'products/delete', path: '/shopify/products/delete', desc: 'Product deleted' },
-                                    { topic: 'customers/create', path: '/shopify/customers/create', desc: 'New customer registered' },
-                                    { topic: 'customers/update', path: '/shopify/customers/update', desc: 'Customer info updated' },
-                                    { topic: 'inventory_levels/update', path: '/shopify/inventory_levels/update', desc: 'Inventory quantity changed' },
-                                ].map((webhook) => (
-                                    <tr key={webhook.topic} className="hover:bg-gray-50">
-                                        <td className="px-4 py-2">
-                                            <div className="flex items-center gap-2">
-                                                <code className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs">
-                                                    {webhook.topic}
-                                                </code>
-                                                {webhook.unified && (
-                                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs font-medium">
-                                                        Unified
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-2">
-                                            <code className="text-xs text-gray-600 font-mono">
-                                                {window.location.origin}/api/webhooks{webhook.path}
-                                            </code>
-                                        </td>
-                                        <td className="px-4 py-2 text-gray-600">{webhook.desc}</td>
-                                        <td className="px-4 py-2">
-                                            <button
-                                                className="p-1 hover:bg-gray-100 rounded"
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(window.location.origin + '/api/webhooks' + webhook.path);
-                                                    setCopiedWebhook(webhook.topic);
-                                                    setTimeout(() => setCopiedWebhook(null), 2000);
-                                                }}
-                                                title="Copy URL"
-                                            >
-                                                {copiedWebhook === webhook.topic ? (
-                                                    <CheckCircle size={14} className="text-green-600" />
-                                                ) : (
-                                                    <Copy size={14} className="text-gray-400" />
-                                                )}
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                        <p className="text-sm font-medium text-blue-800 mb-2">Setup Instructions:</p>
-                        <ol className="text-sm text-blue-700 list-decimal list-inside space-y-1">
-                            <li>Go to Shopify Admin → Settings → Notifications → Webhooks</li>
-                            <li>Click "Create webhook"</li>
-                            <li>Select the event (e.g., "Order creation")</li>
-                            <li>Paste the corresponding URL from the table above</li>
-                            <li>Set format to JSON</li>
-                            <li>Save the webhook</li>
-                        </ol>
-                        <div className="mt-3 p-3 bg-white border border-blue-300 rounded">
-                            <p className="text-sm font-medium text-blue-800 mb-1">Order Webhooks (Unified Endpoint):</p>
-                            <p className="text-xs text-blue-700">
-                                All order-related webhooks (create, updated, cancelled, fulfilled) use the same endpoint: <code className="bg-blue-100 px-1 rounded">/shopify/orders</code>.
-                                The endpoint automatically detects the event type from the X-Shopify-Topic header.
-                            </p>
-                        </div>
-                        <p className="text-sm text-blue-600 mt-3">
-                            <strong>Note:</strong> Webhooks require your server to be publicly accessible (not localhost).
-                        </p>
+                    <div className="space-y-3">
+                        {[
+                            { name: 'Orders', path: '/shopify/orders', topics: 'create, updated, cancelled, fulfilled', topicPrefix: 'orders/' },
+                            { name: 'Products', path: '/shopify/products', topics: 'create, update, delete', topicPrefix: 'products/' },
+                            { name: 'Customers', path: '/shopify/customers', topics: 'create, update', topicPrefix: 'customers/' },
+                        ].map((endpoint) => {
+                            const lastLog = webhookActivity?.recentLogs?.find(
+                                (log: any) => log.topic?.startsWith(endpoint.topicPrefix)
+                            );
+                            return (
+                                <div key={endpoint.name} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-medium text-sm">{endpoint.name}</span>
+                                            {lastLog && (
+                                                <span className="text-xs text-gray-500">
+                                                    Last: {new Date(lastLog.receivedAt).toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <code className="text-xs text-gray-600 font-mono">
+                                            {window.location.origin}/api/webhooks{endpoint.path}
+                                        </code>
+                                        <div className="text-xs text-gray-500 mt-1">
+                                            Topics: {endpoint.topics}
+                                        </div>
+                                    </div>
+                                    <button
+                                        className="btn btn-secondary btn-sm flex items-center gap-1"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(window.location.origin + '/api/webhooks' + endpoint.path);
+                                            setCopiedWebhook(endpoint.name);
+                                            setTimeout(() => setCopiedWebhook(null), 2000);
+                                        }}
+                                    >
+                                        {copiedWebhook === endpoint.name ? (
+                                            <CheckCircle size={14} className="text-green-600" />
+                                        ) : (
+                                            <Copy size={14} />
+                                        )}
+                                        Copy
+                                    </button>
+                                </div>
+                            );
+                        })}
                     </div>
 
                     {shopDomain && (
