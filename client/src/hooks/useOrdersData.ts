@@ -42,10 +42,10 @@ export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOp
     // 3. Switching tabs feels instant since data is pre-loaded
 
     // tRPC query - type-safe, auto-cached with key [['orders', 'list'], { input: { view: 'open' } }]
-    // Note: Using limit=500 (server max) to ensure all open orders are fetched
+    // Note: Using limit=2000 to ensure all open orders are fetched
     // The open view sorts by orderDate ASC (FIFO), so without high limit, newest orders are cut off
     const openOrdersQuery = trpc.orders.list.useQuery(
-        { view: 'open', limit: 500 },
+        { view: 'open', limit: 2000 },
         {
             staleTime: STALE_TIME,
             refetchOnWindowFocus: false,

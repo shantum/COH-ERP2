@@ -170,7 +170,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
             isArchived: false,
             // Include partially cancelled orders - they have active lines to fulfill
         },
-        orderBy: { orderDate: 'asc' }, // Oldest first (FIFO queue)
+        orderBy: { orderDate: 'desc' }, // Newest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
         defaultLimit: 10000,
     },

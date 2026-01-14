@@ -52,7 +52,7 @@ const list = protectedProcedure
         z.object({
             view: z.string().default('open'),
             page: z.number().int().positive().default(1),
-            limit: z.number().int().positive().max(500).default(100),
+            limit: z.number().int().positive().max(2000).default(100),
             days: z.number().int().positive().optional(),
             search: z.string().optional(),
             sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt']).optional(),
