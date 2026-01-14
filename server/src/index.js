@@ -41,7 +41,7 @@ import reportRoutes from './routes/reports.js';
 import salesAnalyticsRoutes from './routes/sales-analytics.js';
 import authRoutes from './routes/auth.js';
 import importExportRoutes from './routes/import-export.js';
-import shopifyRoutes from './routes/shopify.js';
+import shopifyRoutes from './routes/shopify/index.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
 import repackingRoutes from './routes/repacking.js';
