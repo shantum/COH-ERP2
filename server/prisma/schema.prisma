@@ -476,7 +476,9 @@ model OrderLine {
   productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
   rtoInwardedBy      User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
   sku                Sku                 @relation(fields: [skuId], references: [id])
+  repackingQueueItems RepackingQueueItem[] @relation("OrderLineToRepacking")
   returnRequestLines ReturnRequestLine[]
+
 
   @@index([orderId])
   @@index([skuId])
@@ -720,6 +722,9 @@ model RepackingQueueItem {
   qcComments      String?
   orderLineId     String?
   processedBy     User?          @relation("RepackingProcessor", fields: [processedById], references: [id])
+  orderLine       OrderLine?     @relation("OrderLineToRepacking", fields: [orderLineId], references: [id])
+
+
   returnRequest   ReturnRequest? @relation(fields: [returnRequestId], references: [id])
   sku             Sku            @relation(fields: [skuId], references: [id])
 
