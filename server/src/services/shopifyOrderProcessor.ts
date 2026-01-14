@@ -28,10 +28,11 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import shopifyClient from './shopify.js';
 import type { ShopifyOrder, ShopifyFulfillment, ShopifyLineItem, ShopifyAddress, ShopifyCustomer } from './shopify.js';
-import { findOrCreateCustomer } from '../utils/customerUtils.js';
+import { findOrCreateCustomer, type ShopifyCustomerData } from '../utils/customerUtils.js';
 import { withOrderLock } from '../utils/orderLock.js';
-import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
+import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice } from '../utils/shopifyHelpers.js';
 import { updateCustomerTier } from '../utils/tierUtils.js';
+import { syncLogger } from '../utils/logger.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -473,16 +474,26 @@ export async function processShopifyOrderToERP(
     const customer = shopifyOrder.customer;
     const shippingAddress = shopifyOrder.shipping_address;
 
+    // Convert ShopifyCustomer to ShopifyCustomerData for findOrCreateCustomer
+    const customerData: ShopifyCustomerData | null = customer ? {
+        id: customer.id,
+        email: customer.email,
+        first_name: customer.first_name,
+        last_name: customer.last_name,
+        phone: customer.phone,
+        default_address: customer.default_address,
+    } : null;
+
     // Find or create customer using shared utility
     const { customer: dbCustomer } = await findOrCreateCustomer(
         prisma,
-        customer as any || { id: null },
+        customerData,
         {
-            shippingAddress: shippingAddress as any,
+            shippingAddress: shippingAddress as Record<string, unknown> | undefined,
             orderDate: new Date(shopifyOrder.created_at),
         }
     );
-    const customerId = (dbCustomer as any)?.id || null;
+    const customerId = dbCustomer?.id || null;
 
     // Determine order status
     // ERP is source of truth - Shopify fulfillment does NOT auto-ship orders
@@ -530,9 +541,7 @@ export async function processShopifyOrderToERP(
     // Access them via order.shopifyCache JOIN pattern (like VLOOKUP)
 
     // Extract internal notes from Shopify note_attributes (staff-only notes)
-    // Shopify note_attributes is an array of {name, value} objects
-    const noteAttributes = (shopifyOrder as any).note_attributes || [];
-    const internalNote = noteAttributes.find((n: any) => n.name === 'internal_note' || n.name === 'staff_note')?.value;
+    const internalNote = extractInternalNote(shopifyOrder.note_attributes);
 
     // Build order data - ONLY ERP-owned fields (not Shopify fields)
     // Shopify data is accessed via order.shopifyCache relation
@@ -631,21 +640,19 @@ export async function processShopifyOrderToERP(
         }
 
         if (sku) {
-            // Calculate effective unit price after discounts
+            // Calculate effective unit price after discounts using typed helper
             const originalPrice = parseFloat(item.price) || 0;
-            const discountAllocations = (item as any).discount_allocations || [];
-            const totalDiscount = discountAllocations.reduce(
-                (sum: number, alloc: any) => sum + (parseFloat(alloc.amount) || 0),
-                0
+            const effectiveUnitPrice = calculateEffectiveUnitPrice(
+                originalPrice,
+                item.quantity,
+                item.discount_allocations
             );
-            // Effective price = original price - (total line discount / quantity)
-            const effectiveUnitPrice = originalPrice - (totalDiscount / item.quantity);
 
             orderLinesData.push({
                 shopifyLineId: String(item.id),
                 sku: { connect: { id: sku.id } },
                 qty: item.quantity,
-                unitPrice: Math.round(effectiveUnitPrice * 100) / 100, // Round to 2 decimal places
+                unitPrice: effectiveUnitPrice,
                 lineStatus: 'pending',
                 shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
             });
@@ -672,9 +679,18 @@ export async function processShopifyOrderToERP(
 
     // Sync fulfillments to order lines if order came in already fulfilled
     // This handles orders that were fulfilled before sync
+    // Guarded - fulfillment sync failure shouldn't fail order creation
     let fulfillmentSync: FulfillmentSyncResult | null = null;
     if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-        fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
+        try {
+            fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
+        } catch (fulfillmentError: unknown) {
+            syncLogger.warn({
+                orderId: newOrder.id,
+                shopifyOrderId: String(shopifyOrder.id),
+                error: fulfillmentError instanceof Error ? fulfillmentError.message : 'Unknown error'
+            }, 'Failed to sync fulfillments for new order - order was created successfully');
+        }
     }
 
     // Update customer tier based on new order
@@ -750,21 +766,29 @@ export async function cacheAndProcessOrder(
     // Use order lock to prevent race conditions between webhook and sync
     const lockResult = await withOrderLock(shopifyOrderId, source, async () => {
         // Step 1: Cache first (always succeeds)
-        await cacheShopifyOrder(prisma, shopifyOrderId, shopifyOrder, webhookTopic);
+        await cacheShopifyOrders(prisma, shopifyOrder, webhookTopic);
 
         // Step 2: Process to ERP
         try {
             const result = await processShopifyOrderToERP(prisma, shopifyOrder, options);
 
-            // Step 3a: Mark as processed
-            await markCacheProcessed(prisma, shopifyOrderId);
+            // Step 3a: Mark as processed (guarded - don't fail if this errors)
+            try {
+                await markCacheProcessed(prisma, shopifyOrderId);
+            } catch (markError: unknown) {
+                syncLogger.warn({
+                    shopifyOrderId,
+                    error: markError instanceof Error ? markError.message : 'Unknown error'
+                }, 'Failed to mark cache as processed');
+            }
 
             return result;
-        } catch (error) {
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             // Step 3b: Mark error but don't throw
-            await markCacheError(prisma, shopifyOrderId, (error as Error).message);
+            await markCacheError(prisma, shopifyOrderId, errorMessage);
 
-            return { action: 'cache_only' as const, error: (error as Error).message, cached: true };
+            return { action: 'cache_only' as const, error: errorMessage, cached: true };
         }
     }) as LockResult;
 

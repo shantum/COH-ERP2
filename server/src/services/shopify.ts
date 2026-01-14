@@ -123,6 +123,8 @@ interface ShopifyLineItem {
     fulfillment_status?: string | null;
     grams?: number;
     properties?: Array<{ name: string; value: string }>;
+    /** Discount allocations applied to this line item */
+    discount_allocations?: Array<{ amount: string; discount_application_index?: number }>;
 }
 
 /**
@@ -172,6 +174,8 @@ interface ShopifyOrder {
     tags?: string;
     gateway?: string;
     payment_gateway_names?: string[];
+    /** Staff/internal notes from Shopify admin */
+    note_attributes?: Array<{ name: string; value: string }>;
 }
 
 /**

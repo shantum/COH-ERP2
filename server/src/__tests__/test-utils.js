@@ -179,3 +179,57 @@ export const createMockResponse = () => {
 };
 
 export const createMockNext = () => jest.fn();
+
+// Mock Shopify order cache factory
+export const mockShopifyOrderCache = (overrides = {}) => ({
+    id: '5551234567890',
+    rawData: '{}',
+    orderNumber: '#1001',
+    financialStatus: 'paid',
+    fulfillmentStatus: null,
+    lastWebhookAt: new Date(),
+    webhookTopic: 'orders/create',
+    processedAt: null,
+    processingError: null,
+    createdAt: new Date(),
+    customerNotes: null,
+    discountCodes: null,
+    paymentMethod: 'Prepaid',
+    shippedAt: null,
+    shippingCity: 'Mumbai',
+    shippingCountry: 'India',
+    shippingState: 'Maharashtra',
+    tags: null,
+    trackingCompany: null,
+    trackingNumber: null,
+    processingLock: null,
+    ...overrides
+});
+
+// Mock Shopify fulfillment factory
+export const mockShopifyFulfillment = (overrides = {}) => ({
+    id: 12345,
+    tracking_number: 'AWB123456',
+    tracking_company: 'Delhivery',
+    tracking_url: 'https://tracking.example.com/AWB123456',
+    tracking_urls: ['https://tracking.example.com/AWB123456'],
+    created_at: '2024-01-15T10:30:00Z',
+    shipment_status: 'in_transit',
+    line_items: [
+        { id: 123, variant_id: 456, quantity: 1 }
+    ],
+    ...overrides
+});
+
+// Create Axios-like error for testing API error handling
+export const createAxiosError = (status, data, message = 'Request failed') => {
+    const error = new Error(message);
+    error.response = {
+        status,
+        data,
+        headers: {},
+        statusText: status === 429 ? 'Too Many Requests' : 'Error',
+    };
+    error.isAxiosError = true;
+    return error;
+};

@@ -134,3 +134,63 @@ export const CACHE_STALE_DAYS = 90;
  * Number of cache entries to process per batch during cleanup
  */
 export const CACHE_CLEANUP_BATCH_SIZE = 100;
+
+// ============================================
+// SYNC WORKER CONSTANTS
+// ============================================
+
+/**
+ * Configuration for sync worker modes
+ */
+export const SYNC_WORKER_CONFIG = {
+    deep: {
+        batchSize: 250,
+        batchDelay: 1500,
+        gcInterval: 3,
+        disconnectInterval: 5
+    },
+    incremental: {
+        batchSize: 250,
+        batchDelay: 500,
+        gcInterval: 10,
+        disconnectInterval: 20
+    },
+    maxErrors: 20,
+};
+
+// ============================================
+// ORDER LOCK CONSTANTS
+// ============================================
+
+/**
+ * Order lock configuration for preventing race conditions
+ */
+export const ORDER_LOCK_CONFIG = {
+    timeoutMs: parseInt(process.env.ORDER_LOCK_TIMEOUT_MS || '90000', 10),
+};
+
+// ============================================
+// FULL DUMP CONSTANTS
+// ============================================
+
+/**
+ * Configuration for Shopify full dump operations
+ */
+export const FULL_DUMP_CONFIG = {
+    batchSize: 250,
+    batchDelay: 100,
+    maxConsecutiveSmallBatches: 3,
+};
+
+// ============================================
+// CIRCUIT BREAKER CONSTANTS
+// ============================================
+
+/**
+ * Circuit breaker configuration for API failure protection
+ */
+export const CIRCUIT_BREAKER_CONFIG = {
+    failureThreshold: 5,
+    resetTimeoutMs: 60000,
+    halfOpenMaxRequests: 3,
+};

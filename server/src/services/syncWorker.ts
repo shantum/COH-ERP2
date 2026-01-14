@@ -17,6 +17,7 @@ import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
 import { syncSingleProduct, ensureDefaultFabric } from './productSyncService.js';
 import { syncSingleCustomer } from './customerSyncService.js';
 import { syncLogger } from '../utils/logger.js';
+import { SYNC_WORKER_CONFIG } from '../constants.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -79,11 +80,12 @@ class SyncWorker {
 
     constructor() {
         this.activeJobs = new Map();
-        this.batchSize = 250;
-        this.batchDelay = 500;
-        this.maxErrors = 20;
-        this.gcInterval = 10;
-        this.disconnectInterval = 20;
+        // Initialize with incremental defaults from config
+        this.batchSize = SYNC_WORKER_CONFIG.incremental.batchSize;
+        this.batchDelay = SYNC_WORKER_CONFIG.incremental.batchDelay;
+        this.maxErrors = SYNC_WORKER_CONFIG.maxErrors;
+        this.gcInterval = SYNC_WORKER_CONFIG.incremental.gcInterval;
+        this.disconnectInterval = SYNC_WORKER_CONFIG.incremental.disconnectInterval;
     }
 
     /**
@@ -100,20 +102,12 @@ class SyncWorker {
      */
     private configureModeSettings(syncMode: SyncMode): void {
         const mode = this.normalizeMode(syncMode);
+        const config = mode === 'deep' ? SYNC_WORKER_CONFIG.deep : SYNC_WORKER_CONFIG.incremental;
 
-        if (mode === 'deep') {
-            // DEEP: Maximum batch size, aggressive memory management
-            this.batchSize = 250;
-            this.batchDelay = 1500;
-            this.gcInterval = 3;
-            this.disconnectInterval = 5;
-        } else {
-            // INCREMENTAL: Fast, optimized for catch-up
-            this.batchSize = 250;
-            this.batchDelay = 500;
-            this.gcInterval = 10;
-            this.disconnectInterval = 20;
-        }
+        this.batchSize = config.batchSize;
+        this.batchDelay = config.batchDelay;
+        this.gcInterval = config.gcInterval;
+        this.disconnectInterval = config.disconnectInterval;
     }
 
     /**

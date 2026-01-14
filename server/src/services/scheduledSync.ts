@@ -11,7 +11,7 @@
 import type { PrismaClient } from '@prisma/client';
 import shopifyClient from './shopify.js';
 import type { ShopifyOrder } from './shopify.js';
-import { cacheShopifyOrder, processFromCache, markCacheProcessed, markCacheError } from './shopifyOrderProcessor.js';
+import { cacheShopifyOrders, processFromCache, markCacheProcessed, markCacheError } from './shopifyOrderProcessor.js';
 import prisma from '../lib/prisma.js';
 import { syncLogger } from '../utils/logger.js';
 
@@ -147,7 +147,7 @@ async function runHourlySync(): Promise<SyncResult | null> {
 
         for (const order of orders) {
             try {
-                await cacheShopifyOrder(prisma, String(order.id), order, 'scheduled_sync');
+                await cacheShopifyOrders(prisma, order, 'scheduled_sync');
                 cached++;
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : String(err);

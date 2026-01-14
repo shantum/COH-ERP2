@@ -9,11 +9,15 @@ import type { ShopifyOrder, ShopifyProduct } from '../services/shopify.js';
 import syncWorker from '../services/syncWorker.js';
 import { syncAllProducts } from '../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
-import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder, batchCacheShopifyOrders } from '../services/shopifyOrderProcessor.js';
+import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders } from '../services/shopifyOrderProcessor.js';
 import scheduledSync from '../services/scheduledSync.js';
 import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
 import { shopifyLogger } from '../utils/logger.js';
+import { FULL_DUMP_CONFIG } from '../constants.js';
+import { getOrderLockStatus } from '../utils/orderLock.js';
+import { getAllCircuitBreakerStatus, resetAllCircuitBreakers, shopifyApiCircuit } from '../utils/circuitBreaker.js';
+import shutdownCoordinator from '../utils/shutdownCoordinator.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -305,7 +309,8 @@ router.post('/preview/products', authenticateToken, asyncHandler(async (req: Req
         let totalCount = 0;
         try {
             totalCount = await shopifyClient.getProductCount();
-        } catch {
+        } catch (error: unknown) {
+            shopifyLogger.debug({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Product count fetch failed, using array length');
             totalCount = shopifyProducts.length;
         }
 
@@ -364,7 +369,8 @@ router.post('/preview/orders', authenticateToken, asyncHandler(async (req: Reque
         let totalCount = 0;
         try {
             totalCount = await shopifyClient.getOrderCount();
-        } catch {
+        } catch (error: unknown) {
+            shopifyLogger.debug({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Order count fetch failed, using array length');
             totalCount = shopifyOrders.length;
         }
 
@@ -399,7 +405,8 @@ router.post('/preview/customers', authenticateToken, asyncHandler(async (req: Re
         let totalCount = 0;
         try {
             totalCount = await shopifyClient.getCustomerCount();
-        } catch {
+        } catch (error: unknown) {
+            shopifyLogger.debug({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Customer count fetch failed, using array length');
             totalCount = shopifyCustomers.length;
         }
 
@@ -1004,7 +1011,8 @@ router.get('/sync/product-cache-status', authenticateToken, asyncHandler(async (
             const data = JSON.parse(cache.rawData) as { status?: string };
             const status = data.status || 'unknown';
             statusCounts[status] = (statusCounts[status] || 0) + 1;
-        } catch {
+        } catch (error: unknown) {
+            shopifyLogger.debug({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to parse product cache rawData');
             statusCounts.unknown++;
         }
     }
@@ -1084,13 +1092,13 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
         // Streaming approach: fetch batch, cache batch, repeat
         let sinceId: string | null = null;
         let consecutiveSmallBatches = 0;
-        const maxConsecutiveSmallBatches = 3;
+        const { batchSize, batchDelay, maxConsecutiveSmallBatches } = FULL_DUMP_CONFIG;
 
         while (true) {
             // Fetch batch
             const params: Record<string, string | number> = {
                 status: 'any',
-                limit: 250,
+                limit: batchSize,
             };
             if (sinceId) params.since_id = sinceId;
             if (fetchOptions.created_at_min) params.created_at_min = fetchOptions.created_at_min;
@@ -1104,9 +1112,9 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
 
             shopifyLogger.debug({ fetched, total: totalCount, batchSize: orders.length }, 'Full Dump: fetching progress');
 
-            // Cache batch using fast batch operation
+            // Cache batch using unified cache function
             try {
-                const batchCached = await batchCacheShopifyOrders(req.prisma, orders, 'full_dump');
+                const batchCached = await cacheShopifyOrders(req.prisma, orders, 'full_dump');
                 cached += batchCached;
             } catch (err) {
                 const error = err as Error;
@@ -1114,19 +1122,21 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
                 // Fallback to individual caching on batch error
                 for (const order of orders) {
                     try {
-                        await cacheShopifyOrder(req.prisma, String(order.id), order, 'full_dump');
+                        await cacheShopifyOrders(req.prisma, order, 'full_dump');
                         cached++;
-                    } catch (innerErr) {
+                    } catch (innerErr: unknown) {
+                        const errMsg = innerErr instanceof Error ? innerErr.message : 'Unknown error';
+                        shopifyLogger.debug({ orderId: order.id, error: errMsg }, 'Failed to cache individual order');
                         skipped++;
                     }
                 }
             }
 
             // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, batchDelay));
 
             // Check if we should stop
-            if (orders.length < 250) {
+            if (orders.length < batchSize) {
                 consecutiveSmallBatches++;
                 if (fetched >= totalCount || consecutiveSmallBatches >= maxConsecutiveSmallBatches) {
                     break;
@@ -1560,6 +1570,151 @@ router.post('/cache/cleanup', authenticateToken, asyncHandler(async (req: Reques
         message: 'Cache cleanup completed',
         ...results,
     });
+}));
+
+// ============================================
+// DEBUG ENDPOINTS
+// ============================================
+
+/**
+ * Get current lock status
+ * Shows in-memory locks and database lock status
+ */
+router.get('/debug/locks', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    // Get in-memory locks
+    const inMemoryLocks = getOrderLockStatus();
+
+    // Get database locks (orders with processingLock not null and not expired)
+    const now = new Date();
+    const dbLocks = await req.prisma.shopifyOrderCache.findMany({
+        where: {
+            processingLock: { not: null }
+        },
+        select: {
+            id: true,
+            orderNumber: true,
+            processingLock: true,
+        },
+        take: 100,
+    });
+
+    // Format database locks with expiry info
+    const databaseLocks = dbLocks.map(lock => ({
+        orderId: lock.id,
+        orderNumber: lock.orderNumber,
+        lockExpiry: lock.processingLock,
+        expired: lock.processingLock ? new Date(lock.processingLock) < now : true,
+        ageSeconds: lock.processingLock ? Math.round((now.getTime() - new Date(lock.processingLock).getTime()) / 1000) : null,
+    }));
+
+    res.json({
+        inMemory: {
+            count: inMemoryLocks.length,
+            locks: inMemoryLocks,
+        },
+        database: {
+            count: databaseLocks.length,
+            activeLocks: databaseLocks.filter(l => !l.expired).length,
+            locks: databaseLocks,
+        },
+    });
+}));
+
+/**
+ * Get sync progress and status
+ * Shows scheduler status, active jobs, and worker state
+ */
+router.get('/debug/sync-progress', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    // Get scheduler status
+    const schedulerStatus = scheduledSync.getStatus();
+
+    // Get active sync jobs
+    const activeJobs = await req.prisma.syncJob.findMany({
+        where: { status: { in: ['pending', 'running'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+    });
+
+    // Get recent completed jobs
+    const recentJobs = await req.prisma.syncJob.findMany({
+        where: { status: { in: ['completed', 'failed', 'cancelled'] } },
+        orderBy: { completedAt: 'desc' },
+        take: 5,
+    });
+
+    // Get unprocessed cache count
+    const unprocessedCount = await req.prisma.shopifyOrderCache.count({
+        where: { processedAt: null },
+    });
+
+    // Get error cache count
+    const errorCount = await req.prisma.shopifyOrderCache.count({
+        where: { processingError: { not: null } },
+    });
+
+    res.json({
+        scheduler: schedulerStatus,
+        activeJobs: activeJobs.map(job => ({
+            id: job.id,
+            jobType: job.jobType,
+            status: job.status,
+            syncMode: job.syncMode,
+            progress: job.totalRecords ? Math.round((job.processed / job.totalRecords) * 100) : null,
+            processed: job.processed,
+            totalRecords: job.totalRecords,
+            errors: job.errors,
+            startedAt: job.startedAt,
+            currentBatch: job.currentBatch,
+        })),
+        recentJobs: recentJobs.map(job => ({
+            id: job.id,
+            jobType: job.jobType,
+            status: job.status,
+            created: job.created,
+            updated: job.updated,
+            errors: job.errors,
+            completedAt: job.completedAt,
+            durationSeconds: job.startedAt && job.completedAt
+                ? Math.round((job.completedAt.getTime() - job.startedAt.getTime()) / 1000)
+                : null,
+        })),
+        cache: {
+            unprocessed: unprocessedCount,
+            withErrors: errorCount,
+        },
+        shutdownHandlers: shutdownCoordinator.getStatus(),
+    });
+}));
+
+/**
+ * Get circuit breaker status
+ */
+router.get('/debug/circuit-breaker', authenticateToken, asyncHandler(async (_req: Request, res: Response) => {
+    const circuitBreakers = getAllCircuitBreakerStatus();
+
+    res.json({
+        circuitBreakers,
+        shopifyApi: shopifyApiCircuit.getStatus(),
+    });
+}));
+
+/**
+ * Reset circuit breaker (admin action)
+ */
+router.post('/debug/circuit-breaker/reset', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const { name } = req.body as { name?: string };
+
+    if (name) {
+        // Reset specific circuit breaker
+        if (name === 'shopify_api') {
+            shopifyApiCircuit.reset();
+        }
+        res.json({ message: `Circuit breaker '${name}' reset`, status: shopifyApiCircuit.getStatus() });
+    } else {
+        // Reset all circuit breakers
+        resetAllCircuitBreakers();
+        res.json({ message: 'All circuit breakers reset', circuitBreakers: getAllCircuitBreakerStatus() });
+    }
 }));
 
 export default router;

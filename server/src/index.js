@@ -53,6 +53,7 @@ import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import shutdownCoordinator from './utils/shutdownCoordinator.js';
 
 // tRPC setup
 import * as trpcExpress from '@trpc/server/adapters/express';
@@ -194,6 +195,19 @@ app.listen(PORT, async () => {
   // Start tracking sync scheduler (every 4 hours)
   trackingSync.start();
 
+  // Register shutdown handlers for graceful shutdown
+  shutdownCoordinator.register('scheduledSync', () => {
+    scheduledSync.stop();
+  }, 5000);
+
+  shutdownCoordinator.register('trackingSync', () => {
+    trackingSync.stop();
+  }, 5000);
+
+  shutdownCoordinator.register('prisma', async () => {
+    await prisma.$disconnect();
+  }, 10000);
+
   // Start daily cache cleanup scheduler (runs at 2 AM)
   const cacheCleanupInterval = setInterval(async () => {
     const hour = new Date().getHours();
@@ -209,8 +223,10 @@ app.listen(PORT, async () => {
     runAllCleanup().catch(err => console.error('[CacheCleanup] Startup cleanup error:', err));
   }, 30000); // 30 seconds after startup
 
-  // Store reference for graceful shutdown
-  global.cacheCleanupInterval = cacheCleanupInterval;
+  // Register cache cleanup shutdown handler
+  shutdownCoordinator.register('cacheCleanup', () => {
+    clearInterval(cacheCleanupInterval);
+  }, 1000);
 });
 
 // ============================================
@@ -255,23 +271,17 @@ process.on('warning', (warning) => {
   }, `Process warning: ${warning.message}`);
 });
 
-// Graceful shutdown
+// Graceful shutdown using coordinator
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully...');
-  scheduledSync.stop();
-  trackingSync.stop();
-  if (global.cacheCleanupInterval) clearInterval(global.cacheCleanupInterval);
-  await prisma.$disconnect();
+  await shutdownCoordinator.shutdown();
   logger.info('Server shut down complete');
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down gracefully...');
-  scheduledSync.stop();
-  trackingSync.stop();
-  if (global.cacheCleanupInterval) clearInterval(global.cacheCleanupInterval);
-  await prisma.$disconnect();
+  await shutdownCoordinator.shutdown();
   logger.info('Server shut down complete');
   process.exit(0);
 });

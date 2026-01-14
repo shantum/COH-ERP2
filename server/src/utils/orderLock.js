@@ -8,13 +8,15 @@
  * can modify an order at a time.
  */
 
+import { ORDER_LOCK_CONFIG } from '../constants.js';
+
 // In-memory lock for lightweight operations (single-instance only)
 // For multi-instance deployments, use the database lock
 const processingOrders = new Map();
 
 // Lock timeout - release if not explicitly released after this time
-// 90 seconds allows for slow database operations and network latency
-const LOCK_TIMEOUT_MS = 90000; // 90 seconds
+// Configurable via ORDER_LOCK_TIMEOUT_MS env var, defaults to 90 seconds
+const LOCK_TIMEOUT_MS = ORDER_LOCK_CONFIG.timeoutMs;
 
 /**
  * Acquire a lock for processing a Shopify order
