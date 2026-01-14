@@ -191,34 +191,42 @@ app.listen(PORT, async () => {
   // Auto-archive shipped orders older than 90 days on startup
   await autoArchiveOldOrders(prisma);
 
-  // Start hourly Shopify sync scheduler
-  scheduledSync.start();
+  // Background workers can be disabled via environment variable
+  // Useful when running locally while production is also running
+  const disableWorkers = process.env.DISABLE_BACKGROUND_WORKERS === 'true';
 
-  // Start tracking sync scheduler (every 4 hours)
-  trackingSync.start();
+  if (disableWorkers) {
+    console.log('⚠️  Background workers disabled (DISABLE_BACKGROUND_WORKERS=true)');
+  } else {
+    // Start hourly Shopify sync scheduler
+    scheduledSync.start();
 
-  // Start background cache processor (processes pending orders every 30s)
-  cacheProcessor.start();
+    // Start tracking sync scheduler (every 4 hours)
+    trackingSync.start();
 
-  // Start cache dump worker (auto-resumes incomplete Shopify full dumps)
-  cacheDumpWorker.start();
+    // Start background cache processor (processes pending orders every 30s)
+    cacheProcessor.start();
 
-  // Register shutdown handlers for graceful shutdown
-  shutdownCoordinator.register('scheduledSync', () => {
-    scheduledSync.stop();
-  }, 5000);
+    // Start cache dump worker (auto-resumes incomplete Shopify full dumps)
+    cacheDumpWorker.start();
 
-  shutdownCoordinator.register('trackingSync', () => {
-    trackingSync.stop();
-  }, 5000);
+    // Register shutdown handlers for graceful shutdown
+    shutdownCoordinator.register('scheduledSync', () => {
+      scheduledSync.stop();
+    }, 5000);
 
-  shutdownCoordinator.register('cacheProcessor', () => {
-    cacheProcessor.stop();
-  }, 5000);
+    shutdownCoordinator.register('trackingSync', () => {
+      trackingSync.stop();
+    }, 5000);
 
-  shutdownCoordinator.register('cacheDumpWorker', () => {
-    cacheDumpWorker.stop();
-  }, 5000);
+    shutdownCoordinator.register('cacheProcessor', () => {
+      cacheProcessor.stop();
+    }, 5000);
+
+    shutdownCoordinator.register('cacheDumpWorker', () => {
+      cacheDumpWorker.stop();
+    }, 5000);
+  }
 
   shutdownCoordinator.register('prisma', async () => {
     await prisma.$disconnect();
