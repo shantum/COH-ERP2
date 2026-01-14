@@ -860,12 +860,41 @@ class ShopifyClient {
 
     /**
      * Extract gender from product data
+     * Priority: 1. Tags (source of truth), 2. Metafields, 3. Product Type
      */
     extractGenderFromMetafields(
         metafields: ShopifyMetafield[] | null | undefined,
-        productType: string | null = null
+        productType: string | null = null,
+        tags: string | null = null
     ): 'women' | 'men' | 'unisex' {
-        // First, try my_fields.gender metafield
+        // PRIORITY 1: Tags are the source of truth
+        if (tags) {
+            const tagLower = tags.toLowerCase();
+
+            // Check for explicit _related_ tags first (most reliable)
+            if (tagLower.includes('_related_women')) {
+                return 'women';
+            }
+            if (tagLower.includes('_related_men')) {
+                return 'men';
+            }
+
+            // Check for Women/Men in tags (e.g., "Women Top Wear", "Men Shirts")
+            // Must check women first since "men" is substring of "women"
+            if (tagLower.includes('women') || tagLower.includes('woman')) {
+                return 'women';
+            }
+            if (tagLower.includes(' men') || tagLower.includes('men ') ||
+                tagLower.startsWith('men') || tagLower.includes(',men')) {
+                return 'men';
+            }
+
+            if (tagLower.includes('unisex')) {
+                return 'unisex';
+            }
+        }
+
+        // PRIORITY 2: Try my_fields.gender metafield
         const genderField = metafields?.find(
             mf => mf.namespace === 'my_fields' && mf.key === 'gender'
         );
@@ -874,7 +903,7 @@ class ShopifyClient {
             return this.normalizeGender(genderField.value);
         }
 
-        // Try custom.product_type_for_feed metafield (e.g., "Women Co-ord Set", "Men Shirt")
+        // PRIORITY 3: Try custom.product_type_for_feed metafield
         const productTypeField = metafields?.find(
             mf => mf.namespace === 'custom' && mf.key === 'product_type_for_feed'
         );
@@ -883,7 +912,7 @@ class ShopifyClient {
             return this.normalizeGender(productTypeField.value);
         }
 
-        // Fallback to main product_type field (e.g., "Women Co-ord Set")
+        // PRIORITY 4: Fallback to main product_type field
         if (productType) {
             return this.normalizeGender(productType);
         }
@@ -919,6 +948,7 @@ class ShopifyClient {
 
         return 'unisex';
     }
+
 
     // ============================================
     // PAYMENT/TRANSACTION METHODS

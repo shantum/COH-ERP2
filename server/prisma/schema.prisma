@@ -88,8 +88,11 @@ model Product {
   updatedAt                 DateTime @updatedAt
 
   // Shopify integration
-  shopifyProductId String? @unique // Shopify product ID
-  shopifyHandle    String?         // Shopify handle (URL slug)
+  // NOTE: shopifyProductId is the primary/first Shopify product ID (for backward compat)
+  // Multiple Shopify products can link to one ERP product (e.g., each color is a separate Shopify product)
+  shopifyProductId  String?   @unique  // Primary Shopify product ID
+  shopifyProductIds String[]  @default([])  // All linked Shopify product IDs
+  shopifyHandle     String?   // Shopify handle (URL slug) of primary product
 
   // Return/exchange stats (aggregated from SKUs)
   returnCount   Int @default(0)
@@ -102,6 +105,7 @@ model Product {
   @@index([fabricTypeId])
   @@index([category])
   @@index([shopifyHandle])
+  @@index([name])  // For title-based product matching
 }
 
 model Variation {
@@ -119,6 +123,10 @@ model Variation {
   laborMinutes  Float?  // Override labor minutes for this variation (null = inherit from Product.baseProductionTimeMins)
   isActive      Boolean @default(true)
 
+  // Shopify source tracking (which Shopify product this color came from)
+  shopifySourceProductId String?  // Shopify product ID for this specific color
+  shopifySourceHandle    String?  // Handle for reference (e.g., "linen-polo-indigo")
+
   product Product @relation(fields: [productId], references: [id])
   fabric  Fabric  @relation(fields: [fabricId], references: [id])
   skus    Sku[]
@@ -126,6 +134,7 @@ model Variation {
   @@unique([productId, colorName])
   @@index([productId])
   @@index([fabricId])
+  @@index([shopifySourceProductId])  // For reverse lookups
 }
 
 model Sku {

@@ -183,7 +183,10 @@ export function groupVariantsByColor(variants: ShopifyVariantWithInventory[]): V
 
 /**
  * Sync a single product from Shopify to the database
- * Uses ID matching: shopifyProductId first, fallback to name
+ * Uses 3-tier matching: SKU-first → Title match → Create new
+ * 
+ * This prevents duplicates when multiple Shopify products share the same title
+ * (e.g., each color variant is a separate Shopify product)
  */
 export async function syncSingleProduct(
     prisma: PrismaClient,
@@ -194,72 +197,139 @@ export async function syncSingleProduct(
 
     const shopifyProductId = String(shopifyProduct.id);
     const mainImageUrl = shopifyProduct.image?.src || shopifyProduct.images?.[0]?.src || null;
-    const gender = shopifyClient.extractGenderFromMetafields(null, shopifyProduct.product_type);
+    // Use tags as source of truth for gender
+    const gender = shopifyClient.extractGenderFromMetafields(null, shopifyProduct.product_type, shopifyProduct.tags || null);
     const variantImageMap = buildVariantImageMap(shopifyProduct);
 
-    // Find product by shopifyProductId first (preferred), then by name (fallback)
-    let product = await prisma.product.findUnique({
-        where: { shopifyProductId },
-    });
+    // Extract all SKU codes from incoming Shopify variants
+    const incomingSkuCodes = (shopifyProduct.variants || [])
+        .map(v => v.sku?.trim())
+        .filter((sku): sku is string => Boolean(sku));
 
-    if (!product) {
-        // Fallback: find by name and gender
-        product = await prisma.product.findFirst({
-            where: { name: shopifyProduct.title, gender: gender || 'unisex' },
+    let product: Product | null = null;
+    let matchType: 'sku' | 'title' | 'new' = 'new';
+
+    // ============================================
+    // TIER 1: SKU-FIRST MATCHING (Primary)
+    // Find if ANY incoming SKU already exists → trace to its Product
+    // IMPORTANT: Only use if gender matches (men/women can have same SKU patterns)
+    // ============================================
+
+    if (incomingSkuCodes.length > 0) {
+        const existingSku = await prisma.sku.findFirst({
+            where: { skuCode: { in: incomingSkuCodes } },
+            include: {
+                variation: {
+                    include: { product: true }
+                }
+            }
         });
 
-        // If found by name, link to Shopify ID
-        if (product && !product.shopifyProductId) {
-            product = await prisma.product.update({
-                where: { id: product.id },
-                data: {
-                    shopifyProductId,
-                    shopifyHandle: shopifyProduct.handle,
-                    imageUrl: mainImageUrl || product.imageUrl,
-                },
-            });
-            result.updated++;
+        if (existingSku) {
+            const foundProduct = existingSku.variation.product;
+
+            // CRITICAL: Verify gender matches before using this product
+            // Men's and women's products can share same title and color
+            const genderMatches = foundProduct.gender === gender ||
+                foundProduct.gender === 'unisex' ||
+                gender === 'unisex';
+
+            if (genderMatches) {
+                product = foundProduct;
+                matchType = 'sku';
+
+                // Add this Shopify ID to the product's linked IDs if not present
+                if (!product.shopifyProductIds.includes(shopifyProductId)) {
+                    await prisma.product.update({
+                        where: { id: product.id },
+                        data: {
+                            shopifyProductIds: { push: shopifyProductId }
+                        }
+                    });
+                    result.updated++;
+                }
+            }
+            // If gender doesn't match, fall through to Tier 2
         }
     }
 
+    // ============================================
+    // TIER 2: TITLE + GENDER MATCHING (Fallback)
+    // Find product by title AND gender (men's/women's versions should stay separate)
+    // ============================================
+
     if (!product) {
-        // Try finding by name only (without gender)
-        const existingByName = await prisma.product.findFirst({
-            where: { name: shopifyProduct.title },
+        // First try matching by title + gender (preferred - keeps men/women separate)
+        product = await prisma.product.findFirst({
+            where: {
+                name: shopifyProduct.title,
+                gender: gender || 'unisex'
+            }
         });
 
-        if (existingByName && !existingByName.shopifyProductId) {
-            product = await prisma.product.update({
-                where: { id: existingByName.id },
-                data: {
-                    shopifyProductId,
-                    shopifyHandle: shopifyProduct.handle,
-                    gender: gender || 'unisex',
-                    imageUrl: mainImageUrl || existingByName.imageUrl,
-                    category: shopifyProduct.product_type?.toLowerCase() || existingByName.category,
-                },
+        // If no match with same gender, try finding any product with same title
+        // but only if the existing product is 'unisex' (can absorb gendered variants)
+        if (!product) {
+            const existingByTitle = await prisma.product.findFirst({
+                where: { name: shopifyProduct.title }
             });
-            result.updated++;
-        } else {
-            product = await prisma.product.create({
-                data: {
-                    name: shopifyProduct.title,
-                    shopifyProductId,
-                    shopifyHandle: shopifyProduct.handle,
-                    category: shopifyProduct.product_type?.toLowerCase() || 'dress',
-                    productType: 'basic',
-                    gender: gender || 'unisex',
-                    baseProductionTimeMins: 60,
-                    imageUrl: mainImageUrl,
-                },
-            });
-            result.created++;
+
+            // Only merge if existing is unisex (not a specific gender product)
+            if (existingByTitle && existingByTitle.gender === 'unisex') {
+                product = existingByTitle;
+            }
         }
+
+        if (product) {
+            matchType = 'title';
+
+            // Link this Shopify product to existing
+            if (!product.shopifyProductIds.includes(shopifyProductId)) {
+                const updateData: { shopifyProductIds?: { push: string }; shopifyProductId?: string } = {
+                    shopifyProductIds: { push: shopifyProductId }
+                };
+
+                // Set primary ID if not set
+                if (!product.shopifyProductId) {
+                    updateData.shopifyProductId = shopifyProductId;
+                }
+
+                await prisma.product.update({
+                    where: { id: product.id },
+                    data: updateData
+                });
+                result.updated++;
+            }
+        }
+    }
+
+    // ============================================
+    // TIER 3: CREATE NEW PRODUCT
+    // Only if no SKU or title match
+    // ============================================
+
+    if (!product) {
+        product = await prisma.product.create({
+            data: {
+                name: shopifyProduct.title,
+                shopifyProductId: shopifyProductId,
+                shopifyProductIds: [shopifyProductId],
+                shopifyHandle: shopifyProduct.handle,
+                category: shopifyProduct.product_type?.toLowerCase() || 'dress',
+                productType: 'basic',
+                gender: gender || 'unisex',
+                baseProductionTimeMins: 60,
+                imageUrl: mainImageUrl,
+            },
+        });
+        result.created++;
+        matchType = 'new';
     } else {
-        // Product exists - update if needed
+        // Product exists - update image/handle if needed
         const updates: Partial<Product> = {};
-        if (mainImageUrl && product.imageUrl !== mainImageUrl) updates.imageUrl = mainImageUrl;
-        if (shopifyProduct.handle && product.shopifyHandle !== shopifyProduct.handle) {
+        if (mainImageUrl && !product.imageUrl) updates.imageUrl = mainImageUrl;
+        // Only update handle if not set (preserve original)
+        if (shopifyProduct.handle && !product.shopifyHandle) {
             updates.shopifyHandle = shopifyProduct.handle;
         }
 
@@ -268,18 +338,21 @@ export async function syncSingleProduct(
                 where: { id: product.id },
                 data: updates,
             });
-            result.updated++;
         }
     }
 
-    // Group variants by color and process
+    // ============================================
+    // SYNC VARIATIONS & SKUs
+    // Track which Shopify product each color came from
+    // ============================================
+
     const variantsByColor = groupVariantsByColor(shopifyProduct.variants as ShopifyVariantWithInventory[]);
 
     for (const [colorName, variants] of Object.entries(variantsByColor)) {
         const firstVariantId = variants[0]?.id;
         const variationImageUrl = variantImageMap[firstVariantId] || mainImageUrl;
 
-        // Find or create variation
+        // Find or create variation (with source tracking)
         let variation = await prisma.variation.findFirst({
             where: { productId: product.id, colorName },
         });
@@ -291,15 +364,29 @@ export async function syncSingleProduct(
                     colorName,
                     fabricId: defaultFabricId,
                     imageUrl: variationImageUrl,
+                    shopifySourceProductId: shopifyProductId,  // Track source
+                    shopifySourceHandle: shopifyProduct.handle,
                 },
             });
             result.created++;
-        } else if (variationImageUrl && variation.imageUrl !== variationImageUrl) {
-            await prisma.variation.update({
-                where: { id: variation.id },
-                data: { imageUrl: variationImageUrl },
-            });
-            result.updated++;
+        } else {
+            // Update source tracking and image if missing
+            const variationUpdates: Record<string, string | null> = {};
+            if (!variation.shopifySourceProductId) {
+                variationUpdates.shopifySourceProductId = shopifyProductId;
+                variationUpdates.shopifySourceHandle = shopifyProduct.handle;
+            }
+            if (variationImageUrl && !variation.imageUrl) {
+                variationUpdates.imageUrl = variationImageUrl;
+            }
+
+            if (Object.keys(variationUpdates).length > 0) {
+                await prisma.variation.update({
+                    where: { id: variation.id },
+                    data: variationUpdates,
+                });
+                result.updated++;
+            }
         }
 
         // Process SKUs for each variant
@@ -312,6 +399,7 @@ export async function syncSingleProduct(
 
     return result;
 }
+
 
 /**
  * Sync a single SKU from Shopify variant
@@ -462,7 +550,7 @@ export async function cacheAndProcessProduct(
             data: {
                 processingError: (error as Error).message,
             },
-        }).catch(() => {}); // Ignore error if cache entry doesn't exist
+        }).catch(() => { }); // Ignore error if cache entry doesn't exist
 
         console.error(`Error processing product ${shopifyProduct.title}:`, error);
         return {
@@ -490,7 +578,7 @@ export async function handleProductDeletion(
     // Remove from cache
     await prisma.shopifyProductCache.deleteMany({
         where: { id },
-    }).catch(() => {}); // Ignore if not in cache
+    }).catch(() => { }); // Ignore if not in cache
 
     return {
         action: result.count > 0 ? 'deleted' : 'not_found',
