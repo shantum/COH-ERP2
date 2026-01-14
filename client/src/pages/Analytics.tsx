@@ -178,11 +178,10 @@ export default function Analytics() {
                                 <button
                                     key={preset}
                                     onClick={() => setDatePreset(preset)}
-                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                                        datePreset === preset
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${datePreset === preset
                                             ? 'bg-white text-gray-900 shadow-sm'
                                             : 'text-gray-600 hover:text-gray-900'
-                                    }`}
+                                        }`}
                                 >
                                     {preset}
                                 </button>
@@ -255,11 +254,10 @@ export default function Analytics() {
                         <button
                             key={dim.key}
                             onClick={() => setDimension(dim.key)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${
-                                dimension === dim.key
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors ${dimension === dim.key
                                     ? 'bg-primary-100 text-primary-700'
                                     : 'text-gray-600 hover:bg-gray-100'
-                            }`}
+                                }`}
                         >
                             {dim.label}
                         </button>
@@ -372,6 +370,8 @@ export default function Analytics() {
                                         pagination={true}
                                         paginationPageSize={20}
                                         onColumnResized={handleColumnResized}
+                                        enableCellTextSelection={true}
+                                        ensureDomOrder={true}
                                     />
                                 </div>
                             </div>
@@ -407,9 +407,8 @@ function MetricCard({ label, value, icon, color, active, onClick }: MetricCardPr
         <button
             onClick={onClick}
             disabled={!onClick}
-            className={`bg-white rounded-xl p-4 shadow-sm text-left transition-all ${activeClasses} ${
-                onClick ? 'hover:shadow-md cursor-pointer' : 'cursor-default'
-            }`}
+            className={`bg-white rounded-xl p-4 shadow-sm text-left transition-all ${activeClasses} ${onClick ? 'hover:shadow-md cursor-pointer' : 'cursor-default'
+                }`}
         >
             <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-lg ${colorClasses[color]}`}>{icon}</div>

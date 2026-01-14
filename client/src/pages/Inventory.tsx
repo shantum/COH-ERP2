@@ -349,9 +349,9 @@ export default function Inventory() {
                                         <div key={product.productId} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
                                             {/* Rank Badge */}
                                             <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${index === 0 ? 'bg-amber-100 text-amber-700' :
-                                                    index === 1 ? 'bg-gray-200 text-gray-600' :
-                                                        index === 2 ? 'bg-orange-100 text-orange-700' :
-                                                            'bg-gray-100 text-gray-500'
+                                                index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                    index === 2 ? 'bg-orange-100 text-orange-700' :
+                                                        'bg-gray-100 text-gray-500'
                                                 }`}>
                                                 {index + 1}
                                             </div>
@@ -420,9 +420,9 @@ export default function Inventory() {
                                         <div key={product.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
                                             {/* Rank Badge */}
                                             <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${index === 0 ? 'bg-green-100 text-green-700' :
-                                                    index === 1 ? 'bg-gray-200 text-gray-600' :
-                                                        index === 2 ? 'bg-emerald-100 text-emerald-700' :
-                                                            'bg-gray-100 text-gray-500'
+                                                index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                    index === 2 ? 'bg-emerald-100 text-emerald-700' :
+                                                        'bg-gray-100 text-gray-500'
                                                 }`}>
                                                 {index + 1}
                                             </div>
@@ -479,8 +479,8 @@ export default function Inventory() {
                         <button
                             onClick={() => setStockFilter('all')}
                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'all'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
                         >
                             All
@@ -488,8 +488,8 @@ export default function Inventory() {
                         <button
                             onClick={() => setStockFilter('in_stock')}
                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'in_stock'
-                                    ? 'bg-green-600 text-white'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                ? 'bg-green-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
                         >
                             In Stock
@@ -497,8 +497,8 @@ export default function Inventory() {
                         <button
                             onClick={() => setStockFilter('low_stock')}
                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'low_stock'
-                                    ? 'bg-amber-600 text-white'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                ? 'bg-amber-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
                         >
                             Low Stock
@@ -506,8 +506,8 @@ export default function Inventory() {
                         <button
                             onClick={() => setStockFilter('out_of_stock')}
                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${stockFilter === 'out_of_stock'
-                                    ? 'bg-red-600 text-white'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                ? 'bg-red-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                 }`}
                         >
                             Out of Stock
@@ -543,6 +543,8 @@ export default function Inventory() {
                             paginationPageSize={100}
                             paginationPageSizeSelector={[50, 100, 200, 500]}
                             cacheQuickFilter={true}
+                            enableCellTextSelection={true}
+                            ensureDomOrder={true}
                         />
                     </div>
                 </div>

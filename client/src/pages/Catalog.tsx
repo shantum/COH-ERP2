@@ -545,8 +545,8 @@ export default function Catalog() {
     const stats = useMemo(() => {
         const items = displayData;
         const label = viewLevel === 'product' ? 'Products' :
-                      viewLevel === 'variation' ? 'Colors' :
-                      viewLevel === 'consumption' ? 'Products' : 'SKUs';
+            viewLevel === 'variation' ? 'Colors' :
+                viewLevel === 'consumption' ? 'Products' : 'SKUs';
         return {
             total: items.length,
             label,
@@ -849,65 +849,67 @@ export default function Catalog() {
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="table-scroll-container">
                     <div style={{ minWidth: '1100px', height: 'calc(100vh - 320px)', minHeight: '400px' }}>
-                    <AgGridReact
-                        ref={gridRef}
-                        theme={compactThemeSmall}
-                        rowData={displayData}
-                        columnDefs={orderedColumnDefs}
-                        loading={isLoading}
-                        defaultColDef={{
-                            sortable: true,
-                            resizable: true,
-                            suppressMovable: false,
-                        }}
-                        animateRows={false}
-                        suppressCellFocus={false}
-                        singleClickEdit={true}
-                        stopEditingWhenCellsLoseFocus={true}
-                        getRowId={(params) => {
-                            // Use appropriate ID based on view level
-                            if (viewLevel === 'product' || viewLevel === 'consumption') return params.data.productId;
-                            if (viewLevel === 'variation') return params.data.variationId;
-                            return params.data.skuId;
-                        }}
-                        // Handle cell edits (consumption and cost fields)
-                        onCellValueChanged={(params) => {
-                            if (viewLevel === 'consumption') {
-                                handleConsumptionChange(params);
-                            } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'liningCost' || params.colDef.field === 'packagingCost' || params.colDef.field === 'laborMinutes') {
-                                handleCostChange(params);
-                            } else if (params.colDef.field === 'fabricConsumption') {
-                                // Handle fabric consumption edit
-                                const newConsumption = parseFloat(params.newValue);
-                                if (!isNaN(newConsumption) && newConsumption > 0) {
-                                    if (viewLevel === 'sku') {
-                                        // Single SKU update
-                                        updateSkuMutation.mutate({
-                                            skuId: params.data.skuId,
-                                            data: { fabricConsumption: newConsumption },
-                                        });
-                                    } else {
-                                        // Bulk update all SKUs in this product/variation
-                                        const skuIds = params.data.skuIds || [];
-                                        if (skuIds.length > 0) {
-                                            updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
+                        <AgGridReact
+                            ref={gridRef}
+                            theme={compactThemeSmall}
+                            rowData={displayData}
+                            columnDefs={orderedColumnDefs}
+                            loading={isLoading}
+                            defaultColDef={{
+                                sortable: true,
+                                resizable: true,
+                                suppressMovable: false,
+                            }}
+                            animateRows={false}
+                            suppressCellFocus={false}
+                            singleClickEdit={true}
+                            stopEditingWhenCellsLoseFocus={true}
+                            enableCellTextSelection={true}
+                            ensureDomOrder={true}
+                            getRowId={(params) => {
+                                // Use appropriate ID based on view level
+                                if (viewLevel === 'product' || viewLevel === 'consumption') return params.data.productId;
+                                if (viewLevel === 'variation') return params.data.variationId;
+                                return params.data.skuId;
+                            }}
+                            // Handle cell edits (consumption and cost fields)
+                            onCellValueChanged={(params) => {
+                                if (viewLevel === 'consumption') {
+                                    handleConsumptionChange(params);
+                                } else if (params.colDef.field === 'trimsCost' || params.colDef.field === 'liningCost' || params.colDef.field === 'packagingCost' || params.colDef.field === 'laborMinutes') {
+                                    handleCostChange(params);
+                                } else if (params.colDef.field === 'fabricConsumption') {
+                                    // Handle fabric consumption edit
+                                    const newConsumption = parseFloat(params.newValue);
+                                    if (!isNaN(newConsumption) && newConsumption > 0) {
+                                        if (viewLevel === 'sku') {
+                                            // Single SKU update
+                                            updateSkuMutation.mutate({
+                                                skuId: params.data.skuId,
+                                                data: { fabricConsumption: newConsumption },
+                                            });
+                                        } else {
+                                            // Bulk update all SKUs in this product/variation
+                                            const skuIds = params.data.skuIds || [];
+                                            if (skuIds.length > 0) {
+                                                updateConsumption.mutate({ skuIds, fabricConsumption: newConsumption });
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        }}
-                        // Pagination
-                        pagination={true}
-                        paginationPageSize={pageSize === 0 ? 999999 : pageSize}
-                        paginationPageSizeSelector={false}
-                        // Quick filter for fast search
-                        cacheQuickFilter={true}
-                        // Column order and width persistence
-                        onColumnMoved={onColumnMoved}
-                        onColumnResized={onColumnResized}
-                        onGridReady={onGridReady}
-                        maintainColumnOrder={true}
-                    />
+                            }}
+                            // Pagination
+                            pagination={true}
+                            paginationPageSize={pageSize === 0 ? 999999 : pageSize}
+                            paginationPageSizeSelector={false}
+                            // Quick filter for fast search
+                            cacheQuickFilter={true}
+                            // Column order and width persistence
+                            onColumnMoved={onColumnMoved}
+                            onColumnResized={onColumnResized}
+                            onGridReady={onGridReady}
+                            maintainColumnOrder={true}
+                        />
                     </div>
                 </div>
             </div>

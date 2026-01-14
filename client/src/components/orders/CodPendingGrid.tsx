@@ -169,11 +169,10 @@ export function CodPendingGrid({
                             {params.value}
                         </button>
                         {order.customerTier && (
-                            <span className={`ml-1 text-xs px-1 rounded ${
-                                order.customerTier === 'vip' ? 'bg-purple-100 text-purple-700' :
-                                order.customerTier === 'loyal' ? 'bg-blue-100 text-blue-700' :
-                                'bg-gray-100 text-gray-600'
-                            }`}>
+                            <span className={`ml-1 text-xs px-1 rounded ${order.customerTier === 'vip' ? 'bg-purple-100 text-purple-700' :
+                                    order.customerTier === 'loyal' ? 'bg-blue-100 text-blue-700' :
+                                        'bg-gray-100 text-gray-600'
+                                }`}>
                                 {order.customerTier}
                             </span>
                         )}
@@ -400,6 +399,8 @@ export function CodPendingGrid({
                     onColumnMoved={onColumnMoved}
                     onColumnResized={onColumnResized}
                     maintainColumnOrder={true}
+                    enableCellTextSelection={true}
+                    ensureDomOrder={true}
                 />
             </div>
         </div>

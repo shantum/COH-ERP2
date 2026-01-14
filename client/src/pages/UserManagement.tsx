@@ -23,11 +23,10 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 // Status badge component
 function StatusBadge({ isActive }: { isActive: boolean }) {
     return (
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-            isActive
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${isActive
                 ? 'bg-green-100 text-green-700'
                 : 'bg-gray-100 text-gray-500'
-        }`}>
+            }`}>
             {isActive ? <Check size={12} /> : <XIcon size={12} />}
             {isActive ? 'Active' : 'Inactive'}
         </span>
@@ -231,11 +230,10 @@ export default function UserManagement() {
                                         data: { isActive: !user.isActive },
                                     });
                                 }}
-                                className={`p-1.5 rounded ${
-                                    user.isActive
+                                className={`p-1.5 rounded ${user.isActive
                                         ? 'text-red-500 hover:text-red-700 hover:bg-red-50'
                                         : 'text-green-500 hover:text-green-700 hover:bg-green-50'
-                                }`}
+                                    }`}
                                 title={user.isActive ? 'Deactivate' : 'Activate'}
                             >
                                 {user.isActive ? <XIcon size={16} /> : <Check size={16} />}
@@ -348,6 +346,8 @@ export default function UserManagement() {
                         }}
                         suppressCellFocus
                         animateRows
+                        enableCellTextSelection={true}
+                        ensureDomOrder={true}
                     />
                 </div>
             </div>

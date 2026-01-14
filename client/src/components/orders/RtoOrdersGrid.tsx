@@ -157,11 +157,10 @@ export function RtoOrdersGrid({
                             {params.value}
                         </button>
                         {order.customerTier && (
-                            <span className={`ml-1 text-xs px-1 rounded ${
-                                order.customerTier === 'vip' ? 'bg-purple-100 text-purple-700' :
-                                order.customerTier === 'loyal' ? 'bg-blue-100 text-blue-700' :
-                                'bg-gray-100 text-gray-600'
-                            }`}>
+                            <span className={`ml-1 text-xs px-1 rounded ${order.customerTier === 'vip' ? 'bg-purple-100 text-purple-700' :
+                                    order.customerTier === 'loyal' ? 'bg-blue-100 text-blue-700' :
+                                        'bg-gray-100 text-gray-600'
+                                }`}>
                                 {order.customerTier}
                             </span>
                         )}
@@ -203,9 +202,8 @@ export function RtoOrdersGrid({
                 if (!method) return <span className="text-gray-400">-</span>;
                 const isCod = method.toLowerCase() === 'cod';
                 return (
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        isCod ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
-                    }`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isCod ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                        }`}>
                         {method}
                     </span>
                 );
@@ -282,7 +280,7 @@ export function RtoOrdersGrid({
             cellRenderer: (params: ICellRendererParams) => {
                 const days = params.value || 0;
                 const colorClass = days <= 5 ? 'text-gray-600' :
-                                  days <= 10 ? 'text-amber-600' : 'text-red-600';
+                    days <= 10 ? 'text-amber-600' : 'text-red-600';
                 return (
                     <span className={`text-xs font-medium ${colorClass}`}>
                         {days}d
@@ -451,6 +449,8 @@ export function RtoOrdersGrid({
                     onColumnMoved={onColumnMoved}
                     onColumnResized={onColumnResized}
                     maintainColumnOrder={true}
+                    enableCellTextSelection={true}
+                    ensureDomOrder={true}
                 />
             </div>
         </div>

@@ -1040,6 +1040,8 @@ export default function Fabrics() {
                         onColumnMoved={onColumnMoved}
                         onColumnResized={onColumnResized}
                         maintainColumnOrder={true}
+                        enableCellTextSelection={true}
+                        ensureDomOrder={true}
                     />
                 </div>
             </div>

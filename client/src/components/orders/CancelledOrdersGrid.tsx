@@ -227,9 +227,8 @@ export function CancelledOrdersGrid({
                 if (!method) return <span className="text-gray-400">-</span>;
                 const isCod = method.toLowerCase() === 'cod';
                 return (
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        isCod ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
-                    }`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isCod ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
+                        }`}>
                         {method}
                     </span>
                 );
@@ -244,9 +243,8 @@ export function CancelledOrdersGrid({
                 if (!channel) return <span className="text-gray-400">-</span>;
                 const isShopify = channel === 'shopify';
                 return (
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        isShopify ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
-                    }`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isShopify ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                        }`}>
                         {channel}
                     </span>
                 );
@@ -386,6 +384,8 @@ export function CancelledOrdersGrid({
                     onColumnMoved={onColumnMoved}
                     onColumnResized={onColumnResized}
                     maintainColumnOrder={true}
+                    enableCellTextSelection={true}
+                    ensureDomOrder={true}
                 />
             </div>
         </div>
