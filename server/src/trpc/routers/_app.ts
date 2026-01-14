@@ -11,19 +11,29 @@
  * - returns: Return request management
  */
 
-import { router } from '../index.js';
+import { router, publicProcedure } from '../index.js';
 import { authRouter } from './auth.js';
 import { customersRouter } from './customers.js';
 import { inventoryRouter } from './inventory.js';
 import { ordersRouter } from './orders.js';
+import { paymentsRouter } from './payments.js';
 import { productsRouter } from './products.js';
 import { returnsRouter } from './returns.js';
 
+/**
+ * Main application router
+ * Combines all feature routers
+ */
 export const appRouter = router({
+    // Health check endpoint
+    healthCheck: publicProcedure.query(() => ({ status: 'ok', timestamp: new Date() })),
+
+    // Feature routers
     auth: authRouter,
     customers: customersRouter,
     inventory: inventoryRouter,
     orders: ordersRouter,
+    payments: paymentsRouter,
     products: productsRouter,
     returns: returnsRouter,
 });

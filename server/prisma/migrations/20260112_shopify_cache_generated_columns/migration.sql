@@ -144,38 +144,31 @@ ADD COLUMN IF NOT EXISTS "billingPhone" TEXT
 GENERATED ALWAYS AS ((("rawData"::jsonb) -> 'billing_address' ->> 'phone')) STORED;
 
 -- ============================================
--- ORDER TIMESTAMPS (from Shopify)
+-- ORDER TIMESTAMPS (from Shopify) - FIXED
+-- Changed to TIMESTAMP (no timezone) for immutability
+-- TIMESTAMPTZ is not immutable because it depends on timezone settings
 -- ============================================
 
 ALTER TABLE "ShopifyOrderCache"
-ADD COLUMN IF NOT EXISTS "shopifyCreatedAt" TIMESTAMP WITH TIME ZONE
-GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'created_at')::timestamptz) STORED;
+ADD COLUMN IF NOT EXISTS "shopifyCreatedAt" TIMESTAMP
+GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'created_at')::timestamp) STORED;
 
 ALTER TABLE "ShopifyOrderCache"
-ADD COLUMN IF NOT EXISTS "shopifyUpdatedAt" TIMESTAMP WITH TIME ZONE
-GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'updated_at')::timestamptz) STORED;
+ADD COLUMN IF NOT EXISTS "shopifyUpdatedAt" TIMESTAMP
+GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'updated_at')::timestamp) STORED;
 
 ALTER TABLE "ShopifyOrderCache"
-ADD COLUMN IF NOT EXISTS "shopifyProcessedAt" TIMESTAMP WITH TIME ZONE
-GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'processed_at')::timestamptz) STORED;
+ADD COLUMN IF NOT EXISTS "shopifyProcessedAt" TIMESTAMP
+GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'processed_at')::timestamp) STORED;
+
+-- Use NULLIF to handle empty strings before casting
+ALTER TABLE "ShopifyOrderCache"
+ADD COLUMN IF NOT EXISTS "shopifyClosedAt" TIMESTAMP
+GENERATED ALWAYS AS ((NULLIF(("rawData"::jsonb) ->> 'closed_at', ''))::timestamp) STORED;
 
 ALTER TABLE "ShopifyOrderCache"
-ADD COLUMN IF NOT EXISTS "shopifyClosedAt" TIMESTAMP WITH TIME ZONE
-GENERATED ALWAYS AS (
-    CASE WHEN (("rawData"::jsonb) ->> 'closed_at') IS NOT NULL AND (("rawData"::jsonb) ->> 'closed_at') != ''
-         THEN ((("rawData"::jsonb) ->> 'closed_at')::timestamptz)
-         ELSE NULL
-    END
-) STORED;
-
-ALTER TABLE "ShopifyOrderCache"
-ADD COLUMN IF NOT EXISTS "shopifyCancelledAt" TIMESTAMP WITH TIME ZONE
-GENERATED ALWAYS AS (
-    CASE WHEN (("rawData"::jsonb) ->> 'cancelled_at') IS NOT NULL AND (("rawData"::jsonb) ->> 'cancelled_at') != ''
-         THEN ((("rawData"::jsonb) ->> 'cancelled_at')::timestamptz)
-         ELSE NULL
-    END
-) STORED;
+ADD COLUMN IF NOT EXISTS "shopifyCancelledAt" TIMESTAMP
+GENERATED ALWAYS AS ((NULLIF(("rawData"::jsonb) ->> 'cancelled_at', ''))::timestamp) STORED;
 
 -- ============================================
 -- ORDER METADATA

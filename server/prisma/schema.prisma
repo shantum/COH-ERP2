@@ -31,15 +31,16 @@ model User {
   mustChangePassword    Boolean                  @default(false)
   roleId                String?
   tokenVersion          Int                      @default(0)
-  fabricTransactions    FabricTransaction[]
-  inventoryTransactions InventoryTransaction[]
-  customizedLines       OrderLine[]              @relation("CustomizedBy")
-  rtoInwardedLines      OrderLine[]              @relation("RtoInwardedBy")
-  processedRepackItems  RepackingQueueItem[]     @relation("RepackingProcessor")
-  returnStatusHistory   ReturnStatusHistory[]
   userRole              Role?                    @relation(fields: [roleId], references: [id])
   permissionOverrides   UserPermissionOverride[]
+  inventoryTransactions InventoryTransaction[]
+  fabricTransactions    FabricTransaction[]
+  returnStatusHistory   ReturnStatusHistory[]
+  processedRepackItems  RepackingQueueItem[]     @relation("RepackingProcessor")
   createdWriteOffs      WriteOffLog[]            @relation("WriteOffCreator")
+  rtoInwardedLines      OrderLine[]              @relation("RtoInwardedBy")
+  customizedLines       OrderLine[]              @relation("CustomizedBy")
+  recordedPayments      OrderPayment[]           // Payments recorded by this user
 
   @@index([roleId])
 }
@@ -379,12 +380,13 @@ model Order {
   paymentConfirmedBy   String?
   paymentStatus        String?            @default("pending")
   customer             Customer?          @relation(fields: [customerId], references: [id])
-  originalOrder        Order?             @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
-  exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
   shopifyCache         ShopifyOrderCache? @relation(fields: [shopifyOrderId], references: [id])
   orderLines           OrderLine[]
-  exchangeRequests     ReturnRequest[]    @relation("ExchangeOrder")
+  payments             OrderPayment[]     // Payment transactions for this order
   returnRequests       ReturnRequest[]    @relation("OriginalOrder")
+  exchangeRequests     ReturnRequest[]    @relation("ExchangeOrder")
+  originalOrder        Order?             @relation("ExchangeOriginalOrder", fields: [originalOrderId], references: [id])
+  exchangeOrders       Order[]            @relation("ExchangeOriginalOrder")
 
   @@index([customerId])
   @@index([status])
@@ -393,15 +395,40 @@ model Order {
   @@index([isExchange])
   @@index([originalOrderId])
   @@index([shipByDate])
-  @@index([status, orderDate])
-  @@index([customerId, orderDate])
-  @@index([status, isArchived])
-  @@index([status, isArchived, orderDate])
-  @@index([terminalStatus])
-  @@index([terminalAt])
-  @@index([terminalStatus, terminalAt])
-  @@index([shippedAt])
-  @@index([status, shippedAt])
+  @@index([paymentStatus])
+  @@index([paymentMethod, paymentStatus]) // Compound: filter by payment method + status
+  @@index([status, orderDate])      // Compound: filter by status + sort by date
+  @@index([customerId, orderDate])  // Compound: customer order history
+  @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)
+  @@index([status, isArchived, orderDate]) // Compound: open orders with date sort
+  @@index([terminalStatus])         // Terminal status filtering
+  @@index([terminalAt])             // Terminal date filtering for archive
+  @@index([terminalStatus, terminalAt]) // Compound: archive queue queries
+  @@index([shippedAt])              // Shipped orders sorting
+  @@index([status, shippedAt])      // Compound: shipped view filtering
+}
+
+// ============================================
+// ORDER PAYMENTS
+// ============================================
+
+model OrderPayment {
+  id             String   @id @default(uuid())
+  orderId        String
+  amount         Float    // Payment amount in ₹
+  paymentMethod  String?  // cash, bank_transfer, upi, card, cheque, etc.
+  reference      String?  // Transaction ID, UTR, receipt number, cheque number
+  notes          String?  // Additional notes about this payment
+  recordedById   String   // User who recorded this payment
+  recordedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  recordedBy User  @relation(fields: [recordedById], references: [id])
+
+  @@index([orderId])
+  @@index([recordedAt])
+  @@index([orderId, recordedAt]) // Compound: payment history for order
 }
 
 model OrderLine {

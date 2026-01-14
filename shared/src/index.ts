@@ -11,6 +11,7 @@ export * from './types/index.js';
 // Re-export all schemas
 export * from './schemas/index.js';
 export * from './schemas/orders.js';
+export * from './schemas/payments.js';
 
 // Re-export all validators
 export * from './validators/index.js';
