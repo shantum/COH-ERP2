@@ -13,7 +13,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
-import { CreateOrderSchema, MarkPaymentPaidSchema } from '@coh/shared';
+import { CreateOrderSchema } from '@coh/shared';
 import {
     buildViewWhereClause,
     enrichOrdersForView,

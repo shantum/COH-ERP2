@@ -207,8 +207,8 @@ export function OrderSummary({ order, calculatedTotal, totalItems }: OrderSummar
               Payment Method
             </span>
             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isCod
-                ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                : 'bg-blue-100 text-blue-700 border border-blue-200'
+              ? 'bg-amber-100 text-amber-700 border border-amber-200'
+              : 'bg-blue-100 text-blue-700 border border-blue-200'
               }`}>
               {paymentMethod}
             </span>
@@ -218,13 +218,13 @@ export function OrderSummary({ order, calculatedTotal, totalItems }: OrderSummar
             <span className="text-sm text-slate-500">
               Payment Status
             </span>
-            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${order.paymentStatus === 'paid' || shopify?.financialStatus === 'paid'
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${(order as any).paymentStatus === 'paid' || (shopify as any)?.financialStatus === 'paid'
                 ? 'bg-green-100 text-green-700 border border-green-200'
-                : order.paymentStatus === 'refunded' || shopify?.financialStatus === 'refunded'
+                : (order as any).paymentStatus === 'refunded' || (shopify as any)?.financialStatus === 'refunded'
                   ? 'bg-gray-100 text-gray-700 border border-gray-200'
                   : 'bg-amber-100 text-amber-700 border border-amber-200'
               }`}>
-              {order.paymentStatus || shopify?.financialStatus || 'pending'}
+              {(order as any).paymentStatus || (shopify as any)?.financialStatus || 'pending'}
             </span>
           </div>
         </div>
