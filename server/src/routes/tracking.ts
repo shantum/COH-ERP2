@@ -28,6 +28,7 @@ import {
     BusinessLogicError,
     ExternalServiceError,
 } from '../utils/errors.js';
+import { trackingLogger } from '../utils/logger.js';
 import ithinkLogistics from '../services/ithinkLogistics.js';
 import { updateCustomerTier } from '../utils/tierUtils.js';
 import trackingSync from '../services/trackingSync.js';
@@ -618,8 +619,8 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
                     if (rawData.expected_delivery_date && rawData.expected_delivery_date !== '0000-00-00') {
                         try {
                             updateData.expectedDeliveryDate = new Date(rawData.expected_delivery_date);
-                        } catch {
-                            // Invalid date, skip
+                        } catch (e) {
+                            trackingLogger.debug({ awb, date: rawData.expected_delivery_date }, 'Invalid expected delivery date');
                         }
                     }
 
@@ -630,8 +631,8 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
                         if (rawData.last_scan_details.status_date_time) {
                             try {
                                 updateData.lastScanAt = new Date(rawData.last_scan_details.status_date_time);
-                            } catch {
-                                // Invalid date, skip
+                            } catch (e) {
+                                trackingLogger.debug({ awb, date: rawData.last_scan_details.status_date_time }, 'Invalid last scan date');
                             }
                         }
                     }
@@ -666,7 +667,8 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
                     if (isNewRto && order.customerId) {
                         await updateCustomerTier(req.prisma, order.customerId);
                     }
-                } catch {
+                } catch (e) {
+                    trackingLogger.warn({ awb, orderNumber: order.orderNumber, error: e instanceof Error ? e.message : String(e) }, 'Failed to update tracking for order');
                     result.errors++;
                 }
             }

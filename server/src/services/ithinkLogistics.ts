@@ -3,9 +3,70 @@
  * Provides real-time shipment tracking from logistics provider
  */
 
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
 import { shippingLogger } from '../utils/logger.js';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const API_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 2;
+const INITIAL_RETRY_DELAY_MS = 1000;
+
+// ============================================================================
+// Retry Helper
+// ============================================================================
+
+/**
+ * Execute an axios request with retry logic and exponential backoff.
+ * Retries on network errors and 5xx server errors, not on 4xx client errors.
+ */
+async function axiosWithRetry<T>(
+    requestFn: () => Promise<T>,
+    context: string
+): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            return await requestFn();
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+
+            const isAxiosError = axios.isAxiosError(error);
+            const axiosErr = error as AxiosError;
+
+            // Don't retry on 4xx client errors (bad request, auth failed, etc.)
+            if (isAxiosError && axiosErr.response?.status && axiosErr.response.status >= 400 && axiosErr.response.status < 500) {
+                shippingLogger.warn({ context, status: axiosErr.response.status, attempt }, 'iThink API client error - not retrying');
+                throw lastError;
+            }
+
+            // Check if we should retry (network error, timeout, or 5xx)
+            const isRetryable = !isAxiosError ||
+                axiosErr.code === 'ECONNABORTED' || // timeout
+                axiosErr.code === 'ECONNREFUSED' ||
+                axiosErr.code === 'ENOTFOUND' ||
+                axiosErr.code === 'ETIMEDOUT' ||
+                (axiosErr.response?.status && axiosErr.response.status >= 500);
+
+            if (!isRetryable || attempt === MAX_RETRIES) {
+                shippingLogger.error({ context, error: lastError.message, attempt, isRetryable }, 'iThink API request failed');
+                throw lastError;
+            }
+
+            // Exponential backoff: 1s, 2s
+            const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+            shippingLogger.warn({ context, error: lastError.message, attempt, nextRetryMs: delay }, 'iThink API request failed - retrying');
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    // Should never reach here, but TypeScript needs this
+    throw lastError || new Error('Request failed after retries');
+}
 
 // ============================================================================
 // Request Types
@@ -408,16 +469,19 @@ class IThinkLogisticsClient {
             throw new Error('Maximum 10 AWB numbers per request');
         }
 
-        const response = await axios.post(`${this.trackingBaseUrl}/order/track.json`, {
-            data: {
-                access_token: this.accessToken,
-                secret_key: this.secretKey,
-                awb_number_list: awbList.join(',')
-            }
-        }, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-        });
+        const response = await axiosWithRetry(
+            () => axios.post(`${this.trackingBaseUrl}/order/track.json`, {
+                data: {
+                    access_token: this.accessToken,
+                    secret_key: this.secretKey,
+                    awb_number_list: awbList.join(',')
+                }
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: API_TIMEOUT_MS
+            }),
+            `trackShipments:${awbList.join(',')}`
+        );
 
         if (response.data.status_code !== 200) {
             throw new Error(`iThink API error: ${response.data.message || 'Unknown error'}`);
@@ -533,10 +597,13 @@ class IThinkLogisticsClient {
 
         shippingLogger.info({ orderNumber, logistics: logistics || this.defaultLogistics }, 'Creating iThink order');
 
-        const response = await axios.post(`${this.orderBaseUrl}/order/add.json`, requestData, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-        });
+        const response = await axiosWithRetry(
+            () => axios.post(`${this.orderBaseUrl}/order/add.json`, requestData, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: API_TIMEOUT_MS
+            }),
+            `createOrder:${orderNumber}`
+        );
 
         // Log full response for debugging
         shippingLogger.debug({ orderNumber, response: response.data }, 'iThink response received');
@@ -633,10 +700,13 @@ class IThinkLogisticsClient {
             requestData.data.display_shipper_address = displayShipperAddress ? '1' : '0';
         }
 
-        const response = await axios.post(`${this.orderBaseUrl}/shipping/label.json`, requestData, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-        });
+        const response = await axiosWithRetry(
+            () => axios.post(`${this.orderBaseUrl}/shipping/label.json`, requestData, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: API_TIMEOUT_MS
+            }),
+            `getShippingLabel:${awbList}`
+        );
 
         shippingLogger.debug({ awbNumbers: awbList, response: response.data }, 'iThink shipping label response');
 
@@ -665,16 +735,19 @@ class IThinkLogisticsClient {
             throw new Error('Pincode is required');
         }
 
-        const response = await axios.post(`${this.orderBaseUrl}/pincode/check.json`, {
-            data: {
-                pincode: String(pincode),
-                access_token: this.accessToken,
-                secret_key: this.secretKey,
-            }
-        }, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-        });
+        const response = await axiosWithRetry(
+            () => axios.post(`${this.orderBaseUrl}/pincode/check.json`, {
+                data: {
+                    pincode: String(pincode),
+                    access_token: this.accessToken,
+                    secret_key: this.secretKey,
+                }
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: API_TIMEOUT_MS
+            }),
+            `checkPincode:${pincode}`
+        );
 
         shippingLogger.debug({ pincode, response: response.data }, 'iThink pincode check response');
 
@@ -751,24 +824,27 @@ class IThinkLogisticsClient {
             throw new Error('fromPincode and toPincode are required');
         }
 
-        const response = await axios.post(`${this.orderBaseUrl}/rate/check.json`, {
-            data: {
-                from_pincode: String(fromPincode),
-                to_pincode: String(toPincode),
-                shipping_length_cms: String(length),
-                shipping_width_cms: String(width),
-                shipping_height_cms: String(height),
-                shipping_weight_kg: String(weight),
-                order_type: orderType,
-                payment_method: paymentMethod.toLowerCase(),
-                product_mrp: String(productMrp),
-                access_token: this.accessToken,
-                secret_key: this.secretKey,
-            }
-        }, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-        });
+        const response = await axiosWithRetry(
+            () => axios.post(`${this.orderBaseUrl}/rate/check.json`, {
+                data: {
+                    from_pincode: String(fromPincode),
+                    to_pincode: String(toPincode),
+                    shipping_length_cms: String(length),
+                    shipping_width_cms: String(width),
+                    shipping_height_cms: String(height),
+                    shipping_weight_kg: String(weight),
+                    order_type: orderType,
+                    payment_method: paymentMethod.toLowerCase(),
+                    product_mrp: String(productMrp),
+                    access_token: this.accessToken,
+                    secret_key: this.secretKey,
+                }
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: API_TIMEOUT_MS
+            }),
+            `getRates:${fromPincode}->${toPincode}`
+        );
 
         shippingLogger.debug({ fromPincode, toPincode, response: response.data }, 'iThink rate check response');
 
@@ -828,16 +904,19 @@ class IThinkLogisticsClient {
 
         shippingLogger.info({ awbList, count: awbList.length }, 'Cancelling iThink shipments');
 
-        const response = await axios.post(`${this.orderBaseUrl}/order/cancel.json`, {
-            data: {
-                access_token: this.accessToken,
-                secret_key: this.secretKey,
-                awb_numbers: awbList.join(',')
-            }
-        }, {
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-        });
+        const response = await axiosWithRetry(
+            () => axios.post(`${this.orderBaseUrl}/order/cancel.json`, {
+                data: {
+                    access_token: this.accessToken,
+                    secret_key: this.secretKey,
+                    awb_numbers: awbList.join(',')
+                }
+            }, {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: API_TIMEOUT_MS
+            }),
+            `cancelShipment:${awbList.join(',')}`
+        );
 
         shippingLogger.debug({ awbList, response: response.data }, 'iThink cancel response');
 

@@ -431,7 +431,7 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                                 data: { lastTrackingUpdate: new Date() }
                             });
                         } catch (e) {
-                            // Ignore
+                            trackingLogger.warn({ awb, error: e instanceof Error ? e.message : String(e) }, 'Failed to update lastTrackingUpdate');
                         }
                         continue;
                     }
