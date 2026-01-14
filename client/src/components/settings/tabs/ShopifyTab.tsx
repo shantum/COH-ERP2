@@ -25,7 +25,6 @@ export function ShopifyTab() {
     const [productPreview, setProductPreview] = useState<any>(null);
     const [orderPreview, setOrderPreview] = useState<any>(null);
     const [customerPreview, setCustomerPreview] = useState<any>(null);
-    const [syncLimit, setSyncLimit] = useState(20);
     const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
 
     // Full dump state
@@ -231,17 +230,6 @@ export function ShopifyTab() {
                     <Key size={20} /> Shopify API Configuration
                 </h2>
 
-                {/* Info banner if credentials are from env vars */}
-                {config?.fromEnvVars && (
-                    <div className="mb-4 p-3 bg-blue-50 border border-blue-300 rounded-lg flex items-start gap-2">
-                        <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={18} />
-                        <div>
-                            <p className="text-sm font-medium text-blue-800">Using Environment Variables</p>
-                            <p className="text-sm text-blue-700 mt-1">Credentials are loaded from server environment variables. Any changes made here will only apply until the next server restart.</p>
-                        </div>
-                    </div>
-                )}
-
                 <div className="grid gap-4 max-w-xl">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -358,22 +346,6 @@ export function ShopifyTab() {
                             <p className="text-sm text-gray-500">Last Sync</p>
                         </div>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                        <label className="text-sm font-medium text-gray-700">Sync limit:</label>
-                        <select
-                            className="input w-24"
-                            value={syncLimit}
-                            onChange={(e) => setSyncLimit(Number(e.target.value))}
-                        >
-                            <option value={10}>10</option>
-                            <option value={20}>20</option>
-                            <option value={50}>50</option>
-                            <option value={100}>100</option>
-                            <option value={250}>250</option>
-                        </select>
-                        <span className="text-sm text-gray-500">records per sync</span>
-                    </div>
                 </div>
             )}
 
@@ -465,23 +437,7 @@ export function ShopifyTab() {
                         </button>
                         <button
                             className="btn btn-primary flex items-center gap-2"
-                            onClick={() => syncProductsMutation.mutate({ limit: syncLimit })}
-                            disabled={syncProductsMutation.isPending}
-                        >
-                            {syncProductsMutation.isPending ? (
-                                <RefreshCw size={16} className="animate-spin" />
-                            ) : (
-                                <Play size={16} />
-                            )}
-                            {syncProductsMutation.isPending ? 'Syncing...' : `Sync ${syncLimit} Products`}
-                        </button>
-                        <button
-                            className="btn bg-primary-700 text-white hover:bg-primary-800 flex items-center gap-2"
-                            onClick={() => {
-                                if (confirm('This will sync ALL products from Shopify. This may take a while. Continue?')) {
-                                    syncProductsMutation.mutate({ syncAll: true });
-                                }
-                            }}
+                            onClick={() => syncProductsMutation.mutate({ syncAll: true })}
                             disabled={syncProductsMutation.isPending}
                         >
                             {syncProductsMutation.isPending ? (
