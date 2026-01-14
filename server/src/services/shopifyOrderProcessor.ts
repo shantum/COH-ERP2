@@ -802,3 +802,438 @@ export async function cacheAndProcessOrder(
 
     return lockResult.result!;
 }
+
+// ============================================
+// BATCH PROCESSING (OPTIMIZED)
+// ============================================
+
+/**
+ * Batch processing context with pre-fetched data
+ */
+interface BatchContext {
+    existingOrdersMap: Map<string, OrderWithLines>;
+    skuByVariantId: Map<string, { id: string }>;
+    skuByCode: Map<string, { id: string }>;
+}
+
+/**
+ * Cache entry type for batch processing
+ */
+interface CacheEntryForBatch {
+    id: string;
+    rawData: string;
+    orderNumber: string | null;
+}
+
+/**
+ * Result of batch processing
+ */
+export interface BatchProcessResult {
+    processed: number;
+    succeeded: number;
+    failed: number;
+    errors: Array<{ orderNumber: string | null; error: string }>;
+}
+
+/**
+ * Pre-fetch all data needed for batch processing
+ * This reduces N+1 queries to a constant number of queries
+ */
+async function prefetchBatchContext(
+    prisma: PrismaClient,
+    cacheEntries: CacheEntryForBatch[]
+): Promise<BatchContext> {
+    // Parse all orders to extract IDs and SKU references
+    const shopifyOrderIds: string[] = [];
+    const orderNumbers: string[] = [];
+    const variantIds = new Set<string>();
+    const skuCodes = new Set<string>();
+
+    for (const entry of cacheEntries) {
+        try {
+            const order = JSON.parse(entry.rawData) as ExtendedShopifyOrder;
+            shopifyOrderIds.push(String(order.id));
+
+            const orderNumber = order.name || String(order.order_number);
+            if (orderNumber) orderNumbers.push(orderNumber);
+
+            // Collect all variant IDs and SKU codes from line items
+            for (const item of order.line_items || []) {
+                if (item.variant_id) variantIds.add(String(item.variant_id));
+                if (item.sku) skuCodes.add(item.sku);
+            }
+        } catch {
+            // Skip malformed entries
+        }
+    }
+
+    // Batch fetch existing orders (by shopifyOrderId OR orderNumber)
+    const existingOrders = await prisma.order.findMany({
+        where: {
+            OR: [
+                { shopifyOrderId: { in: shopifyOrderIds } },
+                { orderNumber: { in: orderNumbers } }
+            ]
+        },
+        include: { orderLines: true }
+    });
+
+    // Build lookup maps for existing orders
+    const existingOrdersMap = new Map<string, OrderWithLines>();
+    for (const order of existingOrders) {
+        if (order.shopifyOrderId) {
+            existingOrdersMap.set(`shopify:${order.shopifyOrderId}`, order);
+        }
+        if (order.orderNumber) {
+            existingOrdersMap.set(`number:${order.orderNumber}`, order);
+        }
+    }
+
+    // Batch fetch SKUs (by variant ID and SKU code)
+    const [skusByVariant, skusByCode] = await Promise.all([
+        variantIds.size > 0
+            ? prisma.sku.findMany({
+                where: { shopifyVariantId: { in: Array.from(variantIds) } },
+                select: { id: true, shopifyVariantId: true }
+            })
+            : [],
+        skuCodes.size > 0
+            ? prisma.sku.findMany({
+                where: { skuCode: { in: Array.from(skuCodes) } },
+                select: { id: true, skuCode: true }
+            })
+            : []
+    ]);
+
+    // Build SKU lookup maps
+    const skuByVariantId = new Map<string, { id: string }>();
+    for (const sku of skusByVariant) {
+        if (sku.shopifyVariantId) {
+            skuByVariantId.set(sku.shopifyVariantId, { id: sku.id });
+        }
+    }
+
+    const skuByCode = new Map<string, { id: string }>();
+    for (const sku of skusByCode) {
+        if (sku.skuCode) {
+            skuByCode.set(sku.skuCode, { id: sku.id });
+        }
+    }
+
+    return { existingOrdersMap, skuByVariantId, skuByCode };
+}
+
+/**
+ * Process a single order using pre-fetched batch context
+ * Optimized version that uses Maps instead of DB queries for lookups
+ */
+async function processOrderWithContext(
+    prisma: PrismaClient,
+    shopifyOrder: ExtendedShopifyOrder,
+    context: BatchContext
+): Promise<ProcessResult> {
+    const shopifyOrderId = String(shopifyOrder.id);
+    const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
+
+    // Look up existing order from pre-fetched map
+    let existingOrder = context.existingOrdersMap.get(`shopify:${shopifyOrderId}`)
+        || (orderNumber ? context.existingOrdersMap.get(`number:${orderNumber}`) : undefined);
+
+    // Extract customer and shipping info
+    const customer = shopifyOrder.customer;
+    const shippingAddress = shopifyOrder.shipping_address;
+
+    // Convert ShopifyCustomer to ShopifyCustomerData for findOrCreateCustomer
+    const customerData: ShopifyCustomerData | null = customer ? {
+        id: customer.id,
+        email: customer.email,
+        first_name: customer.first_name,
+        last_name: customer.last_name,
+        phone: customer.phone,
+        default_address: customer.default_address,
+    } : null;
+
+    // Find or create customer (this still does DB query, but is fast)
+    const { customer: dbCustomer } = await findOrCreateCustomer(
+        prisma,
+        customerData,
+        {
+            shippingAddress: shippingAddress as Record<string, unknown> | undefined,
+            orderDate: new Date(shopifyOrder.created_at),
+        }
+    );
+    const customerId = dbCustomer?.id || null;
+
+    // Determine order status
+    let status: string = shopifyClient.mapOrderStatus(shopifyOrder);
+
+    if (existingOrder) {
+        const erpManagedStatuses: string[] = ['shipped', 'delivered'];
+        if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
+            status = existingOrder.status;
+        } else if (existingOrder.status === 'open') {
+            status = 'open';
+        }
+    }
+
+    // Determine payment method
+    const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
+
+    // Extract tracking info
+    let awbNumber = existingOrder?.awbNumber || null;
+    let courier = existingOrder?.courier || null;
+    let shippedAt = existingOrder?.shippedAt || null;
+
+    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
+        const fulfillment = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
+        awbNumber = fulfillment.tracking_number || awbNumber;
+        courier = fulfillment.tracking_company || courier;
+        if (fulfillment.created_at && !shippedAt) {
+            shippedAt = new Date(fulfillment.created_at);
+        }
+    }
+
+    // Build customer name
+    const customerName = shippingAddress
+        ? `${shippingAddress.first_name || ''} ${shippingAddress.last_name || ''}`.trim()
+        : customer?.first_name
+            ? `${customer.first_name} ${customer.last_name || ''}`.trim()
+            : 'Unknown';
+
+    const internalNote = extractInternalNote(shopifyOrder.note_attributes);
+
+    // Build order data
+    const orderData = {
+        shopifyOrderId,
+        orderNumber: orderNumber || `SHOP-${shopifyOrderId.slice(-8)}`,
+        channel: shopifyClient.mapOrderChannel(shopifyOrder),
+        status,
+        customerId,
+        customerName: customerName || 'Unknown',
+        customerEmail: customer?.email || shopifyOrder.email || null,
+        customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
+        shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+        totalAmount: parseFloat(shopifyOrder.total_price) || 0,
+        orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
+        internalNotes: existingOrder?.internalNotes || internalNote || null,
+        paymentMethod,
+        awbNumber,
+        courier,
+        shippedAt,
+        syncedAt: new Date(),
+    };
+
+    // Add cancellation note if cancelled
+    if (shopifyOrder.cancelled_at && !existingOrder?.internalNotes?.includes('Cancelled via Shopify')) {
+        orderData.internalNotes = existingOrder?.internalNotes
+            ? `${existingOrder.internalNotes}\nCancelled via Shopify at ${shopifyOrder.cancelled_at}`
+            : `Cancelled via Shopify at ${shopifyOrder.cancelled_at}`;
+    }
+
+    if (existingOrder) {
+        // Update detection
+        const needsUpdate =
+            existingOrder.status !== status ||
+            existingOrder.awbNumber !== awbNumber ||
+            existingOrder.courier !== courier ||
+            existingOrder.paymentMethod !== paymentMethod ||
+            existingOrder.customerEmail !== orderData.customerEmail ||
+            existingOrder.customerPhone !== orderData.customerPhone ||
+            existingOrder.totalAmount !== orderData.totalAmount ||
+            existingOrder.shippingAddress !== orderData.shippingAddress;
+
+        if (needsUpdate) {
+            await prisma.order.update({
+                where: { id: existingOrder.id },
+                data: orderData
+            });
+
+            let changeType: ProcessResult['action'] = 'updated';
+            if (shopifyOrder.cancelled_at && existingOrder.status !== 'cancelled') {
+                changeType = 'cancelled';
+            } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
+                changeType = 'fulfilled';
+            }
+
+            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+            return { action: changeType, orderId: existingOrder.id, fulfillmentSync };
+        }
+
+        // Sync fulfillments even if order data hasn't changed
+        if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
+            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+            if (fulfillmentSync.synced > 0) {
+                return { action: 'fulfillment_synced', orderId: existingOrder.id, fulfillmentSync };
+            }
+        }
+
+        return { action: 'skipped', orderId: existingOrder.id };
+    }
+
+    // Create new order with lines - USE PRE-FETCHED SKUs
+    const lineItems = shopifyOrder.line_items || [];
+    const orderLinesData = [];
+
+    for (const item of lineItems) {
+        const shopifyVariantId = item.variant_id ? String(item.variant_id) : null;
+
+        // Look up SKU from pre-fetched maps (O(1) instead of DB query)
+        let sku: { id: string } | undefined;
+        if (shopifyVariantId) {
+            sku = context.skuByVariantId.get(shopifyVariantId);
+        }
+        if (!sku && item.sku) {
+            sku = context.skuByCode.get(item.sku);
+        }
+
+        if (sku) {
+            const originalPrice = parseFloat(item.price) || 0;
+            const effectiveUnitPrice = calculateEffectiveUnitPrice(
+                originalPrice,
+                item.quantity,
+                item.discount_allocations
+            );
+
+            orderLinesData.push({
+                shopifyLineId: String(item.id),
+                sku: { connect: { id: sku.id } },
+                qty: item.quantity,
+                unitPrice: effectiveUnitPrice,
+                lineStatus: 'pending',
+                shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+            });
+        }
+    }
+
+    // Handle no matching SKUs
+    if (orderLinesData.length === 0) {
+        return { action: 'skipped', reason: 'no_matching_skus' };
+    }
+
+    const newOrder = await prisma.order.create({
+        data: {
+            ...orderData,
+            orderLines: {
+                create: orderLinesData
+            }
+        }
+    });
+
+    // Sync fulfillments
+    let fulfillmentSync: FulfillmentSyncResult | null = null;
+    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
+        try {
+            fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
+        } catch (fulfillmentError: unknown) {
+            syncLogger.warn({
+                orderId: newOrder.id,
+                error: fulfillmentError instanceof Error ? fulfillmentError.message : 'Unknown error'
+            }, 'Failed to sync fulfillments for new order');
+        }
+    }
+
+    // Update customer tier
+    if (orderData.customerId && orderData.totalAmount > 0) {
+        await updateCustomerTier(prisma, orderData.customerId);
+    }
+
+    return {
+        action: 'created',
+        orderId: newOrder.id,
+        linesCreated: orderLinesData.length,
+        totalLineItems: lineItems.length,
+        fulfillmentSync: fulfillmentSync || undefined,
+    };
+}
+
+/**
+ * Process multiple cache entries in parallel with concurrency control
+ *
+ * OPTIMIZATIONS:
+ * 1. Pre-fetches all existing orders in ONE query
+ * 2. Pre-fetches all SKUs in TWO queries (by variant ID and code)
+ * 3. Processes orders in parallel (configurable concurrency)
+ *
+ * @param prisma - Prisma client
+ * @param entries - Cache entries to process
+ * @param options - Processing options
+ * @param options.concurrency - Max concurrent processing (default: 10)
+ * @returns Batch processing results
+ */
+export async function processCacheBatch(
+    prisma: PrismaClient,
+    entries: CacheEntryForBatch[],
+    options: { concurrency?: number } = {}
+): Promise<BatchProcessResult> {
+    const { concurrency = 10 } = options;
+
+    if (entries.length === 0) {
+        return { processed: 0, succeeded: 0, failed: 0, errors: [] };
+    }
+
+    // Step 1: Pre-fetch all needed data in batch
+    const context = await prefetchBatchContext(prisma, entries);
+
+    // Step 2: Process in parallel with concurrency control
+    let succeeded = 0;
+    let failed = 0;
+    const errors: Array<{ orderNumber: string | null; error: string }> = [];
+
+    // Process in chunks to control concurrency
+    for (let i = 0; i < entries.length; i += concurrency) {
+        const chunk = entries.slice(i, i + concurrency);
+
+        const results = await Promise.allSettled(
+            chunk.map(async (entry) => {
+                const shopifyOrder = JSON.parse(entry.rawData) as ExtendedShopifyOrder;
+
+                try {
+                    const result = await processOrderWithContext(prisma, shopifyOrder, context);
+
+                    // Mark as processed if successful
+                    if (result.action !== 'cache_only' && result.action !== 'skipped') {
+                        await markCacheProcessed(prisma, entry.id);
+                    } else if (result.action === 'skipped' && result.reason !== 'no_matching_skus') {
+                        // Mark skipped (existing unchanged) orders as processed too
+                        await markCacheProcessed(prisma, entry.id);
+                    }
+
+                    return { success: true, orderNumber: entry.orderNumber };
+                } catch (err) {
+                    const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+                    await markCacheError(prisma, entry.id, errorMsg);
+                    return { success: false, orderNumber: entry.orderNumber, error: errorMsg };
+                }
+            })
+        );
+
+        // Collect results
+        for (const result of results) {
+            if (result.status === 'fulfilled') {
+                if (result.value.success) {
+                    succeeded++;
+                } else {
+                    failed++;
+                    if (errors.length < 50) {
+                        errors.push({
+                            orderNumber: result.value.orderNumber,
+                            error: result.value.error || 'Unknown'
+                        });
+                    }
+                }
+            } else {
+                failed++;
+                if (errors.length < 50) {
+                    errors.push({ orderNumber: null, error: result.reason?.message || 'Unknown' });
+                }
+            }
+        }
+    }
+
+    return {
+        processed: entries.length,
+        succeeded,
+        failed,
+        errors
+    };
+}

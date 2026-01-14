@@ -51,6 +51,8 @@ import catalogRoutes from './routes/catalog.js';
 import pincodeRoutes from './routes/pincodes.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
+import cacheProcessor from './services/cacheProcessor.js';
+import cacheDumpWorker from './services/cacheDumpWorker.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
@@ -195,6 +197,12 @@ app.listen(PORT, async () => {
   // Start tracking sync scheduler (every 4 hours)
   trackingSync.start();
 
+  // Start background cache processor (processes pending orders every 30s)
+  cacheProcessor.start();
+
+  // Start cache dump worker (auto-resumes incomplete Shopify full dumps)
+  cacheDumpWorker.start();
+
   // Register shutdown handlers for graceful shutdown
   shutdownCoordinator.register('scheduledSync', () => {
     scheduledSync.stop();
@@ -202,6 +210,14 @@ app.listen(PORT, async () => {
 
   shutdownCoordinator.register('trackingSync', () => {
     trackingSync.stop();
+  }, 5000);
+
+  shutdownCoordinator.register('cacheProcessor', () => {
+    cacheProcessor.stop();
+  }, 5000);
+
+  shutdownCoordinator.register('cacheDumpWorker', () => {
+    cacheDumpWorker.stop();
   }, 5000);
 
   shutdownCoordinator.register('prisma', async () => {

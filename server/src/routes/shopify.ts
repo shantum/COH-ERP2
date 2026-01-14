@@ -9,8 +9,10 @@ import type { ShopifyOrder, ShopifyProduct } from '../services/shopify.js';
 import syncWorker from '../services/syncWorker.js';
 import { syncAllProducts } from '../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
-import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders } from '../services/shopifyOrderProcessor.js';
+import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders, processCacheBatch } from '../services/shopifyOrderProcessor.js';
 import scheduledSync from '../services/scheduledSync.js';
+import cacheProcessor from '../services/cacheProcessor.js';
+import cacheDumpWorker from '../services/cacheDumpWorker.js';
 import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
 import { shopifyLogger } from '../utils/logger.js';
@@ -1243,9 +1245,23 @@ router.get('/sync/cache-stats', authenticateToken, asyncHandler(async (req: Requ
 
 /**
  * Process cache: Convert unprocessed cache entries to ERP tables
+ *
+ * OPTIMIZED VERSION (v2):
+ * - Batch pre-fetches orders and SKUs (reduces N+1 queries)
+ * - Parallel processing with configurable concurrency
+ * - Default limit increased to 500
+ *
+ * Body:
+ * - limit: number (default: 500) - Max entries to process
+ * - retryFailed: boolean (default: false) - Retry failed entries instead of new ones
+ * - concurrency: number (default: 10) - Max parallel processing
  */
 router.post('/sync/process-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const { limit = 100, retryFailed = false } = req.body as { limit?: number; retryFailed?: boolean };
+    const { limit = 500, retryFailed = false, concurrency = 10 } = req.body as {
+        limit?: number;
+        retryFailed?: boolean;
+        concurrency?: number;
+    };
 
     // Find entries to process
     const whereClause = retryFailed
@@ -1255,56 +1271,46 @@ router.post('/sync/process-cache', authenticateToken, asyncHandler(async (req: R
     const entries = await req.prisma.shopifyOrderCache.findMany({
         where: whereClause,
         orderBy: { lastWebhookAt: 'asc' },
-        take: limit
+        take: limit,
+        select: { id: true, rawData: true, orderNumber: true }
     });
 
     if (entries.length === 0) {
         res.json({
             message: retryFailed ? 'No failed orders to retry' : 'No unprocessed orders in cache',
             processed: 0,
+            succeeded: 0,
             failed: 0
         });
         return;
     }
 
-    shopifyLogger.info({ count: entries.length, retryFailed }, 'Process Cache: starting');
+    shopifyLogger.info({ count: entries.length, retryFailed, concurrency }, 'Process Cache: starting (optimized batch)');
+    const startTime = Date.now();
 
-    let processed = 0;
-    let failed = 0;
-    const errors: Array<{ orderNumber: string | null; error: string }> = [];
+    // Use optimized batch processing
+    const result = await processCacheBatch(req.prisma, entries, { concurrency });
 
-    for (const entry of entries) {
-        try {
-            const result = await processFromCache(req.prisma, entry);
+    const durationMs = Date.now() - startTime;
+    const ordersPerSecond = result.processed > 0 ? (result.processed / (durationMs / 1000)).toFixed(1) : '0';
 
-            // Only mark as processed if we actually created or updated something
-            if (result.action !== 'cache_only') {
-                await markCacheProcessed(req.prisma, entry.id);
-                processed++;
-            } else {
-                // Processing returned cache_only (error occurred)
-                failed++;
-                if (errors.length < 10) {
-                    errors.push({ orderNumber: entry.orderNumber, error: result.error || 'Unknown error' });
-                }
-            }
-        } catch (err) {
-            const error = err as Error;
-            await markCacheError(req.prisma, entry.id, error.message);
-            failed++;
-            if (errors.length < 10) {
-                errors.push({ orderNumber: entry.orderNumber, error: error.message });
-            }
-        }
-    }
-
-    shopifyLogger.info({ processed, failed, retryFailed }, 'Process Cache: completed');
+    shopifyLogger.info({
+        processed: result.processed,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        durationMs,
+        ordersPerSecond,
+        retryFailed
+    }, 'Process Cache: completed');
 
     res.json({
         message: retryFailed ? 'Retry complete' : 'Processing complete',
-        processed,
-        failed,
-        errors: errors.length > 0 ? errors : undefined
+        processed: result.processed,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        durationMs,
+        ordersPerSecond: parseFloat(ordersPerSecond),
+        errors: result.errors.length > 0 ? result.errors.slice(0, 20) : undefined
     });
 }));
 
@@ -1455,6 +1461,134 @@ router.post('/sync/scheduler/start', authenticateToken, asyncHandler(async (req:
 router.post('/sync/scheduler/stop', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     scheduledSync.stop();
     res.json({ message: 'Scheduler stopped', status: scheduledSync.getStatus() });
+}));
+
+// ============================================
+// BACKGROUND CACHE PROCESSOR
+// ============================================
+
+/**
+ * Get cache processor status
+ * Shows if the background processor is running, stats, and pending count
+ */
+router.get('/sync/processor/status', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const status = await cacheProcessor.getStatusWithPending();
+    res.json(status);
+}));
+
+/**
+ * Start the background cache processor
+ * Automatically processes pending cache entries every 30 seconds
+ */
+router.post('/sync/processor/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    cacheProcessor.start();
+    const status = await cacheProcessor.getStatusWithPending();
+    res.json({ message: 'Cache processor started', ...status });
+}));
+
+/**
+ * Stop the background cache processor
+ */
+router.post('/sync/processor/stop', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    cacheProcessor.stop();
+    res.json({ message: 'Cache processor stopped', ...cacheProcessor.getStatus() });
+}));
+
+/**
+ * Pause the background cache processor (keeps running but skips processing)
+ */
+router.post('/sync/processor/pause', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    cacheProcessor.pause();
+    res.json({ message: 'Cache processor paused', ...cacheProcessor.getStatus() });
+}));
+
+/**
+ * Resume the background cache processor after pause
+ */
+router.post('/sync/processor/resume', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    cacheProcessor.resume();
+    res.json({ message: 'Cache processor resumed', ...cacheProcessor.getStatus() });
+}));
+
+/**
+ * Trigger an immediate batch (doesn't wait for poll interval)
+ */
+router.post('/sync/processor/trigger', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const result = await cacheProcessor.triggerBatch();
+        const status = await cacheProcessor.getStatusWithPending();
+        res.json({
+            message: 'Batch triggered',
+            batch: result,
+            ...status
+        });
+    } catch (error) {
+        const err = error as Error;
+        res.status(400).json({ error: err.message });
+    }
+}));
+
+// ============================================
+// CACHE DUMP WORKER (Full Shopify Sync)
+// ============================================
+
+/**
+ * Get cache dump worker status
+ * Shows sync progress, cache stats, and comparison with Shopify
+ */
+router.get('/sync/dump/status', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const status = await cacheDumpWorker.getStatus();
+    res.json(status);
+}));
+
+/**
+ * Start a new cache dump job
+ * Dumps ALL orders from Shopify to cache (resumable)
+ *
+ * Body:
+ * - daysBack: number (optional) - Only sync last N days. Omit for all time.
+ */
+router.post('/sync/dump/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const { daysBack } = req.body as { daysBack?: number };
+
+    try {
+        const job = await cacheDumpWorker.startJob({ daysBack });
+        const status = await cacheDumpWorker.getStatus();
+        res.json({
+            message: daysBack ? `Cache dump started (last ${daysBack} days)` : 'Cache dump started (all time)',
+            job,
+            ...status
+        });
+    } catch (error) {
+        const err = error as Error;
+        res.status(400).json({ error: err.message });
+    }
+}));
+
+/**
+ * Cancel a running cache dump job
+ */
+router.post('/sync/dump/:id/cancel', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const job = await cacheDumpWorker.cancelJob(req.params.id as string);
+        res.json({ message: 'Cache dump cancelled', job });
+    } catch (error) {
+        const err = error as Error;
+        res.status(400).json({ error: err.message });
+    }
+}));
+
+/**
+ * Resume a failed/cancelled cache dump job
+ */
+router.post('/sync/dump/:id/resume', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    try {
+        const job = await cacheDumpWorker.resumeJob(req.params.id as string);
+        res.json({ message: 'Cache dump resumed', job });
+    } catch (error) {
+        const err = error as Error;
+        res.status(400).json({ error: err.message });
+    }
 }));
 
 // ============================================

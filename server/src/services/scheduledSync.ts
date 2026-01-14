@@ -11,7 +11,7 @@
 import type { PrismaClient } from '@prisma/client';
 import shopifyClient from './shopify.js';
 import type { ShopifyOrder } from './shopify.js';
-import { cacheShopifyOrders, processFromCache, markCacheProcessed, markCacheError } from './shopifyOrderProcessor.js';
+import { cacheShopifyOrders, processCacheBatch } from './shopifyOrderProcessor.js';
 import prisma from '../lib/prisma.js';
 import { syncLogger } from '../utils/logger.js';
 
@@ -163,41 +163,39 @@ async function runHourlySync(): Promise<SyncResult | null> {
         };
         syncLogger.info({ cached, skipped }, 'Step 1 complete');
 
-        // Step 2: Process any unprocessed cache entries
-        syncLogger.info('Step 2: Processing unprocessed cache entries');
+        // Step 2: Process any unprocessed cache entries (using optimized batch processor)
+        syncLogger.info('Step 2: Processing unprocessed cache entries (batch mode)');
 
         const unprocessed = await prisma.shopifyOrderCache.findMany({
-            where: { processedAt: null },
+            where: { processedAt: null, processingError: null },
             orderBy: { lastWebhookAt: 'asc' },
-            take: 500 // Process up to 500 at a time
+            take: 500,
+            select: { id: true, rawData: true, orderNumber: true }
         });
 
-        let processed = 0;
-        let failed = 0;
-        const errors: OrderError[] = [];
+        if (unprocessed.length > 0) {
+            const batchResult = await processCacheBatch(prisma, unprocessed, { concurrency: 10 });
 
-        for (const entry of unprocessed) {
-            try {
-                await processFromCache(prisma, entry);
-                await markCacheProcessed(prisma, entry.id);
-                processed++;
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                await markCacheError(prisma, entry.id, errorMessage);
-                failed++;
-                if (errors.length < 5) {
-                    errors.push({ orderNumber: entry.orderNumber || entry.id, error: errorMessage });
-                }
-            }
+            const errors: OrderError[] = batchResult.errors.slice(0, 5).map(e => ({
+                orderNumber: e.orderNumber || 'unknown',
+                error: e.error
+            }));
+
+            result.step2_process = {
+                found: unprocessed.length,
+                processed: batchResult.succeeded,
+                failed: batchResult.failed,
+                errors: errors.length > 0 ? errors : undefined
+            };
+            syncLogger.info({ processed: batchResult.succeeded, failed: batchResult.failed }, 'Step 2 complete');
+        } else {
+            result.step2_process = {
+                found: 0,
+                processed: 0,
+                failed: 0
+            };
+            syncLogger.info('Step 2 complete: no unprocessed entries');
         }
-
-        result.step2_process = {
-            found: unprocessed.length,
-            processed,
-            failed,
-            errors: errors.length > 0 ? errors : undefined
-        };
-        syncLogger.info({ processed, failed }, 'Step 2 complete');
 
         result.durationMs = Date.now() - startTime;
         lastSyncAt = new Date();
