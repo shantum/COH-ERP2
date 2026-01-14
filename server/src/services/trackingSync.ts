@@ -192,7 +192,7 @@ let lastSyncResult: SyncResult | null = null;
 async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
     // Get distinct AWBs from lines that need tracking updates
     // Using raw SQL because Prisma doesn't support DISTINCT ON with relations well
-    // Subquery ensures we process newest orders first (by createdAt DESC)
+    // Subquery ensures we process newest orders first (by orderDate DESC)
     const lines = await prisma.$queryRaw<Array<{
         id: string;
         awbNumber: string | null;
@@ -215,15 +215,15 @@ async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
                 o."paymentMethod",
                 o."customerId",
                 o."rtoInitiatedAt",
-                o."createdAt"
+                o."orderDate"
             FROM "OrderLine" ol
             INNER JOIN "Order" o ON ol."orderId" = o.id
             WHERE ol."awbNumber" IS NOT NULL
                 AND o."isArchived" = false
                 AND (ol."trackingStatus" IS NULL OR ol."trackingStatus" IN ('in_transit', 'out_for_delivery', 'delivery_delayed', 'rto_initiated', 'rto_in_transit', 'rto_delivered', 'manifested', 'picked_up', 'reached_destination', 'undelivered', 'not_picked', 'delivered'))
-            ORDER BY ol."awbNumber", o."createdAt" DESC
+            ORDER BY ol."awbNumber", o."orderDate" DESC
         ) sub
-        ORDER BY "createdAt" DESC
+        ORDER BY "orderDate" DESC
     `);
 
     // Build AWB -> order info mapping
