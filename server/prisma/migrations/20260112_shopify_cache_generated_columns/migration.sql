@@ -6,6 +6,19 @@
 -- ORDER AMOUNTS
 -- ============================================
 
+-- Function to safely/immutably cast JSONB string to timestamp
+-- This is required because straight cast is not immutable in Postgres
+CREATE OR REPLACE FUNCTION jsonb_extract_timestamp_immutable(data jsonb, key text) 
+RETURNS timestamp 
+LANGUAGE sql 
+IMMUTABLE 
+PARALLEL SAFE 
+AS $$
+  SELECT NULLIF(data ->> key, '')::timestamp
+$$;
+
+
+
 ALTER TABLE "ShopifyOrderCache"
 ADD COLUMN IF NOT EXISTS "totalPrice" NUMERIC
 GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'total_price')::numeric) STORED;
@@ -151,24 +164,24 @@ GENERATED ALWAYS AS ((("rawData"::jsonb) -> 'billing_address' ->> 'phone')) STOR
 
 ALTER TABLE "ShopifyOrderCache"
 ADD COLUMN IF NOT EXISTS "shopifyCreatedAt" TIMESTAMP
-GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'created_at')::timestamp) STORED;
+GENERATED ALWAYS AS (jsonb_extract_timestamp_immutable("rawData"::jsonb, 'created_at')) STORED;
 
 ALTER TABLE "ShopifyOrderCache"
 ADD COLUMN IF NOT EXISTS "shopifyUpdatedAt" TIMESTAMP
-GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'updated_at')::timestamp) STORED;
+GENERATED ALWAYS AS (jsonb_extract_timestamp_immutable("rawData"::jsonb, 'updated_at')) STORED;
 
 ALTER TABLE "ShopifyOrderCache"
 ADD COLUMN IF NOT EXISTS "shopifyProcessedAt" TIMESTAMP
-GENERATED ALWAYS AS ((("rawData"::jsonb) ->> 'processed_at')::timestamp) STORED;
+GENERATED ALWAYS AS (jsonb_extract_timestamp_immutable("rawData"::jsonb, 'processed_at')) STORED;
 
 -- Use NULLIF to handle empty strings before casting
 ALTER TABLE "ShopifyOrderCache"
 ADD COLUMN IF NOT EXISTS "shopifyClosedAt" TIMESTAMP
-GENERATED ALWAYS AS ((NULLIF(("rawData"::jsonb) ->> 'closed_at', ''))::timestamp) STORED;
+GENERATED ALWAYS AS (jsonb_extract_timestamp_immutable("rawData"::jsonb, 'closed_at')) STORED;
 
 ALTER TABLE "ShopifyOrderCache"
 ADD COLUMN IF NOT EXISTS "shopifyCancelledAt" TIMESTAMP
-GENERATED ALWAYS AS ((NULLIF(("rawData"::jsonb) ->> 'cancelled_at', ''))::timestamp) STORED;
+GENERATED ALWAYS AS (jsonb_extract_timestamp_immutable("rawData"::jsonb, 'cancelled_at')) STORED;
 
 -- ============================================
 -- ORDER METADATA
