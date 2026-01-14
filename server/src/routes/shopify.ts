@@ -1542,6 +1542,15 @@ router.get('/sync/dump/status', authenticateToken, asyncHandler(async (req: Requ
 }));
 
 /**
+ * Stop the cache dump worker
+ */
+router.post('/sync/dump/stop', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    cacheDumpWorker.stop();
+    const status = await cacheDumpWorker.getStatus();
+    res.json({ message: 'Cache dump worker stopped', ...status });
+}));
+
+/**
  * Start a new cache dump job
  * Dumps ALL orders from Shopify to cache (resumable)
  *
