@@ -72,11 +72,13 @@ export function decrypt(encryptedValue: string | null | undefined): string | nul
         if (isEncrypted(encryptedValue)) {
             // This appears to be encrypted data that failed to decrypt
             // Could be corrupted or wrong key - don't return potentially corrupted data
-            console.error('Decryption failed for encrypted value - data may be corrupted');
-            throw new Error('Failed to decrypt stored value - data may be corrupted');
+            console.error('[Encryption] Decryption FAILED - this usually means JWT_SECRET has changed since the value was encrypted.');
+            console.error('[Encryption] Stored value preview:', encryptedValue.substring(0, 20) + '...');
+            console.error('[Encryption] To fix: re-enter and save the Shopify access token in Settings.');
+            throw new Error('Failed to decrypt stored value - JWT_SECRET may have changed');
         }
         // Not encrypted format - return as plaintext (legacy compatibility)
-        console.warn('Value stored in plaintext format (legacy)');
+        console.warn('[Encryption] Value stored in plaintext format (legacy) - will work but consider re-saving');
         return encryptedValue;
     }
 }

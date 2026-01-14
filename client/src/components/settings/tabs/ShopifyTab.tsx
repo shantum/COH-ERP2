@@ -231,6 +231,17 @@ export function ShopifyTab() {
                     <Key size={20} /> Shopify API Configuration
                 </h2>
 
+                {/* Info banner if credentials are from env vars */}
+                {config?.fromEnvVars && (
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-300 rounded-lg flex items-start gap-2">
+                        <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={18} />
+                        <div>
+                            <p className="text-sm font-medium text-blue-800">Using Environment Variables</p>
+                            <p className="text-sm text-blue-700 mt-1">Credentials are loaded from server environment variables. Any changes made here will only apply until the next server restart.</p>
+                        </div>
+                    </div>
+                )}
+
                 <div className="grid gap-4 max-w-xl">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">

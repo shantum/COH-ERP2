@@ -249,17 +249,27 @@ class IThinkLogisticsClient {
         // Different base URLs for different endpoints
         this.trackingBaseUrl = 'https://api.ithinklogistics.com/api_v3';
         this.orderBaseUrl = 'https://my.ithinklogistics.com/api_v3';
-        this.accessToken = null;
-        this.secretKey = null;
-        this.pickupAddressId = null;
-        this.returnAddressId = null;
-        this.defaultLogistics = 'delhivery'; // delhivery, bluedart, xpressbees, ecom, ekart
+
+        // Load from environment variables first
+        this.accessToken = process.env.ITHINK_ACCESS_TOKEN || null;
+        this.secretKey = process.env.ITHINK_SECRET_KEY || null;
+        this.pickupAddressId = process.env.ITHINK_PICKUP_ADDRESS_ID || null;
+        this.returnAddressId = process.env.ITHINK_RETURN_ADDRESS_ID || null;
+        this.defaultLogistics = process.env.ITHINK_DEFAULT_LOGISTICS || 'delhivery';
     }
 
     /**
-     * Load credentials from database
+     * Load credentials - prefers env vars, falls back to database
+     * Credentials should be set via environment variables for security
      */
     async loadFromDatabase(): Promise<void> {
+        // If env vars are fully configured, skip database
+        if (this.accessToken && this.secretKey) {
+            shippingLogger.debug('Using iThink credentials from environment variables');
+            return;
+        }
+
+        // Fall back to database only if env vars not set
         try {
             const settings = await prisma.systemSetting.findMany({
                 where: {
@@ -275,18 +285,25 @@ class IThinkLogisticsClient {
                 }
             });
 
+            let loadedFromDb = false;
             for (const setting of settings) {
-                if (setting.key === 'ithink_access_token') {
+                if (setting.key === 'ithink_access_token' && !this.accessToken) {
                     this.accessToken = setting.value;
-                } else if (setting.key === 'ithink_secret_key') {
+                    loadedFromDb = true;
+                } else if (setting.key === 'ithink_secret_key' && !this.secretKey) {
                     this.secretKey = setting.value;
-                } else if (setting.key === 'ithink_pickup_address_id') {
+                    loadedFromDb = true;
+                } else if (setting.key === 'ithink_pickup_address_id' && !this.pickupAddressId) {
                     this.pickupAddressId = setting.value;
-                } else if (setting.key === 'ithink_return_address_id') {
+                } else if (setting.key === 'ithink_return_address_id' && !this.returnAddressId) {
                     this.returnAddressId = setting.value;
                 } else if (setting.key === 'ithink_default_logistics') {
                     this.defaultLogistics = setting.value;
                 }
+            }
+
+            if (loadedFromDb) {
+                shippingLogger.warn('Using iThink credentials from database. Consider moving to environment variables.');
             }
         } catch (error) {
             shippingLogger.error({ error: (error as Error).message }, 'Error loading iThink Logistics config');
@@ -295,8 +312,14 @@ class IThinkLogisticsClient {
 
     /**
      * Update credentials in database
+     * Note: For production, credentials should be set via environment variables
      */
     async updateConfig(config: IThinkConfig): Promise<void> {
+        // Warn if trying to update while env vars are set
+        if (process.env.ITHINK_ACCESS_TOKEN) {
+            shippingLogger.warn('iThink credentials are set via environment variables. Database update will be ignored on restart.');
+        }
+
         const { accessToken, secretKey, pickupAddressId, returnAddressId, defaultLogistics } = config;
 
         const updates = [];

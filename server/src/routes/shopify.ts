@@ -107,14 +107,24 @@ const router = Router();
 // ============================================
 
 router.get('/config', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    // Reload from database to get latest
+    // Reload configuration (prefers env vars, falls back to database)
     await shopifyClient.loadFromDatabase();
     const config = shopifyClient.getConfig();
+
+    const hasAccessToken = !!(shopifyClient as unknown as { accessToken: string | undefined }).accessToken;
+
+    // Check if credentials are from environment variables
+    const fromEnvVars = !!(process.env.SHOPIFY_ACCESS_TOKEN && process.env.SHOPIFY_SHOP_DOMAIN);
 
     res.json({
         shopDomain: config.shopDomain || '',
         apiVersion: config.apiVersion,
-        hasAccessToken: !!(shopifyClient as unknown as { accessToken: string | undefined }).accessToken,
+        hasAccessToken,
+        fromEnvVars,
+        // Note: If from env vars, UI updates won't persist after restart
+        ...(fromEnvVars && {
+            info: 'Credentials loaded from environment variables. Changes made here will not persist after server restart.',
+        }),
     });
 }));
 

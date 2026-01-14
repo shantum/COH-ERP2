@@ -1,6 +1,5 @@
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
-import { encrypt, decrypt } from '../utils/encryption.js';
 import { shopifyLogger } from '../utils/logger.js';
 
 // ============================================
@@ -361,9 +360,18 @@ class ShopifyClient {
     }
 
     /**
-     * Load configuration from database settings
+     * Load configuration - prefers env vars, falls back to database
+     * Credentials should be set via environment variables for security
      */
     async loadFromDatabase(): Promise<void> {
+        // Prefer environment variables (set in constructor)
+        if (this.shopDomain && this.accessToken) {
+            shopifyLogger.debug('Using Shopify credentials from environment variables');
+            this.initializeClient();
+            return;
+        }
+
+        // Fall back to database only if env vars not set
         try {
             const domainSetting = await prisma.systemSetting.findUnique({
                 where: { key: 'shopify_shop_domain' },
@@ -372,13 +380,13 @@ class ShopifyClient {
                 where: { key: 'shopify_access_token' },
             });
 
-            if (domainSetting?.value) {
+            if (domainSetting?.value && !this.shopDomain) {
                 this.shopDomain = domainSetting.value;
             }
-            if (tokenSetting?.value) {
-                // Decrypt the access token
-                const decrypted = decrypt(tokenSetting.value);
-                this.accessToken = decrypted ?? undefined;
+            if (tokenSetting?.value && !this.accessToken) {
+                // Database tokens are stored in plaintext now (no encryption)
+                this.accessToken = tokenSetting.value;
+                shopifyLogger.warn('Using Shopify credentials from database. Consider moving to environment variables.');
             }
 
             this.initializeClient();
@@ -389,8 +397,14 @@ class ShopifyClient {
 
     /**
      * Update configuration and reinitialize client
+     * Note: For production, credentials should be set via environment variables
      */
     async updateConfig(shopDomain: string, accessToken?: string): Promise<void> {
+        // Warn if trying to update while env vars are set
+        if (process.env.SHOPIFY_ACCESS_TOKEN) {
+            shopifyLogger.warn('Shopify credentials are set via environment variables. Database update will be ignored on restart.');
+        }
+
         await prisma.systemSetting.upsert({
             where: { key: 'shopify_shop_domain' },
             update: { value: shopDomain },
@@ -399,16 +413,13 @@ class ShopifyClient {
 
         // Only update token if a new one is provided
         if (accessToken && accessToken !== 'KEEP_EXISTING') {
-            // Encrypt the access token before storing
-            const encryptedToken = encrypt(accessToken);
-            if (encryptedToken) {
-                await prisma.systemSetting.upsert({
-                    where: { key: 'shopify_access_token' },
-                    update: { value: encryptedToken },
-                    create: { key: 'shopify_access_token', value: encryptedToken },
-                });
-                this.accessToken = accessToken;
-            }
+            // Store token in plaintext (no encryption - use env vars for security)
+            await prisma.systemSetting.upsert({
+                where: { key: 'shopify_access_token' },
+                update: { value: accessToken },
+                create: { key: 'shopify_access_token', value: accessToken },
+            });
+            this.accessToken = accessToken;
         }
 
         this.shopDomain = shopDomain;
