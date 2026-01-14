@@ -13,7 +13,8 @@
 const processingOrders = new Map();
 
 // Lock timeout - release if not explicitly released after this time
-const LOCK_TIMEOUT_MS = 30000; // 30 seconds
+// 90 seconds allows for slow database operations and network latency
+const LOCK_TIMEOUT_MS = 90000; // 90 seconds
 
 /**
  * Acquire a lock for processing a Shopify order
@@ -90,10 +91,9 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
     try {
         // Database lock: Import prisma client dynamically to avoid circular dependency
         // This works because fn() will have access to prisma via closure
-        const { default: prisma } = await import('../db.js');
+        const { default: prisma } = await import('../lib/prisma.js');
 
-        const lockTimeout = 30000; // 30 seconds
-        const lockExpiry = new Date(Date.now() + lockTimeout);
+        const lockExpiry = new Date(Date.now() + LOCK_TIMEOUT_MS);
 
         // Try to acquire database lock using transaction for atomicity
         const lockResult = await prisma.$transaction(async (tx) => {
@@ -111,7 +111,7 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
             // Check if lock is held and not expired
             if (cache.processingLock) {
                 const lockAge = Date.now() - new Date(cache.processingLock).getTime();
-                if (lockAge < lockTimeout) {
+                if (lockAge < LOCK_TIMEOUT_MS) {
                     return { acquired: false, reason: 'locked', lockAge };
                 }
                 // Lock expired, we can take it
@@ -151,85 +151,6 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
     } finally {
         // Always release in-memory lock
         releaseOrderLock(shopifyOrderId);
-    }
-}
-
-/**
- * Database-level order lock using Prisma transaction
- *
- * @deprecated Use `withOrderLock()` instead, which now includes database locking.
- * This function is kept for backward compatibility but is no longer needed.
- *
- * This uses a "processing lock" pattern:
- * 1. Try to update ShopifyOrderCache.processingLock to current timestamp
- * 2. Only succeed if processingLock is null or expired
- * 3. On completion, set processingLock back to null
- *
- * @param {PrismaClient} prisma
- * @param {string} shopifyOrderId
- * @param {string} source
- * @param {Function} fn
- */
-export async function withDatabaseOrderLock(prisma, shopifyOrderId, source, fn) {
-    const lockTimeout = 60000; // 60 seconds
-
-    try {
-        // Try to acquire lock using atomic update
-        const result = await prisma.$transaction(async (tx) => {
-            // Get current cache entry with lock
-            const cache = await tx.shopifyOrderCache.findUnique({
-                where: { id: shopifyOrderId },
-                select: { id: true, processingLock: true }
-            });
-
-            // If no cache entry exists yet, allow processing (will create cache)
-            if (!cache) {
-                return { acquired: true, isNew: true };
-            }
-
-            // Check if lock is held and not expired
-            if (cache.processingLock) {
-                const lockAge = Date.now() - new Date(cache.processingLock).getTime();
-                if (lockAge < lockTimeout) {
-                    return { acquired: false, reason: 'locked', lockAge };
-                }
-                // Lock expired, we can take it
-                console.log(`[OrderLock] Expired database lock released for ${shopifyOrderId}`);
-            }
-
-            // Acquire lock
-            await tx.shopifyOrderCache.update({
-                where: { id: shopifyOrderId },
-                data: { processingLock: new Date() }
-            });
-
-            return { acquired: true };
-        });
-
-        if (!result.acquired) {
-            return { locked: false, skipped: true, reason: result.reason };
-        }
-
-        // Execute the function
-        const fnResult = await fn();
-
-        // Release lock
-        await prisma.shopifyOrderCache.update({
-            where: { id: shopifyOrderId },
-            data: { processingLock: null }
-        }).catch(() => {
-            // Ignore errors releasing lock (cache might not exist)
-        });
-
-        return { locked: true, result: fnResult };
-    } catch (error) {
-        // Try to release lock on error
-        await prisma.shopifyOrderCache.update({
-            where: { id: shopifyOrderId },
-            data: { processingLock: null }
-        }).catch(() => {});
-
-        throw error;
     }
 }
 

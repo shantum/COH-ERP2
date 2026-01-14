@@ -666,6 +666,10 @@ class ShopifyClient {
         const limit = 250; // Max allowed by Shopify
         const totalCount = await this.getOrderCount(options);
 
+        // Track consecutive empty batches to detect true end of data
+        let consecutiveSmallBatches = 0;
+        const maxConsecutiveSmallBatches = 3;
+
         while (true) {
             const params: Record<string, string | number> = {
                 status: options.status || 'any',
@@ -679,6 +683,7 @@ class ShopifyClient {
             );
             const orders = response.data.orders;
 
+            // True end: no orders returned
             if (orders.length === 0) break;
 
             allOrders.push(...orders);
@@ -691,7 +696,18 @@ class ShopifyClient {
             // Small delay to avoid rate limiting (in addition to automatic handling)
             await new Promise(resolve => setTimeout(resolve, 100));
 
-            if (orders.length < limit) break;
+            // Check if we should stop:
+            // - If we've fetched at least totalCount, we're done
+            // - If batch is small AND we've had multiple consecutive small batches, stop
+            // This handles gaps in Shopify IDs (deleted orders) while still stopping eventually
+            if (orders.length < limit) {
+                consecutiveSmallBatches++;
+                if (allOrders.length >= totalCount || consecutiveSmallBatches >= maxConsecutiveSmallBatches) {
+                    break;
+                }
+            } else {
+                consecutiveSmallBatches = 0;
+            }
         }
 
         return allOrders;

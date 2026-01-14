@@ -9,7 +9,7 @@ import type { ShopifyOrder, ShopifyProduct } from '../services/shopify.js';
 import syncWorker from '../services/syncWorker.js';
 import { syncAllProducts } from '../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../services/customerSyncService.js';
-import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder } from '../services/shopifyOrderProcessor.js';
+import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrder, batchCacheShopifyOrders } from '../services/shopifyOrderProcessor.js';
 import scheduledSync from '../services/scheduledSync.js';
 import { runAllCleanup, getCacheStats } from '../utils/cacheCleanup.js';
 import { detectPaymentMethod } from '../utils/shopifyHelpers.js';
@@ -1044,6 +1044,8 @@ router.get('/sync/product-cache-status', authenticateToken, asyncHandler(async (
 /**
  * Full dump: Fetch ALL orders from Shopify and store in cache
  * Use this once to populate the cache, then rely on webhooks for real-time updates
+ *
+ * Uses streaming approach - fetches and caches in batches to avoid memory issues
  */
 router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const { daysBack } = req.body as { daysBack?: number };
@@ -1055,54 +1057,103 @@ router.post('/sync/full-dump', authenticateToken, asyncHandler(async (req: Reque
     }
 
     // Build options
-    const options: { status: 'any'; created_at_min?: string } = { status: 'any' };
+    const fetchOptions: { status: 'any'; created_at_min?: string; since_id?: string; limit: number } = {
+        status: 'any',
+        limit: 250
+    };
     if (daysBack) {
         const d = new Date();
         d.setDate(d.getDate() - daysBack);
-        options.created_at_min = d.toISOString();
+        fetchOptions.created_at_min = d.toISOString();
     }
 
     shopifyLogger.info({ daysBack }, 'Full Dump: starting order dump from Shopify');
+    let fetched = 0;
     let cached = 0;
     let skipped = 0;
     const startTime = Date.now();
 
     try {
-        // Fetch all orders with progress callback
-        const allOrders = await shopifyClient.getAllOrders(
-            (fetched, total) => {
-                shopifyLogger.debug({ fetched, total }, 'Full Dump: fetching progress');
-            },
-            options
-        );
+        // Get total count for progress tracking
+        const totalCount = await shopifyClient.getOrderCount({
+            status: 'any',
+            created_at_min: fetchOptions.created_at_min
+        });
+        shopifyLogger.info({ totalCount }, 'Full Dump: total orders to fetch');
 
-        shopifyLogger.info({ count: allOrders.length }, 'Full Dump: fetched orders, caching');
+        // Streaming approach: fetch batch, cache batch, repeat
+        let sinceId: string | null = null;
+        let consecutiveSmallBatches = 0;
+        const maxConsecutiveSmallBatches = 3;
 
-        // Cache each order
-        for (const order of allOrders) {
+        while (true) {
+            // Fetch batch
+            const params: Record<string, string | number> = {
+                status: 'any',
+                limit: 250,
+            };
+            if (sinceId) params.since_id = sinceId;
+            if (fetchOptions.created_at_min) params.created_at_min = fetchOptions.created_at_min;
+
+            const orders = await shopifyClient.getOrders(params);
+
+            if (orders.length === 0) break;
+
+            fetched += orders.length;
+            sinceId = String(orders[orders.length - 1].id);
+
+            shopifyLogger.debug({ fetched, total: totalCount, batchSize: orders.length }, 'Full Dump: fetching progress');
+
+            // Cache batch using fast batch operation
             try {
-                await cacheShopifyOrder(req.prisma, String(order.id), order, 'full_dump');
-                cached++;
+                const batchCached = await batchCacheShopifyOrders(req.prisma, orders, 'full_dump');
+                cached += batchCached;
             } catch (err) {
                 const error = err as Error;
-                shopifyLogger.error({ orderName: order.name, error: error.message }, 'Full Dump: error caching order');
-                skipped++;
+                shopifyLogger.error({ batchSize: orders.length, error: error.message }, 'Full Dump: batch cache error, falling back to individual');
+                // Fallback to individual caching on batch error
+                for (const order of orders) {
+                    try {
+                        await cacheShopifyOrder(req.prisma, String(order.id), order, 'full_dump');
+                        cached++;
+                    } catch (innerErr) {
+                        skipped++;
+                    }
+                }
+            }
+
+            // Small delay to avoid rate limiting
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Check if we should stop
+            if (orders.length < 250) {
+                consecutiveSmallBatches++;
+                if (fetched >= totalCount || consecutiveSmallBatches >= maxConsecutiveSmallBatches) {
+                    break;
+                }
+            } else {
+                consecutiveSmallBatches = 0;
+            }
+
+            // Log progress every 1000 orders
+            if (fetched % 1000 === 0) {
+                shopifyLogger.info({ fetched, cached, skipped, total: totalCount }, 'Full Dump: progress');
             }
         }
 
         const duration = Math.round((Date.now() - startTime) / 1000);
-        shopifyLogger.info({ cached, skipped, durationSeconds: duration }, 'Full Dump: completed');
+        shopifyLogger.info({ fetched, cached, skipped, durationSeconds: duration }, 'Full Dump: completed');
 
         res.json({
             message: 'Full dump complete',
-            fetched: allOrders.length,
+            fetched,
             cached,
             skipped,
             durationSeconds: duration
         });
     } catch (error) {
         const err = error as Error;
-        shopifyLogger.error({ error: err.message }, 'Full Dump: failed');
+        shopifyLogger.error({ error: err.message, fetched, cached, skipped }, 'Full Dump: failed');
         throw new ExternalServiceError(err.message, 'Shopify');
     }
 }));
@@ -1148,38 +1199,85 @@ router.get('/orders/:orderNumber', authenticateToken, asyncHandler(async (req: R
 }));
 
 /**
+ * Get cache statistics
+ */
+router.get('/sync/cache-stats', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const [total, unprocessed, failed, processed] = await Promise.all([
+        req.prisma.shopifyOrderCache.count(),
+        req.prisma.shopifyOrderCache.count({ where: { processedAt: null, processingError: null } }),
+        req.prisma.shopifyOrderCache.count({ where: { processingError: { not: null } } }),
+        req.prisma.shopifyOrderCache.count({ where: { processedAt: { not: null } } }),
+    ]);
+
+    // Get recent errors
+    const recentErrors = await req.prisma.shopifyOrderCache.findMany({
+        where: { processingError: { not: null } },
+        select: { id: true, orderNumber: true, processingError: true, lastWebhookAt: true },
+        orderBy: { lastWebhookAt: 'desc' },
+        take: 10
+    });
+
+    res.json({
+        total,
+        unprocessed,
+        failed,
+        processed,
+        recentErrors: recentErrors.map(e => ({
+            id: e.id,
+            orderNumber: e.orderNumber,
+            error: e.processingError,
+            lastUpdate: e.lastWebhookAt
+        }))
+    });
+}));
+
+/**
  * Process cache: Convert unprocessed cache entries to ERP tables
  */
 router.post('/sync/process-cache', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const { limit = 100 } = req.body as { limit?: number };
+    const { limit = 100, retryFailed = false } = req.body as { limit?: number; retryFailed?: boolean };
 
-    // Find unprocessed cache entries
-    const unprocessed = await req.prisma.shopifyOrderCache.findMany({
-        where: { processedAt: null },
+    // Find entries to process
+    const whereClause = retryFailed
+        ? { processingError: { not: null } }  // Retry failed entries
+        : { processedAt: null, processingError: null };  // New entries only
+
+    const entries = await req.prisma.shopifyOrderCache.findMany({
+        where: whereClause,
         orderBy: { lastWebhookAt: 'asc' },
         take: limit
     });
 
-    if (unprocessed.length === 0) {
+    if (entries.length === 0) {
         res.json({
-            message: 'No unprocessed orders in cache',
+            message: retryFailed ? 'No failed orders to retry' : 'No unprocessed orders in cache',
             processed: 0,
             failed: 0
         });
         return;
     }
 
-    shopifyLogger.info({ count: unprocessed.length }, 'Process Cache: starting');
+    shopifyLogger.info({ count: entries.length, retryFailed }, 'Process Cache: starting');
 
     let processed = 0;
     let failed = 0;
     const errors: Array<{ orderNumber: string | null; error: string }> = [];
 
-    for (const entry of unprocessed) {
+    for (const entry of entries) {
         try {
-            await processFromCache(req.prisma, entry);
-            await markCacheProcessed(req.prisma, entry.id);
-            processed++;
+            const result = await processFromCache(req.prisma, entry);
+
+            // Only mark as processed if we actually created or updated something
+            if (result.action !== 'cache_only') {
+                await markCacheProcessed(req.prisma, entry.id);
+                processed++;
+            } else {
+                // Processing returned cache_only (error occurred)
+                failed++;
+                if (errors.length < 10) {
+                    errors.push({ orderNumber: entry.orderNumber, error: result.error || 'Unknown error' });
+                }
+            }
         } catch (err) {
             const error = err as Error;
             await markCacheError(req.prisma, entry.id, error.message);
@@ -1190,10 +1288,10 @@ router.post('/sync/process-cache', authenticateToken, asyncHandler(async (req: R
         }
     }
 
-    shopifyLogger.info({ processed, failed }, 'Process Cache: completed');
+    shopifyLogger.info({ processed, failed, retryFailed }, 'Process Cache: completed');
 
     res.json({
-        message: 'Processing complete',
+        message: retryFailed ? 'Retry complete' : 'Processing complete',
         processed,
         failed,
         errors: errors.length > 0 ? errors : undefined
@@ -1247,19 +1345,18 @@ router.get('/sync/history', authenticateToken, asyncHandler(async (req: Request,
  *
  * Body:
  * - jobType: 'orders' | 'customers' | 'products' (required)
- * - syncMode: 'deep' | 'quick' | 'update' (optional for orders)
- *   - 'deep': Full import with aggressive memory management (initial setup, recovery)
- *   - 'quick': Missing orders only, fetches after latest DB order date (daily catch-up)
- *   - 'update': Recently changed orders via updated_at_min (hourly refresh)
- *   - null/omitted: Legacy upsert behavior
- * - days: number (optional, for deep mode) - For created_at filter
- * - staleAfterMins: number (required for update mode) - Fetch orders updated within last X mins
+ * - syncMode: 'deep' | 'incremental' (optional for orders)
+ *   - 'deep': Full import of all orders (initial setup, recovery)
+ *   - 'incremental': Catch-up sync using date filters (hourly/daily refresh)
+ *   - Legacy modes 'quick', 'update' are still accepted (mapped to 'incremental')
+ * - days: number (optional) - For created_at filter
+ * - staleAfterMins: number (optional) - Fetch orders updated within last X mins
  *
  * Examples:
  *   { "jobType": "orders", "syncMode": "deep" }  // Full import, all time
  *   { "jobType": "orders", "syncMode": "deep", "days": 365 }  // Full import, last 365 days
- *   { "jobType": "orders", "syncMode": "quick" }  // Missing orders only
- *   { "jobType": "orders", "syncMode": "update", "staleAfterMins": 60 }  // Refresh recently changed
+ *   { "jobType": "orders", "syncMode": "incremental" }  // Catch-up since last order
+ *   { "jobType": "orders", "syncMode": "incremental", "staleAfterMins": 60 }  // Refresh recently changed
  */
 router.post('/sync/jobs/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const { jobType, days, syncMode, staleAfterMins } = req.body as {
@@ -1273,26 +1370,22 @@ router.post('/sync/jobs/start', authenticateToken, asyncHandler(async (req: Requ
         throw new ValidationError('Invalid job type. Must be: orders, customers, or products');
     }
 
-    // Validate syncMode
-    if (syncMode && !['deep', 'quick', 'update'].includes(syncMode)) {
-        throw new ValidationError(`Invalid syncMode: ${syncMode}. Must be 'deep', 'quick', or 'update'.`);
-    }
-
-    // Validate syncMode-specific requirements
-    if (syncMode === 'update' && !staleAfterMins) {
-        throw new ValidationError(
-            'staleAfterMins is required when syncMode is "update". Example: { "jobType": "orders", "syncMode": "update", "staleAfterMins": 60 }'
-        );
+    // Validate syncMode (accept both new and legacy modes)
+    if (syncMode && !['deep', 'incremental', 'quick', 'update'].includes(syncMode)) {
+        throw new ValidationError(`Invalid syncMode: ${syncMode}. Must be 'deep' or 'incremental'.`);
     }
 
     const job = await syncWorker.startJob(jobType as 'orders' | 'customers' | 'products', {
-        days: days || undefined, // Only used for deep mode
-        syncMode: syncMode as 'deep' | 'quick' | 'update' | undefined,
+        days: days || undefined,
+        syncMode: syncMode as 'deep' | 'incremental' | 'quick' | 'update' | undefined,
         staleAfterMins
     });
 
+    // Normalize mode for response message
+    const effectiveMode = syncMode === 'deep' ? 'deep' : 'incremental';
+
     res.json({
-        message: `Sync job started (${syncMode || 'legacy'} mode)`,
+        message: `Sync job started (${effectiveMode} mode)`,
         job
     });
 }));

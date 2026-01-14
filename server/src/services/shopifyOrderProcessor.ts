@@ -142,50 +142,22 @@ type OrderWithLines = Prisma.OrderGetPayload<{
 // ============================================
 
 /**
- * Cache raw Shopify order data to ShopifyOrderCache table
- *
- * IMPORTANT: Called FIRST before processShopifyOrderToERP. Handles:
- * - Extracting payment method via CACHE-FIRST PATTERN (see module docs)
- * - Preserving COD status: Once COD, always COD even after payment
- * - Extracting fulfillment/tracking info from fulfillments array
- * - Extracting shipping address fields (city, state, country)
- *
- * PAYMENT METHOD DETECTION (priority order):
- * 1. Check payment_gateway_names: shopflo/razorpay = Prepaid, cod/cash/manual = COD
- * 2. If isCodGateway OR existing cache is COD → preserve COD
- * 3. If isPrepaidGateway → mark Prepaid
- * 4. If financial_status='pending' + no prepaid gateway → assume COD (common for new orders)
- * 5. Fallback: Prepaid
- *
- * KEY: Once an order is marked COD, it STAYS COD even after payment is received.
- * This prevents confusion between payment status and fulfillment method.
- *
- * @param prisma - Prisma client
- * @param shopifyOrderId - Shopify order ID (will be stringified)
- * @param shopifyOrder - Raw Shopify order object from API
- * @param webhookTopic - Source: 'orders/create', 'orders/updated', 'api_sync'
- *
- * @example
- * const shopifyOrder = await shopify.rest.Order.find({ ...});
- * await cacheShopifyOrder(prisma, shopifyOrder.id, shopifyOrder, 'orders/create');
- * // Caches: discountCodes, customerNotes, financialStatus, fulfillmentStatus, etc.
+ * Extract cache data from a Shopify order (shared logic for single and batch caching)
  */
-export async function cacheShopifyOrder(
-    prisma: PrismaClient,
-    shopifyOrderId: string | number,
-    shopifyOrder: ExtendedShopifyOrder,
-    webhookTopic = 'api_sync'
-): Promise<void> {
-    const orderId = String(shopifyOrderId);
+function extractCacheData(
+    order: ExtendedShopifyOrder,
+    webhookTopic: string,
+    existingPaymentMethod: string | null = null
+) {
+    const orderId = String(order.id);
 
     // Extract discount codes (comma-separated, empty string if none)
-    const discountCodes = (shopifyOrder.discount_codes || [])
+    const discountCodes = (order.discount_codes || [])
         .map(d => d.code).join(', ') || '';
 
     // Extract tracking info from fulfillments (for reference only, not source of truth)
-    // NOTE: Order table owns tracking data (awbNumber, courier), these are Shopify's view
-    const fulfillment = shopifyOrder.fulfillments?.find(f => f.tracking_number)
-        || shopifyOrder.fulfillments?.[0];
+    const fulfillment = order.fulfillments?.find(f => f.tracking_number)
+        || order.fulfillments?.[0];
     const trackingNumber = fulfillment?.tracking_number || null;
     const trackingCompany = fulfillment?.tracking_company || null;
     const trackingUrl = fulfillment?.tracking_url || fulfillment?.tracking_urls?.[0] || null;
@@ -193,37 +165,28 @@ export async function cacheShopifyOrder(
     const shipmentStatus = fulfillment?.shipment_status || null;
     const fulfillmentUpdatedAt = fulfillment?.updated_at ? new Date(fulfillment.updated_at) : null;
 
-    // Check for delivered status from fulfillment events
+    // Check for delivered status
     const deliveredEvent = fulfillment?.line_items?.[0]?.fulfillment_status === 'fulfilled'
         && shipmentStatus === 'delivered';
     const deliveredAt = deliveredEvent && fulfillment?.updated_at
         ? new Date(fulfillment.updated_at) : null;
 
-    // Detect payment method using shared utility
-    // Check existing cache to preserve COD status
-    const existingCache = await prisma.shopifyOrderCache.findUnique({
-        where: { id: orderId },
-        select: { paymentMethod: true }
-    });
-    const paymentMethod = detectPaymentMethod(shopifyOrder, existingCache?.paymentMethod);
+    // Detect payment method (preserves existing COD status)
+    const paymentMethod = detectPaymentMethod(order, existingPaymentMethod);
 
-    // Extract shipping address fields
-    const addr = shopifyOrder.shipping_address;
-    const shippingCity = addr?.city || null;
-    const shippingState = addr?.province || null;
-    const shippingCountry = addr?.country || null;
+    // Extract shipping address
+    const addr = order.shipping_address;
 
-    const cacheData = {
-        rawData: JSON.stringify(shopifyOrder),
-        orderNumber: shopifyOrder.name || null,
-        financialStatus: shopifyOrder.financial_status || null,
-        fulfillmentStatus: shopifyOrder.fulfillment_status || null,
-        // Extracted Shopify-owned fields (read-only)
+    return {
+        id: orderId,
+        rawData: JSON.stringify(order),
+        orderNumber: order.name || null,
+        financialStatus: order.financial_status || null,
+        fulfillmentStatus: order.fulfillment_status || null,
         discountCodes,
-        customerNotes: shopifyOrder.note || null,
-        tags: shopifyOrder.tags || null,
+        customerNotes: order.note || null,
+        tags: order.tags || null,
         paymentMethod,
-        // Tracking info from Shopify (may differ from ERP)
         trackingNumber,
         trackingCompany,
         trackingUrl,
@@ -231,27 +194,101 @@ export async function cacheShopifyOrder(
         deliveredAt,
         shipmentStatus,
         fulfillmentUpdatedAt,
-        // Address
-        shippingCity,
-        shippingState,
-        shippingCountry,
-        // Metadata
+        shippingCity: addr?.city || null,
+        shippingState: addr?.province || null,
+        shippingCountry: addr?.country || null,
         webhookTopic,
         lastWebhookAt: new Date(),
     };
+}
 
-    await prisma.shopifyOrderCache.upsert({
-        where: { id: orderId },
-        create: {
-            id: orderId,
-            ...cacheData,
-        },
-        update: {
-            ...cacheData,
-            // Clear any previous error since we have new data
-            processingError: null,
-        }
-    });
+/**
+ * Cache Shopify orders to ShopifyOrderCache table
+ *
+ * UNIFIED FUNCTION: Handles both single orders and batches efficiently.
+ * - Single order: Checks existing cache for payment method preservation
+ * - Batch: Skips existing check for speed (use for initial loads)
+ *
+ * @param prisma - Prisma client
+ * @param orders - Single order or array of orders to cache
+ * @param webhookTopic - Source: 'orders/create', 'orders/updated', 'api_sync', 'full_dump'
+ * @returns Number of orders cached
+ */
+export async function cacheShopifyOrders(
+    prisma: PrismaClient,
+    orders: ExtendedShopifyOrder | ExtendedShopifyOrder[],
+    webhookTopic = 'api_sync'
+): Promise<number> {
+    const orderArray = Array.isArray(orders) ? orders : [orders];
+    if (orderArray.length === 0) return 0;
+
+    // Single order: Check existing cache for payment method preservation
+    if (orderArray.length === 1) {
+        const order = orderArray[0];
+        const orderId = String(order.id);
+
+        // Check existing cache to preserve COD status
+        const existingCache = await prisma.shopifyOrderCache.findUnique({
+            where: { id: orderId },
+            select: { paymentMethod: true }
+        });
+
+        const cacheData = extractCacheData(order, webhookTopic, existingCache?.paymentMethod);
+
+        await prisma.shopifyOrderCache.upsert({
+            where: { id: orderId },
+            create: cacheData,
+            update: { ...cacheData, processingError: null },
+        });
+
+        return 1;
+    }
+
+    // Batch: Use chunked transactions for speed (skip existing check)
+    const records = orderArray.map(order => extractCacheData(order, webhookTopic, null));
+    const chunkSize = 50;
+    let cached = 0;
+
+    for (let i = 0; i < records.length; i += chunkSize) {
+        const chunk = records.slice(i, i + chunkSize);
+        await prisma.$transaction(
+            chunk.map(record =>
+                prisma.shopifyOrderCache.upsert({
+                    where: { id: record.id },
+                    create: record,
+                    update: { ...record, processingError: null },
+                })
+            )
+        );
+        cached += chunk.length;
+    }
+
+    return cached;
+}
+
+/**
+ * Cache a single Shopify order (convenience wrapper)
+ * @deprecated Use cacheShopifyOrders() instead
+ */
+export async function cacheShopifyOrder(
+    prisma: PrismaClient,
+    shopifyOrderId: string | number,
+    shopifyOrder: ExtendedShopifyOrder,
+    webhookTopic = 'api_sync'
+): Promise<void> {
+    await cacheShopifyOrders(prisma, shopifyOrder, webhookTopic);
+}
+
+/**
+ * Batch cache multiple Shopify orders (convenience wrapper)
+ * @deprecated Use cacheShopifyOrders() instead
+ */
+export async function batchCacheShopifyOrders(
+    prisma: PrismaClient,
+    orders: ExtendedShopifyOrder[],
+    webhookTopic = 'full_dump'
+): Promise<number> {
+    return cacheShopifyOrders(prisma, orders, webhookTopic);
 }
 
 /**
@@ -419,21 +456,18 @@ export async function processShopifyOrderToERP(
     const orderName = shopifyOrder.name || String(shopifyOrder.order_number) || shopifyOrderId;
 
     // Check if order exists - first by shopifyOrderId, then by orderNumber
+    // This handles both synced orders (have shopifyOrderId) and manual orders (only have orderNumber)
+    const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
+
     let existingOrder = await prisma.order.findFirst({
-        where: { shopifyOrderId },
+        where: {
+            OR: [
+                { shopifyOrderId },
+                ...(orderNumber ? [{ orderNumber }] : [])
+            ]
+        },
         include: { orderLines: true }
     });
-
-    // If not found by shopifyOrderId, check by orderNumber (handles orders created before sync)
-    if (!existingOrder) {
-        const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
-        if (orderNumber) {
-            existingOrder = await prisma.order.findFirst({
-                where: { orderNumber },
-                include: { orderLines: true }
-            });
-        }
-    }
 
     // Extract customer and shipping info
     const customer = shopifyOrder.customer;
@@ -504,7 +538,7 @@ export async function processShopifyOrderToERP(
     // Shopify data is accessed via order.shopifyCache relation
     const orderData = {
         shopifyOrderId,
-        orderNumber: shopifyOrder.name || String(shopifyOrder.order_number) || `SHOP-${shopifyOrderId.slice(-8)}`,
+        orderNumber: orderNumber || `SHOP-${shopifyOrderId.slice(-8)}`,
         channel: shopifyClient.mapOrderChannel(shopifyOrder),
         status,
         customerId,

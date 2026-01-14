@@ -129,14 +129,6 @@ export function ShopifyTab() {
         },
     });
 
-    const reprocessCacheMutation = useMutation({
-        mutationFn: () => shopifyApi.reprocessCache(),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
-            queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
-        },
-    });
-
     // Full dump mutation
     const fullDumpMutation = useMutation({
         mutationFn: (daysBack?: number) => shopifyApi.fullDump(daysBack),
@@ -148,7 +140,8 @@ export function ShopifyTab() {
 
     // Process cache mutation
     const processCacheMutation = useMutation({
-        mutationFn: (limit?: number) => shopifyApi.processCache(limit),
+        mutationFn: ({ limit, retryFailed }: { limit?: number; retryFailed?: boolean }) =>
+            shopifyApi.processCache(limit, retryFailed),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['orders'] });
             queryClient.invalidateQueries({ queryKey: ['openOrders'] });
@@ -172,7 +165,7 @@ export function ShopifyTab() {
     const startJobMutation = useMutation({
         mutationFn: (params: {
             jobType: string;
-            syncMode?: 'deep' | 'quick' | 'update';
+            syncMode?: 'deep' | 'incremental';
             days?: number;
             staleAfterMins?: number;
         }) => shopifyApi.startSyncJob(params),
@@ -689,7 +682,7 @@ export function ShopifyTab() {
                             <div className="flex gap-2 mb-3">
                                 <button
                                     className="btn bg-green-600 text-white hover:bg-green-700 flex-1 flex items-center justify-center gap-2"
-                                    onClick={() => processCacheMutation.mutate(100)}
+                                    onClick={() => processCacheMutation.mutate({ limit: 100 })}
                                     disabled={processCacheMutation.isPending || (cacheStatus?.pending || 0) === 0}
                                 >
                                     {processCacheMutation.isPending ? (
@@ -707,10 +700,10 @@ export function ShopifyTab() {
                                 {(cacheStatus?.failed || 0) > 0 && (
                                     <button
                                         className="btn bg-orange-500 text-white hover:bg-orange-600 flex items-center gap-1"
-                                        onClick={() => reprocessCacheMutation.mutate()}
-                                        disabled={reprocessCacheMutation.isPending}
+                                        onClick={() => processCacheMutation.mutate({ limit: 100, retryFailed: true })}
+                                        disabled={processCacheMutation.isPending}
                                     >
-                                        <RefreshCw size={14} className={reprocessCacheMutation.isPending ? 'animate-spin' : ''} />
+                                        <RefreshCw size={14} className={processCacheMutation.isPending ? 'animate-spin' : ''} />
                                         Retry Failed ({cacheStatus?.failed || 0})
                                     </button>
                                 )}
@@ -729,17 +722,6 @@ export function ShopifyTab() {
                                 </div>
                             )}
 
-                            {reprocessCacheMutation.isPending && (
-                                <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                                    <div className="flex items-center gap-3">
-                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-orange-600 border-t-transparent"></div>
-                                        <div>
-                                            <p className="text-sm font-medium text-orange-800">Retrying failed orders...</p>
-                                            <p className="text-xs text-orange-600">Re-processing {cacheStatus?.failed || 0} failed cache entries</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                             {/* Success result */}
                             {processCacheMutation.data && !processCacheMutation.isPending && (
@@ -768,19 +750,6 @@ export function ShopifyTab() {
                                 </div>
                             )}
 
-                            {reprocessCacheMutation.data && !reprocessCacheMutation.isPending && (
-                                <div className="mt-3 p-3 bg-orange-100 border border-orange-200 rounded-lg">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <CheckCircle size={16} className="text-orange-600" />
-                                        <span className="font-medium text-orange-800">Retry Complete</span>
-                                    </div>
-                                    <div className="text-sm text-orange-700">
-                                        Reprocessed: <span className="font-semibold">{reprocessCacheMutation.data?.data?.processed || 0}</span> |
-                                        Succeeded: <span className="font-semibold text-green-600">{reprocessCacheMutation.data?.data?.succeeded || 0}</span> |
-                                        Still Failed: <span className="font-semibold text-red-600">{reprocessCacheMutation.data?.data?.failed || 0}</span>
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
 
@@ -1345,15 +1314,12 @@ export function ShopifyTab() {
                                                     {job.syncMode ? (
                                                         <span className={`px-2 py-0.5 rounded text-xs ${
                                                             job.syncMode === 'deep' ? 'bg-amber-100 text-amber-700' :
-                                                            job.syncMode === 'quick' ? 'bg-blue-100 text-blue-700' :
-                                                            job.syncMode === 'update' ? 'bg-green-100 text-green-700' :
-                                                            job.syncMode === 'populate' ? 'bg-blue-100 text-blue-700' :
-                                                            'bg-gray-100 text-gray-600'
+                                                            'bg-blue-100 text-blue-700'
                                                         }`}>
-                                                            {job.syncMode}
+                                                            {job.syncMode === 'deep' ? 'deep' : 'incremental'}
                                                         </span>
                                                     ) : (
-                                                        <span className="text-gray-400 text-xs">legacy</span>
+                                                        <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700">incremental</span>
                                                     )}
                                                 </td>
                                                 <td className="px-3 py-2">

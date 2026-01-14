@@ -480,11 +480,12 @@ export const shopifyApi = {
     // Simple sync operations (recommended)
     fullDump: (daysBack?: number) => api.post('/shopify/sync/full-dump', { daysBack }),
     lookupOrder: (orderNumber: string) => api.get(`/shopify/orders/${orderNumber}`),
-    processCache: (limit?: number) => api.post('/shopify/sync/process-cache', { limit }),
-    // Background sync jobs (legacy - use fullDump instead for orders)
+    processCache: (limit?: number, retryFailed?: boolean) =>
+        api.post('/shopify/sync/process-cache', { limit, retryFailed }),
+    // Background sync jobs
     startSyncJob: (params: {
         jobType: string;
-        syncMode?: 'deep' | 'quick' | 'update' | 'populate';
+        syncMode?: 'deep' | 'incremental';
         days?: number;
         staleAfterMins?: number;
     }) => api.post('/shopify/sync/jobs/start', params),

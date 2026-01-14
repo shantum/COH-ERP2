@@ -2,10 +2,11 @@
  * Background Sync Worker
  * Processes sync jobs with checkpointing and resume capability
  *
- * Supports three sync modes for orders:
- * - DEEP: Full import with aggressive memory management (initial setup, recovery)
- * - QUICK: Missing orders only, fetches after latest DB order date (daily catch-up)
- * - UPDATE: Recently changed orders only via updated_at_min (hourly refresh)
+ * SIMPLIFIED SYNC MODES (2 modes only):
+ * - DEEP: Full import, upserts all orders (initial setup, recovery)
+ * - INCREMENTAL: Catch-up sync using updated_at_min or created_at_min
+ *
+ * Legacy modes (quick, update) are mapped to INCREMENTAL for backward compatibility.
  */
 
 import type { PrismaClient, SyncJob } from '@prisma/client';
@@ -23,8 +24,11 @@ import { syncLogger } from '../utils/logger.js';
 
 /**
  * Supported sync modes for orders
+ * - deep: Full import of all orders (initial setup, recovery)
+ * - incremental: Catch-up sync using date filters (hourly/daily refresh)
+ * Legacy: 'quick' and 'update' are treated as 'incremental'
  */
-type SyncMode = 'deep' | 'quick' | 'update' | null;
+type SyncMode = 'deep' | 'incremental' | 'quick' | 'update' | null;
 
 /**
  * Valid sync job types
@@ -58,10 +62,9 @@ type SyncOrderResult = 'created' | 'updated' | 'skipped';
  * Background Sync Worker
  * Processes sync jobs with checkpointing and resume capability
  *
- * Supports three sync modes for orders:
- * - DEEP: Full import with aggressive memory management (initial setup, recovery)
- * - QUICK: Missing orders only, fetches after latest DB order date (daily catch-up)
- * - UPDATE: Recently changed orders only via updated_at_min (hourly refresh)
+ * SIMPLIFIED SYNC MODES:
+ * - DEEP: Full import, aggressive memory management (initial setup, recovery)
+ * - INCREMENTAL: Fast catch-up using date filters (hourly/daily refresh)
  */
 class SyncWorker {
     // Active jobs tracker (in-memory, single instance only)
@@ -76,39 +79,40 @@ class SyncWorker {
 
     constructor() {
         this.activeJobs = new Map();
-        this.batchSize = 50;
-        this.batchDelay = 1000;
+        this.batchSize = 250;
+        this.batchDelay = 500;
         this.maxErrors = 20;
-        this.gcInterval = 5;
-        this.disconnectInterval = 10;
+        this.gcInterval = 10;
+        this.disconnectInterval = 20;
+    }
+
+    /**
+     * Normalize sync mode (map legacy modes to simplified modes)
+     */
+    private normalizeMode(syncMode: SyncMode): 'deep' | 'incremental' {
+        if (syncMode === 'deep') return 'deep';
+        // quick, update, null all map to incremental
+        return 'incremental';
     }
 
     /**
      * Configure settings based on sync mode
      */
     private configureModeSettings(syncMode: SyncMode): void {
-        switch (syncMode) {
-            case 'deep':
-                // DEEP: Maximum batch size, aggressive memory management
-                this.batchSize = 250;
-                this.batchDelay = 1500;
-                this.gcInterval = 3;
-                this.disconnectInterval = 5;
-                break;
-            case 'quick':
-            case 'update':
-                // QUICK/UPDATE: Fast, smaller batches
-                this.batchSize = 250;
-                this.batchDelay = 500;
-                this.gcInterval = 10;
-                this.disconnectInterval = 20;
-                break;
-            default:
-                // Legacy mode: conservative settings
-                this.batchSize = 50;
-                this.batchDelay = 1000;
-                this.gcInterval = 5;
-                this.disconnectInterval = 10;
+        const mode = this.normalizeMode(syncMode);
+
+        if (mode === 'deep') {
+            // DEEP: Maximum batch size, aggressive memory management
+            this.batchSize = 250;
+            this.batchDelay = 1500;
+            this.gcInterval = 3;
+            this.disconnectInterval = 5;
+        } else {
+            // INCREMENTAL: Fast, optimized for catch-up
+            this.batchSize = 250;
+            this.batchDelay = 500;
+            this.gcInterval = 10;
+            this.disconnectInterval = 20;
         }
     }
 
@@ -116,12 +120,11 @@ class SyncWorker {
      * Start a new sync job
      * @param jobType - 'orders', 'customers', 'products'
      * @param options - Job options
-     * @param options.days - Number of days to sync (for created_at filter, used by DEEP mode)
-     * @param options.syncMode - 'deep' | 'quick' | 'update' | null (legacy)
-     *   - 'deep': Full import with aggressive memory management (initial setup, recovery)
-     *   - 'quick': Missing orders only, fetches after latest DB order date (daily catch-up)
-     *   - 'update': Recently changed orders via updated_at_min (hourly refresh)
-     * @param options.staleAfterMins - For update mode: re-sync orders updated in last X mins
+     * @param options.days - Number of days to sync (for created_at filter)
+     * @param options.syncMode - 'deep' | 'incremental' (or legacy: 'quick' | 'update')
+     *   - 'deep': Full import of all orders (initial setup, recovery)
+     *   - 'incremental': Catch-up sync using date filters (hourly/daily refresh)
+     * @param options.staleAfterMins - For incremental mode: re-sync orders updated in last X mins
      */
     async startJob(jobType: JobType, options: StartJobOptions = {}): Promise<SyncJob> {
         // Reload Shopify config first (outside transaction)
@@ -131,20 +134,23 @@ class SyncWorker {
             throw new Error('Shopify is not configured');
         }
 
-        // Validate syncMode
-        const validModes: SyncMode[] = ['deep', 'quick', 'update', null];
+        // Validate syncMode (accept both new and legacy modes)
+        const validModes: SyncMode[] = ['deep', 'incremental', 'quick', 'update', null];
         if (options.syncMode !== undefined && !validModes.includes(options.syncMode)) {
-            throw new Error(`Invalid syncMode: ${options.syncMode}. Must be 'deep', 'quick', 'update', or omitted for legacy mode.`);
+            throw new Error(`Invalid syncMode: ${options.syncMode}. Must be 'deep', 'incremental', or omitted.`);
         }
+
+        // Normalize mode for storage
+        const effectiveMode = this.normalizeMode(options.syncMode ?? null);
 
         // Build date filter label
         let dateFilter = 'All time';
-        if (options.syncMode === 'update' && options.staleAfterMins) {
+        if (options.staleAfterMins) {
             dateFilter = `Updated in last ${options.staleAfterMins} mins`;
-        } else if (options.syncMode === 'quick') {
-            dateFilter = 'Since last order';
         } else if (options.days) {
             dateFilter = `Last ${options.days} days`;
+        } else if (effectiveMode === 'incremental') {
+            dateFilter = 'Since last order';
         }
 
         // Use transaction to atomically check for existing job and create new one
@@ -310,33 +316,32 @@ class SyncWorker {
 
     /**
      * Process order sync with checkpointing
-     * Supports three modes:
+     * SIMPLIFIED MODES:
      * - DEEP: Full import, upsert all orders (initial setup, data recovery)
-     * - QUICK: Missing orders only, skip existing (daily catch-up)
-     * - UPDATE: Only fetch orders updated in Shopify since staleAfterMins (hourly refresh)
-     * - LEGACY (null): Upsert all orders with conservative settings
+     * - INCREMENTAL: Catch-up sync using date filters (hourly/daily refresh)
      */
     private async processOrderSync(jobId: string): Promise<void> {
         let job = await prisma.syncJob.findUnique({ where: { id: jobId } });
         if (!job) return;
 
-        const syncMode = job.syncMode as SyncMode;
+        const rawSyncMode = job.syncMode as SyncMode;
+        const effectiveMode = this.normalizeMode(rawSyncMode);
 
         // Configure batch settings based on sync mode
-        this.configureModeSettings(syncMode);
+        this.configureModeSettings(rawSyncMode);
 
         // Calculate date filters based on sync mode
         let createdAtMin: string | null = null;
         let updatedAtMin: string | null = null;
 
-        if (syncMode === 'update' && job.staleAfterMins) {
-            // UPDATE mode: Use updated_at_min to only fetch recently modified orders
+        if (job.staleAfterMins) {
+            // Use updated_at_min to only fetch recently modified orders
             const threshold = new Date();
             threshold.setMinutes(threshold.getMinutes() - job.staleAfterMins);
             updatedAtMin = threshold.toISOString();
-            syncLogger.info({ jobId, updatedAtMin }, 'UPDATE mode: fetching recently updated orders');
-        } else if (syncMode === 'quick') {
-            // QUICK mode: Find most recent order date in DB and fetch newer orders
+            syncLogger.info({ jobId, updatedAtMin }, 'INCREMENTAL mode: fetching recently updated orders');
+        } else if (effectiveMode === 'incremental' && !job.daysBack) {
+            // Find most recent order date in DB and fetch newer orders
             const latestOrder = await prisma.order.findFirst({
                 where: { shopifyOrderId: { not: null } },
                 orderBy: { orderDate: 'desc' },
@@ -344,31 +349,19 @@ class SyncWorker {
             });
             if (latestOrder?.orderDate) {
                 createdAtMin = latestOrder.orderDate.toISOString();
-                syncLogger.info({ jobId, createdAtMin }, 'QUICK mode: fetching orders since last sync');
+                syncLogger.info({ jobId, createdAtMin }, 'INCREMENTAL mode: fetching orders since last sync');
             } else {
-                syncLogger.info({ jobId }, 'QUICK mode: no existing orders, fetching all');
+                syncLogger.info({ jobId }, 'INCREMENTAL mode: no existing orders, fetching all');
             }
         } else if (job.daysBack) {
-            // DEEP or LEGACY mode: Use created_at_min with days filter
+            // Use created_at_min with days filter
             const d = new Date();
             d.setDate(d.getDate() - job.daysBack);
             createdAtMin = d.toISOString();
         }
 
-        // For QUICK mode, load existing order IDs upfront for skip logic
-        let existingOrderIds = new Set<string>();
-        if (syncMode === 'quick') {
-            syncLogger.debug({ jobId }, 'QUICK mode: loading existing Shopify order IDs');
-            const existingOrders = await prisma.order.findMany({
-                where: { shopifyOrderId: { not: null } },
-                select: { shopifyOrderId: true }
-            });
-            existingOrderIds = new Set(existingOrders.map(o => o.shopifyOrderId!));
-            syncLogger.debug({ jobId, count: existingOrderIds.size }, 'Found existing orders to skip');
-        }
-
-        // Get total count if not set (only for DEEP/LEGACY modes; QUICK/UPDATE are unpredictable)
-        if (!job.totalRecords && syncMode !== 'update' && syncMode !== 'quick') {
+        // Get total count if not set (only for DEEP mode where we know scope)
+        if (!job.totalRecords && effectiveMode === 'deep') {
             const totalCount = await shopifyClient.getOrderCount({
                 status: 'any',
                 created_at_min: createdAtMin || undefined
@@ -381,7 +374,7 @@ class SyncWorker {
             if (!job) return;
         }
 
-        syncLogger.info({ jobId, syncMode: syncMode || 'legacy', totalRecords: job.totalRecords, resumeFrom: job.lastProcessedId || 'start' }, 'Starting order sync');
+        syncLogger.info({ jobId, syncMode: effectiveMode, totalRecords: job.totalRecords, resumeFrom: job.lastProcessedId || 'start' }, 'Starting order sync');
 
         let sinceId = job.lastProcessedId;
 
@@ -426,25 +419,15 @@ class SyncWorker {
                 break;
             }
 
-            syncLogger.debug({ jobId, batchNumber, orderCount: shopifyOrders.length, syncMode: syncMode || 'legacy' }, 'Processing batch');
+            syncLogger.debug({ jobId, batchNumber, orderCount: shopifyOrders.length, syncMode: effectiveMode }, 'Processing batch');
 
             let batchCreated = 0, batchUpdated = 0, batchSkipped = 0, batchErrors = 0;
 
             for (const shopifyOrder of shopifyOrders) {
                 try {
-                    // QUICK mode: Skip if order already exists
-                    if (syncMode === 'quick' && existingOrderIds.has(String(shopifyOrder.id))) {
-                        batchSkipped++;
-                        continue;
-                    }
-
                     const result = await this.syncSingleOrder(shopifyOrder);
                     if (result === 'created') {
                         batchCreated++;
-                        // Add to existing set for subsequent batches (in case of duplicates)
-                        if (syncMode === 'quick') {
-                            existingOrderIds.add(String(shopifyOrder.id));
-                        }
                     } else if (result === 'updated') {
                         batchUpdated++;
                     } else {
@@ -508,7 +491,7 @@ class SyncWorker {
             }
         });
 
-        syncLogger.info({ jobId, syncMode: syncMode || 'legacy' }, 'Order sync completed');
+        syncLogger.info({ jobId, syncMode: effectiveMode }, 'Order sync completed');
     }
 
     /**
