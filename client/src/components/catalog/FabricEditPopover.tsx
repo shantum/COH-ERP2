@@ -142,11 +142,16 @@ export function FabricEditPopover({
         setIsOpen(false);
     };
 
-    // Display text - based on column type, not view level
-    // For fabric type: prefer the fabric's type (variationFabricTypeName) over product's type (fabricTypeName)
-    // This ensures the column shows the actual fabric type when a fabric is selected
+    // Display text - based on column type and view level
+    // For fabric type column:
+    //   - Product view: show product's fabricTypeName (matches the dropdown value)
+    //   - Variation/SKU views: show variation's fabric type (variationFabricTypeName) for clarity
     const displayText = columnType === 'fabricType'
-        ? (hasMixedFabricTypes ? 'Multiple' : row.variationFabricTypeName || row.fabricTypeName || 'Not set')
+        ? (hasMixedFabricTypes
+            ? 'Multiple'
+            : viewLevel === 'product'
+                ? (row.fabricTypeName || 'Not set')
+                : (row.variationFabricTypeName || row.fabricTypeName || 'Not set'))
         : (hasMixedFabrics ? 'Multiple' : row.fabricName || 'Not set');
 
     return (
@@ -198,10 +203,12 @@ export function FabricEditPopover({
                         </div>
                     )}
 
-                    {/* Fabric Type filter - for variation level only (filters, doesn't update) */}
+                    {/* Fabric Type filter - for variation level only (filters fabric dropdown, doesn't update product) */}
                     {viewLevel === 'variation' && (
                         <div className="mb-3">
-                            <label className="block text-xs text-gray-600 mb-1">Fabric Type</label>
+                            <label className="block text-xs text-gray-600 mb-1">
+                                Filter by Fabric Type
+                            </label>
                             <select
                                 value={filterFabricTypeId}
                                 onChange={(e) => setFilterFabricTypeId(e.target.value)}
@@ -212,6 +219,9 @@ export function FabricEditPopover({
                                     <option key={ft.id} value={ft.id}>{ft.name}</option>
                                 ))}
                             </select>
+                            <p className="text-xs text-gray-400 mt-1">
+                                Filters fabric list below. Edit fabric type in Product view.
+                            </p>
                         </div>
                     )}
 
