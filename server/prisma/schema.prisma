@@ -33,6 +33,7 @@ model User {
   tokenVersion          Int                      @default(0)
   userRole              Role?                    @relation(fields: [roleId], references: [id])
   permissionOverrides   UserPermissionOverride[]
+  gridPreferences       UserGridPreference[]
   inventoryTransactions InventoryTransaction[]
   fabricTransactions    FabricTransaction[]
   returnStatusHistory   ReturnStatusHistory[]
@@ -55,6 +56,24 @@ model UserPermissionOverride {
 
   @@unique([userId, permission])
   @@index([userId])
+}
+
+model UserGridPreference {
+  id             String    @id @default(uuid())
+  userId         String
+  gridId         String
+  visibleColumns String    // JSON array of visible column IDs
+  columnOrder    String    // JSON array of column IDs in display order
+  columnWidths   String    // JSON object of columnId -> width mappings
+  adminVersion   DateTime? // Tracks which admin defaults user has acknowledged
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gridId])
+  @@index([userId])
+  @@index([gridId])
 }
 
 model Product {
@@ -879,10 +898,10 @@ model ShopifyOrderCache {
   totalLineItemsPrice   Float?
   totalOutstanding      Float?
   totalShippingPrice    Float?
-  totalPrice            Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'total_price'::text))::numeric")) @db.Decimal
-  subtotalPrice         Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'subtotal_price'::text))::numeric")) @db.Decimal
-  totalTax              Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'total_tax'::text))::numeric")) @db.Decimal
-  totalDiscounts        Decimal?  @default(dbgenerated("(((\"rawData\")::jsonb ->> 'total_discounts'::text))::numeric")) @db.Decimal
+  totalPrice            Decimal?  @db.Decimal
+  subtotalPrice         Decimal?  @db.Decimal
+  totalTax              Decimal?  @db.Decimal
+  totalDiscounts        Decimal?  @db.Decimal
   order                 Order?
 
   @@index([orderNumber])

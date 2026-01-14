@@ -30,16 +30,11 @@ npm run db:generate && npm run db:push
 
 ## Critical Gotchas
 
-1. **Credentials in DB**: Shopify/iThink creds in `SystemSetting` table, not env vars
-2. **Router order**: Specific routes before parameterized (`:id`)
-3. **AsyncHandler**: Wrap async routes with `asyncHandler()`
-4. **Dual cache invalidation**: Mutations must invalidate both TanStack Query and tRPC caches
-5. **Inventory cache**: Direct `prisma.inventoryTransaction.create()` requires `inventoryBalanceCache.invalidate([skuId])`
-6. **AG-Grid cellRenderer**: Return JSX elements, not HTML strings
-
-## Domain Docs
-
-See `docs/domains/` for deep dives on orders, inventory, shipping, returns, shopify, etc.
+1. **Router order**: Specific routes before parameterized (`:id`)
+2. **AsyncHandler**: Wrap async routes with `asyncHandler()`
+3. **Dual cache invalidation**: Mutations must invalidate both TanStack Query and tRPC caches
+4. **Inventory cache**: Direct `prisma.inventoryTransaction.create()` requires `inventoryBalanceCache.invalidate([skuId])`
+5. **AG-Grid cellRenderer**: Return JSX elements, not HTML strings
 
 ## Environment
 

@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Archive, Truck, Save, RefreshCw } from 'lucide-react';
+import { Plus, Archive, Truck, Save, RefreshCw, RotateCcw } from 'lucide-react';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
@@ -409,7 +409,20 @@ export default function Orders() {
     );
 
     // Grid component
-    const { gridComponent, actionPanel, columnVisibilityDropdown, statusLegend, isManager, hasUnsavedChanges, isSavingPrefs, savePreferencesToServer } = OrdersGrid({
+    const {
+        gridComponent,
+        actionPanel,
+        columnVisibilityDropdown,
+        statusLegend,
+        // User preferences
+        hasUserCustomizations,
+        differsFromAdminDefaults,
+        isSavingPrefs,
+        resetToDefaults,
+        // Admin-only
+        isManager,
+        savePreferencesToServer,
+    } = OrdersGrid({
         rows: filteredOpenRows,
         lockedDates: lockedDates || [],
         onAllocate: handleAllocate,
@@ -611,22 +624,38 @@ export default function Orders() {
                             <div className="w-px h-4 bg-gray-200" />
                             {statusLegend}
                             {columnVisibilityDropdown}
-                            {isManager && hasUnsavedChanges && (
+                            {/* Admin: Set as default - only when current differs from admin defaults */}
+                            {isManager && differsFromAdminDefaults && (
                                 <button
                                     onClick={async () => {
                                         const success = await savePreferencesToServer();
                                         if (success) {
-                                            alert('Column preferences saved for all users');
+                                            alert('Column defaults saved for all users');
                                         } else {
-                                            alert('Failed to save preferences');
+                                            alert('Failed to save defaults');
                                         }
                                     }}
                                     disabled={isSavingPrefs}
                                     className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
-                                    title="Save current column visibility and order for all users"
+                                    title="Set current columns as default for all users"
                                 >
                                     <Save size={12} />
-                                    {isSavingPrefs ? 'Saving...' : 'Sync columns'}
+                                    Set as default
+                                </button>
+                            )}
+                            {/* Reset to defaults - show when user has customizations */}
+                            {hasUserCustomizations && (
+                                <button
+                                    onClick={async () => {
+                                        if (confirm('Reset your column layout to defaults?')) {
+                                            await resetToDefaults();
+                                        }
+                                    }}
+                                    className="flex items-center gap-1 text-xs px-2 py-1 rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                    title="Reset to default column layout"
+                                >
+                                    <RotateCcw size={12} />
+                                    Reset
                                 </button>
                             )}
                         </div>

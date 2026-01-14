@@ -1,7 +1,15 @@
 /**
  * Hook for managing AG-Grid state with localStorage persistence
  * Handles column visibility, column order, column widths, and page size
- * Supports server sync for sharing preferences across all users (admin feature)
+ *
+ * Preference hierarchy:
+ * 1. User's saved preferences (database) - highest priority
+ * 2. Admin defaults (SystemSetting) - fallback
+ * 3. Code defaults (component props) - lowest priority
+ *
+ * Features:
+ * - All users can save their own preferences (auto-saves on change)
+ * - Admins can save defaults that apply to all users
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
@@ -12,7 +20,7 @@ interface UseGridStateOptions {
     gridId: string;
     allColumnIds: string[];
     defaultPageSize?: number;
-    defaultHiddenColumns?: string[]; // Columns hidden by default when no localStorage state exists
+    defaultHiddenColumns?: string[]; // Columns hidden by default when no preferences exist
 }
 
 interface UseGridStateReturn {
@@ -25,11 +33,29 @@ interface UseGridStateReturn {
     handleColumnMoved: (newOrder: string[]) => void;
     handleColumnResized: (colId: string, width: number) => void;
     handlePageSizeChange: (newSize: number) => void;
-    // Server sync functionality
-    isManager: boolean;
+    // User preferences
     hasUnsavedChanges: boolean;
+    hasUserCustomizations: boolean; // True if user has any saved customizations
+    differsFromAdminDefaults: boolean; // True if current state differs from admin defaults
     isSavingPrefs: boolean;
+    resetToDefaults: () => Promise<boolean>;
+    // Admin-only: save as defaults for all users
+    isManager: boolean;
     savePreferencesToServer: () => Promise<boolean>;
+}
+
+interface AdminPrefs {
+    visibleColumns: string[];
+    columnOrder: string[];
+    columnWidths: Record<string, number>;
+    updatedAt?: string;
+}
+
+interface UserPrefs {
+    visibleColumns: string[];
+    columnOrder: string[];
+    columnWidths: Record<string, number>;
+    adminVersion: string | null;
 }
 
 export function useGridState({
@@ -45,9 +71,9 @@ export function useGridState({
     const pageSizeKey = `${gridId}PageSize`;
 
     // Compute default visible columns (all except defaultHiddenColumns)
-    const defaultVisibleColumns = new Set(
+    const defaultVisibleColumns = useMemo(() => new Set(
         allColumnIds.filter(id => !defaultHiddenColumns.includes(id))
-    );
+    ), [allColumnIds, defaultHiddenColumns]);
 
     // Column visibility state
     const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
@@ -94,90 +120,230 @@ export function useGridState({
         return saved ? parseInt(saved, 10) : defaultPageSize;
     });
 
-    // Debounce timer for width changes (to avoid saving on every pixel)
+    // Debounce timer for width changes
     const widthSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Server sync state
-    const [serverPrefsLoaded, setServerPrefsLoaded] = useState(false);
+    // Preference loading state
+    const [prefsLoaded, setPrefsLoaded] = useState(false);
     const [isSavingPrefs, setIsSavingPrefs] = useState(false);
-    const [savedServerPrefs, setSavedServerPrefs] = useState<{
-        visibleColumns: string[];
-        columnOrder: string[];
-        columnWidths: Record<string, number>;
-    } | null>(null);
+
+    // Saved preferences for comparison
+    const [savedUserPrefs, setSavedUserPrefs] = useState<UserPrefs | null>(null);
+    const [savedAdminPrefs, setSavedAdminPrefs] = useState<AdminPrefs | null>(null);
+
 
     // Check if user is admin (Owner or Manager)
     const { isManager } = usePermissions();
 
-    // Fetch server preferences on mount and apply them (overrides localStorage)
+    // Fetch both admin and user preferences on mount
     useEffect(() => {
-        if (serverPrefsLoaded) return;
+        if (prefsLoaded) return;
 
-        adminApi.getGridPreferences(gridId)
-            .then((res) => {
-                const prefs = res.data;
-                if (prefs && prefs.visibleColumns && prefs.visibleColumns.length > 0) {
-                    // Apply server preferences
-                    setVisibleColumns(new Set(prefs.visibleColumns));
-                    if (prefs.columnOrder && prefs.columnOrder.length > 0) {
-                        setColumnOrder(prefs.columnOrder);
-                    }
-                    if (prefs.columnWidths && Object.keys(prefs.columnWidths).length > 0) {
-                        setColumnWidths(prefs.columnWidths);
-                    }
-                    // Store as reference for change detection
-                    setSavedServerPrefs({
-                        visibleColumns: prefs.visibleColumns,
-                        columnOrder: prefs.columnOrder || allColumnIds,
-                        columnWidths: prefs.columnWidths || {},
-                    });
-                    // Also persist to localStorage for offline use
-                    localStorage.setItem(visibilityKey, JSON.stringify(prefs.visibleColumns));
-                    if (prefs.columnOrder) localStorage.setItem(orderKey, JSON.stringify(prefs.columnOrder));
-                    if (prefs.columnWidths) localStorage.setItem(widthsKey, JSON.stringify(prefs.columnWidths));
+        const fetchPreferences = async () => {
+            try {
+                // Fetch both in parallel
+                const [adminRes, userRes] = await Promise.all([
+                    adminApi.getGridPreferences(gridId).catch(() => ({ data: null })),
+                    adminApi.getUserGridPreferences(gridId).catch(() => ({ data: null })),
+                ]);
+
+                const adminPrefs = adminRes.data as AdminPrefs | null;
+                const userPrefs = userRes.data as UserPrefs | null;
+
+                // Store admin prefs for reference
+                if (adminPrefs && adminPrefs.visibleColumns?.length > 0) {
+                    setSavedAdminPrefs(adminPrefs);
                 }
-            })
-            .catch(() => {
-                // Server preferences not available, continue with localStorage values
-            })
-            .finally(() => {
-                setServerPrefsLoaded(true);
-            });
-    }, [serverPrefsLoaded, gridId, allColumnIds, visibilityKey, orderKey, widthsKey]);
 
-    // Detect if current preferences differ from saved server preferences
+                // Determine which preferences to apply
+                if (userPrefs && userPrefs.visibleColumns?.length > 0) {
+                    // User has saved preferences - use them
+                    setVisibleColumns(new Set(userPrefs.visibleColumns));
+                    if (userPrefs.columnOrder?.length > 0) {
+                        setColumnOrder(userPrefs.columnOrder);
+                    }
+                    if (userPrefs.columnWidths && Object.keys(userPrefs.columnWidths).length > 0) {
+                        setColumnWidths(userPrefs.columnWidths);
+                    }
+                    setSavedUserPrefs(userPrefs);
+
+                    // Persist to localStorage for offline use
+                    localStorage.setItem(visibilityKey, JSON.stringify(userPrefs.visibleColumns));
+                    if (userPrefs.columnOrder) localStorage.setItem(orderKey, JSON.stringify(userPrefs.columnOrder));
+                    if (userPrefs.columnWidths) localStorage.setItem(widthsKey, JSON.stringify(userPrefs.columnWidths));
+                } else if (adminPrefs && adminPrefs.visibleColumns?.length > 0) {
+                    // No user prefs, use admin defaults
+                    setVisibleColumns(new Set(adminPrefs.visibleColumns));
+                    if (adminPrefs.columnOrder?.length > 0) {
+                        setColumnOrder(adminPrefs.columnOrder);
+                    }
+                    if (adminPrefs.columnWidths && Object.keys(adminPrefs.columnWidths).length > 0) {
+                        setColumnWidths(adminPrefs.columnWidths);
+                    }
+
+                    // Persist to localStorage for offline use
+                    localStorage.setItem(visibilityKey, JSON.stringify(adminPrefs.visibleColumns));
+                    if (adminPrefs.columnOrder) localStorage.setItem(orderKey, JSON.stringify(adminPrefs.columnOrder));
+                    if (adminPrefs.columnWidths) localStorage.setItem(widthsKey, JSON.stringify(adminPrefs.columnWidths));
+                }
+                // If neither exists, keep localStorage/default values
+            } catch (error) {
+                // Preferences not available, continue with localStorage values
+                console.error('Failed to fetch grid preferences:', error);
+            } finally {
+                setPrefsLoaded(true);
+            }
+        };
+
+        fetchPreferences();
+    }, [prefsLoaded, gridId, allColumnIds, visibilityKey, orderKey, widthsKey]);
+
+    // Detect if current preferences differ from saved user preferences
     const hasUnsavedChanges = useMemo(() => {
-        if (!serverPrefsLoaded) return false;
+        if (!prefsLoaded) return false;
 
-        // If no server prefs saved yet, any local config is "new"
-        if (!savedServerPrefs) {
-            // Only show as changed if user has customized from defaults
-            const currentVisible = [...visibleColumns].sort();
-            const defaultVisible = [...defaultVisibleColumns].sort();
-            const visibilityChanged = JSON.stringify(currentVisible) !== JSON.stringify(defaultVisible);
-            const orderChanged = JSON.stringify(columnOrder) !== JSON.stringify(allColumnIds);
-            return visibilityChanged || orderChanged;
+        const currentVisible = [...visibleColumns].sort();
+
+        // If user has saved prefs, compare against those
+        if (savedUserPrefs) {
+            const savedVisible = [...savedUserPrefs.visibleColumns].sort();
+            if (JSON.stringify(currentVisible) !== JSON.stringify(savedVisible)) return true;
+            if (JSON.stringify(columnOrder) !== JSON.stringify(savedUserPrefs.columnOrder)) return true;
+
+            // Column widths comparison
+            const currentWidthKeys = Object.keys(columnWidths).sort();
+            const savedWidthKeys = Object.keys(savedUserPrefs.columnWidths).sort();
+            if (JSON.stringify(currentWidthKeys) !== JSON.stringify(savedWidthKeys)) return true;
+            for (const key of currentWidthKeys) {
+                if (columnWidths[key] !== savedUserPrefs.columnWidths[key]) return true;
+            }
+            return false;
         }
 
-        // Compare with saved server preferences
-        const currentVisible = [...visibleColumns].sort();
-        const savedVisible = [...savedServerPrefs.visibleColumns].sort();
-        if (JSON.stringify(currentVisible) !== JSON.stringify(savedVisible)) return true;
+        // If no saved user prefs, compare against admin defaults or code defaults
+        const referencePrefs = savedAdminPrefs || {
+            visibleColumns: [...defaultVisibleColumns],
+            columnOrder: allColumnIds,
+            columnWidths: {},
+        };
 
-        if (JSON.stringify(columnOrder) !== JSON.stringify(savedServerPrefs.columnOrder)) return true;
+        const refVisible = [...referencePrefs.visibleColumns].sort();
+        if (JSON.stringify(currentVisible) !== JSON.stringify(refVisible)) return true;
+        if (JSON.stringify(columnOrder) !== JSON.stringify(referencePrefs.columnOrder)) return true;
 
-        // Column widths comparison
-        const currentWidthKeys = Object.keys(columnWidths).sort();
-        const savedWidthKeys = Object.keys(savedServerPrefs.columnWidths).sort();
-        if (JSON.stringify(currentWidthKeys) !== JSON.stringify(savedWidthKeys)) return true;
-        for (const key of currentWidthKeys) {
-            if (columnWidths[key] !== savedServerPrefs.columnWidths[key]) return true;
+        // Only consider width changes if there are any saved widths
+        if (Object.keys(columnWidths).length > 0 || Object.keys(referencePrefs.columnWidths).length > 0) {
+            const currentWidthKeys = Object.keys(columnWidths).sort();
+            const savedWidthKeys = Object.keys(referencePrefs.columnWidths).sort();
+            if (JSON.stringify(currentWidthKeys) !== JSON.stringify(savedWidthKeys)) return true;
+            for (const key of currentWidthKeys) {
+                if (columnWidths[key] !== referencePrefs.columnWidths[key]) return true;
+            }
         }
 
         return false;
-    }, [serverPrefsLoaded, savedServerPrefs, visibleColumns, columnOrder, columnWidths, defaultVisibleColumns, allColumnIds]);
+    }, [prefsLoaded, savedUserPrefs, savedAdminPrefs, visibleColumns, columnOrder, columnWidths, defaultVisibleColumns, allColumnIds]);
 
-    // Function for admin to save current preferences to server
+    // Detect if current state differs from admin defaults (for "Set as default" button)
+    const differsFromAdminDefaults = useMemo(() => {
+        if (!prefsLoaded) return false;
+
+        const currentVisible = [...visibleColumns].sort();
+        const referencePrefs = savedAdminPrefs || {
+            visibleColumns: [...defaultVisibleColumns],
+            columnOrder: allColumnIds,
+            columnWidths: {},
+        };
+
+        const refVisible = [...referencePrefs.visibleColumns].sort();
+        if (JSON.stringify(currentVisible) !== JSON.stringify(refVisible)) return true;
+        if (JSON.stringify(columnOrder) !== JSON.stringify(referencePrefs.columnOrder)) return true;
+
+        return false;
+    }, [prefsLoaded, savedAdminPrefs, visibleColumns, columnOrder, defaultVisibleColumns, allColumnIds]);
+
+    // Save user preferences
+    const saveUserPreferences = useCallback(async (): Promise<boolean> => {
+        setIsSavingPrefs(true);
+        try {
+            const newPrefs = {
+                visibleColumns: [...visibleColumns],
+                columnOrder,
+                columnWidths,
+                adminVersion: savedAdminPrefs?.updatedAt || undefined,
+            };
+            await adminApi.saveUserGridPreferences(gridId, newPrefs);
+
+            // Update saved reference
+            setSavedUserPrefs({
+                visibleColumns: newPrefs.visibleColumns,
+                columnOrder: newPrefs.columnOrder,
+                columnWidths: newPrefs.columnWidths,
+                adminVersion: newPrefs.adminVersion || null,
+            });
+
+            return true;
+        } catch (error) {
+            console.error('Failed to save user preferences:', error);
+            return false;
+        } finally {
+            setIsSavingPrefs(false);
+        }
+    }, [visibleColumns, columnOrder, columnWidths, gridId, savedAdminPrefs]);
+
+    // Auto-save user preferences when changes are detected (debounced)
+    const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (!prefsLoaded || !hasUnsavedChanges) return;
+
+        // Clear any pending save
+        if (autoSaveTimer.current) {
+            clearTimeout(autoSaveTimer.current);
+        }
+
+        // Debounce save by 1 second
+        autoSaveTimer.current = setTimeout(() => {
+            saveUserPreferences();
+        }, 1000);
+
+        return () => {
+            if (autoSaveTimer.current) {
+                clearTimeout(autoSaveTimer.current);
+            }
+        };
+    }, [prefsLoaded, hasUnsavedChanges, saveUserPreferences]);
+
+    // Reset to admin defaults
+    const resetToDefaults = useCallback(async (): Promise<boolean> => {
+        setIsSavingPrefs(true);
+        try {
+            // Delete user preferences
+            await adminApi.deleteUserGridPreferences(gridId);
+
+            // Apply admin defaults or code defaults
+            if (savedAdminPrefs) {
+                setVisibleColumns(new Set(savedAdminPrefs.visibleColumns));
+                setColumnOrder(savedAdminPrefs.columnOrder);
+                setColumnWidths(savedAdminPrefs.columnWidths);
+            } else {
+                setVisibleColumns(defaultVisibleColumns);
+                setColumnOrder([...allColumnIds]);
+                setColumnWidths({});
+            }
+
+            // Clear saved user prefs
+            setSavedUserPrefs(null);
+
+            return true;
+        } catch (error) {
+            console.error('Failed to reset preferences:', error);
+            return false;
+        } finally {
+            setIsSavingPrefs(false);
+        }
+    }, [gridId, savedAdminPrefs, defaultVisibleColumns, allColumnIds]);
+
+    // Admin-only: save as defaults for all users
     const savePreferencesToServer = useCallback(async (): Promise<boolean> => {
         if (!isManager) return false;
         setIsSavingPrefs(true);
@@ -188,8 +354,14 @@ export function useGridState({
                 columnWidths,
             };
             await adminApi.saveGridPreferences(gridId, newPrefs);
-            // Update saved reference so button hides
-            setSavedServerPrefs(newPrefs);
+
+            // Update admin prefs reference with new timestamp
+            const now = new Date().toISOString();
+            setSavedAdminPrefs({
+                ...newPrefs,
+                updatedAt: now,
+            });
+
             return true;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
@@ -241,10 +413,17 @@ export function useGridState({
     }, []);
 
     const handleResetAll = useCallback(() => {
-        setVisibleColumns(defaultVisibleColumns);
-        setColumnOrder([...allColumnIds]);
-        setColumnWidths({});
-    }, [allColumnIds, defaultVisibleColumns]);
+        // Reset to admin defaults if available, otherwise code defaults
+        if (savedAdminPrefs) {
+            setVisibleColumns(new Set(savedAdminPrefs.visibleColumns));
+            setColumnOrder(savedAdminPrefs.columnOrder);
+            setColumnWidths(savedAdminPrefs.columnWidths);
+        } else {
+            setVisibleColumns(defaultVisibleColumns);
+            setColumnOrder([...allColumnIds]);
+            setColumnWidths({});
+        }
+    }, [savedAdminPrefs, allColumnIds, defaultVisibleColumns]);
 
     const handleColumnMoved = useCallback((newOrder: string[]) => {
         if (newOrder.length > 0) {
@@ -275,10 +454,14 @@ export function useGridState({
         handleColumnMoved,
         handleColumnResized,
         handlePageSizeChange,
-        // Server sync functionality
-        isManager,
+        // User preferences
         hasUnsavedChanges,
+        hasUserCustomizations: savedUserPrefs !== null,
+        differsFromAdminDefaults,
         isSavingPrefs,
+        resetToDefaults,
+        // Admin-only
+        isManager,
         savePreferencesToServer,
     };
 }

@@ -85,8 +85,7 @@ import { compactThemeSmall } from '../../utils/agGridHelpers';
 import { TrackingStatusBadge } from '../common/grid/TrackingStatusBadge';
 import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
 import { OrderActionPanel } from './OrderActionPanel';
-import { adminApi } from '../../services/api';
-import { usePermissions } from '../../hooks/usePermissions';
+import { useGridState } from '../../hooks/useGridState';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -512,148 +511,49 @@ export function OrdersGrid({
         return saved ? JSON.parse(saved) : {};
     });
 
-    // Visible columns state - defaults to curated DEFAULT_VISIBLE_COLUMNS for new users
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-        const saved = localStorage.getItem('ordersGridVisibleColumns');
-        if (saved) {
-            try {
-                return new Set(JSON.parse(saved));
-            } catch {
-                return new Set(DEFAULT_VISIBLE_COLUMNS);
-            }
-        }
-        return new Set(DEFAULT_VISIBLE_COLUMNS);
+    // Use shared grid state hook for column preferences
+    const {
+        visibleColumns,
+        columnOrder,
+        columnWidths,
+        handleToggleColumn,
+        handleResetAll,
+        handleColumnMoved,
+        handleColumnResized,
+        // User preferences
+        hasUserCustomizations,
+        differsFromAdminDefaults,
+        isSavingPrefs,
+        resetToDefaults,
+        // Admin-only
+        isManager,
+        savePreferencesToServer,
+    } = useGridState({
+        gridId: 'ordersGrid',
+        allColumnIds: ALL_COLUMN_IDS,
+        defaultHiddenColumns: ALL_COLUMN_IDS.filter(id => !DEFAULT_VISIBLE_COLUMNS.includes(id)),
     });
 
-    // Column order state (moved up for useEffect dependency)
-    const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-        const saved = localStorage.getItem('ordersGridColumnOrder');
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return ALL_COLUMN_IDS;
+    // Wrapper to handle AG-Grid column moved events
+    const onColumnMoved = useCallback((event: any) => {
+        if (!event.finished || !event.api) return;
+        const newOrder = event.api.getAllDisplayedColumns()
+            .map((col: any) => col.getColId())
+            .filter((id: string) => ALL_COLUMN_IDS.includes(id));
+        handleColumnMoved(newOrder);
+    }, [handleColumnMoved]);
+
+    // Wrapper to handle AG-Grid column resized events
+    const onColumnResized = useCallback((event: any) => {
+        if (!event.finished || !event.columns?.length) return;
+        event.columns.forEach((col: any) => {
+            const colId = col.getColId();
+            const width = col.getActualWidth();
+            if (colId && width) {
+                handleColumnResized(colId, width);
             }
-        }
-        return ALL_COLUMN_IDS;
-    });
-
-    // Column widths state (moved up for useEffect dependency)
-    const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
-        const saved = localStorage.getItem('ordersGridColumnWidths');
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return {};
-            }
-        }
-        return {};
-    });
-
-    // Track if server preferences have been loaded
-    const [serverPrefsLoaded, setServerPrefsLoaded] = useState(false);
-    const [isSavingPrefs, setIsSavingPrefs] = useState(false);
-
-    // Store the saved server preferences to detect changes
-    const [savedServerPrefs, setSavedServerPrefs] = useState<{
-        visibleColumns: string[];
-        columnOrder: string[];
-        columnWidths: Record<string, number>;
-    } | null>(null);
-
-    // Check if user is admin (Owner or Manager)
-    const { isManager } = usePermissions();
-
-    // Fetch server preferences on mount and apply them (overrides localStorage)
-    useEffect(() => {
-        if (serverPrefsLoaded) return;
-
-        adminApi.getGridPreferences('ordersGrid')
-            .then((res) => {
-                const prefs = res.data;
-                if (prefs && prefs.visibleColumns && prefs.visibleColumns.length > 0) {
-                    // Apply server preferences
-                    setVisibleColumns(new Set(prefs.visibleColumns));
-                    if (prefs.columnOrder && prefs.columnOrder.length > 0) {
-                        setColumnOrder(prefs.columnOrder);
-                    }
-                    if (prefs.columnWidths && Object.keys(prefs.columnWidths).length > 0) {
-                        setColumnWidths(prefs.columnWidths);
-                    }
-                    // Store as reference for change detection
-                    setSavedServerPrefs({
-                        visibleColumns: prefs.visibleColumns,
-                        columnOrder: prefs.columnOrder || ALL_COLUMN_IDS,
-                        columnWidths: prefs.columnWidths || {},
-                    });
-                    // Also persist to localStorage for offline use
-                    localStorage.setItem('ordersGridVisibleColumns', JSON.stringify(prefs.visibleColumns));
-                    if (prefs.columnOrder) localStorage.setItem('ordersGridColumnOrder', JSON.stringify(prefs.columnOrder));
-                    if (prefs.columnWidths) localStorage.setItem('ordersGridColumnWidths', JSON.stringify(prefs.columnWidths));
-                }
-            })
-            .catch(() => {
-                // Server preferences not available, continue with localStorage values
-            })
-            .finally(() => {
-                setServerPrefsLoaded(true);
-            });
-    }, [serverPrefsLoaded]);
-
-    // Detect if current preferences differ from saved server preferences
-    const hasUnsavedChanges = useMemo(() => {
-        if (!serverPrefsLoaded) return false;
-
-        // If no server prefs saved yet, any local config is "new"
-        if (!savedServerPrefs) {
-            // Only show as changed if user has customized from defaults
-            const currentVisible = [...visibleColumns].sort();
-            const defaultVisible = [...DEFAULT_VISIBLE_COLUMNS].sort();
-            const visibilityChanged = JSON.stringify(currentVisible) !== JSON.stringify(defaultVisible);
-            const orderChanged = JSON.stringify(columnOrder) !== JSON.stringify(ALL_COLUMN_IDS);
-            return visibilityChanged || orderChanged;
-        }
-
-        // Compare with saved server preferences
-        const currentVisible = [...visibleColumns].sort();
-        const savedVisible = [...savedServerPrefs.visibleColumns].sort();
-        if (JSON.stringify(currentVisible) !== JSON.stringify(savedVisible)) return true;
-
-        if (JSON.stringify(columnOrder) !== JSON.stringify(savedServerPrefs.columnOrder)) return true;
-
-        // Column widths comparison (ignore minor differences)
-        const currentWidthKeys = Object.keys(columnWidths).sort();
-        const savedWidthKeys = Object.keys(savedServerPrefs.columnWidths).sort();
-        if (JSON.stringify(currentWidthKeys) !== JSON.stringify(savedWidthKeys)) return true;
-        for (const key of currentWidthKeys) {
-            if (columnWidths[key] !== savedServerPrefs.columnWidths[key]) return true;
-        }
-
-        return false;
-    }, [serverPrefsLoaded, savedServerPrefs, visibleColumns, columnOrder, columnWidths]);
-
-    // Function for admin to save current preferences to server
-    const savePreferencesToServer = useCallback(async () => {
-        if (!isManager) return false;
-        setIsSavingPrefs(true);
-        try {
-            const newPrefs = {
-                visibleColumns: [...visibleColumns],
-                columnOrder,
-                columnWidths,
-            };
-            await adminApi.saveGridPreferences('ordersGrid', newPrefs);
-            // Update saved reference so button hides
-            setSavedServerPrefs(newPrefs);
-            return true;
-        } catch (error) {
-            console.error('Failed to save grid preferences:', error);
-            return false;
-        } finally {
-            setIsSavingPrefs(false);
-        }
-    }, [isManager, visibleColumns, columnOrder, columnWidths]);
+        });
+    }, [handleColumnResized]);
 
     const setCustomHeader = useCallback((colId: string, headerName: string) => {
         setCustomHeaders((prev) => {
@@ -661,25 +561,6 @@ export function OrdersGrid({
             localStorage.setItem('ordersGridHeaders', JSON.stringify(updated));
             return updated;
         });
-    }, []);
-
-    const toggleColumnVisibility = useCallback((colId: string) => {
-        setVisibleColumns((prev) => {
-            const updated = new Set(prev);
-            if (updated.has(colId)) {
-                updated.delete(colId);
-            } else {
-                updated.add(colId);
-            }
-            localStorage.setItem('ordersGridVisibleColumns', JSON.stringify([...updated]));
-            return updated;
-        });
-    }, []);
-
-    const resetColumnVisibility = useCallback(() => {
-        const defaultVisible = new Set(DEFAULT_VISIBLE_COLUMNS);
-        setVisibleColumns(defaultVisible);
-        localStorage.removeItem('ordersGridVisibleColumns');
     }, []);
 
     const getHeaderName = useCallback(
@@ -1928,37 +1809,6 @@ export function OrdersGrid({
         ]
     );
 
-    const handleColumnMoved = useCallback((event: any) => {
-        if (!event.finished || !event.api) return;
-        const newOrder = event.api.getAllDisplayedColumns()
-            .map((col: any) => col.getColId())
-            .filter((id: string) => ALL_COLUMN_IDS.includes(id));
-        setColumnOrder(newOrder);
-        localStorage.setItem('ordersGridColumnOrder', JSON.stringify(newOrder));
-    }, []);
-
-    const handleColumnResized = useCallback((event: any) => {
-        if (!event.finished || !event.columns?.length) return;
-        event.columns.forEach((col: any) => {
-            const colId = col.getColId();
-            const width = col.getActualWidth();
-            if (colId && width) {
-                setColumnWidths(prev => {
-                    const updated = { ...prev, [colId]: width };
-                    localStorage.setItem('ordersGridColumnWidths', JSON.stringify(updated));
-                    return updated;
-                });
-            }
-        });
-    }, []);
-
-    const resetColumnOrder = useCallback(() => {
-        setColumnOrder(ALL_COLUMN_IDS);
-        setColumnWidths({});
-        localStorage.removeItem('ordersGridColumnOrder');
-        localStorage.removeItem('ordersGridColumnWidths');
-    }, []);
-
     // Sort column defs by saved order and apply saved widths
     const orderedColumnDefs = useMemo((): ColDef[] => {
         const colDefMap = new Map(columnDefs.map(col => [col.colId, col]));
@@ -2154,8 +2004,8 @@ export function OrdersGrid({
                             ensureDomOrder={true}
                             suppressRowClickSelection={false}
                             suppressRowHoverHighlight={false}
-                            onColumnMoved={handleColumnMoved}
-                            onColumnResized={handleColumnResized}
+                            onColumnMoved={onColumnMoved}
+                            onColumnResized={onColumnResized}
                             maintainColumnOrder={true}
                         />
                     </div>
@@ -2183,11 +2033,8 @@ export function OrdersGrid({
         columnVisibilityDropdown: (
             <ColumnVisibilityDropdown
                 visibleColumns={visibleColumns}
-                onToggleColumn={toggleColumnVisibility}
-                onResetAll={() => {
-                    resetColumnVisibility();
-                    resetColumnOrder();
-                }}
+                onToggleColumn={handleToggleColumn}
+                onResetAll={handleResetAll}
                 columnIds={ALL_COLUMN_IDS}
                 columnHeaders={{ ...DEFAULT_HEADERS, ...customHeaders }}
             />
@@ -2195,11 +2042,13 @@ export function OrdersGrid({
         statusLegend: <StatusLegend />,
         customHeaders,
         resetHeaders,
-        resetColumnOrder,
-        // Admin sync functionality
-        isManager,
-        hasUnsavedChanges,
+        // User preferences
+        hasUserCustomizations,
+        differsFromAdminDefaults,
         isSavingPrefs,
+        resetToDefaults,
+        // Admin-only
+        isManager,
         savePreferencesToServer,
     };
 }

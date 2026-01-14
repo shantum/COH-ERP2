@@ -370,8 +370,90 @@ router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (
 }));
 
 /**
+ * POST /lines/:lineId/pick
+ * Mark order line as picked (allocated -> picked)
+ *
+ * WHAT HAPPENS:
+ * - Updates lineStatus to 'picked'
+ * - Sets pickedAt timestamp
+ * - No inventory changes (just status tracking)
+ *
+ * VALIDATION:
+ * - Line must be in 'allocated' status
+ *
+ * @param {string} req.params.lineId - Order line ID
+ * @returns {Object} Updated orderLine record
+ */
+router.post('/lines/:lineId/pick', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const lineId = req.params.lineId as string;
+
+    const line = await req.prisma.orderLine.findUnique({
+        where: { id: lineId },
+    });
+
+    if (!line) {
+        throw new NotFoundError('Order line not found', 'OrderLine', lineId);
+    }
+
+    if (line.lineStatus !== 'allocated') {
+        throw new BusinessLogicError(
+            `Line must be in allocated status to pick (current: ${line.lineStatus})`,
+            'INVALID_STATUS'
+        );
+    }
+
+    const updated = await req.prisma.orderLine.update({
+        where: { id: lineId },
+        data: { lineStatus: 'picked', pickedAt: new Date() },
+    });
+
+    res.json(updated);
+}));
+
+/**
+ * POST /lines/:lineId/unpick
+ * Revert order line from picked to allocated
+ *
+ * WHAT HAPPENS:
+ * - Updates lineStatus back to 'allocated'
+ * - Clears pickedAt timestamp
+ * - No inventory changes
+ *
+ * VALIDATION:
+ * - Line must be in 'picked' status
+ *
+ * @param {string} req.params.lineId - Order line ID
+ * @returns {Object} Updated orderLine record
+ */
+router.post('/lines/:lineId/unpick', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const lineId = req.params.lineId as string;
+
+    const line = await req.prisma.orderLine.findUnique({
+        where: { id: lineId },
+    });
+
+    if (!line) {
+        throw new NotFoundError('Order line not found', 'OrderLine', lineId);
+    }
+
+    if (line.lineStatus !== 'picked') {
+        throw new BusinessLogicError(
+            `Line must be in picked status to unpick (current: ${line.lineStatus})`,
+            'INVALID_STATUS'
+        );
+    }
+
+    const updated = await req.prisma.orderLine.update({
+        where: { id: lineId },
+        data: { lineStatus: 'allocated', pickedAt: null },
+    });
+
+    res.json(updated);
+}));
+
+/**
  * POST /lines/:lineId/pack
- * Mark order line as packed (allocated -> packed)
+ * Mark order line as packed (allocated/picked -> packed)
  *
  * WHAT HAPPENS:
  * - Updates lineStatus to 'packed'
@@ -379,7 +461,7 @@ router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (
  * - No inventory changes (just status tracking)
  *
  * VALIDATION:
- * - Line must be in 'allocated' status
+ * - Line must be in 'allocated' or 'picked' status
  *
  * @param {string} req.params.lineId - Order line ID
  * @returns {Object} Updated orderLine record
@@ -399,9 +481,9 @@ router.post('/lines/:lineId/pack', authenticateToken, asyncHandler(async (req: R
         throw new NotFoundError('Order line not found', 'OrderLine', lineId);
     }
 
-    if (line.lineStatus !== 'allocated') {
+    if (line.lineStatus !== 'allocated' && line.lineStatus !== 'picked') {
         throw new BusinessLogicError(
-            `Line must be in allocated status to pack (current: ${line.lineStatus})`,
+            `Line must be in allocated or picked status to pack (current: ${line.lineStatus})`,
             'INVALID_STATUS'
         );
     }
@@ -414,7 +496,7 @@ router.post('/lines/:lineId/pack', authenticateToken, asyncHandler(async (req: R
     res.json(updated);
 }));
 
-// Unpack order line (revert to allocated)
+// Unpack order line (revert to picked if pickedAt exists, otherwise allocated)
 router.post('/lines/:lineId/unpack', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const lineId = req.params.lineId as string;
 
@@ -433,10 +515,13 @@ router.post('/lines/:lineId/unpack', authenticateToken, asyncHandler(async (req:
         );
     }
 
+    // Revert to 'picked' if the line was picked before packing, otherwise revert to 'allocated'
+    const revertStatus = line.pickedAt ? 'picked' : 'allocated';
+
     const updated = await req.prisma.orderLine.update({
         where: { id: lineId },
         data: {
-            lineStatus: 'allocated',
+            lineStatus: revertStatus,
             packedAt: null,
             // Clear manual AWB and courier when unpacking
             awbNumber: null,

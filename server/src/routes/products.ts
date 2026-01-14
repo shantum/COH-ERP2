@@ -473,23 +473,6 @@ router.put('/:id', authenticateToken, requirePermission('products:edit'), asyncH
     const id = req.params.id as string;
     const { name, styleCode, category, productType, gender, fabricTypeId, baseProductionTimeMins, defaultFabricConsumption, trimsCost, liningCost, packagingCost, isActive } = req.body as UpdateProductBody;
 
-    // Get current product with variations to check if fabricTypeId is changing
-    const currentProduct = await req.prisma.product.findUnique({
-        where: { id },
-        include: {
-            variations: {
-                select: {
-                    id: true,
-                    fabric: {
-                        select: { colorName: true },
-                    },
-                },
-            },
-        },
-    });
-
-    const fabricTypeChanged = fabricTypeId && currentProduct?.fabricTypeId !== fabricTypeId;
-
     const product = await req.prisma.product.update({
         where: { id },
         data: {
@@ -509,22 +492,8 @@ router.put('/:id', authenticateToken, requirePermission('products:edit'), asyncH
         include: { fabricType: true },
     });
 
-    // If fabric type changed at product level, reset all variation fabrics to Default
-    if (fabricTypeChanged && currentProduct?.variations?.length && currentProduct.variations.length > 0) {
-        // Get the Default fabric
-        const defaultFabric = await req.prisma.fabric.findFirst({
-            where: { fabricType: { name: 'Default' } },
-            select: { id: true },
-        });
-
-        if (defaultFabric) {
-            // Reset all variations to Default fabric
-            await req.prisma.variation.updateMany({
-                where: { productId: id },
-                data: { fabricId: defaultFabric.id },
-            });
-        }
-    }
+    // Note: We no longer auto-reset variation fabrics when product fabric type changes.
+    // Variations keep their existing fabric assignments. Users can update fabrics separately.
 
     res.json(product);
 }));

@@ -67,6 +67,14 @@ export function usePermissions(): PermissionContext {
 
     const permissions = user?.permissions ?? [];
     const roleName = user?.roleName ?? null;
+    const legacyRole = (user as any)?.role ?? null; // Legacy role field for users without roleId
+
+    // Check by role name OR by having wildcard permission (owner has '*')
+    // Also check legacy 'role' field for backwards compatibility (admin = owner equivalent)
+    const hasWildcard = permissions.includes('*');
+    const isOwnerByRole = roleName?.toLowerCase() === 'owner';
+    const isManagerByRole = roleName?.toLowerCase() === 'manager';
+    const isAdminLegacy = legacyRole?.toLowerCase() === 'admin';
 
     return {
         permissions,
@@ -74,8 +82,8 @@ export function usePermissions(): PermissionContext {
         hasPermission: (permission: string) => checkPermission(permissions, permission),
         hasAnyPermission: (...perms: string[]) => checkAnyPermission(permissions, ...perms),
         hasAllPermissions: (...perms: string[]) => checkAllPermissions(permissions, ...perms),
-        isOwner: roleName === 'Owner',
-        isManager: roleName === 'Owner' || roleName === 'Manager',
+        isOwner: isOwnerByRole || hasWildcard || isAdminLegacy,
+        isManager: isOwnerByRole || isManagerByRole || hasWildcard || isAdminLegacy,
     };
 }
 
