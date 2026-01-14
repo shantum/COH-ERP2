@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Archive, Truck, Save } from 'lucide-react';
+import { Plus, Archive, Truck, Save, RefreshCw } from 'lucide-react';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
@@ -104,6 +104,10 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
+        refetchOpen,
+        refetchCancelled,
+        isFetchingOpen,
+        isFetchingCancelled,
     } = useOrdersData({ activeTab: tab, selectedCustomerId });
 
     // Unified modal handlers (must be after openOrders is available)
@@ -594,6 +598,16 @@ export default function Orders() {
                                     {mutations.migrateShopifyFulfilled.isPending ? 'Migrating...' : 'Migrate Fulfilled'}
                                 </button>
                             )}
+                            {/* Refresh Button */}
+                            <button
+                                onClick={() => refetchOpen()}
+                                disabled={isFetchingOpen}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                                title="Refresh table data"
+                            >
+                                <RefreshCw size={12} className={isFetchingOpen ? 'animate-spin' : ''} />
+                                {isFetchingOpen ? 'Refreshing...' : 'Refresh'}
+                            </button>
                             <div className="w-px h-4 bg-gray-200" />
                             {statusLegend}
                             {columnVisibilityDropdown}
@@ -641,6 +655,18 @@ export default function Orders() {
                 {/* Cancelled Orders */}
                 {!isLoading && tab === 'cancelled' && (
                     <div className="p-4">
+                        {/* Cancelled tab toolbar */}
+                        <div className="flex items-center justify-end mb-3">
+                            <button
+                                onClick={() => refetchCancelled()}
+                                disabled={isFetchingCancelled}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                                title="Refresh table data"
+                            >
+                                <RefreshCw size={12} className={isFetchingCancelled ? 'animate-spin' : ''} />
+                                {isFetchingCancelled ? 'Refreshing...' : 'Refresh'}
+                            </button>
+                        </div>
                         <CancelledOrdersGrid
                             orders={cancelledOrders || []}
                             onViewOrder={handleViewOrder}

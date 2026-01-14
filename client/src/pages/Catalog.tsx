@@ -130,7 +130,7 @@ export default function Catalog() {
     }, [searchInput]);
 
     // Fetch catalog data (without search - that's done client-side via quick filter)
-    const { data: catalogData, isLoading } = useQuery({
+    const { data: catalogData, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['catalog', filter.gender, filter.category, filter.productId, filter.status],
         queryFn: () => catalogApi.getSkuInventory({
             gender: filter.gender || undefined,
@@ -733,6 +733,8 @@ export default function Catalog() {
                 isSavingPrefs={isSavingPrefs}
                 savePreferencesToServer={savePreferencesToServer}
                 hiddenColumnsByView={HIDDEN_COLUMNS_BY_VIEW[viewLevel]}
+                onRefresh={() => refetch()}
+                isRefreshing={isFetching}
             />
 
             {/* Active Product Filter Breadcrumb - appears when drilling down */}

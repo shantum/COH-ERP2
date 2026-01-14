@@ -186,6 +186,12 @@ export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOp
         // Individual loading states if needed
         loadingOpen: openOrdersQuery.isLoading,
         loadingCancelled: cancelledOrdersQuery.isLoading,
+
+        // Refetch functions for manual refresh
+        refetchOpen: openOrdersQuery.refetch,
+        refetchCancelled: cancelledOrdersQuery.refetch,
+        isFetchingOpen: openOrdersQuery.isFetching,
+        isFetchingCancelled: cancelledOrdersQuery.isFetching,
     };
 }
 

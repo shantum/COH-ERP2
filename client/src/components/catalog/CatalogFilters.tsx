@@ -9,7 +9,7 @@
  * - Column visibility dropdown
  */
 
-import { Search, Save } from 'lucide-react';
+import { Search, Save, RefreshCw } from 'lucide-react';
 import { ColumnVisibilityDropdown } from '../common/grid';
 import type { ViewLevel } from './FabricEditPopover';
 
@@ -54,6 +54,8 @@ export interface CatalogFiltersProps {
     isSavingPrefs: boolean;
     savePreferencesToServer: () => Promise<boolean>;
     hiddenColumnsByView: string[];
+    onRefresh: () => void;
+    isRefreshing: boolean;
 }
 
 export function CatalogFilters({
@@ -77,6 +79,8 @@ export function CatalogFilters({
     isSavingPrefs,
     savePreferencesToServer,
     hiddenColumnsByView,
+    onRefresh,
+    isRefreshing,
 }: CatalogFiltersProps) {
     return (
         <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
@@ -181,6 +185,17 @@ export function CatalogFilters({
                             ))}
                         </select>
                     </div>
+
+                    {/* Refresh Button */}
+                    <button
+                        onClick={onRefresh}
+                        disabled={isRefreshing}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 disabled:opacity-50 transition-all"
+                        title="Refresh table data"
+                    >
+                        <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+                        {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
 
                     {/* Column Visibility - filter out columns hidden by view level and permissions */}
                     <ColumnVisibilityDropdown

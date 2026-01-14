@@ -19,7 +19,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp } from 'lucide-react';
+import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { trpc } from '../services/trpc';
 import { reportsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -56,7 +56,7 @@ export default function Inventory() {
     }, []);
 
     // Fetch inventory data via tRPC
-    const { data: inventoryData, isLoading } = trpc.inventory.getAllBalances.useQuery({
+    const { data: inventoryData, isLoading, refetch, isFetching } = trpc.inventory.getAllBalances.useQuery({
         includeCustomSkus: false,
         limit: 10000,
     });
@@ -511,6 +511,17 @@ export default function Inventory() {
                                 }`}
                         >
                             Out of Stock
+                        </button>
+
+                        {/* Refresh Button */}
+                        <button
+                            onClick={() => refetch()}
+                            disabled={isFetching}
+                            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 disabled:opacity-50 transition-all"
+                            title="Refresh table data"
+                        >
+                            <RefreshCw size={16} className={isFetching ? 'animate-spin' : ''} />
+                            {isFetching ? 'Refreshing...' : 'Refresh'}
                         </button>
                     </div>
                 </div>

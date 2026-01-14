@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle, Save } from 'lucide-react';
+import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle, Save, RefreshCw } from 'lucide-react';
 import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -170,7 +170,7 @@ export default function Fabrics() {
     }, [searchInput]);
 
     // Fetch flat fabric data (switches between color and type views)
-    const { data: fabricData, isLoading } = useQuery({
+    const { data: fabricData, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['fabricsFlat', filter.fabricTypeId, filter.status, viewLevel],
         queryFn: () => fabricsApi.getFlat({
             fabricTypeId: filter.fabricTypeId || undefined,
@@ -988,6 +988,17 @@ export default function Fabrics() {
                         ))}
                     </select>
                 </div>
+
+                {/* Refresh Button */}
+                <button
+                    onClick={() => refetch()}
+                    disabled={isFetching}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:border-gray-300 disabled:opacity-50 transition-all"
+                    title="Refresh table data"
+                >
+                    <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
+                    {isFetching ? 'Refreshing...' : 'Refresh'}
+                </button>
 
                 <ColumnVisibilityDropdown
                     visibleColumns={visibleColumns}
