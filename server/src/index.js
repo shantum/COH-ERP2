@@ -185,8 +185,9 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, async () => {
-  console.log(`🚀 COH ERP Server running on http://localhost:${PORT}`);
+// Bind to 0.0.0.0 for Railway/Docker compatibility
+app.listen(PORT, '0.0.0.0', async () => {
+  console.log(`🚀 COH ERP Server running on port ${PORT}`);
 
   // Auto-archive shipped orders older than 90 days on startup
   await autoArchiveOldOrders(prisma);
