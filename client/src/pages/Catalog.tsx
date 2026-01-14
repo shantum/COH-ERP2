@@ -87,8 +87,10 @@ export default function Catalog() {
         handleColumnResized,
         handlePageSizeChange,
         isManager,
-        hasUnsavedChanges,
+        hasUserCustomizations,
+        differsFromAdminDefaults,
         isSavingPrefs,
+        resetToDefaults,
         savePreferencesToServer,
     } = useGridState({
         gridId: 'catalogGrid',
@@ -729,8 +731,10 @@ export default function Catalog() {
                 availableColumnIds={availableColumnIds}
                 columnHeaders={DEFAULT_HEADERS}
                 isManager={isManager}
-                hasUnsavedChanges={hasUnsavedChanges}
+                hasUserCustomizations={hasUserCustomizations}
+                differsFromAdminDefaults={differsFromAdminDefaults}
                 isSavingPrefs={isSavingPrefs}
+                resetToDefaults={resetToDefaults}
                 savePreferencesToServer={savePreferencesToServer}
                 hiddenColumnsByView={HIDDEN_COLUMNS_BY_VIEW[viewLevel]}
                 onRefresh={() => refetch()}

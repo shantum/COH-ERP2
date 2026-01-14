@@ -7,10 +7,10 @@ import { useMemo, useCallback, useRef } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Undo2, Eye, ExternalLink, XCircle, Save } from 'lucide-react';
+import { Undo2, Eye, ExternalLink, XCircle } from 'lucide-react';
 import { parseCity } from '../../utils/orderHelpers';
 import { compactTheme, formatDate } from '../../utils/agGridHelpers';
-import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
+import { ColumnVisibilityDropdown, GridPreferencesToolbar } from '../common/grid';
 import { useGridState, getColumnOrderFromApi } from '../../hooks/useGridState';
 
 // Register AG Grid modules
@@ -76,8 +76,10 @@ export function CancelledOrdersGrid({
         handleColumnMoved,
         handleColumnResized,
         isManager,
-        hasUnsavedChanges,
+        hasUserCustomizations,
+        differsFromAdminDefaults,
         isSavingPrefs,
+        resetToDefaults,
         savePreferencesToServer,
     } = useGridState({
         gridId: 'cancelledGrid',
@@ -104,16 +106,6 @@ export function CancelledOrdersGrid({
             });
         }
     }, [handleColumnResized]);
-
-    // Handle save preferences to server (managers only)
-    const handleSavePreferences = useCallback(async () => {
-        const success = await savePreferencesToServer();
-        if (success) {
-            alert('Column preferences saved for all users');
-        } else {
-            alert('Failed to save preferences');
-        }
-    }, [savePreferencesToServer]);
 
     // Transform orders for grid
     const rowData = useMemo(() => {
@@ -360,17 +352,14 @@ export function CancelledOrdersGrid({
                         columnIds={ALL_COLUMN_IDS}
                         columnHeaders={DEFAULT_HEADERS}
                     />
-                    {isManager && hasUnsavedChanges && (
-                        <button
-                            onClick={handleSavePreferences}
-                            disabled={isSavingPrefs}
-                            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
-                            title="Save current column visibility and order for all users"
-                        >
-                            <Save size={12} />
-                            {isSavingPrefs ? 'Saving...' : 'Sync columns'}
-                        </button>
-                    )}
+                    <GridPreferencesToolbar
+                        hasUserCustomizations={hasUserCustomizations}
+                        differsFromAdminDefaults={differsFromAdminDefaults}
+                        isSavingPrefs={isSavingPrefs}
+                        onResetToDefaults={resetToDefaults}
+                        isManager={isManager}
+                        onSaveAsDefaults={savePreferencesToServer}
+                    />
                 </div>
             </div>
             <div style={{ height: 'calc(100% - 40px)' }}>

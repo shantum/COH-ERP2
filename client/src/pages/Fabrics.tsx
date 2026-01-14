@@ -8,11 +8,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle, Save, RefreshCw } from 'lucide-react';
+import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle, RefreshCw } from 'lucide-react';
 import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { compactThemeSmall } from '../utils/agGridHelpers';
-import { ColumnVisibilityDropdown, FabricStatusBadge } from '../components/common/grid';
+import { ColumnVisibilityDropdown, FabricStatusBadge, GridPreferencesToolbar } from '../components/common/grid';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
 
 // Page size options
@@ -135,8 +135,10 @@ export default function Fabrics() {
         handleColumnResized,
         handlePageSizeChange,
         isManager,
-        hasUnsavedChanges,
+        hasUserCustomizations,
+        differsFromAdminDefaults,
         isSavingPrefs,
+        resetToDefaults,
         savePreferencesToServer,
     } = viewLevel === 'type' ? typeGridState : colorGridState;
 
@@ -1007,24 +1009,14 @@ export default function Fabrics() {
                     columnIds={viewLevel === 'type' ? TYPE_COLUMN_IDS : COLOR_COLUMN_IDS}
                     columnHeaders={viewLevel === 'type' ? TYPE_HEADERS : COLOR_HEADERS}
                 />
-                {isManager && hasUnsavedChanges && (
-                    <button
-                        onClick={async () => {
-                            const success = await savePreferencesToServer();
-                            if (success) {
-                                alert('Column preferences saved for all users');
-                            } else {
-                                alert('Failed to save preferences');
-                            }
-                        }}
-                        disabled={isSavingPrefs}
-                        className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
-                        title="Save current column visibility and order for all users"
-                    >
-                        <Save size={12} />
-                        {isSavingPrefs ? 'Saving...' : 'Sync columns'}
-                    </button>
-                )}
+                <GridPreferencesToolbar
+                    hasUserCustomizations={hasUserCustomizations}
+                    differsFromAdminDefaults={differsFromAdminDefaults}
+                    isSavingPrefs={isSavingPrefs}
+                    onResetToDefaults={resetToDefaults}
+                    isManager={isManager}
+                    onSaveAsDefaults={savePreferencesToServer}
+                />
             </div>
 
             {/* AG-Grid */}

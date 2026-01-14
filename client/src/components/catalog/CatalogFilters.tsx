@@ -9,8 +9,8 @@
  * - Column visibility dropdown
  */
 
-import { Search, Save, RefreshCw } from 'lucide-react';
-import { ColumnVisibilityDropdown } from '../common/grid';
+import { Search, RefreshCw } from 'lucide-react';
+import { ColumnVisibilityDropdown, GridPreferencesToolbar } from '../common/grid';
 import type { ViewLevel } from './FabricEditPopover';
 
 // Page size options
@@ -50,8 +50,10 @@ export interface CatalogFiltersProps {
     availableColumnIds: string[];
     columnHeaders: Record<string, string>;
     isManager: boolean;
-    hasUnsavedChanges: boolean;
+    hasUserCustomizations: boolean;
+    differsFromAdminDefaults: boolean;
     isSavingPrefs: boolean;
+    resetToDefaults: () => Promise<boolean>;
     savePreferencesToServer: () => Promise<boolean>;
     hiddenColumnsByView: string[];
     onRefresh: () => void;
@@ -75,8 +77,10 @@ export function CatalogFilters({
     availableColumnIds,
     columnHeaders,
     isManager,
-    hasUnsavedChanges,
+    hasUserCustomizations,
+    differsFromAdminDefaults,
     isSavingPrefs,
+    resetToDefaults,
     savePreferencesToServer,
     hiddenColumnsByView,
     onRefresh,
@@ -205,24 +209,14 @@ export function CatalogFilters({
                         columnIds={availableColumnIds.filter(id => !hiddenColumnsByView.includes(id))}
                         columnHeaders={columnHeaders}
                     />
-                    {isManager && hasUnsavedChanges && (
-                        <button
-                            onClick={async () => {
-                                const success = await savePreferencesToServer();
-                                if (success) {
-                                    alert('Column preferences saved for all users');
-                                } else {
-                                    alert('Failed to save preferences');
-                                }
-                            }}
-                            disabled={isSavingPrefs}
-                            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 border border-blue-200"
-                            title="Save current column visibility and order for all users"
-                        >
-                            <Save size={12} />
-                            {isSavingPrefs ? 'Saving...' : 'Sync columns'}
-                        </button>
-                    )}
+                    <GridPreferencesToolbar
+                        hasUserCustomizations={hasUserCustomizations}
+                        differsFromAdminDefaults={differsFromAdminDefaults}
+                        isSavingPrefs={isSavingPrefs}
+                        onResetToDefaults={resetToDefaults}
+                        isManager={isManager}
+                        onSaveAsDefaults={savePreferencesToServer}
+                    />
                 </div>
             </div>
         </div>
