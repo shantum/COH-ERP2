@@ -32,7 +32,7 @@ import {
     ConflictError,
     BusinessLogicError,
 } from '../../utils/errors.js';
-import { updateCustomerTier } from '../../utils/tierUtils.js';
+import { updateCustomerTier, adjustCustomerLtv, recalculateAllCustomerLtvs } from '../../utils/tierUtils.js';
 import { orderLogger } from '../../utils/logger.js';
 
 const router: Router = Router();
@@ -1213,6 +1213,22 @@ router.post(
     })
 );
 
+/**
+ * Backfill all customer LTVs from orders
+ * Run once after adding ltv field to Customer
+ */
+router.post(
+    '/backfill-customer-ltvs',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const result = await recalculateAllCustomerLtvs(req.prisma);
+        res.json({
+            message: `Recalculated LTV for ${result.updated} customers`,
+            ...result,
+        });
+    })
+);
+
 // ============================================
 // ORDER LINE OPERATIONS
 // ============================================
@@ -1283,16 +1299,13 @@ router.post(
             });
         });
 
-        // Update customer tier - line cancellation affects LTV (especially if order is now fully cancelled)
+        // Adjust customer LTV (subtract cancelled line amount)
         if (line.order.customerId) {
-            await updateCustomerTier(req.prisma, line.order.customerId);
+            const lineAmount = line.qty * line.unitPrice;
+            await adjustCustomerLtv(req.prisma, line.order.customerId, -lineAmount);
         }
 
-        const updated = await req.prisma.orderLine.findUnique({
-            where: { id: lineId },
-        });
-
-        res.json(updated);
+        res.json({ id: lineId, lineStatus: 'cancelled' });
     })
 );
 
@@ -1354,16 +1367,13 @@ router.post(
             });
         });
 
-        // Update customer tier - restored line affects LTV
+        // Adjust customer LTV (add restored line amount back)
         if (line.order.customerId) {
-            await updateCustomerTier(req.prisma, line.order.customerId);
+            const lineAmount = line.qty * line.unitPrice;
+            await adjustCustomerLtv(req.prisma, line.order.customerId, lineAmount);
         }
 
-        const updated = await req.prisma.orderLine.findUnique({
-            where: { id: lineId },
-        });
-
-        res.json(updated);
+        res.json({ id: lineId, lineStatus: 'pending' });
     })
 );
 

@@ -1,6 +1,11 @@
 /**
  * Customer Tier Utilities
- * Centralized tier calculation logic with configurable thresholds
+ *
+ * SIMPLE MODEL:
+ * - Customer.ltv is stored and updated incrementally
+ * - Tier is calculated from stored ltv (no expensive aggregation)
+ * - adjustCustomerLtv() for incremental changes (fast)
+ * - recalculateCustomerLtv() for full recalc (slow, use sparingly)
  */
 
 import type { PrismaClient } from '@prisma/client';
@@ -9,24 +14,14 @@ import type { PrismaClient } from '@prisma/client';
 // TYPES
 // ============================================
 
-/** Customer tier levels (lowest to highest) */
 export type CustomerTier = 'bronze' | 'silver' | 'gold' | 'platinum';
 
-/** Tier thresholds configuration */
 export interface TierThresholds {
     platinum: number;
     gold: number;
     silver: number;
 }
 
-/** Customer statistics for tier calculation */
-export interface CustomerStats {
-    ltv: number;
-    orderCount: number;
-    rtoCount: number;
-}
-
-/** Result of a tier update operation */
 export interface TierUpdateResult {
     updated: boolean;
     oldTier: CustomerTier | null;
@@ -34,66 +29,48 @@ export interface TierUpdateResult {
     ltv: number;
 }
 
-/** Individual upgrade record for batch operations */
-export interface TierUpgrade {
-    customerId: string;
-    oldTier: CustomerTier;
-    newTier: CustomerTier;
-    ltv: number;
-}
-
-/** Result of batch tier update */
-export interface BatchTierUpdateResult {
-    total: number;
-    updated: number;
-    upgrades: TierUpgrade[];
-}
-
-/** Order data for LTV calculation */
-export interface OrderForLTV {
-    status: string;
-    totalAmount: number | null;
-}
-
 // ============================================
 // CONSTANTS
 // ============================================
 
-/** Default thresholds (used if not configured in SystemSettings) */
 export const DEFAULT_TIER_THRESHOLDS: TierThresholds = {
     platinum: 50000,
     gold: 25000,
     silver: 10000
 };
 
+// Cache tier thresholds (they rarely change)
+let cachedThresholds: TierThresholds | null = null;
+
 // ============================================
-// FUNCTIONS
+// CORE FUNCTIONS
 // ============================================
 
 /**
- * Get tier thresholds from SystemSettings or use defaults
+ * Get tier thresholds (cached)
  */
 export async function getTierThresholds(prisma: PrismaClient): Promise<TierThresholds> {
+    if (cachedThresholds) return cachedThresholds;
+
     try {
         const setting = await prisma.systemSetting.findUnique({
             where: { key: 'tier_thresholds' }
         });
         if (setting?.value) {
-            return JSON.parse(setting.value) as TierThresholds;
+            cachedThresholds = JSON.parse(setting.value) as TierThresholds;
+            return cachedThresholds;
         }
     } catch (error) {
         console.error('Error fetching tier thresholds:', error);
     }
-    return DEFAULT_TIER_THRESHOLDS;
+    cachedThresholds = DEFAULT_TIER_THRESHOLDS;
+    return cachedThresholds;
 }
 
 /**
- * Calculate customer tier based on LTV and thresholds
+ * Calculate tier from LTV
  */
-export function calculateTier(
-    ltv: number,
-    thresholds: TierThresholds = DEFAULT_TIER_THRESHOLDS
-): CustomerTier {
+export function calculateTier(ltv: number, thresholds: TierThresholds = DEFAULT_TIER_THRESHOLDS): CustomerTier {
     if (ltv >= thresholds.platinum) return 'platinum';
     if (ltv >= thresholds.gold) return 'gold';
     if (ltv >= thresholds.silver) return 'silver';
@@ -101,88 +78,51 @@ export function calculateTier(
 }
 
 /**
- * Calculate LTV for a customer from their orders
+ * FAST: Adjust customer LTV by delta and update tier
+ * Use for cancel/uncancel line operations
+ *
+ * @param delta - Amount to add (positive) or subtract (negative)
  */
-export function calculateLTV(orders: OrderForLTV[]): number {
-    if (!orders || orders.length === 0) return 0;
-
-    // Only include non-cancelled orders
-    const validOrders = orders.filter(o => o.status !== 'cancelled');
-    return validOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
-}
-
-/**
- * Get LTV, order count, and RTO count map for multiple customers
- * Uses aggregate query for performance - avoids loading all orders
- */
-export async function getCustomerStatsMap(
+export async function adjustCustomerLtv(
     prisma: PrismaClient,
-    customerIds: string[]
-): Promise<Record<string, CustomerStats>> {
-    if (!customerIds || customerIds.length === 0) return {};
+    customerId: string,
+    delta: number
+): Promise<TierUpdateResult> {
+    if (!customerId || delta === 0) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
 
-    // Run both queries in parallel for performance
-    const [stats, rtoStats] = await Promise.all([
-        // LTV and order count query
-        // Exclude cancelled orders, RTO orders, and zero-value orders (exchanges, giveaways)
-        // Note: trackingStatus can be null for unshipped orders (which should count)
-        prisma.order.groupBy({
-            by: ['customerId'],
-            where: {
-                customerId: { in: customerIds },
-                status: { not: 'cancelled' },
-                OR: [
-                    { trackingStatus: null },
-                    { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
-                ],
-                totalAmount: { gt: 0 }
-            },
-            _sum: { totalAmount: true },
-            _count: { id: true }
-        }),
-        // RTO count query (COD orders only - prepaid RTOs are refunded)
-        prisma.order.groupBy({
-            by: ['customerId'],
-            where: {
-                customerId: { in: customerIds },
-                paymentMethod: 'COD',
-                trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] }
-            },
-            _count: { id: true }
-        })
-    ]);
+    const thresholds = await getTierThresholds(prisma);
 
-    const statsMap: Record<string, CustomerStats> = {};
+    // Single query: get current state
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { tier: true, ltv: true }
+    });
 
-    // Initialize all customerIds with defaults (in case some have no orders)
-    for (const id of customerIds) {
-        statsMap[id] = { ltv: 0, orderCount: 0, rtoCount: 0 };
-    }
+    if (!customer) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
 
-    // Populate LTV and order count from aggregate results
-    for (const stat of stats) {
-        if (stat.customerId) {
-            statsMap[stat.customerId] = {
-                ltv: stat._sum.totalAmount || 0,
-                orderCount: stat._count.id || 0,
-                rtoCount: 0
-            };
+    const oldTier = (customer.tier || 'bronze') as CustomerTier;
+    const newLtv = Math.max(0, (customer.ltv || 0) + delta); // Never go negative
+    const newTier = calculateTier(newLtv, thresholds);
+
+    // Single update with both ltv and tier
+    await prisma.customer.update({
+        where: { id: customerId },
+        data: {
+            ltv: newLtv,
+            tier: newTier
         }
+    });
+
+    if (newTier !== oldTier) {
+        console.log(`[Tier] Customer ${customerId}: ${oldTier} → ${newTier} (LTV: ₹${newLtv.toLocaleString()})`);
     }
 
-    // Add RTO counts
-    for (const stat of rtoStats) {
-        if (stat.customerId && statsMap[stat.customerId]) {
-            statsMap[stat.customerId].rtoCount = stat._count.id || 0;
-        }
-    }
-
-    return statsMap;
+    return { updated: newTier !== oldTier, oldTier, newTier, ltv: newLtv };
 }
 
 /**
- * Update a single customer's tier based on their LTV
- * Call this after order delivery or status changes
+ * FAST: Update tier from stored LTV (no recalculation)
+ * Use when you know LTV is already correct
  */
 export async function updateCustomerTier(
     prisma: PrismaClient,
@@ -192,19 +132,51 @@ export async function updateCustomerTier(
 
     const thresholds = await getTierThresholds(prisma);
 
-    // Get customer's current tier
     const customer = await prisma.customer.findUnique({
         where: { id: customerId },
-        select: { tier: true }
+        select: { tier: true, ltv: true }
+    });
+
+    if (!customer) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
+
+    const oldTier = (customer.tier || 'bronze') as CustomerTier;
+    const ltv = customer.ltv || 0;
+    const newTier = calculateTier(ltv, thresholds);
+
+    if (newTier !== oldTier) {
+        await prisma.customer.update({
+            where: { id: customerId },
+            data: { tier: newTier }
+        });
+        console.log(`[Tier] Customer ${customerId}: ${oldTier} → ${newTier} (LTV: ₹${ltv.toLocaleString()})`);
+        return { updated: true, oldTier, newTier, ltv };
+    }
+
+    return { updated: false, oldTier, newTier, ltv };
+}
+
+/**
+ * SLOW: Full recalculation of customer LTV from orders
+ * Use for: backfill, corrections, RTO adjustments
+ */
+export async function recalculateCustomerLtv(
+    prisma: PrismaClient,
+    customerId: string
+): Promise<TierUpdateResult> {
+    if (!customerId) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
+
+    const thresholds = await getTierThresholds(prisma);
+
+    const customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { tier: true, ltv: true }
     });
 
     if (!customer) return { updated: false, oldTier: null, newTier: null, ltv: 0 };
 
     const oldTier = (customer.tier || 'bronze') as CustomerTier;
 
-    // Calculate LTV from orders
-    // Exclude cancelled orders and RTO orders (returned orders shouldn't count toward LTV)
-    // Note: trackingStatus can be null for unshipped orders (which should count)
+    // Full aggregate - exclude cancelled and RTO orders
     const stats = await prisma.order.aggregate({
         where: {
             customerId,
@@ -218,93 +190,158 @@ export async function updateCustomerTier(
         _sum: { totalAmount: true }
     });
 
-    const ltv = stats._sum.totalAmount || 0;
-    const newTier = calculateTier(ltv, thresholds);
+    const newLtv = stats._sum.totalAmount || 0;
+    const newTier = calculateTier(newLtv, thresholds);
 
-    // Only update if tier changed
+    await prisma.customer.update({
+        where: { id: customerId },
+        data: { ltv: newLtv, tier: newTier }
+    });
+
     if (newTier !== oldTier) {
-        await prisma.customer.update({
-            where: { id: customerId },
-            data: { tier: newTier }
-        });
-        console.log(`[Tier] Customer ${customerId} upgraded: ${oldTier} → ${newTier} (LTV: ₹${ltv.toLocaleString()})`);
-        return { updated: true, oldTier, newTier, ltv };
+        console.log(`[Tier] Customer ${customerId} recalc: ${oldTier} → ${newTier} (LTV: ₹${newLtv.toLocaleString()})`);
     }
 
-    return { updated: false, oldTier, newTier, ltv };
+    return { updated: newTier !== oldTier, oldTier, newTier, ltv: newLtv };
 }
 
-/**
- * Batch update tiers for all customers
- * Run this as a maintenance job or after bulk imports
- * Processes in chunks to avoid PostgreSQL bind variable limits
- */
-export async function updateAllCustomerTiers(prisma: PrismaClient): Promise<BatchTierUpdateResult> {
-    const thresholds = await getTierThresholds(prisma);
-    const CHUNK_SIZE = 5000; // Process 5000 customers at a time
+// ============================================
+// BATCH OPERATIONS
+// ============================================
 
-    // Get total count
+/**
+ * Batch recalculate all customer LTVs
+ * Run as maintenance job after backfill or corrections
+ */
+export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<{ total: number; updated: number }> {
+    const CHUNK_SIZE = 1000;
+    const thresholds = await getTierThresholds(prisma);
+
     const totalCount = await prisma.customer.count();
-    console.log(`[Tier] Processing ${totalCount} customers in chunks of ${CHUNK_SIZE}`);
+    console.log(`[Tier] Recalculating LTV for ${totalCount} customers`);
 
     let processed = 0;
-    let totalUpdated = 0;
-    const allUpgrades: TierUpgrade[] = [];
+    let updated = 0;
 
     while (processed < totalCount) {
-        // Get chunk of customers
         const customers = await prisma.customer.findMany({
-            select: { id: true, tier: true },
+            select: { id: true },
             skip: processed,
             take: CHUNK_SIZE
         });
 
         if (customers.length === 0) break;
 
+        // Get LTV for all customers in chunk
         const customerIds = customers.map(c => c.id);
-        const statsMap = await getCustomerStatsMap(prisma, customerIds);
+        const stats = await prisma.order.groupBy({
+            by: ['customerId'],
+            where: {
+                customerId: { in: customerIds },
+                status: { not: 'cancelled' },
+                OR: [
+                    { trackingStatus: null },
+                    { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
+                ],
+                totalAmount: { gt: 0 }
+            },
+            _sum: { totalAmount: true }
+        });
 
-        const updates: Array<{ where: { id: string }; data: { tier: CustomerTier } }> = [];
-        const upgrades: TierUpgrade[] = [];
-
-        for (const customer of customers) {
-            const stats = statsMap[customer.id] || { ltv: 0 };
-            const newTier = calculateTier(stats.ltv, thresholds);
-            const oldTier = (customer.tier || 'bronze') as CustomerTier;
-
-            if (newTier !== oldTier) {
-                updates.push({
-                    where: { id: customer.id },
-                    data: { tier: newTier }
-                });
-                upgrades.push({
-                    customerId: customer.id,
-                    oldTier,
-                    newTier,
-                    ltv: stats.ltv
-                });
+        // Build update map
+        const ltvMap = new Map<string, number>();
+        for (const stat of stats) {
+            if (stat.customerId) {
+                ltvMap.set(stat.customerId, stat._sum.totalAmount || 0);
             }
         }
 
-        // Batch update this chunk
-        if (updates.length > 0) {
-            await prisma.$transaction(
-                updates.map(u => prisma.customer.update(u))
-            );
-        }
+        // Update all customers in chunk
+        const updates = customerIds.map(id => {
+            const ltv = ltvMap.get(id) || 0;
+            return prisma.customer.update({
+                where: { id },
+                data: { ltv, tier: calculateTier(ltv, thresholds) }
+            });
+        });
+
+        await prisma.$transaction(updates);
 
         processed += customers.length;
-        totalUpdated += updates.length;
-        allUpgrades.push(...upgrades);
-
-        console.log(`[Tier] Processed ${processed}/${totalCount}, updated ${updates.length} in this chunk`);
+        updated += updates.length;
+        console.log(`[Tier] Processed ${processed}/${totalCount}`);
     }
 
-    console.log(`[Tier] Batch complete: ${totalUpdated} of ${totalCount} tiers updated`);
-
-    return {
-        total: totalCount,
-        updated: totalUpdated,
-        upgrades: allUpgrades.slice(0, 100) // Return first 100 upgrades to avoid huge response
-    };
+    console.log(`[Tier] Batch complete: ${updated} customers updated`);
+    return { total: totalCount, updated };
 }
+
+// ============================================
+// LEGACY EXPORTS (for compatibility)
+// ============================================
+
+export interface CustomerStats {
+    ltv: number;
+    orderCount: number;
+    rtoCount: number;
+}
+
+export interface OrderForLTV {
+    status: string;
+    totalAmount: number | null;
+}
+
+export function calculateLTV(orders: OrderForLTV[]): number {
+    if (!orders || orders.length === 0) return 0;
+    const validOrders = orders.filter(o => o.status !== 'cancelled');
+    return validOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+}
+
+/**
+ * Get stats for multiple customers (used by order list enrichment)
+ */
+export async function getCustomerStatsMap(
+    prisma: PrismaClient,
+    customerIds: string[]
+): Promise<Record<string, CustomerStats>> {
+    if (!customerIds || customerIds.length === 0) return {};
+
+    // Just read stored LTV from customers
+    const customers = await prisma.customer.findMany({
+        where: { id: { in: customerIds } },
+        select: { id: true, ltv: true, rtoCount: true }
+    });
+
+    // Get order counts
+    const orderCounts = await prisma.order.groupBy({
+        by: ['customerId'],
+        where: { customerId: { in: customerIds }, status: { not: 'cancelled' } },
+        _count: { id: true }
+    });
+
+    const countMap = new Map<string, number>();
+    for (const stat of orderCounts) {
+        if (stat.customerId) countMap.set(stat.customerId, stat._count.id);
+    }
+
+    const statsMap: Record<string, CustomerStats> = {};
+    for (const c of customers) {
+        statsMap[c.id] = {
+            ltv: c.ltv || 0,
+            orderCount: countMap.get(c.id) || 0,
+            rtoCount: c.rtoCount || 0
+        };
+    }
+
+    // Fill missing with defaults
+    for (const id of customerIds) {
+        if (!statsMap[id]) {
+            statsMap[id] = { ltv: 0, orderCount: 0, rtoCount: 0 };
+        }
+    }
+
+    return statsMap;
+}
+
+// Alias for backward compatibility
+export const updateAllCustomerTiers = recalculateAllCustomerLtvs;

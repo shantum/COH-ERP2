@@ -340,6 +340,7 @@ model Customer {
   returnCount       Int             @default(0)
   rtoCount          Int             @default(0)
   tier              String          @default("bronze")
+  ltv               Int             @default(0)  // Stored LTV, updated incrementally on order changes
   feedback          Feedback[]
   orders            Order[]
   returnRequests    ReturnRequest[]
