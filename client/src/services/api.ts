@@ -212,17 +212,11 @@ export const ordersApi = {
     updateLine: (lineId: string, data: UpdateOrderLineData) => api.put(`/orders/lines/${lineId}`, data),
     cancelLine: (lineId: string) => api.post(`/orders/lines/${lineId}/cancel`),
     uncancelLine: (lineId: string) => api.post(`/orders/lines/${lineId}/uncancel`),
-    allocateLine: (lineId: string) => api.post(`/orders/lines/${lineId}/allocate`),
-    unallocateLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unallocate`),
-    pickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pick`),
-    unpickLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpick`),
     // Customization
     customizeLine: (lineId: string, data: { type: string; value: string; notes?: string }) =>
         api.post(`/orders/lines/${lineId}/customize`, data),
     removeCustomization: (lineId: string, options?: { force?: boolean }) =>
         api.delete(`/orders/lines/${lineId}/customize${options?.force ? '?force=true' : ''}`),
-    packLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pack`),
-    unpackLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpack`),
     // Unified line status endpoint (simplified flow)
     setLineStatus: (lineId: string, status: string, shipData?: { awbNumber?: string; courier?: string }) =>
         api.post(`/orders/lines/${lineId}/status`, { status, shipData }),

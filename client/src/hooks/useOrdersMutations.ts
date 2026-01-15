@@ -335,7 +335,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const unallocate = useMutation<unknown, any, string, InventoryUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.unallocateLine(lineId),
+        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'pending'),
         onMutate: async (lineId): Promise<InventoryUpdateContext> => {
             // Clear any pending invalidation from previous operations to prevent race conditions
             clearPendingInvalidation();
@@ -369,7 +369,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Pick/unpick line mutations - only affects open orders (with optimistic updates)
     // NO onSettled invalidation - optimistic updates are correct, only rollback on error
     const pickLine = useMutation<unknown, any, string, LineUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.pickLine(lineId),
+        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'picked'),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
             clearPendingInvalidation();
             const status = getLineStatus(lineId);
@@ -393,7 +393,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const unpickLine = useMutation<unknown, any, string, LineUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.unpickLine(lineId),
+        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'allocated'),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
             clearPendingInvalidation();
             const status = getLineStatus(lineId);
@@ -418,7 +418,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     // Pack/unpack line mutations - only affects open orders (with optimistic updates)
     const packLine = useMutation<unknown, any, string, LineUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.packLine(lineId),
+        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'packed'),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
             clearPendingInvalidation();
             const status = getLineStatus(lineId);
@@ -442,7 +442,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
     const unpackLine = useMutation<unknown, any, string, LineUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.unpackLine(lineId),
+        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'picked'),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
             clearPendingInvalidation();
             const status = getLineStatus(lineId);
