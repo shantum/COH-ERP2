@@ -1610,13 +1610,31 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyAwb'),
                 width: 130,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return '';
-                    return params.data.order?.shopifyCache?.trackingNumber || '';
+                    // Find fulfillment containing this specific line
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const shopifyLineId = line?.shopifyLineId;
+                    if (!shopifyLineId) return '';
+
+                    // Parse rawData to find fulfillment for this line
+                    const rawData = params.data?.order?.shopifyCache?.rawData;
+                    if (!rawData) return '';
+                    try {
+                        const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+                        const fulfillments = shopifyOrder?.fulfillments || [];
+                        for (const f of fulfillments) {
+                            const lineIds = (f.line_items || []).map((li: any) => String(li.id));
+                            if (lineIds.includes(shopifyLineId)) {
+                                return f.tracking_number || '';
+                            }
+                        }
+                    } catch { /* ignore parse errors */ }
+                    return '';
                 },
                 cellRenderer: (params: ICellRendererParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const awb = params.data.order?.shopifyCache?.trackingNumber;
-                    if (!awb) return null; // Clean empty state
+                    const awb = params.value;
+                    if (!awb) return null;
                     return (
                         <span className="font-mono text-xs text-gray-600" title={awb}>
                             {awb.length > 14 ? awb.substring(0, 14) + '...' : awb}
@@ -1630,13 +1648,31 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyCourier'),
                 width: 100,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return '';
-                    return params.data.order?.shopifyCache?.trackingCompany || '';
+                    // Find fulfillment containing this specific line
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const shopifyLineId = line?.shopifyLineId;
+                    if (!shopifyLineId) return '';
+
+                    // Parse rawData to find fulfillment for this line
+                    const rawData = params.data?.order?.shopifyCache?.rawData;
+                    if (!rawData) return '';
+                    try {
+                        const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+                        const fulfillments = shopifyOrder?.fulfillments || [];
+                        for (const f of fulfillments) {
+                            const lineIds = (f.line_items || []).map((li: any) => String(li.id));
+                            if (lineIds.includes(shopifyLineId)) {
+                                return f.tracking_company || '';
+                            }
+                        }
+                    } catch { /* ignore parse errors */ }
+                    return '';
                 },
                 cellRenderer: (params: ICellRendererParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const courier = params.data.order?.shopifyCache?.trackingCompany;
-                    if (!courier) return null; // Clean empty state
+                    const courier = params.value;
+                    if (!courier) return null;
                     return <span className="text-xs text-gray-600">{courier}</span>;
                 },
                 cellClass: 'text-xs',
