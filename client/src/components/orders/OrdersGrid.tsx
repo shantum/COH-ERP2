@@ -1582,31 +1582,17 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyStatus'),
                 width: 80,
                 cellRenderer: (params: ICellRendererParams) => {
-                    // Check if THIS line is in a Shopify fulfillment
+                    // Check if THIS line has Shopify fulfillment (synced via syncFulfillmentsToOrderLines)
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
-                    const shopifyLineId = line?.shopifyLineId;
 
-                    // If no shopifyLineId, can't determine fulfillment status
-                    if (!shopifyLineId) return null;
+                    // If no shopifyLineId, it's not a Shopify order line
+                    if (!line?.shopifyLineId) return null;
 
-                    // Parse rawData to check if this line is in any fulfillment
-                    const rawData = params.data?.order?.shopifyCache?.rawData;
-                    let isInFulfillment = false;
-                    if (rawData) {
-                        try {
-                            const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-                            const fulfillments = shopifyOrder?.fulfillments || [];
-                            for (const f of fulfillments) {
-                                const lineIds = (f.line_items || []).map((li: any) => String(li.id));
-                                if (lineIds.includes(shopifyLineId)) {
-                                    isInFulfillment = true;
-                                    break;
-                                }
-                            }
-                        } catch { /* ignore parse errors */ }
-                    }
+                    // Check if line has tracking data synced from Shopify (indicates fulfillment)
+                    // awbNumber or trackingStatus being set means Shopify has fulfilled this line
+                    const isInFulfillment = !!(line.awbNumber || line.trackingStatus);
 
                     if (isInFulfillment) {
                         return (
@@ -1630,27 +1616,11 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyAwb'),
                 width: 130,
                 valueGetter: (params: ValueGetterParams) => {
-                    // Find fulfillment containing this specific line
+                    // Use synced AWB from order line (populated by syncFulfillmentsToOrderLines)
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
-                    const shopifyLineId = line?.shopifyLineId;
-                    if (!shopifyLineId) return '';
-
-                    // Parse rawData to find fulfillment for this line
-                    const rawData = params.data?.order?.shopifyCache?.rawData;
-                    if (!rawData) return '';
-                    try {
-                        const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-                        const fulfillments = shopifyOrder?.fulfillments || [];
-                        for (const f of fulfillments) {
-                            const lineIds = (f.line_items || []).map((li: any) => String(li.id));
-                            if (lineIds.includes(shopifyLineId)) {
-                                return f.tracking_number || '';
-                            }
-                        }
-                    } catch { /* ignore parse errors */ }
-                    return '';
+                    return line?.awbNumber || '';
                 },
                 cellRenderer: (params: ICellRendererParams) => {
                     const awb = params.value;
@@ -1668,27 +1638,11 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyCourier'),
                 width: 100,
                 valueGetter: (params: ValueGetterParams) => {
-                    // Find fulfillment containing this specific line
+                    // Use synced courier from order line (populated by syncFulfillmentsToOrderLines)
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
-                    const shopifyLineId = line?.shopifyLineId;
-                    if (!shopifyLineId) return '';
-
-                    // Parse rawData to find fulfillment for this line
-                    const rawData = params.data?.order?.shopifyCache?.rawData;
-                    if (!rawData) return '';
-                    try {
-                        const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-                        const fulfillments = shopifyOrder?.fulfillments || [];
-                        for (const f of fulfillments) {
-                            const lineIds = (f.line_items || []).map((li: any) => String(li.id));
-                            if (lineIds.includes(shopifyLineId)) {
-                                return f.tracking_company || '';
-                            }
-                        }
-                    } catch { /* ignore parse errors */ }
-                    return '';
+                    return line?.courier || '';
                 },
                 cellRenderer: (params: ICellRendererParams) => {
                     const courier = params.value;

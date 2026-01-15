@@ -727,6 +727,7 @@ export const ORDER_UNIFIED_SELECT = {
             isCustomized: true,
             rtoCondition: true,
             trackingStatus: true,
+            shopifyLineId: true,
             // SKU with minimal nested data (includes customization fields)
             sku: {
                 select: {
