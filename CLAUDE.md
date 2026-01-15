@@ -24,19 +24,16 @@ npm run db:generate && npm run db:push
 
 ## Orders System
 
-All order views are consolidated into a single page (`/orders`) with 6 tabs:
+Single page (`/orders`) with 4 tabs:
 - **Open** - Active orders in fulfillment pipeline
-- **Shipped** - Orders in transit or delivered
-- **RTO** - Return to origin orders
-- **COD Pending** - Delivered COD awaiting remittance
+- **Shipped** - Orders in transit/delivered (includes RTO and COD Pending as toggle filters)
 - **Archived** - Completed historical orders
 - **Cancelled** - Cancelled orders
 
 **Key files:**
-- `client/src/pages/Orders.tsx` - Main orchestrator with 6 tabs
+- `client/src/pages/Orders.tsx` - Main orchestrator with 4 tabs + shipped filters
 - `client/src/components/orders/OrdersGrid.tsx` - Unified grid with `currentView` prop
 - `client/src/hooks/useUnifiedOrdersData.ts` - Data hook with background prefetch
-- `server/src/routes/orders/lineStatus.ts` - Unified status endpoint for all line transitions
 
 **Line status flow:** `pending → allocated → picked → packed → shipped`
 
@@ -44,21 +41,19 @@ All order views are consolidated into a single page (`/orders`) with 6 tabs:
 - Frontend calls `ordersApi.setLineStatus(lineId, status)`
 - Backend validates transitions via `VALID_TRANSITIONS` matrix
 - Allocate creates OUTWARD transaction, unallocate deletes it
-- Pick/pack/ship are status-only updates
 
 **Three independent dimensions:**
 | Field | Controls | Values |
 |-------|----------|--------|
 | `lineStatus` | Fulfillment stage | pending, allocated, picked, packed, shipped, cancelled |
-| `closedAt` | View visibility | null = open view, timestamp = shipped view |
+| `closedAt` | View visibility | null = open, timestamp = shipped |
 | `isArchived` | Archive state | false = active, true = archived |
 
 **View query logic:**
 - Open: `closedAt IS NULL` on any line
-- Shipped: All non-cancelled lines have `closedAt`, excludes RTO
-- RTO: `trackingStatus IN ('rto_in_transit', 'rto_delivered')`
-- COD Pending: `paymentMethod='COD' AND trackingStatus='delivered' AND codRemittedAt IS NULL`
+- Shipped: All non-cancelled lines have `closedAt` (RTO/COD filtered client-side)
 - Archived: `isArchived = true`
+- Cancelled: `lineStatus = 'cancelled'`
 
 ## Inventory
 
