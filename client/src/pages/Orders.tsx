@@ -17,7 +17,6 @@ import { useAuth } from '../hooks/useAuth';
 import {
     computeCustomerStats,
     flattenOrders,
-    filterRows,
 } from '../utils/orderHelpers';
 
 // Components
@@ -69,7 +68,6 @@ export default function Orders() {
     }, [setSearchParams]);
 
     // Filter state (Open view only)
-    const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
 
@@ -161,9 +159,7 @@ export default function Orders() {
 
     // Apply filters
     const filteredRows = useMemo(() => {
-        // Date range filter only applies to open view
-        const applyDateFilter = view === 'open';
-        let rows = filterRows(currentRows, '', applyDateFilter ? dateRange : '', applyDateFilter);
+        let rows = currentRows;
 
         // Open view specific filters
         if (view === 'open') {
@@ -201,7 +197,7 @@ export default function Orders() {
         }
 
         return rows;
-    }, [currentRows, dateRange, view, allocatedFilter, productionFilter]);
+    }, [currentRows, view, allocatedFilter, productionFilter]);
 
     // Count of fully shipped orders ready for release (Open view only)
     const releasableOrderCount = useMemo(() => {
@@ -520,17 +516,6 @@ export default function Orders() {
                         {view === 'open' && (
                             <>
                                 <div className="w-px h-5 bg-gray-200" />
-                                <select
-                                    value={dateRange}
-                                    onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                                >
-                                    <option value="">All time</option>
-                                    <option value="14">Last 14 days</option>
-                                    <option value="30">Last 30 days</option>
-                                    <option value="60">Last 60 days</option>
-                                    <option value="90">Last 90 days</option>
-                                </select>
                                 <select
                                     value={allocatedFilter}
                                     onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
