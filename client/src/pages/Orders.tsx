@@ -631,7 +631,7 @@ export default function Orders() {
                 {pagination && pagination.totalPages > 1 && (
                     <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
                         <div className="text-sm text-gray-600">
-                            Showing {((page - 1) * 500) + 1}–{Math.min(page * 500, pagination.total)} of {pagination.total} orders
+                            Showing {((page - 1) * pagination.limit) + 1}–{Math.min(page * pagination.limit, pagination.total)} of {pagination.total} orders
                         </div>
                         <div className="flex items-center gap-2">
                             <button

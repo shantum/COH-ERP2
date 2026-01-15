@@ -7,7 +7,6 @@
 
 import type { PrismaClient, Prisma } from '@prisma/client';
 import {
-    ORDER_LINES_INCLUDE,
     enrichOrdersWithCustomerStats,
     calculateFulfillmentStage,
     calculateLineStatusCounts,
@@ -703,9 +702,65 @@ export const ORDER_UNIFIED_SELECT = {
     holdNotes: true,
     holdAt: true,
 
-    // Relations
-    customer: true,
-    orderLines: ORDER_LINES_INCLUDE,
+    // Relations - lightweight for list views
+    customer: {
+        select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+        },
+    },
+    orderLines: {
+        select: {
+            id: true,
+            lineStatus: true,
+            qty: true,
+            unitPrice: true,
+            skuId: true,
+            productionBatchId: true,
+            notes: true,
+            awbNumber: true,
+            courier: true,
+            shippedAt: true,
+            isCustomized: true,
+            rtoCondition: true,
+            trackingStatus: true,
+            // SKU with minimal nested data (includes customization fields)
+            sku: {
+                select: {
+                    id: true,
+                    skuCode: true,
+                    size: true,
+                    isCustomSku: true,
+                    customizationType: true,
+                    customizationValue: true,
+                    customizationNotes: true,
+                    variation: {
+                        select: {
+                            id: true,
+                            colorName: true,
+                            product: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            productionBatch: {
+                select: {
+                    id: true,
+                    batchCode: true,
+                    batchDate: true,
+                    status: true,
+                },
+            },
+        },
+    },
     shopifyCache: {
         select: {
             discountCodes: true,
