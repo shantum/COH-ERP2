@@ -9,7 +9,7 @@ import shopifyClient from '../../services/shopify.js';
 import type { ShopifyOrder } from '../../services/shopify.js';
 import { syncAllProducts } from '../../services/productSyncService.js';
 import { syncCustomers, syncAllCustomers } from '../../services/customerSyncService.js';
-import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders, processCacheBatch } from '../../services/shopifyOrderProcessor.js';
+import { processFromCache, markCacheProcessed, markCacheError, cacheShopifyOrders, processCacheBatch, syncFulfillmentsToOrderLines } from '../../services/shopifyOrderProcessor.js';
 import { detectPaymentMethod } from '../../utils/shopifyHelpers.js';
 import { shopifyLogger } from '../../utils/logger.js';
 import { FULL_DUMP_CONFIG } from '../../constants.js';
@@ -289,6 +289,74 @@ router.post('/backfill', authenticateToken, asyncHandler(async (req: Request, re
     success: true,
     message: `Backfilled ${totalUpdated} total records`,
     results,
+  });
+}));
+
+// ============================================
+// BACKFILL FULFILLMENTS (re-sync tracking to order lines)
+// ============================================
+
+router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const { batchSize = 500, daysBack } = req.body as { batchSize?: number; daysBack?: number };
+
+  // Find orders with fulfillment data in cache
+  const dateFilter = daysBack ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000) : undefined;
+
+  const ordersWithCache = await req.prisma.order.findMany({
+    where: {
+      shopifyOrderId: { not: null },
+      ...(dateFilter && { orderDate: { gte: dateFilter } }),
+    },
+    select: {
+      id: true,
+      orderNumber: true,
+      shopifyOrderId: true,
+      shopifyCache: { select: { rawData: true } },
+      orderLines: { select: { id: true, awbNumber: true } },
+    },
+    take: batchSize,
+    orderBy: { orderDate: 'desc' },
+  });
+
+  shopifyLogger.info({ count: ordersWithCache.length, daysBack }, 'Backfill Fulfillments: starting');
+
+  let synced = 0;
+  let skipped = 0;
+  let noFulfillments = 0;
+  const errors: Array<{ orderNumber: string; error: string }> = [];
+
+  for (const order of ordersWithCache) {
+    try {
+      if (!order.shopifyCache?.rawData) {
+        skipped++;
+        continue;
+      }
+
+      const shopifyOrder = JSON.parse(order.shopifyCache.rawData);
+      if (!shopifyOrder.fulfillments?.length) {
+        noFulfillments++;
+        continue;
+      }
+
+      const result = await syncFulfillmentsToOrderLines(req.prisma, order.id, shopifyOrder);
+      if (result.synced > 0) {
+        synced++;
+      } else {
+        skipped++;
+      }
+    } catch (error) {
+      const err = error as Error;
+      errors.push({ orderNumber: order.orderNumber || order.id, error: err.message });
+    }
+  }
+
+  res.json({
+    message: `Backfilled fulfillments for ${synced} orders`,
+    total: ordersWithCache.length,
+    synced,
+    skipped,
+    noFulfillments,
+    errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
   });
 }));
 
