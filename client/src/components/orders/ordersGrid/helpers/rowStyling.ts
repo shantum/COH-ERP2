@@ -16,7 +16,7 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
  * - Teal: Picked
  * - Blue: Packed
  */
-export function getRowStyle(params: { data: FlattenedOrderRow }): RowStyle | undefined {
+export function getRowStyle(params: { data?: FlattenedOrderRow }): RowStyle | undefined {
     const row = params.data;
     if (!row) return undefined;
 
@@ -106,16 +106,26 @@ export function getRowStyle(params: { data: FlattenedOrderRow }): RowStyle | und
 /**
  * Get row class for styling and order grouping
  * - Adds order-first-line or order-continuation-line class
+ * - Adds line status classes (line-shipped, line-cancelled)
  * - Adds urgency indicators (order-urgent, order-warning)
  */
-export function getRowClass(params: { data: FlattenedOrderRow }): string {
+export function getRowClass(params: { data?: FlattenedOrderRow }): string {
     const row = params.data;
     if (!row) return '';
 
     const classes = [row.isFirstLine ? 'order-first-line' : 'order-continuation-line'];
 
+    // Line status classes (shipped takes priority, then cancelled)
+    if (row.lineStatus === 'shipped') {
+        classes.push('line-shipped');
+    } else if (row.lineStatus === 'cancelled') {
+        classes.push('line-cancelled');
+    }
+
     // Calculate order age for urgency indicator (only on first line to avoid repetition)
-    if (row.isFirstLine && row.orderDate) {
+    // Don't show urgency on shipped/cancelled lines
+    const lineStatus = row.lineStatus || '';
+    if (row.isFirstLine && row.orderDate && !['shipped', 'cancelled'].includes(lineStatus)) {
         const orderDate = new Date(row.orderDate);
         const daysOld = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
         if (daysOld > 5) {
@@ -152,5 +162,21 @@ export const gridRowStyles = `
     /* Amber left border for orders 3-5 days */
     .ag-row.order-warning {
         border-left: 4px solid #f59e0b !important;
+    }
+    /* Line marked as shipped - dark green background, strikethrough text */
+    .ag-row.line-shipped {
+        background-color: #dcfce7 !important;
+    }
+    .ag-row.line-shipped .ag-cell {
+        text-decoration: line-through;
+        color: #166534 !important;
+    }
+    /* Line cancelled - red background, strikethrough text */
+    .ag-row.line-cancelled {
+        background-color: #fee2e2 !important;
+    }
+    .ag-row.line-cancelled .ag-cell {
+        text-decoration: line-through;
+        color: #991b1b !important;
     }
 `;

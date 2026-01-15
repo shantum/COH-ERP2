@@ -80,14 +80,26 @@ export interface ColumnBuilderContext {
     // Header customization
     getHeaderName: (colId: string) => string;
     setCustomHeader: (colId: string, value: string) => void;
-    // Allocation state
+
+    // Current view (affects column visibility and behavior)
+    currentView?: 'open' | 'shipped' | 'rto' | 'cod_pending' | 'archived' | 'cancelled';
+
+    // UI State
     allocatingLines: Set<string>;
-    // Loading states
     isCancellingLine: boolean;
     isUncancellingLine: boolean;
-    // Locked dates for production
+    isCancellingOrder: boolean;
+    isDeletingOrder: boolean;
+
+    // Utilities
     isDateLocked: (date: string) => boolean;
-    // All handlers from OrdersGridProps
+
+    // Order Info handlers
+    onViewOrder: (orderId: string) => void;
+    onSelectCustomer: (customerId: string) => void;
+    onUpdateShipByDate?: (orderId: string, date: string | null) => void;
+
+    // Fulfillment handlers
     onAllocate: (lineId: string) => void;
     onUnallocate: (lineId: string) => void;
     onPick: (lineId: string) => void;
@@ -96,17 +108,28 @@ export interface ColumnBuilderContext {
     onUnpack: (lineId: string) => void;
     onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
     onUnmarkShippedLine: (lineId: string) => void;
-    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+
+    // Admin actions (optional)
+    isAdmin?: boolean;
+    onForceShipOrder?: (orderId: string, data: { awbNumber: string; courier: string }) => void;
+
+    // Production handlers
     onCreateBatch: (data: any) => void;
     onUpdateBatch: (id: string, data: any) => void;
     onDeleteBatch: (id: string) => void;
+
+    // Line handlers
     onUpdateLineNotes: (lineId: string, notes: string) => void;
-    onViewOrder: (orderId: string) => void;
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
-    onSelectCustomer: (customerId: string) => void;
+    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+
+    // Customization handlers
     onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
     onEditCustomization?: (lineId: string, lineData: EditCustomizationData) => void;
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;
-    onUpdateShipByDate?: (orderId: string, date: string | null) => void;
+
+    // Post-ship handlers
+    onMarkCodRemitted?: (orderId: string) => void;
+    onTrack?: (awbNumber: string, orderNumber: string) => void;
 }

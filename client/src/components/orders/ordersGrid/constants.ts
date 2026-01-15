@@ -2,13 +2,17 @@
  * Constants for OrdersGrid component
  */
 
-// All column IDs in display order
+// All column IDs in display order (includes post-ship columns)
 export const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'shipByDate', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'rtoHistory', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
-    'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'shopifyStatus',
-    'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus', 'actions'
+    'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine', 'shopifyStatus',
+    'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus',
+    // Post-ship columns (for shipped/archived views)
+    'shippedAt', 'deliveredAt', 'deliveryDays', 'daysInTransit',
+    'rtoInitiatedAt', 'daysInRto', 'daysSinceDelivery', 'codRemittedAt',
+    'archivedAt', 'finalStatus',
 ];
 
 // Common courier options
