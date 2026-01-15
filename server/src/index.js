@@ -33,6 +33,7 @@ import inventoryRoutes from './routes/inventory/index.js';
 import inventoryReconciliationRoutes from './routes/inventory-reconciliation.js';
 import orderRoutes from './routes/orders/index.js';
 import { autoArchiveOldOrders } from './routes/orders/mutations.js';
+import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
 import customerRoutes from './routes/customers.js';
 import returnRoutes from './routes/returns/index.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -191,6 +192,9 @@ app.listen(PORT, '0.0.0.0', async () => {
 
   // Auto-archive shipped orders older than 90 days on startup
   await autoArchiveOldOrders(prisma);
+
+  // Backfill customer LTVs if needed (runs in background)
+  await backfillLtvsIfNeeded(prisma);
 
   // Background workers can be disabled via environment variable
   // Useful when running locally while production is also running

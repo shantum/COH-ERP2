@@ -345,3 +345,28 @@ export async function getCustomerStatsMap(
 
 // Alias for backward compatibility
 export const updateAllCustomerTiers = recalculateAllCustomerLtvs;
+
+/**
+ * Startup check: backfill LTVs if needed
+ * Runs once on server start, checks if any customers with orders have ltv=0
+ */
+export async function backfillLtvsIfNeeded(prisma: PrismaClient): Promise<void> {
+    // Check if any customers with orders still have ltv=0
+    const needsBackfill = await prisma.customer.findFirst({
+        where: {
+            ltv: 0,
+            orders: { some: { status: { not: 'cancelled' }, totalAmount: { gt: 0 } } }
+        },
+        select: { id: true }
+    });
+
+    if (needsBackfill) {
+        console.log('[Tier] Found customers with orders but ltv=0, starting background backfill...');
+        // Run in background (don't await) so server starts immediately
+        recalculateAllCustomerLtvs(prisma).catch(err => {
+            console.error('[Tier] Backfill error:', err);
+        });
+    } else {
+        console.log('[Tier] Customer LTVs are up to date');
+    }
+}
