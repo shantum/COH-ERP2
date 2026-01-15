@@ -7,7 +7,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Archive, RefreshCw, CheckSquare } from 'lucide-react';
+import { Plus, Archive, RefreshCw, Send } from 'lucide-react';
 
 // Custom hooks
 import { useUnifiedOrdersData, type UnifiedOrderTab } from '../hooks/useUnifiedOrdersData';
@@ -237,22 +237,20 @@ export default function Orders() {
     // Unique order count for Open tab (available for tab badge if needed)
     // const uniqueOpenOrderCount = new Set(filteredRows.filter(r => tab === 'open').map((r) => r.orderId)).size;
 
-    // Lines that can be closed (shipped or cancelled, not already closed)
-    // Note: With simplified flow, shipped lines move to shipped view automatically
-    const closableLineIds = useMemo(() => {
-        if (!openOrders) return [];
-        const ids: string[] = [];
+    // Count of fully shipped orders ready for release
+    // These are orders where all non-cancelled lines are shipped but releasedToShipped=false
+    const releasableOrderCount = useMemo(() => {
+        if (!openOrders) return 0;
+        let count = 0;
         for (const order of openOrders) {
             const lines = order.orderLines || [];
-            for (const line of lines) {
-                // Line is closeable if shipped or cancelled
-                const status = line.lineStatus as string | null;
-                if (status && ['shipped', 'cancelled'].includes(status)) {
-                    ids.push(line.id as string);
-                }
-            }
+            const nonCancelledLines = lines.filter((l: any) => l.lineStatus !== 'cancelled');
+            if (nonCancelledLines.length === 0) continue;
+            // Check if all non-cancelled lines are shipped
+            const allShipped = nonCancelledLines.every((l: any) => l.lineStatus === 'shipped');
+            if (allShipped) count++;
         }
-        return ids;
+        return count;
     }, [openOrders]);
 
     // Pipeline counts for simple status bar
@@ -480,7 +478,6 @@ export default function Orders() {
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
-        onCloseOrder: (id) => mutations.closeOrder.mutate(id),
         // Post-ship handlers
         onUnarchive: () => {}, // TODO: Add unarchiveOrder mutation if needed
         allocatingLines,
@@ -488,7 +485,6 @@ export default function Orders() {
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
-        isClosingOrder: mutations.closeOrder.isPending,
         isUnarchiving: false, // TODO: Add unarchiveOrder mutation if needed
         isAdmin: user?.role === 'admin',
     });
@@ -657,19 +653,19 @@ export default function Orders() {
                             </select>
                         </div>
                         <div className="flex items-center gap-2">
-                            {closableLineIds.length > 0 && (
+                            {releasableOrderCount > 0 && (
                                 <button
                                     onClick={() => {
-                                        if (confirm(`Close ${closableLineIds.length} completed lines?\n\nThis will move them out of the open view.`)) {
-                                            mutations.closeLines.mutate(closableLineIds);
+                                        if (confirm(`Release ${releasableOrderCount} shipped orders?\n\nThis will move them to the Shipped tab.`)) {
+                                            mutations.releaseToShipped.mutate(undefined);
                                         }
                                     }}
-                                    disabled={mutations.closeLines.isPending}
+                                    disabled={mutations.releaseToShipped.isPending}
                                     className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
-                                    title="Close all shipped and cancelled lines"
+                                    title="Release all shipped orders to Shipped tab"
                                 >
-                                    <CheckSquare size={12} />
-                                    Close {closableLineIds.length} Completed
+                                    <Send size={12} />
+                                    Release {releasableOrderCount} to Shipped
                                 </button>
                             )}
                             {user?.role === 'admin' && (

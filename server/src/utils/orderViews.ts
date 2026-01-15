@@ -163,20 +163,36 @@ export interface EnrichedOrder {
  */
 export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
     /**
-     * Open Orders: Orders with at least one line not shipped/cancelled
-     * SIMPLIFIED: Uses lineStatus directly (no closedAt complexity)
+     * Open Orders: Orders still being processed OR shipped but not released
+     * Shipped orders stay here until user clicks "Release to Shipped"
      */
     open: {
         name: 'Open Orders',
-        description: 'Orders pending fulfillment',
+        description: 'Orders pending fulfillment or awaiting release',
         where: {
             isArchived: false,
-            // At least one line is not shipped and not cancelled
-            orderLines: {
-                some: {
-                    lineStatus: { notIn: ['shipped', 'cancelled'] },
+            OR: [
+                // Still has lines being processed
+                {
+                    orderLines: {
+                        some: {
+                            lineStatus: { notIn: ['shipped', 'cancelled'] },
+                        },
+                    },
                 },
-            },
+                // Fully shipped but not released yet
+                {
+                    releasedToShipped: false,
+                    orderLines: { some: { lineStatus: 'shipped' } },
+                    NOT: {
+                        orderLines: {
+                            some: {
+                                lineStatus: { notIn: ['shipped', 'cancelled'] },
+                            },
+                        },
+                    },
+                },
+            ],
         },
         orderBy: { orderDate: 'desc' }, // Newest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution', 'daysInTransit'],
@@ -184,15 +200,15 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
     },
 
     /**
-     * Shipped Orders: All non-cancelled lines are shipped
+     * Shipped Orders: Fully shipped AND released
      * Includes RTO and COD pending orders (filtered client-side)
-     * No date filter - shows all shipped orders
      */
     shipped: {
         name: 'Shipped Orders',
-        description: 'All post-ship orders (in transit, delivered, RTO, COD pending)',
+        description: 'Released shipped orders (in transit, delivered, RTO, COD pending)',
         where: {
             isArchived: false,
+            releasedToShipped: true,
             // All non-cancelled lines are shipped
             NOT: {
                 orderLines: {
@@ -288,11 +304,10 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         where: {
             isArchived: false,
             isOnHold: false,
-            // At least one line is open (closedAt is null and not cancelled)
+            // At least one line is not shipped/cancelled
             orderLines: {
                 some: {
-                    closedAt: null,
-                    lineStatus: { not: 'cancelled' },
+                    lineStatus: { notIn: ['shipped', 'cancelled'] },
                 },
             },
         },

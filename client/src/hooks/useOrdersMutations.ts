@@ -879,41 +879,14 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         },
     });
 
-    // Close/reopen lines - controls visibility (moves between open and shipped views)
-    const closeLines = useMutation({
-        mutationFn: (lineIds: string[]) => ordersApi.closeLines(lineIds),
+    // Release shipped orders to shipped view
+    const releaseToShipped = useMutation({
+        mutationFn: (orderIds?: string[]) => ordersApi.releaseToShipped(orderIds),
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateShippedOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to close lines')
-    });
-
-    const reopenLines = useMutation({
-        mutationFn: (lineIds: string[]) => ordersApi.reopenLines(lineIds),
-        onSuccess: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to reopen lines')
-    });
-
-    const closeOrder = useMutation({
-        mutationFn: (orderId: string) => ordersApi.closeOrder(orderId),
-        onSuccess: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to close order')
-    });
-
-    const reopenOrder = useMutation({
-        mutationFn: (orderId: string) => ordersApi.reopenOrder(orderId),
-        onSuccess: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
-        },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to reopen order')
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to release orders')
     });
 
     const updateLine = useMutation({
@@ -1036,11 +1009,8 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         updateShipByDate,
         addLine,
 
-        // Close/reopen (visibility control)
-        closeLines,
-        reopenLines,
-        closeOrder,
-        reopenOrder,
+        // Release to shipped view
+        releaseToShipped,
 
         // Customization
         customizeLine,

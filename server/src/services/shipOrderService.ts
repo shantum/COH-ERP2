@@ -283,7 +283,6 @@ export async function shipOrderLines(
                     awbNumber: awbNumber.trim(),
                     courier: courier.trim(),
                     trackingStatus: 'in_transit',
-                    closedAt: now,  // Also close the line (remove from open view)
                 },
             });
 

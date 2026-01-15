@@ -42,16 +42,17 @@ Single page (`/orders`) with 4 tabs:
 - Backend validates transitions via `VALID_TRANSITIONS` matrix
 - Allocate creates OUTWARD transaction, unallocate deletes it
 
-**Three independent dimensions:**
+**Two independent dimensions:**
 | Field | Controls | Values |
 |-------|----------|--------|
 | `lineStatus` | Fulfillment stage | pending, allocated, picked, packed, shipped, cancelled |
-| `closedAt` | View visibility | null = open, timestamp = shipped |
 | `isArchived` | Archive state | false = active, true = archived |
 
+**Release workflow:** Shipped orders stay in Open tab until explicitly released via "Release to Shipped" button (`releasedToShipped` boolean on Order).
+
 **View query logic:**
-- Open: `closedAt IS NULL` on any line
-- Shipped: All non-cancelled lines have `closedAt` (RTO/COD filtered client-side)
+- Open: Any line not shipped/cancelled, OR fully shipped but `releasedToShipped=false`
+- Shipped: All lines shipped AND `releasedToShipped=true` (RTO/COD filtered client-side)
 - Archived: `isArchived = true`
 - Cancelled: `lineStatus = 'cancelled'`
 

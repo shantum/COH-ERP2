@@ -244,11 +244,8 @@ export const ordersApi = {
     searchAll: (q: string, limit?: number) => api.get('/orders/search-all', { params: { q, limit } }),
     // Bulk archive
     archiveDeliveredPrepaid: () => api.post('/orders/archive-delivered-prepaid'),
-    // Close/Reopen lines (visibility control - moves between open and shipped views)
-    closeLines: (lineIds: string[]) => api.post('/orders/lines/close', { lineIds }),
-    reopenLines: (lineIds: string[]) => api.post('/orders/lines/reopen', { lineIds }),
-    closeOrder: (orderId: string) => api.post(`/orders/${orderId}/close`),
-    reopenOrder: (orderId: string) => api.post(`/orders/${orderId}/reopen`),
+    // Release shipped orders to shipped view
+    releaseToShipped: (orderIds?: string[]) => api.post('/orders/release-to-shipped', { orderIds }),
 };
 
 // Catalog (combined products + inventory view)

@@ -415,7 +415,6 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req: Request, 
         });
 
         // Revert line statuses and clear tracking fields
-        // Also clear closedAt to reopen lines (move back to open view)
         await tx.orderLine.updateMany({
             where: { orderId },
             data: {
@@ -424,7 +423,6 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req: Request, 
                 awbNumber: null,
                 courier: null,
                 trackingStatus: null,
-                closedAt: null,
             },
         });
     });

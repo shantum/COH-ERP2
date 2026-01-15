@@ -96,9 +96,6 @@ const list = protectedProcedure
             viewConfig.enrichment
         );
 
-        // Cancelled lines with closedAt=null stay in open view (shown red with strikethrough)
-        // Users close them manually when ready
-
         return {
             orders: enriched,
             view,

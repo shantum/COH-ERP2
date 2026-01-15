@@ -323,12 +323,8 @@ router.get('/', async (req: Request, res: Response) => {
             viewConfig.enrichment
         );
 
-        // Cancelled lines with closedAt=null stay in open view (shown red with strikethrough)
-        // Users close them manually when ready
-        const finalOrders = enriched;
-
         // Filter confidential fields based on user permissions
-        const filteredOrders = filterConfidentialFields(finalOrders, req.userPermissions);
+        const filteredOrders = filterConfidentialFields(enriched, req.userPermissions);
 
         const response: Record<string, unknown> = {
             orders: filteredOrders,
