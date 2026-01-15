@@ -1582,24 +1582,37 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyStatus'),
                 width: 80,
                 cellRenderer: (params: ICellRendererParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    // Use shopifyCache only - deprecated order.shopifyFulfillmentStatus removed
-                    const status = params.data.order?.shopifyCache?.fulfillmentStatus;
-                    if (!status || status === '-') return null;
+                    // Check if THIS line is in a Shopify fulfillment
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const shopifyLineId = line?.shopifyLineId;
 
-                    const statusStyles: Record<string, string> = {
-                        fulfilled: 'bg-green-100 text-green-700',
-                        partial: 'bg-yellow-100 text-yellow-700',
-                        unfulfilled: 'bg-gray-100 text-gray-600',
-                        null: 'bg-gray-100 text-gray-500',
-                    };
+                    // If no shopifyLineId, can't determine fulfillment status
+                    if (!shopifyLineId) return null;
 
-                    const displayStatus = status?.toLowerCase() || 'unfulfilled';
-                    const style = statusStyles[displayStatus] || statusStyles.unfulfilled;
+                    // Parse rawData to check if this line is in any fulfillment
+                    const rawData = params.data?.order?.shopifyCache?.rawData;
+                    let isInFulfillment = false;
+                    if (rawData) {
+                        try {
+                            const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+                            const fulfillments = shopifyOrder?.fulfillments || [];
+                            for (const f of fulfillments) {
+                                const lineIds = (f.line_items || []).map((li: any) => String(li.id));
+                                if (lineIds.includes(shopifyLineId)) {
+                                    isInFulfillment = true;
+                                    break;
+                                }
+                            }
+                        } catch { /* ignore parse errors */ }
+                    }
+
+                    if (!isInFulfillment) return null;
 
                     return (
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${style}`}>
-                            {displayStatus}
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700">
+                            fulfilled
                         </span>
                     );
                 },
@@ -1838,16 +1851,21 @@ export function OrdersGrid({
                 headerName: getHeaderName('trackingStatus'),
                 width: 110,
                 cellRenderer: (params: ICellRendererParams) => {
-                    if (!params.data?.isFirstLine) return null;
+                    // Get line-level tracking status
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
                     const order = params.data.order;
-                    // Show tracking status if any tracking data exists
-                    const hasTrackingData = order?.trackingStatus || order?.courierStatusCode || order?.lastScanAt || order?.lastTrackingUpdate;
-                    if (!hasTrackingData) {
-                        return <span className="text-gray-400 text-xs">-</span>;
-                    }
+
+                    // Use line-level tracking status if available, fall back to order-level
+                    const trackingStatus = line?.trackingStatus || order?.trackingStatus;
+                    const hasTrackingData = trackingStatus || line?.awbNumber;
+
+                    if (!hasTrackingData) return null;
+
                     return (
                         <TrackingStatusBadge
-                            status={order?.trackingStatus || 'in_transit'}
+                            status={trackingStatus || 'in_transit'}
                             daysInTransit={order?.daysInTransit}
                             ofdCount={order?.deliveryAttempts}
                         />
