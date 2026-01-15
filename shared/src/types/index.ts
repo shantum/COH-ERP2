@@ -673,6 +673,8 @@ export interface UpdateOrderLineData {
   qty?: number;
   unitPrice?: number;
   notes?: string;
+  awbNumber?: string;
+  courier?: string;
 }
 
 // Shipped Orders Summary

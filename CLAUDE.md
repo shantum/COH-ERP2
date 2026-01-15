@@ -6,6 +6,21 @@
 
 **The code is the documentation.** Comment your code well so agents can understand context easily. Clear comments > external docs.
 
+## Type Safety Contract
+
+All code must compile under `strict: true`. `any` is forbidden.
+
+**tRPC procedures require:**
+- Zod-validated input
+- Explicit return types
+- Typed error paths
+
+**Rules:**
+- No untyped JSON blobs crossing boundaries
+- No manual client types for server data
+- Prefer correctness and readability over brevity
+- Code that would allow a runtime type mismatch is unacceptable
+
 ## Quick Start
 
 ```bash

@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Archive, Truck, RefreshCw, CheckSquare } from 'lucide-react';
+import { Plus, Archive, RefreshCw, CheckSquare } from 'lucide-react';
 
 // Custom hooks
 import { useUnifiedOrdersData, type UnifiedOrderTab } from '../hooks/useUnifiedOrdersData';
@@ -26,7 +26,6 @@ import {
     CreateOrderModal,
     CustomerDetailModal,
     CustomizationModal,
-    ProcessShippedModal,
     UnifiedOrderModal,
     GlobalOrderSearch,
 } from '../components/orders';
@@ -56,7 +55,6 @@ export default function Orders() {
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-    const [showProcessShippedModal, setShowProcessShippedModal] = useState(false);
     // Unified modal state for viewing, editing, and shipping orders
     const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
     const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
@@ -167,9 +165,6 @@ export default function Orders() {
         onEditSuccess: () => {
             setUnifiedModalOrder(null);
         },
-        onProcessMarkedShippedSuccess: () => {
-            setShowProcessShippedModal(false);
-        },
     });
 
     // Compute customer stats (used for all views)
@@ -234,31 +229,17 @@ export default function Orders() {
     // Unique order count for Open tab (available for tab badge if needed)
     // const uniqueOpenOrderCount = new Set(filteredRows.filter(r => tab === 'open').map((r) => r.orderId)).size;
 
-    // Count lines marked as shipped (ready for batch processing)
-    const markedShippedCount = useMemo(() => {
-        if (!openOrders) return 0;
-        let count = 0;
-        for (const order of openOrders) {
-            const lines = order.orderLines || [];
-            for (const line of lines) {
-                if (line.lineStatus === 'marked_shipped') {
-                    count++;
-                }
-            }
-        }
-        return count;
-    }, [openOrders]);
-
-    // Lines that can be closed (marked_shipped or cancelled, not already closed)
+    // Lines that can be closed (shipped or cancelled, not already closed)
+    // Note: With simplified flow, shipped lines move to shipped view automatically
     const closableLineIds = useMemo(() => {
         if (!openOrders) return [];
         const ids: string[] = [];
         for (const order of openOrders) {
             const lines = order.orderLines || [];
             for (const line of lines) {
-                // Line is closeable if marked_shipped or cancelled, and not already closed
+                // Line is closeable if shipped or cancelled
                 const status = line.lineStatus as string | null;
-                if (status && ['marked_shipped', 'cancelled'].includes(status) && !line.closedAt) {
+                if (status && ['shipped', 'cancelled'].includes(status)) {
                     ids.push(line.id as string);
                 }
             }
@@ -274,10 +255,10 @@ export default function Orders() {
             const lines = (order.orderLines || []).filter((l: any) => l.lineStatus !== 'cancelled');
             if (lines.length === 0) continue;
             const allAllocatedOrBetter = lines.every((l: any) =>
-                ['allocated', 'picked', 'packed', 'marked_shipped'].includes(l.lineStatus)
+                ['allocated', 'picked', 'packed', 'shipped'].includes(l.lineStatus)
             );
             const allPackedOrBetter = lines.every((l: any) =>
-                ['packed', 'marked_shipped'].includes(l.lineStatus)
+                ['packed', 'shipped'].includes(l.lineStatus)
             );
             if (allPackedOrBetter) {
                 ready++;
@@ -290,14 +271,7 @@ export default function Orders() {
         return { pending, allocated, ready };
     }, [openOrders]);
 
-    // Get orders with marked_shipped lines for the modal
-    const ordersWithMarkedShipped = useMemo(() => {
-        if (!openOrders) return [];
-        return openOrders.filter((order: any) => {
-            const lines = order.orderLines || [];
-            return lines.some((line: any) => line.lineStatus === 'marked_shipped');
-        });
-    }, [openOrders]);
+    // Note: ProcessShippedModal removed - using simplified direct ship flow
 
     // Handlers - mark shipped workflow
     const handleMarkShippedLine = useCallback(
@@ -346,6 +320,16 @@ export default function Orders() {
     const handleUnpack = useCallback(
         (lineId: string) => mutations.unpackLine.mutate(lineId),
         [mutations.unpackLine]
+    );
+
+    // Ship line directly (packed → shipped) using unified status endpoint
+    const handleShipLine = useCallback(
+        (lineId: string, data: { awbNumber: string; courier: string }) => {
+            // Use the new unified status endpoint
+            // For now, fall back to markShippedLine which will be updated to ship directly
+            mutations.markShippedLine.mutate({ lineId, data });
+        },
+        [mutations.markShippedLine]
     );
 
     const handleCustomize = useCallback(
@@ -468,6 +452,7 @@ export default function Orders() {
         onUnpick: handleUnpick,
         onPack: handlePack,
         onUnpack: handleUnpack,
+        onShipLine: handleShipLine,
         onMarkShippedLine: handleMarkShippedLine,
         onUnmarkShippedLine: handleUnmarkShippedLine,
         onUpdateLineTracking: handleUpdateLineTracking,
@@ -671,16 +656,6 @@ export default function Orders() {
                             </select>
                         </div>
                         <div className="flex items-center gap-2">
-                            {markedShippedCount > 0 && (
-                                <button
-                                    onClick={() => setShowProcessShippedModal(true)}
-                                    disabled={mutations.processMarkedShipped.isPending}
-                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 font-medium"
-                                >
-                                    <Truck size={12} />
-                                    Clear {markedShippedCount} Shipped
-                                </button>
-                            )}
                             {closableLineIds.length > 0 && (
                                 <button
                                     onClick={() => {
@@ -909,14 +884,7 @@ export default function Orders() {
                 />
             )}
 
-            {showProcessShippedModal && (
-                <ProcessShippedModal
-                    orders={ordersWithMarkedShipped}
-                    onProcess={(data) => mutations.processMarkedShipped.mutate(data)}
-                    onClose={() => setShowProcessShippedModal(false)}
-                    isProcessing={mutations.processMarkedShipped.isPending}
-                />
-            )}
+            {/* ProcessShippedModal removed - using simplified direct ship flow */}
 
             {selectedCustomerId && (
                 <CustomerDetailModal

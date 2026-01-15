@@ -19,7 +19,6 @@ interface UseOrdersMutationsOptions {
     onDeleteSuccess?: () => void;
     onEditSuccess?: () => void;
     onNotesSuccess?: () => void;
-    onProcessMarkedShippedSuccess?: () => void;
 }
 
 // Context types for optimistic update mutations
@@ -466,97 +465,74 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // NO onSettled - optimistic update is authoritative on success
     });
 
-    // Mark shipped (visual only - no inventory release)
+    // Ship line directly (packed → shipped) using unified status endpoint
+    // This is the simplified flow - no more intermediate "marked_shipped" state
     const markShippedLine = useMutation<unknown, any, { lineId: string; data?: { awbNumber?: string; courier?: string } }, LineUpdateContext>({
-        mutationFn: ({ lineId, data }) => ordersApi.markShippedLine(lineId, data),
+        mutationFn: ({ lineId, data }) => ordersApi.setLineStatus(lineId, 'shipped', data),
         onMutate: async ({ lineId }): Promise<LineUpdateContext> => {
             clearPendingInvalidation();
             const status = getLineStatus(lineId);
             if (status !== 'packed') return { skipped: true };
-            return optimisticLineUpdate(lineId, 'marked_shipped');
+            return optimisticLineUpdate(lineId, 'shipped');
+        },
+        onSuccess: () => {
+            // Shipped lines move from open to shipped view
+            invalidateOpenOrders();
+            invalidateShippedOrders();
         },
         onError: (err: any, _vars, context) => {
             if (context?.skipped) return;
             const errorMsg = err.response?.data?.error || '';
-            if (errorMsg.includes('packed') || errorMsg.includes('marked_shipped')) {
+            if (errorMsg.includes('packed') || errorMsg.includes('shipped')) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
                 trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
-            alert(errorMsg || 'Failed to mark line as shipped');
+            alert(errorMsg || 'Failed to ship line');
         },
-        // NO onSettled - optimistic update is authoritative on success
     });
 
+    // Unship line (shipped → packed) - reverses shipping
     const unmarkShippedLine = useMutation<unknown, any, string, LineUpdateContext>({
-        mutationFn: (lineId: string) => ordersApi.unmarkShippedLine(lineId),
+        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'packed'),
         onMutate: async (lineId): Promise<LineUpdateContext> => {
             clearPendingInvalidation();
             const status = getLineStatus(lineId);
-            if (status !== 'marked_shipped') return { skipped: true };
+            if (status !== 'shipped') return { skipped: true };
             return optimisticLineUpdate(lineId, 'packed');
+        },
+        onSuccess: () => {
+            // Unshipped lines move from shipped back to open view
+            invalidateOpenOrders();
+            invalidateShippedOrders();
         },
         onError: (err: any, _lineId, context) => {
             if (context?.skipped) return;
             const errorMsg = err.response?.data?.error || '';
-            if (errorMsg.includes('packed') || errorMsg.includes('marked_shipped')) {
+            if (errorMsg.includes('packed') || errorMsg.includes('shipped')) {
                 debouncedInvalidateOpenOrders();
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
                 trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
-            alert(errorMsg || 'Failed to unmark shipped line');
+            alert(errorMsg || 'Failed to unship line');
         },
-        // NO onSettled - optimistic update is authoritative on success
     });
 
-    // Update line tracking (AWB/courier) with optimistic update
+    // Update line tracking (AWB/courier) - uses generic updateLine endpoint
     const updateLineTracking = useMutation({
         mutationFn: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }) =>
-            ordersApi.updateLineTracking(lineId, data),
-        onMutate: async ({ lineId, data }) => {
-            await queryClient.cancelQueries({ queryKey: orderQueryKeys.open });
-            const previousOrders = queryClient.getQueryData(orderQueryKeys.open);
-
-            // Optimistically update tracking info in cache
-            queryClient.setQueryData(orderQueryKeys.open, (old: any[] | undefined) => {
-                if (!old) return old;
-                return old.map(order => ({
-                    ...order,
-                    orderLines: order.orderLines?.map((line: any) =>
-                        line.id === lineId
-                            ? { ...line, ...data }
-                            : line
-                    )
-                }));
-            });
-
-            return { previousOrders };
-        },
-        onError: (err: any, _vars, context) => {
-            if (context?.previousOrders) {
-                queryClient.setQueryData(['openOrders'], context.previousOrders);
-            }
-            // Log error silently - frontend validation should prevent most cases
-            console.error('Tracking update failed:', err.response?.data?.error || err.message);
-        },
-        // No invalidation needed - optimistic update is sufficient
-    });
-
-    // Process all marked shipped lines (batch clear)
-    const processMarkedShipped = useMutation({
-        mutationFn: (data?: { comment?: string }) => ordersApi.processMarkedShipped(data),
-        onSuccess: (response: any) => {
+            ordersApi.updateLine(lineId, data),
+        onSuccess: () => {
             invalidateOpenOrders();
             invalidateShippedOrders();
-            const { processed, orders } = response.data;
-            alert(`Processed ${processed} lines across ${orders?.length || 0} orders`);
-            options.onProcessMarkedShippedSuccess?.();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to process marked shipped lines')
+        onError: (err: any) => {
+            console.error('Tracking update failed:', err.response?.data?.error || err.message);
+        },
     });
 
     // Migrate Shopify fulfilled orders (onboarding - no inventory)
@@ -1029,11 +1005,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         packLine,
         unpackLine,
 
-        // Mark shipped (spreadsheet workflow)
+        // Ship line (direct: packed → shipped)
         markShippedLine,
         unmarkShippedLine,
         updateLineTracking,
-        processMarkedShipped,
 
         // Migration (onboarding)
         migrateShopifyFulfilled,

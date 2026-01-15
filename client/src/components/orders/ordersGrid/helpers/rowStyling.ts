@@ -11,7 +11,7 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
  * Colors indicate workflow progress:
  * - Gray: Pending/blocked
  * - Amber: In production
- * - Green: Ready to allocate or marked shipped
+ * - Green: Ready to allocate or shipped
  * - Purple: Allocated
  * - Teal: Picked
  * - Blue: Packed
@@ -30,8 +30,8 @@ export function getRowStyle(params: { data: FlattenedOrderRow }): RowStyle | und
         };
     }
 
-    // Marked shipped - DONE state, very distinct green with strikethrough
-    if (row.lineStatus === 'marked_shipped') {
+    // Shipped - DONE state, very distinct green with strikethrough
+    if (row.lineStatus === 'shipped') {
         return {
             backgroundColor: '#bbf7d0',  // Green-200 - strong green
             textDecoration: 'line-through',

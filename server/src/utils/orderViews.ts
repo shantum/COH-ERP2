@@ -163,19 +163,18 @@ export interface EnrichedOrder {
  */
 export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
     /**
-     * Open Orders: Orders with at least one line that is not closed
-     * Uses closedAt on OrderLine for visibility control (not Order.status)
-     * Cancelled lines still show in open view (with strikethrough) until explicitly closed
+     * Open Orders: Orders with at least one line not shipped/cancelled
+     * SIMPLIFIED: Uses lineStatus directly (no closedAt complexity)
      */
     open: {
         name: 'Open Orders',
         description: 'Orders pending fulfillment',
         where: {
             isArchived: false,
-            // At least one line is open (closedAt is null) - includes cancelled lines
+            // At least one line is not shipped and not cancelled
             orderLines: {
                 some: {
-                    closedAt: null,
+                    lineStatus: { notIn: ['shipped', 'cancelled'] },
                 },
             },
         },
@@ -185,31 +184,27 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
     },
 
     /**
-     * Shipped/Closed Orders: Orders where all non-cancelled lines are closed
-     * This is the inverse of 'open' - all active lines have closedAt set
+     * Shipped Orders: All non-cancelled lines are shipped
+     * SIMPLIFIED: Uses lineStatus = 'shipped' (no closedAt complexity)
      */
     shipped: {
         name: 'Shipped Orders',
         description: 'Orders in transit or delivered',
         where: {
             isArchived: false,
-            // All non-cancelled lines are closed
+            rtoInitiatedAt: null, // Not RTO
+            // All non-cancelled lines are shipped
             NOT: {
                 orderLines: {
                     some: {
-                        closedAt: null,
-                        lineStatus: { not: 'cancelled' },
+                        lineStatus: { notIn: ['shipped', 'cancelled'] },
                     },
                 },
             },
-            // Must have at least one line (exclude empty orders)
+            // Must have at least one shipped line
             orderLines: {
-                some: {},
+                some: { lineStatus: 'shipped' },
             },
-        },
-        // Exclude RTO orders
-        excludeWhere: {
-            trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
         },
         // Exclude delivered COD awaiting payment
         excludeCodPending: true,

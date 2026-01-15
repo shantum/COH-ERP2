@@ -19,7 +19,7 @@
  * ROW STYLING:
  * - Each row = one order line with order-level header row
  * - isFirstLine distinguishes header (aggregated order info) vs continuation (line items)
- * - Color-coded by lineStatus: green=marked_shipped, blue=packed, teal=picked, etc.
+ * - Color-coded by lineStatus: green=shipped, blue=packed, teal=picked, etc.
  * - Border left indicators for urgency (red >5 days, amber 3-5 days)
  * - Struck-through for cancelled lines
  *
@@ -421,7 +421,9 @@ interface OrdersGridProps {
     onUnpick: (lineId: string) => void;
     onPack: (lineId: string) => void;
     onUnpack: (lineId: string) => void;
-    // Mark shipped (spreadsheet workflow)
+    // Ship line directly (simplified flow: packed → shipped)
+    onShipLine?: (lineId: string, data: { awbNumber: string; courier: string }) => void;
+    // Legacy mark shipped (deprecated - use onShipLine)
     onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
     onUnmarkShippedLine: (lineId: string) => void;
     onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
@@ -494,8 +496,9 @@ export function OrdersGrid({
     onUnpick,
     onPack,
     onUnpack,
-    onMarkShippedLine,
-    onUnmarkShippedLine,
+    onShipLine,
+    onMarkShippedLine: _onMarkShippedLine,  // Deprecated - use onShipLine
+    onUnmarkShippedLine: _onUnmarkShippedLine,  // Deprecated
     onUpdateLineTracking,
     onShip,
     onCreateBatch,
@@ -1369,8 +1372,8 @@ export function OrdersGrid({
                     if (!row || row.lineStatus === 'cancelled') return null;
                     const isToggling = allocatingLines.has(row.lineId);
                     const canPick = row.lineStatus === 'allocated';
-                    // Include marked_shipped in picked state (it must have been picked)
-                    const isPicked = ['picked', 'packed', 'marked_shipped'].includes(row.lineStatus);
+                    // Include shipped in picked state (it must have been picked)
+                    const isPicked = ['picked', 'packed', 'shipped'].includes(row.lineStatus);
 
                     if (isPicked) {
                         return (
@@ -1384,7 +1387,7 @@ export function OrdersGrid({
                                     ? 'bg-teal-500 border-teal-500 text-white hover:bg-teal-600 shadow-sm'
                                     : 'bg-teal-200 border-teal-200 text-teal-600'
                                     }`}
-                                title={row.lineStatus === 'picked' ? 'Click to unpick' : row.lineStatus === 'marked_shipped' ? 'Marked shipped' : 'Packed'}
+                                title={row.lineStatus === 'picked' ? 'Click to unpick' : row.lineStatus === 'shipped' ? 'Shipped' : 'Packed'}
                             >
                                 <Check size={12} strokeWidth={3} />
                             </button>
@@ -1420,24 +1423,24 @@ export function OrdersGrid({
                     if (!row || row.lineStatus === 'cancelled') return null;
                     const isToggling = allocatingLines.has(row.lineId);
                     const canPack = row.lineStatus === 'picked';
-                    // Include marked_shipped in packed state (it must have been packed)
-                    const isPacked = ['packed', 'marked_shipped'].includes(row.lineStatus);
+                    // Include shipped in packed state (it must have been packed)
+                    const isPacked = ['packed', 'shipped'].includes(row.lineStatus);
 
                     if (isPacked) {
-                        const isMarkedShipped = row.lineStatus === 'marked_shipped';
+                        const isShipped = row.lineStatus === 'shipped';
                         return (
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    if (!isMarkedShipped) onUnpack(row.lineId);
+                                    if (!isShipped) onUnpack(row.lineId);
                                 }}
-                                disabled={isToggling || isMarkedShipped}
+                                disabled={isToggling || isShipped}
                                 className={`w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all ${
-                                    isMarkedShipped
+                                    isShipped
                                         ? 'bg-blue-200 border-blue-200 text-blue-600 cursor-not-allowed'
                                         : 'bg-blue-500 border-blue-500 text-white hover:bg-blue-600 shadow-sm'
                                 }`}
-                                title={isMarkedShipped ? 'Marked shipped' : 'Click to unpack'}
+                                title={isShipped ? 'Already shipped' : 'Click to unpack'}
                             >
                                 <Check size={12} strokeWidth={3} />
                             </button>
@@ -1470,37 +1473,44 @@ export function OrdersGrid({
                 width: 35,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
-                    if (!row || row.lineStatus === 'cancelled' || row.lineStatus === 'shipped') return null;
+                    if (!row || row.lineStatus === 'cancelled') return null;
 
                     const isPacked = row.lineStatus === 'packed';
-                    const isMarkedShipped = row.lineStatus === 'marked_shipped';
+                    const isShipped = row.lineStatus === 'shipped';
 
-                    // Marked shipped - show green checkbox (can unmark)
-                    if (isMarkedShipped) {
+                    // Already shipped - show green filled checkbox
+                    if (isShipped) {
                         return (
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onUnmarkShippedLine(row.lineId);
-                                }}
-                                className="w-5 h-5 rounded border-2 bg-green-500 border-green-500 text-white flex items-center justify-center mx-auto hover:bg-green-600 hover:border-green-600 shadow-sm"
-                                title="Click to unmark shipped"
+                            <div
+                                className="w-5 h-5 rounded border-2 bg-green-500 border-green-500 text-white flex items-center justify-center mx-auto shadow-sm"
+                                title="Shipped"
                             >
                                 <Check size={12} strokeWidth={3} />
-                            </button>
+                            </div>
                         );
                     }
 
-                    // Packed - show empty checkbox (can mark shipped)
+                    // Packed - show empty checkbox (can ship)
+                    // Clicking will trigger ship with Shopify AWB or prompt for AWB
                     if (isPacked) {
+                        const shopifyAwb = row.shopifyAwb || row.awbNumber;
                         return (
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    onMarkShippedLine(row.lineId);
+                                    if (shopifyAwb) {
+                                        // Has AWB - ship directly
+                                        onShipLine?.(row.lineId, { awbNumber: shopifyAwb, courier: row.courier || 'Unknown' });
+                                    } else {
+                                        // No AWB - prompt for it
+                                        const awb = prompt('AWB Number (required):');
+                                        if (!awb?.trim()) return;
+                                        const courier = prompt('Courier:') || 'Unknown';
+                                        onShipLine?.(row.lineId, { awbNumber: awb.trim(), courier });
+                                    }
                                 }}
                                 className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm"
-                                title="Click to mark shipped"
+                                title={shopifyAwb ? `Ship with AWB: ${shopifyAwb}` : 'Click to ship (will prompt for AWB)'}
                             />
                         );
                     }
@@ -1648,7 +1658,7 @@ export function OrdersGrid({
                 width: 140,
                 editable: (params: EditableCallbackParams) => {
                     const status = params.data?.lineStatus;
-                    return ['packed', 'marked_shipped'].includes(status);
+                    return ['packed', 'shipped'].includes(status);
                 },
                 valueGetter: (params: ValueGetterParams) => {
                     // Get line-level AWB from the order line
@@ -1660,7 +1670,7 @@ export function OrdersGrid({
                 valueSetter: (params: ValueSetterParams) => {
                     // Double-check status before calling API to prevent stale data issues
                     const status = params.data?.lineStatus;
-                    if (!['packed', 'marked_shipped'].includes(status)) {
+                    if (!['packed', 'shipped'].includes(status)) {
                         console.warn('Cannot update AWB - line status is:', status);
                         return false;
                     }
@@ -1687,7 +1697,7 @@ export function OrdersGrid({
                     const expectedAwb = row.order?.shopifyCache?.trackingNumber || '';
 
                     // Check if cell is editable
-                    const isEditable = ['packed', 'marked_shipped'].includes(row.lineStatus);
+                    const isEditable = ['packed', 'shipped'].includes(row.lineStatus);
 
                     // Determine match status
                     const hasExpected = !!expectedAwb;
@@ -1726,7 +1736,7 @@ export function OrdersGrid({
                 },
                 cellClass: (params: CellClassParams) => {
                     const status = params.data?.lineStatus;
-                    const editable = ['packed', 'marked_shipped'].includes(status);
+                    const editable = ['packed', 'shipped'].includes(status);
                     return editable ? 'text-xs cursor-text' : 'text-xs';
                 },
             },
@@ -1736,7 +1746,7 @@ export function OrdersGrid({
                 width: 100,
                 editable: (params: EditableCallbackParams) => {
                     const status = params.data?.lineStatus;
-                    return ['packed', 'marked_shipped'].includes(status);
+                    return ['packed', 'shipped'].includes(status);
                 },
                 cellEditor: 'agSelectCellEditor',
                 cellEditorParams: {
@@ -1751,7 +1761,7 @@ export function OrdersGrid({
                 valueSetter: (params: ValueSetterParams) => {
                     // Double-check status before calling API to prevent stale data issues
                     const status = params.data?.lineStatus;
-                    if (!['packed', 'marked_shipped'].includes(status)) {
+                    if (!['packed', 'shipped'].includes(status)) {
                         console.warn('Cannot update courier - line status is:', status);
                         return false;
                     }
@@ -1775,7 +1785,7 @@ export function OrdersGrid({
                     const orderLines = row.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
                     const courier = line?.courier || '';
-                    const isEditable = ['packed', 'marked_shipped'].includes(row.lineStatus);
+                    const isEditable = ['packed', 'shipped'].includes(row.lineStatus);
 
                     if (!courier) {
                         if (isEditable) {
@@ -1794,7 +1804,7 @@ export function OrdersGrid({
                 },
                 cellClass: (params: CellClassParams) => {
                     const status = params.data?.lineStatus;
-                    const editable = ['packed', 'marked_shipped'].includes(status);
+                    const editable = ['packed', 'shipped'].includes(status);
                     return editable ? 'text-xs cursor-pointer' : 'text-xs';
                 },
             },
@@ -1805,9 +1815,9 @@ export function OrdersGrid({
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.data?.isFirstLine) return null;
                     const order = params.data.order;
-                    // Only show iThink status if we have actual iThink data
-                    const hasIThinkData = order?.courierStatusCode || order?.lastScanAt || order?.lastTrackingUpdate;
-                    if (!hasIThinkData) {
+                    // Show tracking status if any tracking data exists
+                    const hasTrackingData = order?.trackingStatus || order?.courierStatusCode || order?.lastScanAt || order?.lastTrackingUpdate;
+                    if (!hasTrackingData) {
                         return <span className="text-gray-400 text-xs">-</span>;
                     }
                     return (
@@ -2190,8 +2200,8 @@ export function OrdersGrid({
             };
         }
 
-        // Marked shipped - DONE state, very distinct green with strikethrough
-        if (row.lineStatus === 'marked_shipped') {
+        // Shipped - DONE state, very distinct green with strikethrough
+        if (row.lineStatus === 'shipped') {
             return {
                 backgroundColor: '#bbf7d0',  // Green-200 - strong green
                 textDecoration: 'line-through',
@@ -2271,7 +2281,7 @@ export function OrdersGrid({
         const classes = [row.isFirstLine ? 'order-first-line' : 'order-continuation-line'];
 
         // Line status classes (shipped takes priority, then cancelled)
-        if (row.lineStatus === 'marked_shipped') {
+        if (row.lineStatus === 'shipped') {
             classes.push('line-shipped');
         } else if (row.lineStatus === 'cancelled') {
             classes.push('line-cancelled');
@@ -2279,7 +2289,7 @@ export function OrdersGrid({
 
         // Calculate order age for urgency indicator (only on first line to avoid repetition)
         // Don't show urgency on shipped/cancelled lines
-        if (row.isFirstLine && row.orderDate && !['marked_shipped', 'cancelled'].includes(row.lineStatus)) {
+        if (row.isFirstLine && row.orderDate && !['shipped', 'cancelled'].includes(row.lineStatus)) {
             const orderDate = new Date(row.orderDate);
             const daysOld = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
             if (daysOld > 5) {

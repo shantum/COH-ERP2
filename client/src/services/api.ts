@@ -200,26 +200,6 @@ export const ordersApi = {
     getArchived: (params?: { limit?: number; offset?: number; days?: number; search?: string; sortBy?: string }) =>
         api.get('/orders', { params: { view: 'archived', ...params } }),
 
-    // Action-oriented views (Zen Philosophy)
-    getReadyToShip: (params?: { limit?: number; offset?: number; search?: string }) =>
-        api.get('/orders', { params: { view: 'ready_to_ship', ...params } }),
-
-    getNeedsAttention: (params?: { limit?: number; offset?: number; search?: string }) =>
-        api.get('/orders', { params: { view: 'needs_attention', ...params } }),
-
-    getWatchList: (params?: { limit?: number; offset?: number; search?: string }) =>
-        api.get('/orders', { params: { view: 'watch_list', ...params } }),
-
-    getInTransit: (params?: { limit?: number; offset?: number; search?: string }) =>
-        api.get('/orders', { params: { view: 'in_transit', ...params } }),
-
-    getPendingPayment: (params?: { limit?: number; offset?: number; search?: string }) =>
-        api.get('/orders', { params: { view: 'pending_payment', ...params } }),
-
-    getCompleted: (params?: { limit?: number; offset?: number; search?: string }) =>
-        api.get('/orders', { params: { view: 'completed', ...params } }),
-
-    getCancelled: () => api.get('/orders/status/cancelled'),
     archive: (id: string) => api.post(`/orders/${id}/archive`),
     unarchive: (id: string) => api.post(`/orders/${id}/unarchive`),
     getById: (id: string) => api.get(`/orders/${id}`),
@@ -243,13 +223,9 @@ export const ordersApi = {
         api.delete(`/orders/lines/${lineId}/customize${options?.force ? '?force=true' : ''}`),
     packLine: (lineId: string) => api.post(`/orders/lines/${lineId}/pack`),
     unpackLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unpack`),
-    // Mark shipped (visual only - no inventory release)
-    markShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) =>
-        api.post(`/orders/lines/${lineId}/mark-shipped`, data),
-    unmarkShippedLine: (lineId: string) => api.post(`/orders/lines/${lineId}/unmark-shipped`),
-    updateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) =>
-        api.patch(`/orders/lines/${lineId}/tracking`, data),
-    processMarkedShipped: (data?: { comment?: string }) => api.post('/orders/process-marked-shipped', data),
+    // Unified line status endpoint (simplified flow)
+    setLineStatus: (lineId: string, status: string, shipData?: { awbNumber?: string; courier?: string }) =>
+        api.post(`/orders/lines/${lineId}/status`, { status, shipData }),
     // Migration (onboarding - no inventory, uses Shopify fulfillment data)
     migrateShopifyFulfilled: () => api.post('/orders/migrate-shopify-fulfilled'),
     // Ship (with inventory release)
@@ -258,7 +234,6 @@ export const ordersApi = {
     // Force ship (admin only - no inventory, bypasses workflow)
     forceShip: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/migration-ship`, data),
     unship: (id: string) => api.post(`/orders/${id}/unship`),
-    deliver: (id: string) => api.post(`/orders/${id}/deliver`),
     // Summary and analytics endpoints
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),
     getArchivedAnalytics: (params?: { days?: number }) => api.get('/orders/archived/analytics', { params }),
@@ -280,8 +255,6 @@ export const ordersApi = {
     reopenLines: (lineIds: string[]) => api.post('/orders/lines/reopen', { lineIds }),
     closeOrder: (orderId: string) => api.post(`/orders/${orderId}/close`),
     reopenOrder: (orderId: string) => api.post(`/orders/${orderId}/reopen`),
-    // Fix incorrectly cancelled orders
-    fixCancelledStatus: () => api.post('/orders/fix-cancelled-status'),
 };
 
 // Catalog (combined products + inventory view)
