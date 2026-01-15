@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, RefreshCw, Send, ChevronDown, Archive } from 'lucide-react';
+import { Plus, RefreshCw, Send, ChevronDown, Archive, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Custom hooks
 import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersData';
@@ -46,13 +46,24 @@ export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
 
-    // View state - persisted in URL
+    // View and page state - persisted in URL
     const [searchParams, setSearchParams] = useSearchParams();
     const view = (searchParams.get('view') as OrderView) || 'open';
+    const page = parseInt(searchParams.get('page') || '1', 10);
+
     const setView = useCallback((newView: OrderView) => {
         setSearchParams(prev => {
             const newParams = new URLSearchParams(prev);
             newParams.set('view', newView);
+            newParams.set('page', '1'); // Reset to page 1 on view change
+            return newParams;
+        }, { replace: true });
+    }, [setSearchParams]);
+
+    const setPage = useCallback((newPage: number) => {
+        setSearchParams(prev => {
+            const newParams = new URLSearchParams(prev);
+            newParams.set('page', String(newPage));
             return newParams;
         }, { replace: true });
     }, [setSearchParams]);
@@ -87,10 +98,10 @@ export default function Orders() {
         notes?: string;
     } | null>(null);
 
-    // Data hook - simplified, single view
+    // Data hook - simplified, single view with pagination
     const {
         orders,
-        viewCount,
+        pagination,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -103,6 +114,7 @@ export default function Orders() {
         refetch,
     } = useUnifiedOrdersData({
         currentView: view,
+        page,
         selectedCustomerId,
     });
 
@@ -494,7 +506,7 @@ export default function Orders() {
                                 onChange={(e) => setView(e.target.value as OrderView)}
                                 className="appearance-none text-sm font-medium bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-300 cursor-pointer"
                             >
-                                <option value="open">Open Orders ({viewCount})</option>
+                                <option value="open">Open Orders{pagination?.total ? ` (${pagination.total})` : ''}</option>
                                 <option value="shipped">Shipped</option>
                                 <option value="rto">RTO</option>
                                 <option value="cod_pending">COD Pending</option>
@@ -612,6 +624,36 @@ export default function Orders() {
                 {!isLoading && filteredRows.length === 0 && (
                     <div className="text-center text-gray-400 py-16">
                         No {VIEW_CONFIG[view].label.toLowerCase()}
+                    </div>
+                )}
+
+                {/* Pagination */}
+                {pagination && pagination.totalPages > 1 && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+                        <div className="text-sm text-gray-600">
+                            Showing {((page - 1) * 500) + 1}–{Math.min(page * 500, pagination.total)} of {pagination.total} orders
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setPage(page - 1)}
+                                disabled={page === 1 || isFetching}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <ChevronLeft size={14} />
+                                Previous
+                            </button>
+                            <span className="text-sm text-gray-600 px-2">
+                                Page {page} of {pagination.totalPages}
+                            </span>
+                            <button
+                                onClick={() => setPage(page + 1)}
+                                disabled={page >= pagination.totalPages || isFetching}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Next
+                                <ChevronRight size={14} />
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>

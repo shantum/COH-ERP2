@@ -8,6 +8,7 @@
  * 3. All other views load on-demand when selected
  *
  * Views: open, shipped, rto, cod_pending, cancelled, archived
+ * Pagination: 500 orders per page
  */
 
 import { useMemo, useEffect } from 'react';
@@ -20,6 +21,8 @@ import { trpc } from '../services/trpc';
 const POLL_INTERVAL = 30000;
 // Stale time prevents double-fetches when data is still fresh
 const STALE_TIME = 25000;
+// Orders per page
+const PAGE_SIZE = 500;
 
 // All available views
 export type OrderView = 'open' | 'shipped' | 'rto' | 'cod_pending' | 'cancelled' | 'archived';
@@ -29,23 +32,26 @@ export type UnifiedOrderTab = OrderView;
 
 interface UseUnifiedOrdersDataOptions {
     currentView: OrderView;
+    page: number;
     selectedCustomerId?: string | null;
 }
 
 export function useUnifiedOrdersData({
     currentView,
+    page,
     selectedCustomerId,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
 
     // ==========================================
-    // MAIN ORDER QUERY - Fetches current view only
+    // MAIN ORDER QUERY - Fetches current view with pagination
     // ==========================================
 
     const ordersQuery = trpc.orders.list.useQuery(
         {
             view: currentView,
-            limit: currentView === 'open' || currentView === 'shipped' ? 2000 : 200,
+            page,
+            limit: PAGE_SIZE,
         },
         {
             staleTime: STALE_TIME,
@@ -56,18 +62,18 @@ export function useUnifiedOrdersData({
     );
 
     // ==========================================
-    // HYBRID LOADING: Prefetch shipped after open loads
+    // HYBRID LOADING: Prefetch shipped page 1 after open loads
     // ==========================================
 
     useEffect(() => {
-        if (currentView === 'open' && ordersQuery.isSuccess) {
-            // Prefetch shipped view in background
+        if (currentView === 'open' && page === 1 && ordersQuery.isSuccess) {
+            // Prefetch shipped view page 1 in background
             queryClient.prefetchQuery({
-                queryKey: [['orders', 'list'], { input: { view: 'shipped', limit: 2000 }, type: 'query' }],
+                queryKey: [['orders', 'list'], { input: { view: 'shipped', page: 1, limit: PAGE_SIZE }, type: 'query' }],
                 staleTime: STALE_TIME,
             });
         }
-    }, [currentView, ordersQuery.isSuccess, queryClient]);
+    }, [currentView, page, ordersQuery.isSuccess, queryClient]);
 
     // ==========================================
     // SUPPORTING DATA QUERIES
@@ -156,13 +162,9 @@ export function useUnifiedOrdersData({
     const orders = ordersQuery.data?.orders || [];
     const pagination = ordersQuery.data?.pagination;
 
-    // View count (from current query)
-    const viewCount = pagination?.total ?? orders.length;
-
     return {
         // Current view orders
         orders,
-        viewCount,
         pagination,
 
         // Supporting data
