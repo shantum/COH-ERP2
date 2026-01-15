@@ -1582,19 +1582,13 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyStatus'),
                 width: 80,
                 cellRenderer: (params: ICellRendererParams) => {
-                    // Check if THIS line has Shopify fulfillment (synced via syncFulfillmentsToOrderLines)
-                    const lineId = params.data?.lineId;
-                    const orderLines = params.data?.order?.orderLines || [];
-                    const line = orderLines.find((l: any) => l.id === lineId);
+                    // Use actual Shopify fulfillment status from cache (not inferred from tracking)
+                    const shopifyStatus = params.data?.shopifyStatus;
 
-                    // If no shopifyLineId, it's not a Shopify order line
-                    if (!line?.shopifyLineId) return null;
+                    // Not a Shopify order or no status
+                    if (!shopifyStatus || shopifyStatus === '-') return null;
 
-                    // Check if line has tracking data synced from Shopify (indicates fulfillment)
-                    // awbNumber or trackingStatus being set means Shopify has fulfilled this line
-                    const isInFulfillment = !!(line.awbNumber || line.trackingStatus);
-
-                    if (isInFulfillment) {
+                    if (shopifyStatus === 'fulfilled') {
                         return (
                             <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700">
                                 fulfilled
@@ -1602,7 +1596,15 @@ export function OrdersGrid({
                         );
                     }
 
-                    // Show unfulfilled for lines not in any fulfillment
+                    if (shopifyStatus === 'partial') {
+                        return (
+                            <span className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700">
+                                partial
+                            </span>
+                        );
+                    }
+
+                    // null/unfulfilled/restocked
                     return (
                         <span className="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600">
                             unfulfilled
@@ -1616,7 +1618,11 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyAwb'),
                 width: 130,
                 valueGetter: (params: ValueGetterParams) => {
-                    // Use synced AWB from order line (populated by syncFulfillmentsToOrderLines)
+                    // Only show AWB if Shopify order is actually fulfilled
+                    const shopifyStatus = params.data?.shopifyStatus;
+                    if (!shopifyStatus || !['fulfilled', 'partial'].includes(shopifyStatus)) {
+                        return '';
+                    }
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
@@ -1638,7 +1644,11 @@ export function OrdersGrid({
                 headerName: getHeaderName('shopifyCourier'),
                 width: 100,
                 valueGetter: (params: ValueGetterParams) => {
-                    // Use synced courier from order line (populated by syncFulfillmentsToOrderLines)
+                    // Only show courier if Shopify order is actually fulfilled
+                    const shopifyStatus = params.data?.shopifyStatus;
+                    if (!shopifyStatus || !['fulfilled', 'partial'].includes(shopifyStatus)) {
+                        return '';
+                    }
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
