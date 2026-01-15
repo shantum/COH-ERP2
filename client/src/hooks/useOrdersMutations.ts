@@ -143,6 +143,21 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         }
     });
 
+    // Force ship (admin only) - bypasses workflow, no inventory deduction
+    const forceShip = useMutation({
+        mutationFn: ({ id, data }: { id: string; data: { awbNumber: string; courier: string } }) =>
+            ordersApi.forceShip(id, data),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+            options.onShipSuccess?.();
+        },
+        onError: (err: any) => {
+            const errorData = err.response?.data;
+            alert(errorData?.error || 'Failed to force ship order');
+        }
+    });
+
     // Helper for optimistic line status updates (pick/pack operations)
     // Returns previous data for rollback on error
     // Now uses tRPC cache management since orders are fetched via tRPC
@@ -998,6 +1013,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // Ship
         ship,
         shipLines,
+        forceShip,
         unship,
 
         // Delivery tracking

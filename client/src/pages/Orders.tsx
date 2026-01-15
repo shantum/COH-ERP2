@@ -468,6 +468,7 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
+        onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
         onArchiveOrder: () => { }, // Not used on Orders page
         onCloseOrder: (id) => mutations.closeOrder.mutate(id),
         allocatingLines,
@@ -477,6 +478,7 @@ export default function Orders() {
         isArchiving: false, // Not used on Orders page
         isDeletingOrder: mutations.deleteOrder.isPending,
         isClosingOrder: mutations.closeOrder.isPending,
+        isAdmin: user?.role === 'admin',
     });
 
     // Tab configuration - only 2 tabs now

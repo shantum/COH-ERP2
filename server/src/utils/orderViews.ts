@@ -180,7 +180,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
             },
         },
         orderBy: { orderDate: 'desc' }, // Newest first
-        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
+        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution', 'daysInTransit'],
         defaultLimit: 10000,
     },
 
@@ -305,7 +305,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
             },
         },
         orderBy: { orderDate: 'asc' }, // FIFO - oldest first
-        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
+        enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution', 'daysInTransit'],
         defaultLimit: 10000,
     },
 

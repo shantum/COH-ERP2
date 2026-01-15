@@ -23,11 +23,14 @@ interface OrderActionPanelProps {
     onShip?: () => void;
     onBookShipment?: () => void;
     onCloseOrder?: () => void;  // Close order (move to shipped view)
+    onForceShip?: (data: { awbNumber: string; courier: string }) => void;  // Admin: ship without workflow
     canDelete: boolean;
     isCancelling: boolean;
     isArchiving: boolean;
     isDeleting: boolean;
     isClosing?: boolean;
+    isForceShipping?: boolean;
+    isAdmin?: boolean;
 }
 
 // Fulfillment progress indicator
@@ -138,11 +141,14 @@ export function OrderActionPanel({
     onShip,
     onBookShipment,
     onCloseOrder,
+    onForceShip,
     canDelete,
     isCancelling,
     isArchiving,
     isDeleting,
     isClosing,
+    isForceShipping,
+    isAdmin,
 }: OrderActionPanelProps) {
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -373,6 +379,28 @@ export function OrderActionPanel({
                         >
                             <Truck size={18} />
                             Book Shipment
+                        </button>
+                    )}
+
+                    {/* Force Ship Button - Admin only, bypasses workflow, no inventory */}
+                    {isAdmin && onForceShip && !isReadyToShip && (
+                        <button
+                            onClick={() => {
+                                const awbNumber = prompt('AWB Number (required):');
+                                if (!awbNumber?.trim()) return;
+                                const courier = prompt('Courier (required):');
+                                if (!courier?.trim()) return;
+                                if (confirm(`Force ship ${order.orderNumber}?\n\nThis will mark all lines as shipped WITHOUT inventory deduction.\nAWB: ${awbNumber}\nCourier: ${courier}`)) {
+                                    onForceShip({ awbNumber: awbNumber.trim(), courier: courier.trim() });
+                                    onClose();
+                                }
+                            }}
+                            disabled={isForceShipping}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-all text-sm font-medium border-2 border-amber-600 disabled:opacity-50"
+                            title="Admin: Ship without allocation/picking/packing (no inventory change)"
+                        >
+                            <Truck size={16} />
+                            {isForceShipping ? 'Shipping...' : 'Force Ship (Admin)'}
                         </button>
                     )}
 

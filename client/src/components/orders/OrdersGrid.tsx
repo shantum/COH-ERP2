@@ -449,6 +449,7 @@ interface OrdersGridProps {
     }) => void;
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
+    onForceShipOrder?: (orderId: string, data: { awbNumber: string; courier: string }) => void;
     allocatingLines: Set<string>;
     isCancellingOrder: boolean;
     isCancellingLine: boolean;
@@ -456,6 +457,7 @@ interface OrdersGridProps {
     isArchiving: boolean;
     isDeletingOrder: boolean;
     isClosingOrder?: boolean;
+    isAdmin?: boolean;
 }
 
 export function OrdersGrid({
@@ -488,6 +490,7 @@ export function OrdersGrid({
     onEditCustomization,
     onRemoveCustomization,
     onUpdateShipByDate,
+    onForceShipOrder,
     allocatingLines,
     isCancellingOrder,
     isCancellingLine,
@@ -495,6 +498,7 @@ export function OrdersGrid({
     isArchiving,
     isDeletingOrder,
     isClosingOrder,
+    isAdmin,
 }: OrdersGridProps) {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
@@ -1459,6 +1463,26 @@ export function OrdersGrid({
                                 }}
                                 className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm"
                                 title="Click to mark shipped"
+                            />
+                        );
+                    }
+
+                    // Admin can force ship any line
+                    if (isAdmin && onForceShipOrder) {
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const awbNumber = prompt('AWB Number (required):');
+                                    if (!awbNumber?.trim()) return;
+                                    const courier = prompt('Courier (required):');
+                                    if (!courier?.trim()) return;
+                                    if (confirm(`Force ship this order?\n\nThis will mark ALL lines as shipped WITHOUT inventory deduction.\nAWB: ${awbNumber}\nCourier: ${courier}`)) {
+                                        onForceShipOrder(row.orderId, { awbNumber: awbNumber.trim(), courier: courier.trim() });
+                                    }
+                                }}
+                                className="w-5 h-5 rounded border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 hover:border-amber-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm"
+                                title="Admin: Force ship (no inventory)"
                             />
                         );
                     }
