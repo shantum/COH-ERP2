@@ -724,6 +724,7 @@ export const ORDER_UNIFIED_SELECT = {
             awbNumber: true,
             courier: true,
             shippedAt: true,
+            deliveredAt: true,
             isCustomized: true,
             rtoCondition: true,
             trackingStatus: true,

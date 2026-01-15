@@ -1812,35 +1812,29 @@ export function OrdersGrid({
                 headerName: getHeaderName('trackingStatus'),
                 width: 110,
                 cellRenderer: (params: ICellRendererParams) => {
-                    // Get line-level tracking status - only show if line is in a fulfillment
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
-                    const order = params.data.order;
-                    const shopifyLineId = line?.shopifyLineId;
+                    const order = params.data?.order;
 
-                    // Check if this line is in a Shopify fulfillment
-                    let isInFulfillment = false;
-                    const rawData = order?.shopifyCache?.rawData;
-                    if (rawData && shopifyLineId) {
-                        try {
-                            const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-                            const fulfillments = shopifyOrder?.fulfillments || [];
-                            for (const f of fulfillments) {
-                                const lineIds = (f.line_items || []).map((li: any) => String(li.id));
-                                if (lineIds.includes(shopifyLineId)) {
-                                    isInFulfillment = true;
-                                    break;
-                                }
-                            }
-                        } catch { /* ignore parse errors */ }
+                    // Get tracking status from iThink sync (order level)
+                    let trackingStatus = order?.trackingStatus;
+
+                    // Check if order/line has been shipped (use any available date)
+                    const shippedAt = line?.shippedAt || order?.shippedAt;
+                    const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+
+                    // If no tracking status from iThink, derive from dates
+                    if (!trackingStatus) {
+                        if (order?.rtoInitiatedAt) {
+                            trackingStatus = order?.rtoReceivedAt ? 'rto_received' : 'rto_initiated';
+                        } else if (deliveredAt) {
+                            trackingStatus = 'delivered';
+                        } else if (shippedAt) {
+                            trackingStatus = 'in_transit';
+                        }
                     }
 
-                    // Only show tracking for fulfilled lines
-                    if (!isInFulfillment) return null;
-
-                    // Use line-level tracking status if available, fall back to order-level
-                    const trackingStatus = line?.trackingStatus || order?.trackingStatus;
                     if (!trackingStatus) return null;
 
                     return (
@@ -1858,10 +1852,16 @@ export function OrdersGrid({
             {
                 colId: 'shippedAt',
                 headerName: getHeaderName('shippedAt'),
-                field: 'order.shippedAt',
                 width: 100,
+                valueGetter: (params: ValueGetterParams) => {
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    // Fallback to order level if line level not available
+                    return line?.shippedAt || params.data?.order?.shippedAt || null;
+                },
                 valueFormatter: (params: ValueFormatterParams) => {
-                    if (!params.data?.isFirstLine || !params.value) return '';
+                    if (!params.value) return '';
                     const dt = formatDateTime(params.value);
                     return dt.date;
                 },
@@ -1870,10 +1870,16 @@ export function OrdersGrid({
             {
                 colId: 'deliveredAt',
                 headerName: getHeaderName('deliveredAt'),
-                field: 'order.deliveredAt',
                 width: 100,
+                valueGetter: (params: ValueGetterParams) => {
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    // Fallback to order level if line level not available
+                    return line?.deliveredAt || params.data?.order?.deliveredAt || null;
+                },
                 valueFormatter: (params: ValueFormatterParams) => {
-                    if (!params.data?.isFirstLine || !params.value) return '';
+                    if (!params.value) return '';
                     const dt = formatDateTime(params.value);
                     return dt.date;
                 },
@@ -1884,11 +1890,16 @@ export function OrdersGrid({
                 headerName: getHeaderName('deliveryDays'),
                 width: 60,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const order = params.data.order;
-                    if (!order?.shippedAt || !order?.deliveredAt) return null;
-                    const shipped = new Date(order.shippedAt);
-                    const delivered = new Date(order.deliveredAt);
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const order = params.data?.order;
+                    // Fallback to order level
+                    const shippedAt = line?.shippedAt || order?.shippedAt;
+                    const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                    if (!shippedAt || !deliveredAt) return null;
+                    const shipped = new Date(shippedAt);
+                    const delivered = new Date(deliveredAt);
                     return Math.ceil((delivered.getTime() - shipped.getTime()) / (1000 * 60 * 60 * 24));
                 },
                 cellRenderer: (params: ICellRendererParams) => {
@@ -1906,10 +1917,15 @@ export function OrdersGrid({
                 headerName: getHeaderName('daysInTransit'),
                 width: 60,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const order = params.data.order;
-                    if (!order?.shippedAt || order?.deliveredAt) return null; // Don't show if already delivered
-                    const shipped = new Date(order.shippedAt);
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const order = params.data?.order;
+                    // Fallback to order level
+                    const shippedAt = line?.shippedAt || order?.shippedAt;
+                    const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                    if (!shippedAt || deliveredAt) return null; // Don't show if already delivered
+                    const shipped = new Date(shippedAt);
                     return Math.floor((Date.now() - shipped.getTime()) / (1000 * 60 * 60 * 24));
                 },
                 cellRenderer: (params: ICellRendererParams) => {
@@ -1928,7 +1944,7 @@ export function OrdersGrid({
                 field: 'order.rtoInitiatedAt',
                 width: 100,
                 valueFormatter: (params: ValueFormatterParams) => {
-                    if (!params.data?.isFirstLine || !params.value) return '';
+                    if (!params.value) return '';
                     const dt = formatDateTime(params.value);
                     return dt.date;
                 },
@@ -1939,8 +1955,7 @@ export function OrdersGrid({
                 headerName: getHeaderName('daysInRto'),
                 width: 60,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const order = params.data.order;
+                    const order = params.data?.order;
                     if (!order?.rtoInitiatedAt) return null;
                     const rtoDate = new Date(order.rtoInitiatedAt);
                     return Math.floor((Date.now() - rtoDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -1960,10 +1975,14 @@ export function OrdersGrid({
                 headerName: getHeaderName('daysSinceDelivery'),
                 width: 70,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const order = params.data.order;
-                    if (!order?.deliveredAt) return null;
-                    const delivered = new Date(order.deliveredAt);
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    const order = params.data?.order;
+                    // Fallback to order level
+                    const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                    if (!deliveredAt) return null;
+                    const delivered = new Date(deliveredAt);
                     return Math.floor((Date.now() - delivered.getTime()) / (1000 * 60 * 60 * 24));
                 },
                 cellRenderer: (params: ICellRendererParams) => {
@@ -1988,19 +2007,18 @@ export function OrdersGrid({
                 field: 'order.codRemittedAt',
                 width: 100,
                 valueFormatter: (params: ValueFormatterParams) => {
-                    if (!params.data?.isFirstLine || !params.value) return '';
+                    if (!params.value) return '';
                     const dt = formatDateTime(params.value);
                     return dt.date;
                 },
                 cellRenderer: (params: ICellRendererParams) => {
-                    if (!params.data?.isFirstLine) return null;
-                    const order = params.data.order;
+                    const order = params.data?.order;
                     if (order?.codRemittedAt) {
                         const dt = formatDateTime(order.codRemittedAt);
                         return <span className="text-xs text-green-600">{dt.date}</span>;
                     }
-                    // Show "Mark Remitted" button for COD pending
-                    if (order?.paymentMethod === 'COD' && order?.trackingStatus === 'delivered' && onMarkCodRemitted) {
+                    // Show "Mark Remitted" button only on first line (order-level action)
+                    if (params.data?.isFirstLine && order?.paymentMethod === 'COD' && order?.trackingStatus === 'delivered' && onMarkCodRemitted) {
                         return (
                             <button
                                 onClick={(e) => {
@@ -2023,7 +2041,7 @@ export function OrdersGrid({
                 field: 'order.archivedAt',
                 width: 100,
                 valueFormatter: (params: ValueFormatterParams) => {
-                    if (!params.data?.isFirstLine || !params.value) return '';
+                    if (!params.value) return '';
                     const dt = formatDateTime(params.value);
                     return dt.date;
                 },
@@ -2034,9 +2052,11 @@ export function OrdersGrid({
                 headerName: getHeaderName('finalStatus'),
                 width: 100,
                 valueGetter: (params: ValueGetterParams) => {
-                    if (!params.data?.isFirstLine) return '';
-                    const order = params.data.order;
-                    return order?.terminalStatus || order?.trackingStatus || '';
+                    const lineId = params.data?.lineId;
+                    const orderLines = params.data?.order?.orderLines || [];
+                    const line = orderLines.find((l: any) => l.id === lineId);
+                    // Use line trackingStatus, fallback to order-level for backward compatibility
+                    return line?.trackingStatus || params.data?.order?.terminalStatus || params.data?.order?.trackingStatus || '';
                 },
                 cellRenderer: (params: ICellRendererParams) => {
                     if (!params.value) return null;
@@ -2047,6 +2067,9 @@ export function OrdersGrid({
                         cancelled: 'bg-red-100 text-red-700',
                         returned: 'bg-orange-100 text-orange-700',
                         shipped: 'bg-blue-100 text-blue-700',
+                        in_transit: 'bg-sky-100 text-sky-700',
+                        out_for_delivery: 'bg-indigo-100 text-indigo-700',
+                        rto_initiated: 'bg-orange-100 text-orange-700',
                     };
                     const style = statusStyles[status] || 'bg-gray-100 text-gray-700';
                     const label = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
