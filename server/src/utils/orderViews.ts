@@ -185,14 +185,14 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
 
     /**
      * Shipped Orders: All non-cancelled lines are shipped
-     * SIMPLIFIED: Uses lineStatus = 'shipped' (no closedAt complexity)
+     * Includes RTO and COD pending orders (filtered client-side)
+     * No date filter - shows all shipped orders
      */
     shipped: {
         name: 'Shipped Orders',
-        description: 'Orders in transit or delivered',
+        description: 'All post-ship orders (in transit, delivered, RTO, COD pending)',
         where: {
             isArchived: false,
-            rtoInitiatedAt: null, // Not RTO
             // All non-cancelled lines are shipped
             NOT: {
                 orderLines: {
@@ -206,12 +206,9 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
                 some: { lineStatus: 'shipped' },
             },
         },
-        // Exclude delivered COD awaiting payment
-        excludeCodPending: true,
         orderBy: { shippedAt: 'desc' },
-        enrichment: ['daysInTransit', 'trackingStatus', 'shopifyTracking', 'customerStats'],
-        dateFilter: { field: 'shippedAt', defaultDays: 30 },
-        defaultLimit: 100,
+        enrichment: ['daysInTransit', 'trackingStatus', 'shopifyTracking', 'customerStats', 'daysSinceDelivery', 'rtoStatus'],
+        defaultLimit: 2000,
     },
 
     rto: {

@@ -1,20 +1,19 @@
 /**
  * useUnifiedOrdersData hook
- * Centralizes all data queries for the unified Orders page (all 6 tabs)
+ * Centralizes all data queries for the unified Orders page (4 tabs)
  *
  * Loading strategy:
  * 1. Active tab loads immediately
  * 2. Once active tab completes, remaining tabs load sequentially in background
- * 3. Priority order: Open → Shipped → RTO → COD Pending → Cancelled → Archived
+ * 3. Priority order: Open → Shipped → Cancelled → Archived
  *
- * This combines the previous useOrdersData and useShipmentsData hooks
- * into a single hook supporting all order views.
+ * RTO and COD Pending are now filters within the Shipped tab (client-side filtering).
  */
 
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fabricsApi, productionApi, adminApi, customersApi, ordersApi } from '../services/api';
-import { inventoryQueryKeys, orderQueryKeys } from '../constants/queryKeys';
+import { fabricsApi, productionApi, adminApi, customersApi } from '../services/api';
+import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 
 // Poll interval for data refresh (30 seconds)
@@ -22,13 +21,11 @@ const POLL_INTERVAL = 30000;
 // Stale time prevents double-fetches when data is still fresh
 const STALE_TIME = 25000;
 
-export type UnifiedOrderTab = 'open' | 'shipped' | 'rto' | 'cod-pending' | 'archived' | 'cancelled';
+export type UnifiedOrderTab = 'open' | 'shipped' | 'archived' | 'cancelled';
 
 interface UseUnifiedOrdersDataOptions {
     activeTab: UnifiedOrderTab;
     selectedCustomerId?: string | null;
-    // Shipped tab options
-    shippedDays?: number;
     // Archived tab options
     archivedDays?: number;
     archivedLimit?: number;
@@ -38,7 +35,6 @@ interface UseUnifiedOrdersDataOptions {
 export function useUnifiedOrdersData({
     activeTab,
     selectedCustomerId,
-    shippedDays = 30,
     archivedDays = 90,
     archivedLimit = 100,
     archivedSortBy = 'archivedAt'
@@ -52,7 +48,7 @@ export function useUnifiedOrdersData({
     // ORDER QUERIES - SEQUENTIAL BACKGROUND LOADING
     // ==========================================
     // Active tab loads immediately, remaining tabs load one-by-one after it completes.
-    // Priority: Open → Shipped → RTO → COD Pending → Cancelled → Archived
+    // Priority: Open → Shipped → Cancelled → Archived
 
     // Open orders (default tab) - limit 2000 for all open orders
     const openOrdersQuery = trpc.orders.list.useQuery(
@@ -66,8 +62,9 @@ export function useUnifiedOrdersData({
     );
 
     // Shipped loads: when tab is active OR after open completes
+    // Now includes RTO and COD pending orders (filtered client-side)
     const shippedOrdersQuery = trpc.orders.list.useQuery(
-        { view: 'shipped', days: shippedDays, limit: 500 },
+        { view: 'shipped', limit: 2000 },
         {
             staleTime: STALE_TIME,
             refetchOnWindowFocus: false,
@@ -77,31 +74,7 @@ export function useUnifiedOrdersData({
         }
     );
 
-    // RTO loads: when tab is active OR after shipped completes
-    const rtoOrdersQuery = trpc.orders.list.useQuery(
-        { view: 'rto' },
-        {
-            staleTime: STALE_TIME,
-            refetchOnWindowFocus: false,
-            refetchInterval: activeTab === 'rto' ? POLL_INTERVAL : false,
-            refetchIntervalInBackground: false,
-            enabled: activeTab === 'rto' || shippedOrdersQuery.isSuccess,
-        }
-    );
-
-    // COD Pending loads: when tab is active OR after RTO completes
-    const codPendingOrdersQuery = trpc.orders.list.useQuery(
-        { view: 'cod_pending' },
-        {
-            staleTime: STALE_TIME,
-            refetchOnWindowFocus: false,
-            refetchInterval: activeTab === 'cod-pending' ? POLL_INTERVAL : false,
-            refetchIntervalInBackground: false,
-            enabled: activeTab === 'cod-pending' || rtoOrdersQuery.isSuccess,
-        }
-    );
-
-    // Cancelled loads: when tab is active OR after COD Pending completes
+    // Cancelled loads: when tab is active OR after shipped completes
     const cancelledOrdersQuery = trpc.orders.list.useQuery(
         { view: 'cancelled' },
         {
@@ -109,7 +82,7 @@ export function useUnifiedOrdersData({
             refetchOnWindowFocus: false,
             refetchInterval: activeTab === 'cancelled' ? POLL_INTERVAL : false,
             refetchIntervalInBackground: false,
-            enabled: activeTab === 'cancelled' || codPendingOrdersQuery.isSuccess,
+            enabled: activeTab === 'cancelled' || shippedOrdersQuery.isSuccess,
         }
     );
 
@@ -211,24 +184,6 @@ export function useUnifiedOrdersData({
     });
 
     // ==========================================
-    // SUMMARY QUERIES (for Shipped and RTO tabs)
-    // ==========================================
-
-    const shippedSummaryQuery = useQuery({
-        queryKey: [...orderQueryKeys.shippedSummary, shippedDays],
-        queryFn: () => ordersApi.getShippedSummary({ days: shippedDays }).then(r => r.data),
-        staleTime: STALE_TIME,
-        enabled: activeTab === 'shipped' || shippedOrdersQuery.isSuccess,
-    });
-
-    const rtoSummaryQuery = useQuery({
-        queryKey: orderQueryKeys.rtoSummary,
-        queryFn: () => ordersApi.getRtoSummary().then(r => r.data),
-        staleTime: STALE_TIME,
-        enabled: activeTab === 'rto' || rtoOrdersQuery.isSuccess,
-    });
-
-    // ==========================================
     // COMPUTED VALUES
     // ==========================================
 
@@ -236,47 +191,58 @@ export function useUnifiedOrdersData({
     const isLoading =
         activeTab === 'open' ? openOrdersQuery.isLoading :
         activeTab === 'shipped' ? shippedOrdersQuery.isLoading :
-        activeTab === 'rto' ? rtoOrdersQuery.isLoading :
-        activeTab === 'cod-pending' ? codPendingOrdersQuery.isLoading :
         activeTab === 'cancelled' ? cancelledOrdersQuery.isLoading :
         archivedOrdersQuery.isLoading;
 
     // Extract orders from tRPC responses
     const openOrders = openOrdersQuery.data?.orders || [];
     const shippedOrders = shippedOrdersQuery.data?.orders || [];
-    const rtoOrders = rtoOrdersQuery.data?.orders || [];
-    const codPendingOrders = codPendingOrdersQuery.data?.orders || [];
     const cancelledOrders = cancelledOrdersQuery.data?.orders || [];
     const archivedOrders = archivedOrdersQuery.data?.orders || [];
+
+    // Compute RTO and COD pending counts from shipped orders (for filter badges)
+    const rtoCount = useMemo(() =>
+        shippedOrders.filter((o: any) =>
+            ['rto_in_transit', 'rto_delivered'].includes(o.trackingStatus)
+        ).length,
+        [shippedOrders]
+    );
+
+    const codPendingCount = useMemo(() =>
+        shippedOrders.filter((o: any) =>
+            o.paymentMethod === 'COD' &&
+            o.trackingStatus === 'delivered' &&
+            !o.codRemittedAt
+        ).length,
+        [shippedOrders]
+    );
 
     // Get orders for current tab
     const currentOrders = useMemo(() => {
         switch (activeTab) {
             case 'open': return openOrders;
             case 'shipped': return shippedOrders;
-            case 'rto': return rtoOrders;
-            case 'cod-pending': return codPendingOrders;
             case 'cancelled': return cancelledOrders;
             case 'archived': return archivedOrders;
             default: return openOrders;
         }
-    }, [activeTab, openOrders, shippedOrders, rtoOrders, codPendingOrders, cancelledOrders, archivedOrders]);
+    }, [activeTab, openOrders, shippedOrders, cancelledOrders, archivedOrders]);
 
     // Tab counts for badges
     const tabCounts = useMemo(() => ({
         open: openOrdersQuery.data?.pagination?.total ?? openOrders.length,
         shipped: shippedOrdersQuery.data?.pagination?.total ?? shippedOrders.length,
-        rto: rtoOrdersQuery.data?.pagination?.total ?? rtoOrders.length,
-        'cod-pending': codPendingOrdersQuery.data?.pagination?.total ?? codPendingOrders.length,
         cancelled: cancelledOrdersQuery.data?.pagination?.total ?? cancelledOrders.length,
         archived: archivedOrdersQuery.data?.pagination?.total ?? archivedOrders.length,
+        // RTO and COD counts for filter badges (computed from shipped data)
+        rto: rtoCount,
+        codPending: codPendingCount,
     }), [
         openOrdersQuery.data, openOrders,
         shippedOrdersQuery.data, shippedOrders,
-        rtoOrdersQuery.data, rtoOrders,
-        codPendingOrdersQuery.data, codPendingOrders,
         cancelledOrdersQuery.data, cancelledOrders,
         archivedOrdersQuery.data, archivedOrders,
+        rtoCount, codPendingCount,
     ]);
 
     return {
@@ -286,12 +252,10 @@ export function useUnifiedOrdersData({
         // All orders by view (for cross-view access if needed)
         openOrders,
         shippedOrders,
-        rtoOrders,
-        codPendingOrders,
         cancelledOrders,
         archivedOrders,
 
-        // Tab counts for badges
+        // Tab counts for badges (includes rto and codPending for filter badges)
         tabCounts,
 
         // Supporting data
@@ -300,12 +264,6 @@ export function useUnifiedOrdersData({
         fabricStock: fabricStockQuery.data,
         channels: channelsQuery.data,
         lockedDates: lockedDatesQuery.data,
-
-        // Summary data
-        shippedSummary: shippedSummaryQuery.data,
-        rtoSummary: rtoSummaryQuery.data,
-        loadingShippedSummary: shippedSummaryQuery.isLoading,
-        loadingRtoSummary: rtoSummaryQuery.isLoading,
 
         // Customer detail
         customerDetail: customerDetailQuery.data,
@@ -326,31 +284,23 @@ export function useUnifiedOrdersData({
         // Individual loading states
         loadingOpen: openOrdersQuery.isLoading,
         loadingShipped: shippedOrdersQuery.isLoading,
-        loadingRto: rtoOrdersQuery.isLoading,
-        loadingCodPending: codPendingOrdersQuery.isLoading,
         loadingCancelled: cancelledOrdersQuery.isLoading,
         loadingArchived: archivedOrdersQuery.isLoading,
 
         // Individual fetching states
         isFetchingOpen: openOrdersQuery.isFetching,
         isFetchingShipped: shippedOrdersQuery.isFetching,
-        isFetchingRto: rtoOrdersQuery.isFetching,
-        isFetchingCodPending: codPendingOrdersQuery.isFetching,
         isFetchingCancelled: cancelledOrdersQuery.isFetching,
         isFetchingArchived: archivedOrdersQuery.isFetching,
 
         // Refetch functions
         refetchOpen: openOrdersQuery.refetch,
         refetchShipped: shippedOrdersQuery.refetch,
-        refetchRto: rtoOrdersQuery.refetch,
-        refetchCodPending: codPendingOrdersQuery.refetch,
         refetchCancelled: cancelledOrdersQuery.refetch,
         refetchArchived: archivedOrdersQuery.refetch,
         refetchAll: () => {
             openOrdersQuery.refetch();
             shippedOrdersQuery.refetch();
-            rtoOrdersQuery.refetch();
-            codPendingOrdersQuery.refetch();
             cancelledOrdersQuery.refetch();
             archivedOrdersQuery.refetch();
         },

@@ -260,8 +260,8 @@ function ProductionDatePopover({
     );
 }
 
-// View type for unified order views
-export type OrderViewType = 'open' | 'shipped' | 'rto' | 'cod-pending' | 'archived' | 'cancelled';
+// View type for unified order views (RTO and COD Pending are now filters within Shipped)
+export type OrderViewType = 'open' | 'shipped' | 'archived' | 'cancelled';
 
 // All column IDs in display order (includes post-ship columns)
 const ALL_COLUMN_IDS = [

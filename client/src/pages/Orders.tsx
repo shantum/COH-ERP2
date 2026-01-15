@@ -1,6 +1,7 @@
 /**
- * Orders page - Unified order management with 6 view tabs
- * All order views (open, shipped, rto, cod-pending, archived, cancelled) in one place
+ * Orders page - Unified order management with 4 view tabs
+ * All order views (open, shipped, archived, cancelled) in one place
+ * RTO and COD Pending are now filters within the Shipped tab
  */
 
 import { useState, useMemo, useCallback } from 'react';
@@ -81,15 +82,14 @@ export default function Orders() {
     // Archived pagination state
     const [archivedDays, setArchivedDays] = useState(90);
     const [archivedLimit, setArchivedLimit] = useState(100);
-    const [shippedDays, setShippedDays] = useState(30);
+    // Shipped filter state (RTO and COD Pending are now filters within Shipped)
+    const [shippedFilter, setShippedFilter] = useState<'all' | 'rto' | 'cod_pending'>('all');
 
-    // Data hooks - all 6 views
+    // Data hooks - 4 main views (RTO and COD Pending are filters within Shipped)
     const {
         currentOrders,
         openOrders,
         shippedOrders,
-        rtoOrders,
-        codPendingOrders,
         cancelledOrders,
         archivedOrders,
         tabCounts,
@@ -98,21 +98,15 @@ export default function Orders() {
         fabricStock,
         channels,
         lockedDates,
-        // shippedSummary, rtoSummary available for summary panels if needed
         customerDetail,
         customerLoading,
         isLoading,
         refetchOpen,
         refetchShipped,
-        refetchRto,
-        refetchCodPending,
         refetchCancelled,
         refetchArchived,
-        // refetchAll - available for bulk refresh
         isFetchingOpen,
         isFetchingShipped,
-        isFetchingRto,
-        isFetchingCodPending,
         isFetchingCancelled,
         isFetchingArchived,
         archivedPagination,
@@ -121,7 +115,6 @@ export default function Orders() {
     } = useUnifiedOrdersData({
         activeTab: tab,
         selectedCustomerId,
-        shippedDays,
         archivedDays,
         archivedLimit,
     });
@@ -179,7 +172,7 @@ export default function Orders() {
         [currentOrders, customerStats, inventoryBalance, fabricStock]
     );
 
-    // Apply filters (mainly for open tab)
+    // Apply filters (per-tab)
     const filteredRows = useMemo(() => {
         // Date range filter only applies to open tab
         const applyDateFilter = tab === 'open';
@@ -223,8 +216,23 @@ export default function Orders() {
             }
         }
 
+        // Shipped tab filters (RTO and COD Pending)
+        if (tab === 'shipped' && shippedFilter !== 'all') {
+            if (shippedFilter === 'rto') {
+                rows = rows.filter(row =>
+                    ['rto_in_transit', 'rto_delivered'].includes(row.order?.trackingStatus)
+                );
+            } else if (shippedFilter === 'cod_pending') {
+                rows = rows.filter(row =>
+                    row.order?.paymentMethod === 'COD' &&
+                    row.order?.trackingStatus === 'delivered' &&
+                    !row.order?.codRemittedAt
+                );
+            }
+        }
+
         return rows;
-    }, [currentRows, dateRange, tab, allocatedFilter, productionFilter]);
+    }, [currentRows, dateRange, tab, allocatedFilter, productionFilter, shippedFilter]);
 
     // Unique order count for Open tab (available for tab badge if needed)
     // const uniqueOpenOrderCount = new Set(filteredRows.filter(r => tab === 'open').map((r) => r.orderId)).size;
@@ -488,12 +496,10 @@ export default function Orders() {
         isAdmin: user?.role === 'admin',
     });
 
-    // Tab configuration - all 6 tabs
+    // Tab configuration - 4 tabs (RTO and COD Pending are filters within Shipped)
     const tabs: { id: UnifiedOrderTab; label: string; count: number; highlight?: boolean }[] = [
         { id: 'open', label: 'Open', count: tabCounts.open },
         { id: 'shipped', label: 'Shipped', count: tabCounts.shipped },
-        { id: 'rto', label: 'RTO', count: tabCounts.rto, highlight: tabCounts.rto > 0 },
-        { id: 'cod-pending', label: 'COD Pending', count: tabCounts['cod-pending'], highlight: tabCounts['cod-pending'] > 0 },
         { id: 'archived', label: 'Archived', count: tabCounts.archived },
         { id: 'cancelled', label: 'Cancelled', count: tabCounts.cancelled },
     ];
@@ -503,25 +509,21 @@ export default function Orders() {
         switch (tab) {
             case 'open': return refetchOpen;
             case 'shipped': return refetchShipped;
-            case 'rto': return refetchRto;
-            case 'cod-pending': return refetchCodPending;
             case 'archived': return refetchArchived;
             case 'cancelled': return refetchCancelled;
             default: return refetchOpen;
         }
-    }, [tab, refetchOpen, refetchShipped, refetchRto, refetchCodPending, refetchArchived, refetchCancelled]);
+    }, [tab, refetchOpen, refetchShipped, refetchArchived, refetchCancelled]);
 
     const currentIsFetching = useMemo(() => {
         switch (tab) {
             case 'open': return isFetchingOpen;
             case 'shipped': return isFetchingShipped;
-            case 'rto': return isFetchingRto;
-            case 'cod-pending': return isFetchingCodPending;
             case 'archived': return isFetchingArchived;
             case 'cancelled': return isFetchingCancelled;
             default: return false;
         }
-    }, [tab, isFetchingOpen, isFetchingShipped, isFetchingRto, isFetchingCodPending, isFetchingArchived, isFetchingCancelled]);
+    }, [tab, isFetchingOpen, isFetchingShipped, isFetchingArchived, isFetchingCancelled]);
 
     return (
         <div className="space-y-4">
@@ -532,13 +534,15 @@ export default function Orders() {
                     <GlobalOrderSearch
                         onSelectOrder={(orderId, selectedTab) => {
                             // All views are now on Orders page
-                            setTab(selectedTab as UnifiedOrderTab);
+                            // RTO and COD pending orders are now in shipped view
+                            const mappedTab = (selectedTab === 'rto' || selectedTab === 'cod-pending')
+                                ? 'shipped'
+                                : selectedTab;
+                            setTab(mappedTab as UnifiedOrderTab);
                             // Find the order across all views
                             const allOrders = [
                                 ...(openOrders || []),
                                 ...(shippedOrders || []),
-                                ...(rtoOrders || []),
-                                ...(codPendingOrders || []),
                                 ...(archivedOrders || []),
                                 ...(cancelledOrders || []),
                             ];
@@ -707,67 +711,40 @@ export default function Orders() {
                     </div>
                 )}
 
-                {/* Shipped tab toolbar */}
+                {/* Shipped tab toolbar with RTO/COD filters */}
                 {tab === 'shipped' && (
                     <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
-                        <div className="flex items-center gap-2">
-                            <select
-                                value={shippedDays}
-                                onChange={(e) => setShippedDays(Number(e.target.value))}
-                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                            >
-                                <option value={7}>Last 7 days</option>
-                                <option value={14}>Last 14 days</option>
-                                <option value={30}>Last 30 days</option>
-                                <option value={60}>Last 60 days</option>
-                                <option value={90}>Last 90 days</option>
-                            </select>
-                        </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                             <button
-                                onClick={() => currentRefetch()}
-                                disabled={currentIsFetching}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                                onClick={() => setShippedFilter('all')}
+                                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
+                                    shippedFilter === 'all'
+                                        ? 'bg-primary-100 text-primary-700 ring-1 ring-primary-200'
+                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                                }`}
                             >
-                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
-                                Refresh
+                                All
                             </button>
-                            <div className="w-px h-4 bg-gray-200" />
-                            {columnVisibilityDropdown}
-                        </div>
-                    </div>
-                )}
-
-                {/* RTO tab toolbar */}
-                {tab === 'rto' && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-red-50/50 border-b border-gray-100">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-red-700">
-                                {tabCounts.rto} orders in RTO
-                            </span>
-                        </div>
-                        <div className="flex items-center gap-2">
                             <button
-                                onClick={() => currentRefetch()}
-                                disabled={currentIsFetching}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                                onClick={() => setShippedFilter('rto')}
+                                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
+                                    shippedFilter === 'rto'
+                                        ? 'bg-red-100 text-red-700 ring-1 ring-red-200'
+                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
+                                }`}
                             >
-                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
-                                Refresh
+                                RTO {tabCounts.rto > 0 && `(${tabCounts.rto})`}
                             </button>
-                            <div className="w-px h-4 bg-gray-200" />
-                            {columnVisibilityDropdown}
-                        </div>
-                    </div>
-                )}
-
-                {/* COD Pending tab toolbar */}
-                {tab === 'cod-pending' && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-50/50 border-b border-gray-100">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-amber-700">
-                                {tabCounts['cod-pending']} COD orders awaiting remittance
-                            </span>
+                            <button
+                                onClick={() => setShippedFilter('cod_pending')}
+                                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
+                                    shippedFilter === 'cod_pending'
+                                        ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200'
+                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
+                                }`}
+                            >
+                                COD Pending {tabCounts.codPending > 0 && `(${tabCounts.codPending})`}
+                            </button>
                         </div>
                         <div className="flex items-center gap-2">
                             <button
