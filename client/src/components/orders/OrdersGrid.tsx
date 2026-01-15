@@ -1608,11 +1608,18 @@ export function OrdersGrid({
                         } catch { /* ignore parse errors */ }
                     }
 
-                    if (!isInFulfillment) return null;
+                    if (isInFulfillment) {
+                        return (
+                            <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700">
+                                fulfilled
+                            </span>
+                        );
+                    }
 
+                    // Show unfulfilled for lines not in any fulfillment
                     return (
-                        <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700">
-                            fulfilled
+                        <span className="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600">
+                            unfulfilled
                         </span>
                     );
                 },
@@ -1851,21 +1858,40 @@ export function OrdersGrid({
                 headerName: getHeaderName('trackingStatus'),
                 width: 110,
                 cellRenderer: (params: ICellRendererParams) => {
-                    // Get line-level tracking status
+                    // Get line-level tracking status - only show if line is in a fulfillment
                     const lineId = params.data?.lineId;
                     const orderLines = params.data?.order?.orderLines || [];
                     const line = orderLines.find((l: any) => l.id === lineId);
                     const order = params.data.order;
+                    const shopifyLineId = line?.shopifyLineId;
+
+                    // Check if this line is in a Shopify fulfillment
+                    let isInFulfillment = false;
+                    const rawData = order?.shopifyCache?.rawData;
+                    if (rawData && shopifyLineId) {
+                        try {
+                            const shopifyOrder = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+                            const fulfillments = shopifyOrder?.fulfillments || [];
+                            for (const f of fulfillments) {
+                                const lineIds = (f.line_items || []).map((li: any) => String(li.id));
+                                if (lineIds.includes(shopifyLineId)) {
+                                    isInFulfillment = true;
+                                    break;
+                                }
+                            }
+                        } catch { /* ignore parse errors */ }
+                    }
+
+                    // Only show tracking for fulfilled lines
+                    if (!isInFulfillment) return null;
 
                     // Use line-level tracking status if available, fall back to order-level
                     const trackingStatus = line?.trackingStatus || order?.trackingStatus;
-                    const hasTrackingData = trackingStatus || line?.awbNumber;
-
-                    if (!hasTrackingData) return null;
+                    if (!trackingStatus) return null;
 
                     return (
                         <TrackingStatusBadge
-                            status={trackingStatus || 'in_transit'}
+                            status={trackingStatus}
                             daysInTransit={order?.daysInTransit}
                             ofdCount={order?.deliveryAttempts}
                         />
