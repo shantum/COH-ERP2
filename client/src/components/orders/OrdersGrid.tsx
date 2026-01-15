@@ -499,6 +499,46 @@ export function OrdersGrid({
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
 
+    // Track previous row data to detect lineStatus changes
+    const prevRowsRef = useRef<Map<string, string>>(new Map());
+
+    // Force AG-Grid to refresh row styles when lineStatus changes
+    // AG-Grid caches getRowStyle results, so we need to explicitly redraw changed rows
+    useEffect(() => {
+        const api = gridRef.current?.api;
+        if (!api || !rows.length) return;
+
+        // Build map of current lineStatus values
+        const currentStatuses = new Map<string, string>();
+        const changedRowIds: string[] = [];
+
+        for (const row of rows) {
+            const rowId = row.lineId || `order-${row.orderId}-header`;
+            const status = row.lineStatus || '';
+            currentStatuses.set(rowId, status);
+
+            // Check if status changed from previous render
+            const prevStatus = prevRowsRef.current.get(rowId);
+            if (prevStatus !== undefined && prevStatus !== status) {
+                changedRowIds.push(rowId);
+            }
+        }
+
+        // Update ref for next comparison
+        prevRowsRef.current = currentStatuses;
+
+        // If any rows changed status, redraw them to update row styling
+        if (changedRowIds.length > 0) {
+            const rowNodes = changedRowIds
+                .map(id => api.getRowNode(id))
+                .filter((node): node is NonNullable<typeof node> => node != null);
+
+            if (rowNodes.length > 0) {
+                api.redrawRows({ rowNodes });
+            }
+        }
+    }, [rows]);
+
     // Stable row ID function - prevents scroll reset on data updates
     const getRowId = useCallback((params: any) => {
         const row = params.data;
