@@ -1233,144 +1233,89 @@ router.post(
 // ORDER LINE OPERATIONS
 // ============================================
 
-// Cancel a single order line
+// Cancel a single order line - LEAN: just update status + reverse inventory if needed
 router.post(
     '/lines/:lineId/cancel',
     authenticateToken,
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const lineId = getParamString(req.params.lineId);
+
+        // Single query to get line with minimal fields
         const line = await req.prisma.orderLine.findUnique({
             where: { id: lineId },
-            include: { order: true },
+            select: { id: true, lineStatus: true, qty: true, unitPrice: true, order: { select: { customerId: true } } },
         });
 
         if (!line) {
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
-
         if (line.lineStatus === 'shipped') {
             throw new BusinessLogicError('Cannot cancel shipped line', 'CANNOT_CANCEL_SHIPPED');
         }
-
         if (line.lineStatus === 'cancelled') {
-            throw new BusinessLogicError('Line is already cancelled', 'ALREADY_CANCELLED');
+            res.json({ id: lineId, lineStatus: 'cancelled' }); // Already cancelled, just return
+            return;
         }
 
-        await req.prisma.$transaction(async (tx) => {
-            // If allocated, reverse the OUTWARD transaction (new simplified model)
-            if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
-                const txn = await tx.inventoryTransaction.findFirst({
-                    where: {
-                        referenceId: line.id,
-                        txnType: TXN_TYPE.OUTWARD,
-                        reason: TXN_REASON.ORDER_ALLOCATION,
-                    },
-                    select: { id: true, skuId: true },
-                });
-
-                if (txn) {
-                    await tx.inventoryTransaction.delete({ where: { id: txn.id } });
-                    inventoryBalanceCache.invalidate([txn.skuId]);
-                }
+        // If allocated, reverse inventory (important for stock accuracy)
+        if (['allocated', 'picked', 'packed'].includes(line.lineStatus || '')) {
+            const txn = await req.prisma.inventoryTransaction.findFirst({
+                where: { referenceId: lineId, txnType: TXN_TYPE.OUTWARD, reason: TXN_REASON.ORDER_ALLOCATION },
+                select: { id: true, skuId: true },
+            });
+            if (txn) {
+                await req.prisma.inventoryTransaction.delete({ where: { id: txn.id } });
+                inventoryBalanceCache.invalidate([txn.skuId]);
             }
+        }
 
-            // Simply mark line as cancelled - order stays in open view
-            // User can close completed lines via "Close Completed" button
-            await tx.orderLine.update({
-                where: { id: lineId },
-                data: { lineStatus: 'cancelled' },
-            });
-
-            // Update order total based on remaining active lines
-            const allLines = await tx.orderLine.findMany({
-                where: { orderId: line.orderId },
-            });
-            const activeLines = allLines.filter((l) =>
-                l.id === lineId ? false : l.lineStatus !== 'cancelled'
-            );
-            const newTotal = activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-
-            await tx.order.update({
-                where: { id: line.orderId },
-                data: {
-                    totalAmount: newTotal,
-                    partiallyCancelled: activeLines.length < allLines.length,
-                },
-            });
+        // Update line status - that's it
+        await req.prisma.orderLine.update({
+            where: { id: lineId },
+            data: { lineStatus: 'cancelled' },
         });
 
-        // Adjust customer LTV (subtract cancelled line amount)
-        if (line.order.customerId) {
+        // Background: adjust LTV (fire and forget)
+        if (line.order?.customerId) {
             const lineAmount = line.qty * line.unitPrice;
-            await adjustCustomerLtv(req.prisma, line.order.customerId, -lineAmount);
+            adjustCustomerLtv(req.prisma, line.order.customerId, -lineAmount).catch(() => {});
         }
 
         res.json({ id: lineId, lineStatus: 'cancelled' });
     })
 );
 
-// Uncancel a single order line
+// Uncancel a single order line - LEAN: just update status
 router.post(
     '/lines/:lineId/uncancel',
     authenticateToken,
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const lineId = getParamString(req.params.lineId);
+
+        // Single query with minimal fields
         const line = await req.prisma.orderLine.findUnique({
             where: { id: lineId },
-            include: { order: true },
+            select: { id: true, lineStatus: true, qty: true, unitPrice: true, order: { select: { customerId: true } } },
         });
 
         if (!line) {
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
-
         if (line.lineStatus !== 'cancelled') {
-            throw new BusinessLogicError('Line is not cancelled', 'NOT_CANCELLED');
+            res.json({ id: lineId, lineStatus: line.lineStatus }); // Not cancelled, just return current status
+            return;
         }
 
-        await req.prisma.$transaction(async (tx) => {
-            await tx.orderLine.update({
-                where: { id: lineId },
-                data: { lineStatus: 'pending' },
-            });
-
-            // Get all lines to check if any cancelled lines remain
-            const allLines = await tx.orderLine.findMany({
-                where: { orderId: line.orderId },
-            });
-
-            // Calculate new total from all non-cancelled lines (including the one we just restored)
-            const activeLines = allLines.filter(
-                (l) => l.id === lineId || l.lineStatus !== 'cancelled'
-            );
-            const newTotal = activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-
-            // Check if any cancelled lines remain (excluding the one we just restored)
-            const remainingCancelledLines = allLines.filter(
-                (l) => l.id !== lineId && l.lineStatus === 'cancelled'
-            );
-
-            const updateData: OrderUpdateData = {
-                totalAmount: newTotal,
-                partiallyCancelled: remainingCancelledLines.length > 0,
-            };
-
-            if (line.order.status === 'cancelled') {
-                updateData.status = 'open';
-                updateData.terminalStatus = null;
-                updateData.terminalAt = null;
-            }
-
-            await tx.order.update({
-                where: { id: line.orderId },
-                data: updateData,
-            });
+        // Update line status - that's it
+        await req.prisma.orderLine.update({
+            where: { id: lineId },
+            data: { lineStatus: 'pending' },
         });
 
-        // Adjust customer LTV (add restored line amount back)
-        if (line.order.customerId) {
+        // Background: adjust LTV (fire and forget)
+        if (line.order?.customerId) {
             const lineAmount = line.qty * line.unitPrice;
-            await adjustCustomerLtv(req.prisma, line.order.customerId, lineAmount);
+            adjustCustomerLtv(req.prisma, line.order.customerId, lineAmount).catch(() => {});
         }
 
         res.json({ id: lineId, lineStatus: 'pending' });
