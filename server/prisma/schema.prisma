@@ -364,6 +364,7 @@ model Order {
   isArchived           Boolean            @default(false)
   archivedAt           DateTime?
   releasedToShipped    Boolean            @default(false)
+  releasedToCancelled  Boolean            @default(false)
   awbNumber            String?
   courier              String?
   shippedAt            DateTime?
@@ -429,6 +430,7 @@ model Order {
   @@index([status, shippedAt])      // Compound: shipped view filtering
   @@index([isArchived, releasedToShipped]) // Compound: open view filtering
   @@index([isArchived, releasedToShipped, orderDate]) // Compound: open view with date sort
+  @@index([isArchived, releasedToCancelled]) // Compound: cancelled view filtering
 }
 
 // ============================================

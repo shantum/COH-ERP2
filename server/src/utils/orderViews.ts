@@ -162,8 +162,9 @@ export interface EnrichedOrder {
  */
 export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
     /**
-     * Open Orders: Orders still being processed OR shipped but not released
+     * Open Orders: Orders still being processed OR shipped/cancelled but not released
      * Shipped orders stay here until user clicks "Release to Shipped"
+     * Cancelled orders stay here until user clicks "Release to Cancelled"
      */
     open: {
         name: 'Open Orders',
@@ -171,7 +172,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         where: {
             isArchived: false,
             OR: [
-                // Still has lines being processed
+                // Still has lines being processed (not shipped, not cancelled)
                 {
                     orderLines: {
                         some: {
@@ -187,6 +188,18 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
                         orderLines: {
                             some: {
                                 lineStatus: { notIn: ['shipped', 'cancelled'] },
+                            },
+                        },
+                    },
+                },
+                // Fully cancelled but not released yet
+                {
+                    releasedToCancelled: false,
+                    orderLines: { some: { lineStatus: 'cancelled' } },
+                    NOT: {
+                        orderLines: {
+                            some: {
+                                lineStatus: { not: 'cancelled' },
                             },
                         },
                     },
@@ -265,11 +278,11 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
 
     cancelled: {
         name: 'Cancelled Lines',
-        description: 'Individual cancelled order lines (line-level view)',
+        description: 'Released cancelled order lines (line-level view)',
         // Note: This view uses a special line-level query in listOrders.js
         // The where clause here is just for reference
         where: {
-            status: 'cancelled', // Fully cancelled orders only for unified API
+            releasedToCancelled: true, // Only show released cancelled orders
             isArchived: false,
         },
         orderBy: { orderDate: 'desc' },
@@ -656,6 +669,8 @@ export const ORDER_UNIFIED_SELECT = {
     paymentMethod: true,
     isArchived: true,
     archivedAt: true,
+    releasedToShipped: true,
+    releasedToCancelled: true,
     createdAt: true,
     syncedAt: true,
     internalNotes: true,
@@ -710,6 +725,7 @@ export const ORDER_UNIFIED_SELECT = {
             lastName: true,
             email: true,
             phone: true,
+            tags: true,
         },
     },
     orderLines: {
@@ -795,4 +811,344 @@ export function getValidViewNames(): ViewName[] {
  */
 export function getViewConfig(viewName: string): OrderViewConfig | null {
     return ORDER_VIEWS[viewName as ViewName] || null;
+}
+
+// ============================================
+// FLATTENED ROW TYPE & FUNCTION
+// ============================================
+
+/**
+ * Pre-flattened order row for AG-Grid display
+ * Server computes this to eliminate client-side transformation overhead
+ */
+export interface FlattenedOrderRow {
+    // Order-level fields
+    orderId: string;
+    orderNumber: string;
+    orderDate: string;
+    shipByDate: string | null;
+    customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    customerId: string | null;
+    city: string;
+    customerOrderCount: number;
+    customerLtv: number;
+    customerTier: string | null;
+    customerRtoCount: number;
+    totalAmount: number | null;
+    paymentMethod: string | null;
+    channel: string | null;
+    internalNotes: string | null;
+
+    // Line-level fields
+    productName: string;
+    colorName: string;
+    size: string;
+    skuCode: string;
+    skuId: string | null;
+    qty: number;
+    lineId: string | null;
+    lineStatus: string | null;
+    lineNotes: string;
+
+    // Inventory (filled client-side for now)
+    skuStock: number;
+    fabricBalance: number;
+
+    // Shopify status
+    shopifyStatus: string;
+
+    // Production batch
+    productionBatch: {
+        id: string;
+        batchCode: string;
+        batchDate: string | null;
+        status: string;
+    } | null;
+    productionBatchId: string | null;
+    productionDate: string | null;
+
+    // Row metadata
+    isFirstLine: boolean;
+    totalLines: number;
+    fulfillmentStage: string | null;
+
+    // Full order reference (for modals, actions)
+    order: EnrichedOrder;
+
+    // Customization fields
+    isCustomized: boolean;
+    isNonReturnable: boolean;
+    customSkuCode: string | null;
+    customizationType: string | null;
+    customizationValue: string | null;
+    customizationNotes: string | null;
+    originalSkuCode: string | null;
+
+    // Line-level tracking (pre-computed for O(1) access)
+    lineShippedAt: string | null;
+    lineDeliveredAt: string | null;
+    lineTrackingStatus: string | null;
+    lineAwbNumber: string | null;
+    lineCourier: string | null;
+
+    // Enriched fields (from server enrichments)
+    daysInTransit: number | null;
+    daysSinceDelivery: number | null;
+    daysInRto: number | null;
+    rtoStatus: string | null;
+
+    // Shopify cache fields (for columns)
+    discountCodes: string | null;
+    customerNotes: string | null;
+    shopifyTags: string | null;
+    shopifyAwb: string | null;
+    shopifyCourier: string | null;
+
+    // Customer tags
+    customerTags: string[] | null;
+}
+
+/**
+ * Parse city from JSON shipping address
+ */
+function parseCity(shippingAddress: string | null | undefined): string {
+    if (!shippingAddress) return '-';
+    try {
+        const addr = JSON.parse(shippingAddress);
+        return addr.city || '-';
+    } catch {
+        return '-';
+    }
+}
+
+/**
+ * Flatten enriched orders into rows for AG-Grid
+ * Sorted by orderDate descending (newest first)
+ *
+ * This runs on the server to eliminate client-side transformation overhead.
+ * Inventory/fabric balances are filled client-side (separate query).
+ */
+export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[] {
+    if (!orders || orders.length === 0) return [];
+
+    // Sort orders by date descending (newest first)
+    const sortedOrders = [...orders].sort((a, b) => {
+        const dateA = a.orderDate ? new Date(a.orderDate as string).getTime() : 0;
+        const dateB = b.orderDate ? new Date(b.orderDate as string).getTime() : 0;
+        return dateB - dateA;
+    });
+
+    const rows: FlattenedOrderRow[] = [];
+
+    for (const order of sortedOrders) {
+        const orderLines = (order.orderLines || []) as Array<{
+            id: string;
+            lineStatus: string | null;
+            qty: number;
+            unitPrice: number;
+            skuId: string;
+            notes: string | null;
+            awbNumber: string | null;
+            courier: string | null;
+            shippedAt: string | null;
+            deliveredAt: string | null;
+            isCustomized: boolean;
+            trackingStatus: string | null;
+            productionBatchId: string | null;
+            sku: {
+                id: string;
+                skuCode: string;
+                size: string;
+                isCustomSku: boolean;
+                customizationType: string | null;
+                customizationValue: string | null;
+                customizationNotes: string | null;
+                variation: {
+                    id: string;
+                    colorName: string | null;
+                    product: { id: string; name: string } | null;
+                } | null;
+            } | null;
+            productionBatch: {
+                id: string;
+                batchCode: string;
+                batchDate: string | null;
+                status: string;
+            } | null;
+        }>;
+
+        const shopifyCache = order.shopifyCache as {
+            discountCodes: string | null;
+            customerNotes: string | null;
+            tags: string | null;
+            trackingNumber: string | null;
+            trackingCompany: string | null;
+            fulfillmentStatus: string | null;
+        } | null;
+
+        const customer = order.customer as {
+            tags: string[] | null;
+        } | null;
+
+        // Common order-level values
+        const city = parseCity(order.shippingAddress as string | null);
+        const customerOrderCount = (order.customerOrderCount as number) || 0;
+        const customerLtv = (order.customerLtv as number) || 0;
+        const customerTier = (order.customerTier as string) || null;
+        const customerRtoCount = (order.customerRtoCount as number) || 0;
+        const shopifyStatus = shopifyCache?.fulfillmentStatus || '-';
+        const discountCodes = shopifyCache?.discountCodes || null;
+        const customerNotes = shopifyCache?.customerNotes || null;
+        const shopifyTags = shopifyCache?.tags || null;
+        const shopifyAwb = shopifyCache?.trackingNumber || null;
+        const shopifyCourier = shopifyCache?.trackingCompany || null;
+        const customerTags = customer?.tags || null;
+
+        // Handle orders with no lines
+        if (orderLines.length === 0) {
+            rows.push({
+                orderId: order.id as string,
+                orderNumber: order.orderNumber as string,
+                orderDate: order.orderDate as string,
+                shipByDate: (order.shipByDate as string) || null,
+                customerName: order.customerName as string,
+                customerEmail: (order.customerEmail as string) || null,
+                customerPhone: (order.customerPhone as string) || null,
+                customerId: (order.customerId as string) || null,
+                city,
+                customerOrderCount,
+                customerLtv,
+                customerTier,
+                customerRtoCount,
+                totalAmount: (order.totalAmount as number) || null,
+                paymentMethod: (order.paymentMethod as string) || null,
+                channel: (order.channel as string) || null,
+                internalNotes: (order.internalNotes as string) || null,
+                productName: '(no items)',
+                colorName: '-',
+                size: '-',
+                skuCode: '-',
+                skuId: null,
+                qty: 0,
+                lineId: null,
+                lineStatus: null,
+                lineNotes: '',
+                skuStock: 0,
+                fabricBalance: 0,
+                shopifyStatus,
+                productionBatch: null,
+                productionBatchId: null,
+                productionDate: null,
+                isFirstLine: true,
+                totalLines: 0,
+                fulfillmentStage: (order.fulfillmentStage as string) || null,
+                order,
+                isCustomized: false,
+                isNonReturnable: false,
+                customSkuCode: null,
+                customizationType: null,
+                customizationValue: null,
+                customizationNotes: null,
+                originalSkuCode: null,
+                lineShippedAt: null,
+                lineDeliveredAt: null,
+                lineTrackingStatus: null,
+                lineAwbNumber: null,
+                lineCourier: null,
+                daysInTransit: (order.daysInTransit as number) ?? null,
+                daysSinceDelivery: (order.daysSinceDelivery as number) ?? null,
+                daysInRto: (order.daysInRto as number) ?? null,
+                rtoStatus: (order.rtoStatus as string) || null,
+                discountCodes,
+                customerNotes,
+                shopifyTags,
+                shopifyAwb,
+                shopifyCourier,
+                customerTags,
+            });
+            continue;
+        }
+
+        // Flatten each line into a row
+        const lineCount = orderLines.length;
+        for (let idx = 0; idx < lineCount; idx++) {
+            const line = orderLines[idx];
+            const sku = line.sku;
+            const productionBatch = line.productionBatch;
+
+            // Customization data
+            const isCustomized = line.isCustomized || false;
+            const customSkuCode = isCustomized && sku?.isCustomSku ? sku.skuCode : null;
+
+            rows.push({
+                orderId: order.id as string,
+                orderNumber: order.orderNumber as string,
+                orderDate: order.orderDate as string,
+                shipByDate: (order.shipByDate as string) || null,
+                customerName: order.customerName as string,
+                customerEmail: (order.customerEmail as string) || null,
+                customerPhone: (order.customerPhone as string) || null,
+                customerId: (order.customerId as string) || null,
+                city,
+                customerOrderCount,
+                customerLtv,
+                customerTier,
+                customerRtoCount,
+                totalAmount: (order.totalAmount as number) || null,
+                paymentMethod: (order.paymentMethod as string) || null,
+                channel: (order.channel as string) || null,
+                internalNotes: (order.internalNotes as string) || null,
+                productName: sku?.variation?.product?.name || '-',
+                colorName: sku?.variation?.colorName || '-',
+                size: sku?.size || '-',
+                skuCode: sku?.skuCode || '-',
+                skuId: line.skuId || null,
+                qty: line.qty,
+                lineId: line.id,
+                lineStatus: line.lineStatus,
+                lineNotes: line.notes || '',
+                skuStock: 0, // Filled client-side
+                fabricBalance: 0, // Filled client-side
+                shopifyStatus,
+                productionBatch: productionBatch ? {
+                    id: productionBatch.id,
+                    batchCode: productionBatch.batchCode,
+                    batchDate: productionBatch.batchDate,
+                    status: productionBatch.status,
+                } : null,
+                productionBatchId: productionBatch?.id || null,
+                productionDate: productionBatch?.batchDate?.split('T')[0] || null,
+                isFirstLine: idx === 0,
+                totalLines: lineCount,
+                fulfillmentStage: (order.fulfillmentStage as string) || null,
+                order,
+                isCustomized,
+                isNonReturnable: false, // Not tracked at line level currently
+                customSkuCode,
+                customizationType: sku?.customizationType || null,
+                customizationValue: sku?.customizationValue || null,
+                customizationNotes: sku?.customizationNotes || null,
+                originalSkuCode: null, // Would need backend population
+                lineShippedAt: line.shippedAt || null,
+                lineDeliveredAt: line.deliveredAt || null,
+                lineTrackingStatus: line.trackingStatus || null,
+                lineAwbNumber: line.awbNumber || null,
+                lineCourier: line.courier || null,
+                daysInTransit: (order.daysInTransit as number) ?? null,
+                daysSinceDelivery: (order.daysSinceDelivery as number) ?? null,
+                daysInRto: (order.daysInRto as number) ?? null,
+                rtoStatus: (order.rtoStatus as string) || null,
+                discountCodes,
+                customerNotes,
+                shopifyTags,
+                shopifyAwb,
+                shopifyCourier,
+                customerTags,
+            });
+        }
+    }
+
+    return rows;
 }

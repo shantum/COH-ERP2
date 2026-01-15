@@ -677,6 +677,17 @@ export async function processShopifyOrderToERP(
                 changeType = 'fulfilled';
             }
 
+            // If order is being cancelled via Shopify, also cancel all order lines
+            if (changeType === 'cancelled') {
+                await prisma.orderLine.updateMany({
+                    where: {
+                        orderId: existingOrder.id,
+                        lineStatus: { not: 'cancelled' }
+                    },
+                    data: { lineStatus: 'cancelled' }
+                });
+            }
+
             // Sync fulfillments to order lines (partial shipment support)
             const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
 
@@ -1124,6 +1135,17 @@ async function processOrderWithContext(
                 changeType = 'cancelled';
             } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
                 changeType = 'fulfilled';
+            }
+
+            // If order is being cancelled via Shopify, also cancel all order lines
+            if (changeType === 'cancelled') {
+                await prisma.orderLine.updateMany({
+                    where: {
+                        orderId: existingOrder.id,
+                        lineStatus: { not: 'cancelled' }
+                    },
+                    data: { lineStatus: 'cancelled' }
+                });
             }
 
             const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);

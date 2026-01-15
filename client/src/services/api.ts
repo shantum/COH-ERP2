@@ -246,6 +246,8 @@ export const ordersApi = {
     archiveDeliveredPrepaid: () => api.post('/orders/archive-delivered-prepaid'),
     // Release shipped orders to shipped view
     releaseToShipped: (orderIds?: string[]) => api.post('/orders/release-to-shipped', { orderIds }),
+    // Release cancelled orders to cancelled view
+    releaseToCancelled: (orderIds?: string[]) => api.post('/orders/release-to-cancelled', { orderIds }),
 };
 
 // Catalog (combined products + inventory view)

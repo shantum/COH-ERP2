@@ -889,6 +889,16 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to release orders')
     });
 
+    // Release cancelled orders to cancelled view
+    const releaseToCancelled = useMutation({
+        mutationFn: (orderIds?: string[]) => ordersApi.releaseToCancelled(orderIds),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateCancelledOrders();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to release cancelled orders')
+    });
+
     const updateLine = useMutation({
         mutationFn: ({ lineId, data }: { lineId: string; data: any }) =>
             ordersApi.updateLine(lineId, data),
@@ -1011,6 +1021,9 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
         // Release to shipped view
         releaseToShipped,
+
+        // Release to cancelled view
+        releaseToCancelled,
 
         // Customization
         customizeLine,

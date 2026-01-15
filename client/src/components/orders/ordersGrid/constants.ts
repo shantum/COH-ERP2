@@ -5,8 +5,8 @@
 // All column IDs in display order (includes post-ship columns)
 export const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'shipByDate', 'orderNumber', 'customerName', 'city', 'orderValue',
-    'discountCode', 'paymentMethod', 'rtoHistory', 'customerNotes', 'customerOrderCount',
-    'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
+    'discountCode', 'tags', 'paymentMethod', 'rtoHistory', 'customerNotes', 'customerOrderCount',
+    'customerLtv', 'customerTags', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine', 'shopifyStatus',
     'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus',
     // Post-ship columns (for shipped/archived views)

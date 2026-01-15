@@ -27,6 +27,7 @@ export interface ShopifyCustomerData {
     first_name?: string | null;
     last_name?: string | null;
     phone?: string | null;
+    tags?: string | null;
     default_address?: {
         address1?: string;
         address2?: string;
@@ -162,6 +163,7 @@ export async function findOrCreateCustomer(
                             firstName: shopifyCustomer.first_name || null,
                             lastName: shopifyCustomer.last_name || null,
                             phone: shopifyCustomer.phone || null,
+                            tags: shopifyCustomer.tags || null,
                             shopifyCustomerId,
                             defaultAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
                             firstOrderDate: orderDate ? new Date(orderDate) : null,
@@ -273,6 +275,7 @@ export async function upsertCustomerFromWebhook(
                 firstName: shopifyCustomer.first_name || null,
                 lastName: shopifyCustomer.last_name || null,
                 phone: shopifyCustomer.phone || null,
+                tags: shopifyCustomer.tags || customer.tags || null,
                 shopifyCustomerId,
                 defaultAddress: defaultAddress ? JSON.stringify(defaultAddress) : null,
             }
@@ -287,6 +290,7 @@ export async function upsertCustomerFromWebhook(
                 firstName: shopifyCustomer.first_name || null,
                 lastName: shopifyCustomer.last_name || null,
                 phone: shopifyCustomer.phone || null,
+                tags: shopifyCustomer.tags || null,
                 shopifyCustomerId,
                 defaultAddress: defaultAddress ? JSON.stringify(defaultAddress) : null,
             }

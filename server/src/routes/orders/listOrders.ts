@@ -863,14 +863,16 @@ router.get('/status/archived', async (req: Request, res: Response) => {
 
 // Get cancelled lines (line-level view for cancelled tab)
 // Returns individual cancelled lines with their parent order info
+// Only shows lines from orders that have been released to cancelled
 router.get('/status/cancelled', async (req: Request, res: Response) => {
     try {
-        // Fetch all cancelled lines with order and SKU info
+        // Fetch cancelled lines from released-to-cancelled orders
         const cancelledLines = await req.prisma.orderLine.findMany({
             where: {
                 lineStatus: 'cancelled',
                 order: {
                     isArchived: false,
+                    releasedToCancelled: true, // Only show released cancelled orders
                 },
             },
             include: {

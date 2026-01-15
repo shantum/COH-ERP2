@@ -43,6 +43,34 @@ export function buildPaymentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellClass: 'text-xs',
         },
 
+        // Shopify Tags
+        {
+            colId: 'tags',
+            headerName: getHeaderName('tags'),
+            width: 180,
+            valueGetter: (params: ValueGetterParams) => {
+                if (!params.data?.isFirstLine) return '';
+                return params.data.order?.shopifyCache?.tags || '';
+            },
+            cellRenderer: (params: ICellRendererParams) => {
+                if (!params.data?.isFirstLine) return null;
+                const tagsStr = params.data.order?.shopifyCache?.tags || '';
+                if (!tagsStr) return null;
+
+                const tags = tagsStr.split(',').map((t: string) => t.trim()).filter(Boolean);
+                return (
+                    <div className="flex flex-wrap gap-1">
+                        {tags.map((tag: string) => (
+                            <span key={tag} className="px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700">
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+                );
+            },
+            cellClass: 'text-xs',
+        },
+
         // Payment Method (COD/Prepaid)
         {
             colId: 'paymentMethod',
@@ -205,6 +233,34 @@ export function buildPaymentColumns(ctx: ColumnBuilderContext): ColDef[] {
             },
             cellClass: 'text-xs',
             headerTooltip: 'Customer Lifetime Value',
+        },
+
+        // Customer Tags (from Shopify)
+        {
+            colId: 'customerTags',
+            headerName: getHeaderName('customerTags'),
+            width: 180,
+            valueGetter: (params: ValueGetterParams) => {
+                if (!params.data?.isFirstLine) return '';
+                return params.data.order?.customer?.tags || '';
+            },
+            cellRenderer: (params: ICellRendererParams) => {
+                if (!params.data?.isFirstLine) return null;
+                const tagsStr = params.data.order?.customer?.tags || '';
+                if (!tagsStr) return null;
+
+                const tags = tagsStr.split(',').map((t: string) => t.trim()).filter(Boolean);
+                return (
+                    <div className="flex flex-wrap gap-1">
+                        {tags.map((tag: string) => (
+                            <span key={tag} className="px-1.5 py-0.5 rounded text-xs bg-teal-100 text-teal-700">
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+                );
+            },
+            cellClass: 'text-xs',
         },
     ];
 }

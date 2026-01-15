@@ -34,12 +34,14 @@ interface UseUnifiedOrdersDataOptions {
     currentView: OrderView;
     page: number;
     selectedCustomerId?: string | null;
+    shippedFilter?: 'shipped' | 'not_shipped';
 }
 
 export function useUnifiedOrdersData({
     currentView,
     page,
     selectedCustomerId,
+    shippedFilter,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
 
@@ -52,6 +54,7 @@ export function useUnifiedOrdersData({
             view: currentView,
             page,
             limit: PAGE_SIZE,
+            shippedFilter: currentView === 'archived' ? shippedFilter : undefined,
         },
         {
             staleTime: STALE_TIME,
@@ -160,10 +163,13 @@ export function useUnifiedOrdersData({
     // ==========================================
 
     const orders = ordersQuery.data?.orders || [];
+    const rows = ordersQuery.data?.rows || [];
     const pagination = ordersQuery.data?.pagination;
 
     return {
-        // Current view orders
+        // Pre-flattened rows from server (primary data source)
+        rows,
+        // Legacy orders for backwards compatibility
         orders,
         pagination,
 

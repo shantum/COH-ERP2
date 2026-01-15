@@ -20,6 +20,8 @@ import {
     ORDER_UNIFIED_SELECT,
     getValidViewNames,
     getViewConfig,
+    flattenOrdersToRows,
+    type FlattenedOrderRow,
 } from '../../utils/orderViews.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { updateCustomerTier } from '../../utils/tierUtils.js';
@@ -47,10 +49,12 @@ const list = protectedProcedure
             days: z.number().int().positive().optional(),
             search: z.string().optional(),
             sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt']).optional(),
+            // Archived view sub-filter
+            shippedFilter: z.enum(['shipped', 'not_shipped']).optional(),
         })
     )
     .query(async ({ input, ctx }) => {
-        const { view, page, limit, days, search, sortBy } = input;
+        const { view, page, limit, days, search, sortBy, shippedFilter } = input;
 
         // Validate view
         const viewConfig = getViewConfig(view);
@@ -65,10 +69,14 @@ const list = protectedProcedure
         const offset = (page - 1) * limit;
 
         // Build WHERE clause using view config
+        const additionalFilters: Record<string, unknown> = {};
+        if (view === 'archived' && shippedFilter) {
+            additionalFilters.releasedToShipped = shippedFilter === 'shipped';
+        }
         const where = buildViewWhereClause(view, {
             days: days?.toString(),
             search,
-            additionalFilters: {},
+            additionalFilters,
         });
 
         // Determine sort order
@@ -96,7 +104,13 @@ const list = protectedProcedure
             viewConfig.enrichment
         );
 
+        // Pre-flatten orders into rows on server
+        // This eliminates client-side O(n) transformation on every fetch
+        const rows = flattenOrdersToRows(enriched);
+
         return {
+            rows,
+            // Keep orders for backwards compatibility during transition
             orders: enriched,
             view,
             viewName: viewConfig.name,

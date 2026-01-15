@@ -1093,6 +1093,50 @@ router.post(
 );
 
 /**
+ * Release cancelled orders to the cancelled view
+ * Cancelled orders stay in open view until explicitly released
+ */
+router.post(
+    '/release-to-cancelled',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const { orderIds } = req.body as { orderIds?: string[] };
+
+        // Build where clause - either specific orders or all unreleased cancelled orders
+        const whereClause: any = {
+            releasedToCancelled: false,
+            // Only release orders where all lines are cancelled
+            NOT: {
+                orderLines: {
+                    some: {
+                        lineStatus: { not: 'cancelled' },
+                    },
+                },
+            },
+            // Must have at least one cancelled line
+            orderLines: {
+                some: { lineStatus: 'cancelled' },
+            },
+        };
+
+        if (orderIds && orderIds.length > 0) {
+            whereClause.id = { in: orderIds };
+        }
+
+        const result = await req.prisma.order.updateMany({
+            where: whereClause,
+            data: { releasedToCancelled: true },
+        });
+
+        orderLogger.info({ orderIds, count: result.count }, 'Released orders to cancelled');
+        res.json({
+            message: `Released ${result.count} orders to cancelled view`,
+            count: result.count,
+        });
+    })
+);
+
+/**
  * Fix orders incorrectly marked as cancelled
  * Restores orders with status='cancelled' back to 'open' status
  * so they appear in the open orders view again

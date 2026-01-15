@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, RefreshCw, Send, ChevronDown, Archive, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, RefreshCw, Send, ChevronDown, Archive, ChevronLeft, ChevronRight, XCircle } from 'lucide-react';
 
 // Custom hooks
 import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersData';
@@ -16,7 +16,7 @@ import { useAuth } from '../hooks/useAuth';
 // Utilities
 import {
     computeCustomerStats,
-    flattenOrders,
+    enrichRowsWithInventory,
 } from '../utils/orderHelpers';
 
 // Components
@@ -70,6 +70,8 @@ export default function Orders() {
     // Filter state (Open view only)
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
+    // Filter state (Archived view only)
+    const [archivedShipFilter, setArchivedShipFilter] = useState<'' | 'shipped' | 'not_shipped'>('');
 
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
@@ -98,6 +100,7 @@ export default function Orders() {
 
     // Data hook - simplified, single view with pagination
     const {
+        rows: serverRows,
         orders,
         pagination,
         allSkus,
@@ -114,6 +117,7 @@ export default function Orders() {
         currentView: view,
         page,
         selectedCustomerId,
+        shippedFilter: archivedShipFilter || undefined,
     });
 
     // Modal handlers
@@ -145,16 +149,17 @@ export default function Orders() {
         onEditSuccess: () => setUnifiedModalOrder(null),
     });
 
-    // Compute customer stats
+    // Compute customer stats (still used for some order-level calculations)
     const customerStats = useMemo(
         () => computeCustomerStats(orders, []),
         [orders]
     );
 
-    // Flatten orders for grid
+    // Enrich server-flattened rows with client-side inventory data
+    // This is O(n) with O(1) Map lookups - much faster than full flatten
     const currentRows = useMemo(
-        () => flattenOrders(orders, customerStats, inventoryBalance, fabricStock),
-        [orders, customerStats, inventoryBalance, fabricStock]
+        () => enrichRowsWithInventory(serverRows, inventoryBalance, fabricStock),
+        [serverRows, inventoryBalance, fabricStock]
     );
 
     // Apply filters
@@ -196,6 +201,8 @@ export default function Orders() {
             }
         }
 
+        // Note: Archived view shipped filter is applied server-side
+
         return rows;
     }, [currentRows, view, allocatedFilter, productionFilter]);
 
@@ -209,6 +216,19 @@ export default function Orders() {
             if (nonCancelledLines.length === 0) continue;
             const allShipped = nonCancelledLines.every((l: any) => l.lineStatus === 'shipped');
             if (allShipped) count++;
+        }
+        return count;
+    }, [view, orders]);
+
+    // Count of fully cancelled orders ready for release (Open view only)
+    const releasableCancelledCount = useMemo(() => {
+        if (view !== 'open' || !orders) return 0;
+        let count = 0;
+        for (const order of orders) {
+            const lines = order.orderLines || [];
+            if (lines.length === 0) continue;
+            const allCancelled = lines.every((l: any) => l.lineStatus === 'cancelled');
+            if (allCancelled) count++;
         }
         return count;
     }, [view, orders]);
@@ -537,11 +557,30 @@ export default function Orders() {
                                 </select>
                             </>
                         )}
+
+                        {/* Archived view filters */}
+                        {view === 'archived' && (
+                            <>
+                                <div className="w-px h-5 bg-gray-200" />
+                                <select
+                                    value={archivedShipFilter}
+                                    onChange={(e) => {
+                                        setArchivedShipFilter(e.target.value as typeof archivedShipFilter);
+                                        setPage(1); // Reset to page 1 when filter changes
+                                    }}
+                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                                >
+                                    <option value="">All orders</option>
+                                    <option value="shipped">Shipped</option>
+                                    <option value="not_shipped">Not shipped</option>
+                                </select>
+                            </>
+                        )}
                     </div>
 
                     {/* Right side: Actions */}
                     <div className="flex items-center gap-2">
-                        {/* Release button - Open view only */}
+                        {/* Release shipped button - Open view only */}
                         {view === 'open' && releasableOrderCount > 0 && (
                             <button
                                 onClick={() => {
@@ -554,6 +593,22 @@ export default function Orders() {
                             >
                                 <Send size={12} />
                                 Release {releasableOrderCount}
+                            </button>
+                        )}
+
+                        {/* Release cancelled button - Open view only */}
+                        {view === 'open' && releasableCancelledCount > 0 && (
+                            <button
+                                onClick={() => {
+                                    if (confirm(`Release ${releasableCancelledCount} cancelled orders?\n\nThis will move them to the Cancelled view.`)) {
+                                        mutations.releaseToCancelled.mutate(undefined);
+                                    }
+                                }}
+                                disabled={mutations.releaseToCancelled.isPending}
+                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 font-medium"
+                            >
+                                <XCircle size={12} />
+                                Release {releasableCancelledCount} Cancelled
                             </button>
                         )}
 
