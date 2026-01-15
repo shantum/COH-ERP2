@@ -297,7 +297,7 @@ router.post('/backfill', authenticateToken, asyncHandler(async (req: Request, re
 // ============================================
 
 router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-  const { batchSize = 500, daysBack } = req.body as { batchSize?: number; daysBack?: number };
+  const { batchSize = 500, daysBack, skip = 0 } = req.body as { batchSize?: number; daysBack?: number; skip?: number };
 
   // Find orders with fulfillment data in cache
   const dateFilter = daysBack ? new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000) : undefined;
@@ -314,6 +314,7 @@ router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req
       shopifyCache: { select: { rawData: true } },
       orderLines: { select: { id: true, awbNumber: true } },
     },
+    skip,
     take: batchSize,
     orderBy: { orderDate: 'desc' },
   });
@@ -356,6 +357,8 @@ router.post('/backfill-fulfillments', authenticateToken, asyncHandler(async (req
     synced,
     skipped,
     noFulfillments,
+    skip,
+    nextSkip: ordersWithCache.length === batchSize ? skip + batchSize : null,
     errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
   });
 }));
