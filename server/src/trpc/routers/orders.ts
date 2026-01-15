@@ -31,15 +31,6 @@ import {
 import { shipOrderLines } from '../../services/shipOrderService.js';
 
 // ============================================
-// TYPE DEFINITIONS
-// ============================================
-
-interface OrderWithLines {
-    orderLines?: Array<{ lineStatus?: string | null }>;
-    [key: string]: unknown;
-}
-
-// ============================================
 // LIST ORDERS PROCEDURE
 // ============================================
 
@@ -105,21 +96,11 @@ const list = protectedProcedure
             viewConfig.enrichment
         );
 
-        // For open/ready_to_ship views, filter out cancelled lines
-        let finalOrders = enriched;
-        if (view === 'open' || view === 'ready_to_ship') {
-            finalOrders = enriched
-                .map((order: OrderWithLines) => ({
-                    ...order,
-                    orderLines: (order.orderLines || []).filter(
-                        (line: { lineStatus?: string | null }) => line.lineStatus !== 'cancelled'
-                    ),
-                }))
-                .filter((order: OrderWithLines) => (order.orderLines?.length ?? 0) > 0);
-        }
+        // Cancelled lines with closedAt=null stay in open view (shown red with strikethrough)
+        // Users close them manually when ready
 
         return {
-            orders: finalOrders,
+            orders: enriched,
             view,
             viewName: viewConfig.name,
             pagination: {
@@ -393,10 +374,11 @@ const allocate = protectedProcedure
                 }
 
                 // Prepare transaction data for all lines of this SKU
+                // OUTWARD transaction created at allocation (immediate deduction)
                 for (const line of skuLines) {
                     txnData.push({
                         skuId: line.skuId,
-                        txnType: TXN_TYPE.RESERVED,
+                        txnType: TXN_TYPE.OUTWARD,
                         qty: line.qty,
                         reason: TXN_REASON.ORDER_ALLOCATION,
                         referenceId: line.id,

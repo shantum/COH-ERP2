@@ -162,25 +162,50 @@ export interface EnrichedOrder {
  * - excludeViews: Views to exclude from (for mutual exclusivity)
  */
 export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
+    /**
+     * Open Orders: Orders with at least one line that is not closed
+     * Uses closedAt on OrderLine for visibility control (not Order.status)
+     * Cancelled lines still show in open view (with strikethrough) until explicitly closed
+     */
     open: {
         name: 'Open Orders',
         description: 'Orders pending fulfillment',
         where: {
-            status: 'open',
             isArchived: false,
-            // Include partially cancelled orders - they have active lines to fulfill
+            // At least one line is open (closedAt is null) - includes cancelled lines
+            orderLines: {
+                some: {
+                    closedAt: null,
+                },
+            },
         },
         orderBy: { orderDate: 'desc' }, // Newest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],
         defaultLimit: 10000,
     },
 
+    /**
+     * Shipped/Closed Orders: Orders where all non-cancelled lines are closed
+     * This is the inverse of 'open' - all active lines have closedAt set
+     */
     shipped: {
         name: 'Shipped Orders',
         description: 'Orders in transit or delivered',
         where: {
-            status: { in: ['shipped', 'delivered'] },
             isArchived: false,
+            // All non-cancelled lines are closed
+            NOT: {
+                orderLines: {
+                    some: {
+                        closedAt: null,
+                        lineStatus: { not: 'cancelled' },
+                    },
+                },
+            },
+            // Must have at least one line (exclude empty orders)
+            orderLines: {
+                some: {},
+            },
         },
         // Exclude RTO orders
         excludeWhere: {
@@ -269,10 +294,15 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         name: 'Ready to Ship',
         description: 'Orders ready for fulfillment',
         where: {
-            status: 'open',
             isArchived: false,
             isOnHold: false,
-            // Include partially cancelled - they have active lines to fulfill
+            // At least one line is open (closedAt is null and not cancelled)
+            orderLines: {
+                some: {
+                    closedAt: null,
+                    lineStatus: { not: 'cancelled' },
+                },
+            },
         },
         orderBy: { orderDate: 'asc' }, // FIFO - oldest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution'],

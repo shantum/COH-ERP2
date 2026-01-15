@@ -870,6 +870,43 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any) => alert(err.response?.data?.error || 'Failed to restore line')
     });
 
+    // Close/reopen lines - controls visibility (moves between open and shipped views)
+    const closeLines = useMutation({
+        mutationFn: (lineIds: string[]) => ordersApi.closeLines(lineIds),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to close lines')
+    });
+
+    const reopenLines = useMutation({
+        mutationFn: (lineIds: string[]) => ordersApi.reopenLines(lineIds),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to reopen lines')
+    });
+
+    const closeOrder = useMutation({
+        mutationFn: (orderId: string) => ordersApi.closeOrder(orderId),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to close order')
+    });
+
+    const reopenOrder = useMutation({
+        mutationFn: (orderId: string) => ordersApi.reopenOrder(orderId),
+        onSuccess: () => {
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+        },
+        onError: (err: any) => alert(err.response?.data?.error || 'Failed to reopen order')
+    });
+
     const updateLine = useMutation({
         mutationFn: ({ lineId, data }: { lineId: string; data: any }) =>
             ordersApi.updateLine(lineId, data),
@@ -989,6 +1026,12 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         updateLineNotes,
         updateShipByDate,
         addLine,
+
+        // Close/reopen (visibility control)
+        closeLines,
+        reopenLines,
+        closeOrder,
+        reopenOrder,
 
         // Customization
         customizeLine,

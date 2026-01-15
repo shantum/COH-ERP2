@@ -3,23 +3,18 @@
  * Order line status updates and shipping operations
  *
  * ORDER LINE STATUS FLOW:
- * pending -> allocated -> packed -> [mark-shipped*] -> shipped
- *   | (allocate)          |
- * [creates reserve]     [unpack, clear AWB]
- *   | (unallocate)
- * [releases reserve]
+ * pending -> allocated -> picked -> packed -> closed (out of open view)
  *
- * * mark-shipped: Visual-only status (part of spreadsheet shipping workflow)
- *   Converted to shipped via process-marked-shipped batch endpoint
+ * SIMPLIFIED INVENTORY MODEL (2024-01):
+ * - Allocate: Creates OUTWARD transaction immediately (stock deducted)
+ * - Unallocate: Deletes OUTWARD transaction (stock restored)
+ * - Close: Sets closedAt timestamp (visibility only, no inventory)
+ * - Reopen: Clears closedAt timestamp (visibility only)
  *
- * INVENTORY MECHANICS:
- * - Allocate: Creates RESERVED transaction (holds stock, not deducted from balance)
- * - Unallocate: Deletes RESERVED transaction
- * - Ship: Releases RESERVED, creates OUTWARD (deducts from balance)
- * - Unship: Reverses OUTWARD, recreates RESERVED
+ * NOTE: RESERVED transaction type removed. All inventory changes happen at allocation.
  *
  * RACE CONDITION PREVENTION:
- * - Pre-checks before transaction (status, stock, AWB)
+ * - Pre-checks before transaction (status, stock)
  * - Re-checks inside transaction before updates
  * - ConflictError if concurrent requests detected
  *
@@ -42,10 +37,9 @@ import {
     calculateInventoryBalance,
     TXN_TYPE,
     TXN_REASON,
-    releaseReservedInventory,
-    createReservedTransaction,
     deleteSaleTransactions,
 } from '../../utils/queryPatterns.js';
+import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { validate } from '../../utils/validation.js';
 import { ShipOrderSchema } from '@coh/shared';
 import { shipOrderLines, shipOrder } from '../../services/shipOrderService.js';
@@ -161,7 +155,7 @@ router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('ord
             throw new ConflictError('Line was already allocated by another request', 'RACE_CONDITION');
         }
 
-        // Balance check inside transaction (atomic with reserve creation)
+        // Balance check inside transaction (atomic with outward creation)
         const balance = await calculateInventoryBalance(tx, currentLine.skuId);
         if (balance.availableBalance < currentLine.qty) {
             throw new BusinessLogicError(
@@ -170,12 +164,18 @@ router.post('/lines/:lineId/allocate', authenticateToken, requirePermission('ord
             );
         }
 
-        await createReservedTransaction(tx, {
-            skuId: currentLine.skuId,
-            qty: currentLine.qty,
-            orderLineId: lineId,
-            userId: req.user!.id,
+        // Create OUTWARD transaction immediately (simplified model - no more RESERVED)
+        await tx.inventoryTransaction.create({
+            data: {
+                skuId: currentLine.skuId,
+                txnType: TXN_TYPE.OUTWARD,
+                qty: currentLine.qty,
+                reason: TXN_REASON.ORDER_ALLOCATION,
+                referenceId: lineId,
+                createdById: req.user!.id,
+            },
         });
+        inventoryBalanceCache.invalidate([currentLine.skuId]);
 
         // Return updated line directly (no refetch needed)
         return await tx.orderLine.update({
@@ -280,10 +280,11 @@ router.post('/lines/bulk-allocate', authenticateToken, requirePermission('orders
             }
 
             // Prepare transaction data for all lines of this SKU
+            // OUTWARD transaction created at allocation (immediate deduction)
             for (const line of skuLines) {
                 txnData.push({
                     skuId: line.skuId,
-                    txnType: TXN_TYPE.RESERVED,
+                    txnType: TXN_TYPE.OUTWARD,
                     qty: line.qty,
                     reason: TXN_REASON.ORDER_ALLOCATION,
                     referenceId: line.id,
@@ -358,7 +359,20 @@ router.post('/lines/:lineId/unallocate', authenticateToken, asyncHandler(async (
 
     // All operations inside single transaction, return result directly
     const updated = await req.prisma.$transaction(async (tx) => {
-        await releaseReservedInventory(tx, line.id);
+        // Find and delete the OUTWARD transaction created at allocation
+        const txn = await tx.inventoryTransaction.findFirst({
+            where: {
+                referenceId: line.id,
+                txnType: TXN_TYPE.OUTWARD,
+                reason: TXN_REASON.ORDER_ALLOCATION,
+            },
+            select: { id: true, skuId: true },
+        });
+
+        if (txn) {
+            await tx.inventoryTransaction.delete({ where: { id: txn.id } });
+            inventoryBalanceCache.invalidate([txn.skuId]);
+        }
 
         return await tx.orderLine.update({
             where: { id: lineId },
@@ -1156,24 +1170,9 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req: Request, 
             throw new ConflictError('Order status changed by another request', 'RACE_CONDITION');
         }
 
-        // Atomic inventory correction
-        // First, delete all sale transactions for this order's lines
-        for (const line of order.orderLines) {
-            await deleteSaleTransactions(tx, line.id);
-        }
-
-        // Then create reserved transactions atomically
-        for (const line of order.orderLines) {
-            // Skip cancelled lines - they shouldn't get reserved inventory
-            if (line.lineStatus === 'cancelled') continue;
-
-            await createReservedTransaction(tx, {
-                skuId: line.skuId,
-                qty: line.qty,
-                orderLineId: line.id,
-                userId: req.user!.id,
-            });
-        }
+        // Note: No inventory action needed on unship
+        // In the simplified model, OUTWARD is created at allocation and stays
+        // Unshipping only affects status/visibility, not inventory
 
         await tx.order.update({
             where: { id: orderId },
@@ -1183,6 +1182,7 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req: Request, 
         });
 
         // Revert line statuses and clear tracking fields
+        // Also clear closedAt to reopen lines (move back to open view)
         await tx.orderLine.updateMany({
             where: { orderId },
             data: {
@@ -1191,6 +1191,7 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req: Request, 
                 awbNumber: null,
                 courier: null,
                 trackingStatus: null,
+                closedAt: null,
             },
         });
     });

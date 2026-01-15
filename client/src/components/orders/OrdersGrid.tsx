@@ -265,7 +265,7 @@ const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'shipByDate', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'rtoHistory', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
-    'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'shopifyStatus',
+    'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine', 'shopifyStatus',
     'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus', 'actions'
 ];
 
@@ -424,6 +424,7 @@ interface OrdersGridProps {
     onCancelOrder: (id: string, reason?: string) => void;
     onArchiveOrder: (id: string) => void;
     onDeleteOrder: (id: string) => void;
+    onCloseOrder?: (id: string) => void;  // Close order (move to shipped view)
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
     onSelectCustomer: (customerId: string) => void;
@@ -454,6 +455,7 @@ interface OrdersGridProps {
     isUncancellingLine: boolean;
     isArchiving: boolean;
     isDeletingOrder: boolean;
+    isClosingOrder?: boolean;
 }
 
 export function OrdersGrid({
@@ -478,6 +480,7 @@ export function OrdersGrid({
     onCancelOrder,
     onArchiveOrder,
     onDeleteOrder,
+    onCloseOrder,
     onCancelLine,
     onUncancelLine,
     onSelectCustomer,
@@ -491,6 +494,7 @@ export function OrdersGrid({
     isUncancellingLine,
     isArchiving,
     isDeletingOrder,
+    isClosingOrder,
 }: OrdersGridProps) {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
@@ -1381,7 +1385,7 @@ export function OrdersGrid({
             {
                 colId: 'ship',
                 headerName: getHeaderName('ship'),
-                width: 50,
+                width: 35,
                 cellRenderer: (params: ICellRendererParams) => {
                     const row = params.data;
                     if (!row || row.lineStatus === 'cancelled' || row.lineStatus === 'shipped') return null;
@@ -1389,15 +1393,7 @@ export function OrdersGrid({
                     const isPacked = row.lineStatus === 'packed';
                     const isMarkedShipped = row.lineStatus === 'marked_shipped';
 
-                    // Get AWB info for validation
-                    const orderLines = row.order?.orderLines || [];
-                    const line = orderLines.find((l: any) => l.id === row.lineId);
-                    const lineAwb = line?.awbNumber || '';
-                    const expectedAwb = row.order?.shopifyCache?.trackingNumber || '';
-                    const hasAwb = !!lineAwb;
-                    const awbMatches = hasAwb && expectedAwb && lineAwb.toLowerCase() === expectedAwb.toLowerCase();
-
-                    // Toggle between packed <-> marked_shipped
+                    // Marked shipped - show green checkbox (can unmark)
                     if (isMarkedShipped) {
                         return (
                             <button
@@ -1405,55 +1401,77 @@ export function OrdersGrid({
                                     e.stopPropagation();
                                     onUnmarkShippedLine(row.lineId);
                                 }}
-                                className="w-6 h-6 rounded border-2 border-green-500 bg-green-500 text-white flex items-center justify-center mx-auto hover:bg-green-600 hover:border-green-600 shadow-sm"
-                                title="Click to undo"
+                                className="w-5 h-5 rounded border-2 bg-green-500 border-green-500 text-white flex items-center justify-center mx-auto hover:bg-green-600 hover:border-green-600 shadow-sm"
+                                title="Click to unmark shipped"
                             >
-                                <Check size={14} strokeWidth={3} />
+                                <Check size={12} strokeWidth={3} />
                             </button>
                         );
                     }
 
+                    // Packed - show empty checkbox (can mark shipped)
                     if (isPacked) {
-                        const handleMarkShipped = (e: React.MouseEvent) => {
-                            e.stopPropagation();
-
-                            // Validate AWB
-                            if (!hasAwb) {
-                                if (!window.confirm('No AWB entered for this line. Mark as shipped anyway?')) {
-                                    return;
-                                }
-                            } else if (expectedAwb && !awbMatches) {
-                                if (!window.confirm(`AWB mismatch!\n\nEntered: ${lineAwb}\nExpected: ${expectedAwb}\n\nMark as shipped anyway?`)) {
-                                    return;
-                                }
-                            }
-
-                            onMarkShippedLine(row.lineId);
-                        };
-
-                        // Visual indicator for AWB status
-                        const hasWarning = !hasAwb || (expectedAwb && !awbMatches);
-
                         return (
                             <button
-                                onClick={handleMarkShipped}
-                                className={`w-6 h-6 rounded-md border-2 flex items-center justify-center mx-auto cursor-pointer transition-all ${
-                                    hasWarning
-                                        ? 'border-amber-400 bg-amber-50 hover:bg-amber-100 hover:border-amber-500'
-                                        : 'border-blue-400 bg-blue-50 hover:bg-blue-100 hover:border-blue-500'
-                                }`}
-                                title={!hasAwb ? 'No AWB - click to ship' : !awbMatches && expectedAwb ? 'AWB mismatch - click to ship' : 'Click to ship'}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onMarkShippedLine(row.lineId);
+                                }}
+                                className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm"
+                                title="Click to mark shipped"
+                            />
+                        );
+                    }
+
+                    // Not packed yet - show disabled checkbox
+                    return (
+                        <div
+                            className="w-5 h-5 rounded border-2 border-gray-200 bg-gray-100 flex items-center justify-center mx-auto opacity-40"
+                            title="Pack first"
+                        />
+                    );
+                },
+                cellClass: 'text-center',
+            },
+            {
+                colId: 'cancelLine',
+                headerName: getHeaderName('cancelLine'),
+                width: 35,
+                cellRenderer: (params: ICellRendererParams) => {
+                    const row = params.data;
+                    if (!row || !row.lineId) return null;
+
+                    const isCancelled = row.lineStatus === 'cancelled';
+                    const isToggling = isCancellingLine || isUncancellingLine;
+
+                    // Cancelled - show red X (can restore)
+                    if (isCancelled) {
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onUncancelLine(row.lineId);
+                                }}
+                                disabled={isToggling}
+                                className="w-5 h-5 rounded border-2 bg-red-500 border-red-500 text-white flex items-center justify-center mx-auto hover:bg-red-600 hover:border-red-600 shadow-sm disabled:opacity-50"
+                                title="Click to restore line"
                             >
-                                <Truck size={14} className={hasWarning ? 'text-amber-600' : 'text-blue-600'} />
+                                <X size={12} strokeWidth={3} />
                             </button>
                         );
                     }
 
-                    // Non-packed rows: show subtle disabled indicator
+                    // Not cancelled - show empty checkbox (can cancel)
                     return (
-                        <div className="w-6 h-6 rounded-md border border-gray-200 bg-gray-50 flex items-center justify-center mx-auto opacity-30" title="Pack first">
-                            <Truck size={12} className="text-gray-400" />
-                        </div>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onCancelLine(row.lineId);
+                            }}
+                            disabled={isToggling}
+                            className="w-5 h-5 rounded border-2 border-red-300 bg-white hover:bg-red-50 hover:border-red-400 flex items-center justify-center mx-auto cursor-pointer shadow-sm disabled:opacity-50"
+                            title="Click to cancel line"
+                        />
                     );
                 },
                 cellClass: 'text-center',
@@ -1806,6 +1824,8 @@ export function OrdersGrid({
             onCustomize,
             onEditCustomization,
             onRemoveCustomization,
+            onCancelLine,
+            onUncancelLine,
         ]
     );
 
@@ -1937,15 +1957,23 @@ export function OrdersGrid({
         return undefined;
     }, []);
 
-    // Add class for non-first lines to hide row separator, and urgency classes
+    // Add class for non-first lines to hide row separator, and urgency/status classes
     const getRowClass = useCallback((params: any): string => {
         const row = params.data;
         if (!row) return '';
 
         const classes = [row.isFirstLine ? 'order-first-line' : 'order-continuation-line'];
 
+        // Line status classes (shipped takes priority, then cancelled)
+        if (row.lineStatus === 'marked_shipped') {
+            classes.push('line-shipped');
+        } else if (row.lineStatus === 'cancelled') {
+            classes.push('line-cancelled');
+        }
+
         // Calculate order age for urgency indicator (only on first line to avoid repetition)
-        if (row.isFirstLine && row.orderDate) {
+        // Don't show urgency on shipped/cancelled lines
+        if (row.isFirstLine && row.orderDate && !['marked_shipped', 'cancelled'].includes(row.lineStatus)) {
             const orderDate = new Date(row.orderDate);
             const daysOld = Math.floor((Date.now() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
             if (daysOld > 5) {
@@ -1981,6 +2009,22 @@ export function OrdersGrid({
                     /* Amber left border for orders 3-5 days */
                     .ag-row.order-warning {
                         border-left: 4px solid #f59e0b !important;
+                    }
+                    /* Line marked as shipped - dark green background, strikethrough text */
+                    .ag-row.line-shipped {
+                        background-color: #dcfce7 !important;
+                    }
+                    .ag-row.line-shipped .ag-cell {
+                        text-decoration: line-through;
+                        color: #166534 !important;
+                    }
+                    /* Line cancelled - red background, strikethrough text */
+                    .ag-row.line-cancelled {
+                        background-color: #fee2e2 !important;
+                    }
+                    .ag-row.line-cancelled .ag-cell {
+                        text-decoration: line-through;
+                        color: #991b1b !important;
                     }
                 `}</style>
                 <div className="table-scroll-container border rounded">
@@ -2024,10 +2068,12 @@ export function OrdersGrid({
                 onDelete={() => onDeleteOrder(actionPanelOrder?.id)}
                 onShip={onShip ? () => onShip(actionPanelOrder) : undefined}
                 onBookShipment={() => onEditOrder(actionPanelOrder)}
+                onCloseOrder={onCloseOrder ? () => onCloseOrder(actionPanelOrder?.id) : undefined}
                 canDelete={actionPanelOrder?.orderLines?.length === 0}
                 isCancelling={isCancellingOrder}
                 isArchiving={isArchiving}
                 isDeleting={isDeletingOrder}
+                isClosing={isClosingOrder}
             />
         ),
         columnVisibilityDropdown: (

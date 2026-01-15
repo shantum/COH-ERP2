@@ -596,12 +596,12 @@ router.delete('/transactions/:id', authenticateToken, requireAnyPermission('inve
                         );
                     }
 
-                    // Reverse auto-allocation: delete reserved transaction
+                    // Reverse auto-allocation: delete OUTWARD transaction (simplified model)
                     await tx.inventoryTransaction.deleteMany({
                         where: {
                             skuId: productionBatch.skuId,
                             referenceId: productionBatch.sourceOrderLineId,
-                            txnType: TXN_TYPE.RESERVED,
+                            txnType: TXN_TYPE.OUTWARD,
                             reason: TXN_REASON.ORDER_ALLOCATION
                         }
                     });

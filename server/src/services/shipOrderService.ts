@@ -2,11 +2,11 @@
  * Unified Shipping Service
  *
  * Consolidates all shipping operations into a single service that all shipping paths use.
- * This replaces the 7 different shipping implementations across the codebase.
  *
- * INVENTORY OPERATIONS:
- * - Releases RESERVED transactions (deletes allocation holds)
- * - Creates OUTWARD/SALE transactions (deducts from inventory balance)
+ * SIMPLIFIED MODEL (2024-01):
+ * - Inventory is now handled at ALLOCATION time (not shipping)
+ * - Shipping only updates status, AWB, courier, and tracking info
+ * - No more RESERVED transactions - allocation creates OUTWARD directly
  *
  * IDEMPOTENCY:
  * - Already-shipped lines are skipped (safe to retry)
@@ -30,10 +30,7 @@
  * @module services/shipOrderService
  */
 
-import {
-    releaseReservedInventory,
-    createSaleTransaction,
-} from '../utils/queryPatterns.js';
+// NOTE: Inventory imports removed - allocation now handles inventory directly
 import type { PrismaTransactionClient } from '../utils/queryPatterns.js';
 import type { PrismaClient } from '@prisma/client';
 import { shippingLogger } from '../utils/logger.js';
@@ -175,7 +172,9 @@ export async function shipOrderLines(
         courier,
         userId,
         skipStatusValidation = false,
-        skipInventory = false,
+        // Note: skipInventory kept for backward compatibility but no longer used
+        // Inventory is now deducted at allocation, not shipping
+        skipInventory: _skipInventory = false,
     } = options;
 
     // Validate required parameters
@@ -271,22 +270,11 @@ export async function shipOrderLines(
         linesToShip.push(line);
     }
 
-    // Process inventory and update lines
+    // Process lines - no inventory operations needed (handled at allocation)
     for (const line of linesToShip) {
         try {
-            // Release reserved inventory and create sale transaction
-            // Only deduct inventory if the line was properly allocated
-            if (!skipInventory && line.allocatedAt) {
-                await releaseReservedInventory(tx, line.id);
-                await createSaleTransaction(tx, {
-                    skuId: line.skuId,
-                    qty: line.qty,
-                    orderLineId: line.id,
-                    userId,
-                });
-            }
-
             // Update line status and tracking info
+            // NOTE: Inventory already deducted at allocation time
             await tx.orderLine.update({
                 where: { id: line.id },
                 data: {
@@ -295,6 +283,7 @@ export async function shipOrderLines(
                     awbNumber: awbNumber.trim(),
                     courier: courier.trim(),
                     trackingStatus: 'in_transit',
+                    closedAt: now,  // Also close the line (remove from open view)
                 },
             });
 

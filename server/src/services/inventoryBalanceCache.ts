@@ -25,13 +25,13 @@ import {
 
 /**
  * Cached balance entry with timestamp
+ * NOTE: totalReserved removed - allocation now creates OUTWARD directly
  */
 export interface CachedBalance {
     totalInward: number;
     totalOutward: number;
-    totalReserved: number;
     currentBalance: number;
-    availableBalance: number;
+    availableBalance: number;  // Same as currentBalance (kept for backward compatibility)
     hasDataIntegrityIssue: boolean;
     cachedAt: number;
 }
@@ -101,7 +101,6 @@ class InventoryBalanceCache {
                     ? {
                           totalInward: balance.totalInward,
                           totalOutward: balance.totalOutward,
-                          totalReserved: balance.totalReserved,
                           currentBalance: balance.currentBalance,
                           availableBalance: balance.availableBalance,
                           hasDataIntegrityIssue: balance.hasDataIntegrityIssue,
@@ -111,7 +110,6 @@ class InventoryBalanceCache {
                           // SKU has no transactions - zero balance
                           totalInward: 0,
                           totalOutward: 0,
-                          totalReserved: 0,
                           currentBalance: 0,
                           availableBalance: 0,
                           hasDataIntegrityIssue: false,

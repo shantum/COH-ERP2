@@ -41,6 +41,7 @@ model User {
   createdWriteOffs      WriteOffLog[]            @relation("WriteOffCreator")
   rtoInwardedLines      OrderLine[]              @relation("RtoInwardedBy")
   customizedLines       OrderLine[]              @relation("CustomizedBy")
+  closedLines           OrderLine[]              @relation("ClosedByLine")
   recordedPayments      OrderPayment[]           // Payments recorded by this user
 
   @@index([roleId])
@@ -490,6 +491,9 @@ model OrderLine {
   rtoReceivedAt      DateTime?
   trackingStatus     String?
   shippingAddress    String?
+  closedAt           DateTime?           // When line was closed/moved out of open view
+  closedById         String?             // User who closed the line
+  closedBy           User?               @relation("ClosedByLine", fields: [closedById], references: [id])
   customizedBy       User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
   order              Order               @relation(fields: [orderId], references: [id])
   productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
@@ -509,6 +513,8 @@ model OrderLine {
   @@index([awbNumber])
   @@index([skuId, rtoCondition])
   @@index([orderId, rtoCondition])
+  @@index([closedAt])
+  @@index([closedById])
 }
 
 model ReturnRequest {

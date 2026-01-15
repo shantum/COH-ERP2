@@ -103,7 +103,7 @@ const getBalances = protectedProcedure
                 skuCode: skuCodeMap.get(skuId) || '',
                 totalInward: balance?.totalInward ?? 0,
                 totalOutward: balance?.totalOutward ?? 0,
-                totalReserved: balance?.totalReserved ?? 0,
+                totalReserved: 0,  // Deprecated: kept for backward compatibility
                 currentBalance: balance?.currentBalance ?? 0,
                 availableBalance: balance?.availableBalance ?? 0,
                 hasDataIntegrityIssue: balance?.hasDataIntegrityIssue ?? false,
@@ -164,7 +164,6 @@ const getAllBalances = protectedProcedure
             const balance = balanceMap.get(sku.id) || {
                 totalInward: 0,
                 totalOutward: 0,
-                totalReserved: 0,
                 currentBalance: 0,
                 availableBalance: 0
             };
@@ -185,7 +184,7 @@ const getAllBalances = protectedProcedure
                 category: sku.variation.product.category,
                 imageUrl,
                 currentBalance: balance.currentBalance,
-                reservedBalance: balance.totalReserved,
+                reservedBalance: 0,  // Deprecated: kept for backward compatibility
                 availableBalance: balance.availableBalance,
                 totalInward: balance.totalInward,
                 totalOutward: balance.totalOutward,

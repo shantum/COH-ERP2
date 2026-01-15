@@ -6,7 +6,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Archive, Truck, RefreshCw } from 'lucide-react';
+import { Plus, Archive, Truck, RefreshCw, CheckSquare } from 'lucide-react';
 
 // Custom hooks
 import { useOrdersData } from '../hooks/useOrdersData';
@@ -231,6 +231,22 @@ export default function Orders() {
         return count;
     }, [openOrders]);
 
+    // Lines that can be closed (marked_shipped or cancelled, not already closed)
+    const closableLineIds = useMemo(() => {
+        if (!openOrders) return [];
+        const ids: string[] = [];
+        for (const order of openOrders) {
+            const lines = order.orderLines || [];
+            for (const line of lines) {
+                // Line is closeable if marked_shipped or cancelled, and not already closed
+                if (['marked_shipped', 'cancelled'].includes(line.lineStatus) && !line.closedAt) {
+                    ids.push(line.id);
+                }
+            }
+        }
+        return ids;
+    }, [openOrders]);
+
     // Pipeline counts for simple status bar
     const pipelineCounts = useMemo(() => {
         if (!openOrders) return { pending: 0, allocated: 0, ready: 0 };
@@ -452,12 +468,14 @@ export default function Orders() {
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         onArchiveOrder: () => { }, // Not used on Orders page
+        onCloseOrder: (id) => mutations.closeOrder.mutate(id),
         allocatingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isArchiving: false, // Not used on Orders page
         isDeletingOrder: mutations.deleteOrder.isPending,
+        isClosingOrder: mutations.closeOrder.isPending,
     });
 
     // Tab configuration - only 2 tabs now
@@ -599,6 +617,21 @@ export default function Orders() {
                                 >
                                     <Truck size={12} />
                                     Clear {markedShippedCount} Shipped
+                                </button>
+                            )}
+                            {closableLineIds.length > 0 && (
+                                <button
+                                    onClick={() => {
+                                        if (confirm(`Close ${closableLineIds.length} completed lines?\n\nThis will move them out of the open view.`)) {
+                                            mutations.closeLines.mutate(closableLineIds);
+                                        }
+                                    }}
+                                    disabled={mutations.closeLines.isPending}
+                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
+                                    title="Close all shipped and cancelled lines"
+                                >
+                                    <CheckSquare size={12} />
+                                    Close {closableLineIds.length} Completed
                                 </button>
                             )}
                             {user?.role === 'admin' && (

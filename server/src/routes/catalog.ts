@@ -18,11 +18,11 @@ const router: Router = Router();
 
 /**
  * Inventory balance data from calculateAllInventoryBalances
+ * NOTE: totalReserved removed - allocation now creates OUTWARD directly
  */
 interface InventoryBalance {
     totalInward: number;
     totalOutward: number;
-    totalReserved: number;
     currentBalance: number;
     availableBalance: number;
 }
@@ -368,7 +368,6 @@ router.get('/sku-inventory', authenticateToken, asyncHandler(async (req: Request
         const balance: InventoryBalance = balanceMap.get(sku.id) || {
             totalInward: 0,
             totalOutward: 0,
-            totalReserved: 0,
             currentBalance: 0,
             availableBalance: 0,
         };
@@ -473,7 +472,7 @@ router.get('/sku-inventory', authenticateToken, asyncHandler(async (req: Request
 
             // Inventory
             currentBalance: balance.currentBalance,
-            reservedBalance: balance.totalReserved,
+            reservedBalance: 0,  // NOTE: Reserved concept removed - allocation creates OUTWARD directly
             availableBalance: balance.availableBalance,
             totalInward: balance.totalInward,
             totalOutward: balance.totalOutward,

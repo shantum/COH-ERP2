@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
     X, Eye, Pencil, Ban, Archive, Trash2, Truck, Package,
-    CheckCircle, Clock, User, MapPin, CreditCard
+    CheckCircle, Clock, User, MapPin, CreditCard, CheckSquare
 } from 'lucide-react';
 import { formatDateTime } from '../../utils/orderHelpers';
 
@@ -22,10 +22,12 @@ interface OrderActionPanelProps {
     onDelete: () => void;
     onShip?: () => void;
     onBookShipment?: () => void;
+    onCloseOrder?: () => void;  // Close order (move to shipped view)
     canDelete: boolean;
     isCancelling: boolean;
     isArchiving: boolean;
     isDeleting: boolean;
+    isClosing?: boolean;
 }
 
 // Fulfillment progress indicator
@@ -135,10 +137,12 @@ export function OrderActionPanel({
     onDelete,
     onShip,
     onBookShipment,
+    onCloseOrder,
     canDelete,
     isCancelling,
     isArchiving,
     isDeleting,
+    isClosing,
 }: OrderActionPanelProps) {
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -374,6 +378,21 @@ export function OrderActionPanel({
 
                     {/* Secondary Actions */}
                     <div className="flex gap-2 pt-2 border-t border-gray-200">
+                        {onCloseOrder && (
+                            <button
+                                onClick={() => {
+                                    if (confirm(`Close ${order.orderNumber}?\n\nThis moves the order to the shipped view.`)) {
+                                        onCloseOrder();
+                                        onClose();
+                                    }
+                                }}
+                                disabled={isClosing}
+                                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-gray-500 hover:text-emerald-600 hover:bg-emerald-50 transition-all text-xs font-medium disabled:opacity-50"
+                            >
+                                <CheckSquare size={14} />
+                                Close
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 const reason = prompt(`Cancel ${order.orderNumber}?\n\nReason (optional):`);

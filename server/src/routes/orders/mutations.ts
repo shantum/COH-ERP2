@@ -10,10 +10,13 @@ import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { requirePermission } from '../../middleware/permissions.js';
 import {
-    releaseReservedInventory,
     createCustomSku,
     removeCustomization,
+    releaseReservedInventory,
+    TXN_TYPE,
+    TXN_REASON,
 } from '../../utils/queryPatterns.js';
+import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import type { CreateCustomSkuResult, RemoveCustomizationResult } from '../../utils/queryPatterns.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { validate } from '../../utils/validation.js';
@@ -1046,6 +1049,171 @@ router.post(
 );
 
 // ============================================
+// CLOSE/REOPEN LINE OPERATIONS (Visibility Control)
+// ============================================
+
+/**
+ * Close order line(s) - removes them from the open view
+ * This is purely a visibility control, no inventory impact
+ */
+router.post(
+    '/lines/close',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const { lineIds } = req.body as { lineIds: string[] };
+
+        if (!lineIds || !Array.isArray(lineIds) || lineIds.length === 0) {
+            throw new ValidationError('lineIds array is required');
+        }
+
+        const now = new Date();
+        const userId = req.user!.id;
+
+        const result = await req.prisma.orderLine.updateMany({
+            where: {
+                id: { in: lineIds },
+                closedAt: null,  // Only close lines that aren't already closed
+                lineStatus: { not: 'cancelled' },  // Don't close cancelled lines
+            },
+            data: {
+                closedAt: now,
+                closedById: userId,
+            },
+        });
+
+        orderLogger.info({ lineIds, count: result.count, userId }, 'Lines closed');
+        res.json({
+            message: `Closed ${result.count} lines`,
+            count: result.count,
+        });
+    })
+);
+
+/**
+ * Reopen order line(s) - returns them to the open view
+ * This is purely a visibility control, no inventory impact
+ */
+router.post(
+    '/lines/reopen',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const { lineIds } = req.body as { lineIds: string[] };
+
+        if (!lineIds || !Array.isArray(lineIds) || lineIds.length === 0) {
+            throw new ValidationError('lineIds array is required');
+        }
+
+        const result = await req.prisma.orderLine.updateMany({
+            where: {
+                id: { in: lineIds },
+                closedAt: { not: null },  // Only reopen lines that are closed
+            },
+            data: {
+                closedAt: null,
+                closedById: null,
+            },
+        });
+
+        orderLogger.info({ lineIds, count: result.count }, 'Lines reopened');
+        res.json({
+            message: `Reopened ${result.count} lines`,
+            count: result.count,
+        });
+    })
+);
+
+/**
+ * Close all lines for an order - removes entire order from open view
+ */
+router.post(
+    '/:id/close',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const orderId = getParamString(req.params.id);
+        const now = new Date();
+        const userId = req.user!.id;
+
+        const result = await req.prisma.orderLine.updateMany({
+            where: {
+                orderId,
+                closedAt: null,
+                lineStatus: { not: 'cancelled' },
+            },
+            data: {
+                closedAt: now,
+                closedById: userId,
+            },
+        });
+
+        orderLogger.info({ orderId, count: result.count, userId }, 'Order closed');
+        res.json({
+            message: `Closed ${result.count} lines for order`,
+            count: result.count,
+        });
+    })
+);
+
+/**
+ * Reopen all lines for an order - returns order to open view
+ */
+router.post(
+    '/:id/reopen',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        const orderId = getParamString(req.params.id);
+
+        const result = await req.prisma.orderLine.updateMany({
+            where: {
+                orderId,
+                closedAt: { not: null },
+            },
+            data: {
+                closedAt: null,
+                closedById: null,
+            },
+        });
+
+        orderLogger.info({ orderId, count: result.count }, 'Order reopened');
+        res.json({
+            message: `Reopened ${result.count} lines for order`,
+            count: result.count,
+        });
+    })
+);
+
+/**
+ * Fix orders incorrectly marked as cancelled
+ * Restores orders with status='cancelled' back to 'open' status
+ * so they appear in the open orders view again
+ */
+router.post(
+    '/fix-cancelled-status',
+    authenticateToken,
+    asyncHandler(async (req: Request, res: Response): Promise<void> => {
+        // Find all orders marked as cancelled that have lines without closedAt
+        // These should be in the open view, not cancelled
+        const result = await req.prisma.order.updateMany({
+            where: {
+                status: 'cancelled',
+                terminalStatus: 'cancelled',
+                isArchived: false,
+            },
+            data: {
+                status: 'open',
+                terminalStatus: null,
+                terminalAt: null,
+            },
+        });
+
+        orderLogger.info({ count: result.count }, 'Fixed cancelled orders');
+        res.json({
+            message: `Restored ${result.count} orders to open status`,
+            count: result.count,
+        });
+    })
+);
+
+// ============================================
 // ORDER LINE OPERATIONS
 // ============================================
 
@@ -1073,45 +1241,46 @@ router.post(
         }
 
         await req.prisma.$transaction(async (tx) => {
+            // If allocated, reverse the OUTWARD transaction (new simplified model)
             if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
-                await releaseReservedInventory(tx, line.id);
+                const txn = await tx.inventoryTransaction.findFirst({
+                    where: {
+                        referenceId: line.id,
+                        txnType: TXN_TYPE.OUTWARD,
+                        reason: TXN_REASON.ORDER_ALLOCATION,
+                    },
+                    select: { id: true, skuId: true },
+                });
+
+                if (txn) {
+                    await tx.inventoryTransaction.delete({ where: { id: txn.id } });
+                    inventoryBalanceCache.invalidate([txn.skuId]);
+                }
             }
 
+            // Simply mark line as cancelled - order stays in open view
+            // User can close completed lines via "Close Completed" button
             await tx.orderLine.update({
                 where: { id: lineId },
                 data: { lineStatus: 'cancelled' },
             });
 
+            // Update order total based on remaining active lines
             const allLines = await tx.orderLine.findMany({
                 where: { orderId: line.orderId },
             });
             const activeLines = allLines.filter((l) =>
                 l.id === lineId ? false : l.lineStatus !== 'cancelled'
             );
+            const newTotal = activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
 
-            if (activeLines.length === 0) {
-                // All lines cancelled - mark order as fully cancelled
-                await tx.order.update({
-                    where: { id: line.orderId },
-                    data: {
-                        status: 'cancelled',
-                        terminalStatus: 'cancelled',
-                        terminalAt: new Date(),
-                        totalAmount: 0,
-                        partiallyCancelled: false, // Fully cancelled, not partial
-                    },
-                });
-            } else {
-                // Some lines still active - mark as partially cancelled
-                const newTotal = activeLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
-                await tx.order.update({
-                    where: { id: line.orderId },
-                    data: {
-                        totalAmount: newTotal,
-                        partiallyCancelled: true,
-                    },
-                });
-            }
+            await tx.order.update({
+                where: { id: line.orderId },
+                data: {
+                    totalAmount: newTotal,
+                    partiallyCancelled: activeLines.length < allLines.length,
+                },
+            });
         });
 
         // Update customer tier - line cancellation affects LTV (especially if order is now fully cancelled)

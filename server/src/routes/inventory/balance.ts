@@ -106,7 +106,7 @@ router.get('/balance', authenticateToken, asyncHandler(async (req: Request, res:
     }
 
     const balances: BalanceItem[] = skus.map((sku) => {
-        const balance = balanceMap.get(sku.id) || { totalInward: 0, totalOutward: 0, totalReserved: 0, currentBalance: 0, availableBalance: 0 };
+        const balance = balanceMap.get(sku.id) || { totalInward: 0, totalOutward: 0, currentBalance: 0, availableBalance: 0 };
 
         // Get image URL from variation or product
         const imageUrl = sku.variation.imageUrl || sku.variation.product.imageUrl || null;
@@ -124,7 +124,7 @@ router.get('/balance', authenticateToken, asyncHandler(async (req: Request, res:
             category: sku.variation.product.category,
             imageUrl,
             currentBalance: balance.currentBalance,
-            reservedBalance: balance.totalReserved,
+            reservedBalance: 0,  // NOTE: Reserved concept removed - allocation creates OUTWARD directly
             availableBalance: balance.availableBalance,
             totalInward: balance.totalInward,
             totalOutward: balance.totalOutward,

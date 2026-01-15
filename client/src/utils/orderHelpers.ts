@@ -415,6 +415,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     pick: 'Pick',
     pack: 'Pack',
     ship: 'Ship',
+    cancelLine: 'Cancel',
     shopifyStatus: 'Shopify',
     shopifyAwb: 'Shopify AWB',
     shopifyCourier: 'Shopify Courier',
@@ -427,5 +428,5 @@ export const DEFAULT_HEADERS: Record<string, string> = {
 // Columns shown by default (cleaner initial view)
 export const DEFAULT_VISIBLE_COLUMNS = [
     'orderDate', 'orderAge', 'orderNumber', 'customerName', 'paymentMethod', 'rtoHistory', 'productName',
-    'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'actions'
+    'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine', 'actions'
 ];

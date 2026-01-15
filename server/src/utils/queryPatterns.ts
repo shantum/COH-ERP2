@@ -45,11 +45,11 @@ export type PrismaOrTransaction = PrismaClient | PrismaTransactionClient;
 
 /**
  * Inventory transaction types
+ * NOTE: RESERVED type removed in simplification - allocate now creates OUTWARD directly
  */
 export const TXN_TYPE = {
     INWARD: 'inward',
     OUTWARD: 'outward',
-    RESERVED: 'reserved',
 } as const;
 
 export type TxnType = typeof TXN_TYPE[keyof typeof TXN_TYPE];
@@ -102,13 +102,14 @@ export type FabricTxnType = typeof FABRIC_TXN_TYPE[keyof typeof FABRIC_TXN_TYPE]
 
 /**
  * Result of inventory balance calculation
+ * NOTE: totalReserved removed - allocate now creates OUTWARD directly
+ * currentBalance and availableBalance are now the same (inward - outward)
  */
 export interface InventoryBalance {
     totalInward: number;
     totalOutward: number;
-    totalReserved: number;
     currentBalance: number;
-    availableBalance: number;
+    availableBalance: number;  // Same as currentBalance (kept for backward compatibility)
     hasDataIntegrityIssue: boolean;
 }
 
@@ -864,19 +865,18 @@ export async function calculateInventoryBalance(
 
     let totalInward = 0;
     let totalOutward = 0;
-    let totalReserved = 0;
 
     result.forEach((r) => {
         if (r.txnType === 'inward') totalInward = r._sum.qty || 0;
         else if (r.txnType === 'outward') totalOutward = r._sum.qty || 0;
-        else if (r.txnType === 'reserved') totalReserved = r._sum.qty || 0;
     });
 
     let currentBalance = totalInward - totalOutward;
-    let availableBalance = currentBalance - totalReserved;
+    // availableBalance is now the same as currentBalance (no more reserved concept)
+    let availableBalance = currentBalance;
 
     // Flag for data integrity issues (when outward > inward)
-    const hasDataIntegrityIssue = currentBalance < 0 || availableBalance < 0;
+    const hasDataIntegrityIssue = currentBalance < 0;
 
     // Floor at 0 unless explicitly allowing negative (for diagnostic purposes)
     if (!allowNegative) {
@@ -887,7 +887,6 @@ export async function calculateInventoryBalance(
     return {
         totalInward,
         totalOutward,
-        totalReserved,
         currentBalance,
         availableBalance,
         hasDataIntegrityIssue
@@ -932,7 +931,6 @@ export async function calculateAllInventoryBalances(
                 skuId: r.skuId,
                 totalInward: 0,
                 totalOutward: 0,
-                totalReserved: 0,
                 currentBalance: 0,
                 availableBalance: 0,
                 hasDataIntegrityIssue: false,
@@ -942,16 +940,16 @@ export async function calculateAllInventoryBalances(
         const balance = balanceMap.get(r.skuId)!;
         if (r.txnType === 'inward') balance.totalInward = r._sum.qty || 0;
         else if (r.txnType === 'outward') balance.totalOutward = r._sum.qty || 0;
-        else if (r.txnType === 'reserved') balance.totalReserved = r._sum.qty || 0;
     });
 
     // Calculate derived fields
     for (const [skuId, balance] of balanceMap) {
         let currentBalance = balance.totalInward - balance.totalOutward;
-        let availableBalance = currentBalance - balance.totalReserved;
+        // availableBalance is now the same as currentBalance (no more reserved concept)
+        let availableBalance = currentBalance;
 
         // Flag for data integrity issues
-        balance.hasDataIntegrityIssue = currentBalance < 0 || availableBalance < 0;
+        balance.hasDataIntegrityIssue = currentBalance < 0;
 
         // Floor at 0 unless explicitly allowing negative
         if (!allowNegative) {
@@ -1100,8 +1098,9 @@ export async function validateOutwardTransaction(
 }
 
 /**
- * Release reserved inventory for an order line
- * Used when unallocating, shipping, or cancelling an order line
+ * Release allocated inventory for an order line (reverses allocation)
+ * Used when unallocating or cancelling an order line
+ * In the simplified model, allocation creates OUTWARD directly
  */
 export async function releaseReservedInventory(
     prisma: PrismaOrTransaction,
@@ -1111,7 +1110,7 @@ export async function releaseReservedInventory(
     const affectedTransactions = await prisma.inventoryTransaction.findMany({
         where: {
             referenceId: orderLineId,
-            txnType: TXN_TYPE.RESERVED,
+            txnType: TXN_TYPE.OUTWARD,
             reason: TXN_REASON.ORDER_ALLOCATION,
         },
         select: { skuId: true },
@@ -1121,7 +1120,7 @@ export async function releaseReservedInventory(
     const result = await prisma.inventoryTransaction.deleteMany({
         where: {
             referenceId: orderLineId,
-            txnType: TXN_TYPE.RESERVED,
+            txnType: TXN_TYPE.OUTWARD,
             reason: TXN_REASON.ORDER_ALLOCATION,
         },
     });
@@ -1135,7 +1134,7 @@ export async function releaseReservedInventory(
 }
 
 /**
- * Release reserved inventory for multiple order lines
+ * Release allocated inventory for multiple order lines
  */
 export async function releaseReservedInventoryBatch(
     prisma: PrismaOrTransaction,
@@ -1145,7 +1144,7 @@ export async function releaseReservedInventoryBatch(
     const affectedTransactions = await prisma.inventoryTransaction.findMany({
         where: {
             referenceId: { in: orderLineIds },
-            txnType: TXN_TYPE.RESERVED,
+            txnType: TXN_TYPE.OUTWARD,
             reason: TXN_REASON.ORDER_ALLOCATION,
         },
         select: { skuId: true },
@@ -1155,7 +1154,7 @@ export async function releaseReservedInventoryBatch(
     const result = await prisma.inventoryTransaction.deleteMany({
         where: {
             referenceId: { in: orderLineIds },
-            txnType: TXN_TYPE.RESERVED,
+            txnType: TXN_TYPE.OUTWARD,
             reason: TXN_REASON.ORDER_ALLOCATION,
         },
     });
@@ -1169,16 +1168,17 @@ export async function releaseReservedInventoryBatch(
 }
 
 /**
- * Create a reserved inventory transaction for order allocation
+ * Create an allocation inventory transaction (OUTWARD with ORDER_ALLOCATION reason)
+ * In the simplified model, allocation immediately deducts from inventory
  */
-export async function createReservedTransaction(
+export async function createAllocationTransaction(
     prisma: PrismaOrTransaction,
     { skuId, qty, orderLineId, userId }: CreateReservedTransactionParams
 ): Promise<Prisma.InventoryTransactionGetPayload<object>> {
     const transaction = await prisma.inventoryTransaction.create({
         data: {
             skuId,
-            txnType: TXN_TYPE.RESERVED,
+            txnType: TXN_TYPE.OUTWARD,
             qty,
             reason: TXN_REASON.ORDER_ALLOCATION,
             referenceId: orderLineId,
@@ -1191,6 +1191,9 @@ export async function createReservedTransaction(
 
     return transaction;
 }
+
+// Backward compatibility alias
+export const createReservedTransaction = createAllocationTransaction;
 
 /**
  * Create a sale (outward) transaction when shipping
@@ -1309,28 +1312,21 @@ export async function validateTransactionDeletion(
                 transactionQty: transaction.qty,
             });
         }
-
-        // Check if there are reserved quantities that would be affected
-        if (balance.totalReserved > 0 && balanceAfterDeletion < balance.totalReserved) {
-            dependencies.push({
-                type: 'reserved_inventory',
-                message: `Deleting would leave insufficient stock for ${balance.totalReserved} reserved units`,
-                reserved: balance.totalReserved,
-            });
-        }
     }
 
-    // For reserved transactions, check if order line is in a state that requires reservation
-    if (transaction.txnType === TXN_TYPE.RESERVED && transaction.referenceId) {
+    // For allocation transactions (OUTWARD with ORDER_ALLOCATION), check if order line is still allocated
+    if (transaction.txnType === TXN_TYPE.OUTWARD &&
+        transaction.reason === TXN_REASON.ORDER_ALLOCATION &&
+        transaction.referenceId) {
         const orderLine = await prisma.orderLine.findFirst({
             where: { id: transaction.referenceId },
             include: { order: { select: { status: true, orderNumber: true } } },
         });
 
-        if (orderLine && orderLine.lineStatus === 'allocated') {
+        if (orderLine && ['allocated', 'picked', 'packed', 'shipped'].includes(orderLine.lineStatus)) {
             dependencies.push({
                 type: 'active_allocation',
-                message: `Order line ${orderLine.order?.orderNumber} is still allocated`,
+                message: `Order line ${orderLine.order?.orderNumber} is still allocated/shipped`,
                 orderNumber: orderLine.order?.orderNumber,
                 lineStatus: orderLine.lineStatus,
             });

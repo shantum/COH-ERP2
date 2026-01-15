@@ -668,11 +668,11 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
         // When a custom SKU batch completes, auto-allocate to the linked order line
         // Standard order-linked batches do NOT auto-allocate (staff allocates manually)
         if (isCustomSkuBatch && batch.sourceOrderLineId) {
-            // Create reserved transaction for the completed quantity
+            // Create OUTWARD transaction (simplified model - allocation deducts immediately)
             await tx.inventoryTransaction.create({
                 data: {
                     skuId: batch.skuId,
-                    txnType: TXN_TYPE.RESERVED,
+                    txnType: TXN_TYPE.OUTWARD,
                     qty: qtyCompleted,
                     reason: TXN_REASON.ORDER_ALLOCATION,
                     referenceId: batch.sourceOrderLineId,
@@ -772,11 +772,11 @@ router.post('/batches/:id/uncomplete', authenticateToken, requirePermission('pro
 
         // CUSTOM SKU: Reverse auto-allocation
         if (isCustomSkuBatch && batch.sourceOrderLineId) {
-            // Delete reserved transaction for this order line
+            // Delete OUTWARD transaction for this order line (simplified model)
             await tx.inventoryTransaction.deleteMany({
                 where: {
                     referenceId: batch.sourceOrderLineId,
-                    txnType: TXN_TYPE.RESERVED,
+                    txnType: TXN_TYPE.OUTWARD,
                     reason: TXN_REASON.ORDER_ALLOCATION,
                     skuId: batch.skuId
                 }

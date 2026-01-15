@@ -323,18 +323,9 @@ router.get('/', async (req: Request, res: Response) => {
             viewConfig.enrichment
         );
 
-        // For open/ready_to_ship views, filter out cancelled lines
-        // (cancelled lines appear in the cancelled tab instead)
-        let finalOrders = enriched;
-        if (view === 'open' || view === 'ready_to_ship') {
-            finalOrders = enriched
-                .map((order: OrderWithLines) => ({
-                    ...order,
-                    orderLines: (order.orderLines || []).filter((line: { lineStatus?: string | null }) => line.lineStatus !== 'cancelled'),
-                }))
-                // Also filter out orders with zero active lines (all cancelled)
-                .filter((order: OrderWithLines) => (order.orderLines?.length ?? 0) > 0);
-        }
+        // Cancelled lines with closedAt=null stay in open view (shown red with strikethrough)
+        // Users close them manually when ready
+        const finalOrders = enriched;
 
         // Filter confidential fields based on user permissions
         const filteredOrders = filterConfidentialFields(finalOrders, req.userPermissions);
