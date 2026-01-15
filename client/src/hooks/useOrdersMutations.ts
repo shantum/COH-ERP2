@@ -46,7 +46,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     // Map view names to tRPC query input
     const viewToTrpcInput: Record<string, { view: string; limit?: number }> = {
-        open: { view: 'open', limit: 500 },
+        open: { view: 'open', limit: 2000 },
         shipped: { view: 'shipped' },
         rto: { view: 'rto' },
         cod_pending: { view: 'cod_pending' },
@@ -148,14 +148,14 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Now uses tRPC cache management since orders are fetched via tRPC
     const optimisticLineUpdate = async (lineId: string, newStatus: string) => {
         // Cancel any outgoing refetches to avoid overwriting optimistic update
-        await trpcUtils.orders.list.cancel({ view: 'open', limit: 500 });
+        await trpcUtils.orders.list.cancel({ view: 'open', limit: 2000 });
 
         // Snapshot the previous value from tRPC cache
-        const previousOrders = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
+        const previousOrders = trpcUtils.orders.list.getData({ view: 'open', limit: 2000 });
 
         // Optimistically update the line status in tRPC cache
         // IMPORTANT: Only create new objects for the modified order/line to preserve AG-Grid selection state
-        trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, (old) => {
+        trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, (old) => {
             if (!old) return old;
 
             // Find which order contains this line
@@ -183,7 +183,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Helper to get current line status from tRPC cache
     const getLineStatus = (lineId: string): string | null => {
         // Use tRPC cache (orders.list with view=open)
-        const data = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
+        const data = trpcUtils.orders.list.getData({ view: 'open', limit: 2000 });
         const orders = data?.orders;
         if (!orders) return null;
         for (const order of orders) {
@@ -198,10 +198,10 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // Uses tRPC cache management for inventory - updates getBalances cache (filtered by skuIds)
     const optimisticInventoryUpdate = async (lineId: string, newStatus: string, delta: number) => {
         // Cancel tRPC queries
-        await trpcUtils.orders.list.cancel({ view: 'open', limit: 500 });
+        await trpcUtils.orders.list.cancel({ view: 'open', limit: 2000 });
 
         // Get current data from tRPC cache
-        const previousOrdersData = trpcUtils.orders.list.getData({ view: 'open', limit: 500 });
+        const previousOrdersData = trpcUtils.orders.list.getData({ view: 'open', limit: 2000 });
 
         // Find the line to get skuId and qty
         let skuId: string | null = null;
@@ -237,7 +237,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
         // Update line status in tRPC openOrders cache
         // IMPORTANT: Only create new objects for the modified order/line to preserve AG-Grid selection state
-        trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, (old) => {
+        trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, (old) => {
             if (!old) return old;
 
             // Find which order contains this line
@@ -302,7 +302,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err, _vars, context) => {
             // ALWAYS rollback first, before any early returns
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             if (context && 'previousInventory' in context && context.previousInventory && context.skuIds?.length) {
                 trpcUtils.inventory.getBalances.setData({ skuIds: context.skuIds }, context.previousInventory as any);
@@ -334,7 +334,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onError: (err: any, _lineId, context) => {
             // ALWAYS rollback first using tRPC cache, before any early returns
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             if (context && 'previousInventory' in context && context.previousInventory && context.skuIds?.length) {
                 trpcUtils.inventory.getBalances.setData({ skuIds: context.skuIds }, context.previousInventory as any);
@@ -371,7 +371,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to pick line');
         },
@@ -395,7 +395,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to unpick line');
         },
@@ -420,7 +420,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to pack line');
         },
@@ -444,7 +444,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to unpack line');
         },
@@ -468,7 +468,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to mark line as shipped');
         },
@@ -491,7 +491,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
                 return;
             }
             if (context && 'previousOrders' in context && context.previousOrders) {
-                trpcUtils.orders.list.setData({ view: 'open', limit: 500 }, context.previousOrders as any);
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders as any);
             }
             alert(errorMsg || 'Failed to unmark shipped line');
         },
@@ -857,17 +857,35 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     });
 
 
-    // Order line mutations - only affects open orders
+    // Order line mutations - use optimistic updates (no refetch)
     const cancelLine = useMutation({
         mutationFn: (lineId: string) => ordersApi.cancelLine(lineId),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to cancel line')
+        onMutate: async (lineId) => {
+            const previousOrders = trpcUtils.orders.list.getData({ view: 'open', limit: 2000 });
+            await optimisticLineUpdate(lineId, 'cancelled');
+            return { previousOrders };
+        },
+        onError: (err: any, _lineId, context) => {
+            if (context?.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to cancel line');
+        },
     });
 
     const uncancelLine = useMutation({
         mutationFn: (lineId: string) => ordersApi.uncancelLine(lineId),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to restore line')
+        onMutate: async (lineId) => {
+            const previousOrders = trpcUtils.orders.list.getData({ view: 'open', limit: 2000 });
+            await optimisticLineUpdate(lineId, 'pending');
+            return { previousOrders };
+        },
+        onError: (err: any, _lineId, context) => {
+            if (context?.previousOrders) {
+                trpcUtils.orders.list.setData({ view: 'open', limit: 2000 }, context.previousOrders);
+            }
+            alert(err.response?.data?.error || 'Failed to restore line');
+        },
     });
 
     // Close/reopen lines - controls visibility (moves between open and shipped views)
