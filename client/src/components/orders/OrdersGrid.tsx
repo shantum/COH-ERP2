@@ -8,7 +8,7 @@
  * - Line Items: skuCode, productName, customize, qty, skuStock, fabricBalance
  * - Fulfillment Actions: allocate, production, notes, pick, pack, ship, trackingStatus
  * - Tracking: shopifyStatus, shopifyAwb, shopifyCourier, awb, courier
- * - Management: actions (view, manage, cancel)
+ * - Management: cancelLine column for cancel/uncancel
  *
  * KEY HELPER FUNCTIONS:
  * - TrackingStatusBadge: Color-coded shipment status (in_transit, delivered, rto, etc.)
@@ -43,12 +43,11 @@
  * @param {Function} props.onViewOrder - (orderId) => open order detail panel
  * @param {Function} props.onCancelLine - (lineId) => cancel line
  * @param {Function} props.onCancelOrder - (orderId, reason) => cancel entire order
- * @returns {Object} { gridComponent, actionPanel, columnVisibilityDropdown, statusLegend, ... }
+ * @returns {Object} { gridComponent, columnVisibilityDropdown, statusLegend, ... }
  *
  * @example
  * const {
  *   gridComponent,
- *   actionPanel,
  *   columnVisibilityDropdown,
  *   statusLegend
  * } = OrdersGrid({
@@ -57,10 +56,9 @@
  *   onAllocate,
  *   onPick,
  *   onPack,
- *   onShip,
  *   // ... 20+ handlers
  * });
- * return <>{gridComponent}{actionPanel}</>;
+ * return <>{gridComponent}</>;
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
@@ -77,14 +75,13 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { Check, X, Undo2, Truck, CheckCircle, AlertCircle, Settings, Wrench, Calendar, ChevronRight, ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import { Check, X, CheckCircle, AlertCircle, Settings, Wrench, Calendar, ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import { formatDateTime, DEFAULT_HEADERS, DEFAULT_VISIBLE_COLUMNS } from '../../utils/orderHelpers';
 import { calculateOrderTotal } from '../../utils/orderPricing';
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 import { compactThemeSmall } from '../../utils/agGridHelpers';
 import { TrackingStatusBadge } from '../common/grid/TrackingStatusBadge';
 import { ColumnVisibilityDropdown } from '../common/grid/ColumnVisibilityDropdown';
-import { OrderActionPanel } from './OrderActionPanel';
 import { useGridState } from '../../hooks/useGridState';
 
 // Register AG Grid modules
@@ -270,11 +267,10 @@ const ALL_COLUMN_IDS = [
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine', 'shopifyStatus',
     'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus',
-    // Post-ship columns (for shipped/rto/cod-pending/archived views)
+    // Post-ship columns (for shipped/archived views)
     'shippedAt', 'deliveredAt', 'deliveryDays', 'daysInTransit',
     'rtoInitiatedAt', 'daysInRto', 'daysSinceDelivery', 'codRemittedAt',
     'archivedAt', 'finalStatus',
-    'actions'
 ];
 
 // Row status legend component
@@ -435,7 +431,6 @@ interface OrdersGridProps {
     onViewOrder: (orderId: string) => void;
     onEditOrder: (order: any) => void;
     onCancelOrder: (id: string, reason?: string) => void;
-    onArchiveOrder: (id: string) => void;
     onDeleteOrder: (id: string) => void;
     onCloseOrder?: (id: string) => void;  // Close order (move to shipped view)
     onCancelLine: (lineId: string) => void;
@@ -476,7 +471,6 @@ interface OrdersGridProps {
     isCancellingOrder: boolean;
     isCancellingLine: boolean;
     isUncancellingLine: boolean;
-    isArchiving: boolean;
     isDeletingOrder: boolean;
     isClosingOrder?: boolean;
     isUnshipping?: boolean;
@@ -500,17 +494,16 @@ export function OrdersGrid({
     onMarkShippedLine: _onMarkShippedLine,  // Deprecated - use onShipLine
     onUnmarkShippedLine: _onUnmarkShippedLine,  // Deprecated
     onUpdateLineTracking,
-    onShip,
+    onShip: _onShip,
     onCreateBatch,
     onUpdateBatch,
     onDeleteBatch,
     onUpdateLineNotes,
     onViewOrder,
-    onEditOrder,
-    onCancelOrder,
-    onArchiveOrder,
-    onDeleteOrder,
-    onCloseOrder,
+    onEditOrder: _onEditOrder,
+    onCancelOrder: _onCancelOrder,
+    onDeleteOrder: _onDeleteOrder,
+    onCloseOrder: _onCloseOrder,
     onCancelLine,
     onUncancelLine,
     onSelectCustomer,
@@ -532,9 +525,8 @@ export function OrdersGrid({
     isCancellingOrder,
     isCancellingLine,
     isUncancellingLine,
-    isArchiving,
     isDeletingOrder,
-    isClosingOrder,
+    isClosingOrder: _isClosingOrder,
     isUnshipping: _isUnshipping,
     isMarkingDelivered: _isMarkingDelivered,
     isMarkingRto: _isMarkingRto,
@@ -590,9 +582,6 @@ export function OrdersGrid({
         // Use lineId if available (for order line rows), otherwise create unique key from orderId
         return row.lineId || `order-${row.orderId}-header`;
     }, []);
-
-    // Action panel state - for the order being managed
-    const [actionPanelOrder, setActionPanelOrder] = useState<any>(null);
 
     // Custom headers state
     const [customHeaders, setCustomHeaders] = useState<Record<string, string>>(() => {
@@ -2030,96 +2019,6 @@ export function OrdersGrid({
                     return <span className={`text-xs px-1.5 py-0.5 rounded ${style}`}>{label}</span>;
                 },
             },
-            {
-                colId: 'actions',
-                headerName: '',
-                width: 80,
-                sortable: false,
-                resizable: false,
-                pinned: 'right',
-                cellRenderer: (params: ICellRendererParams) => {
-                    const row = params.data;
-                    if (!row) return null;
-                    const order = row.order;
-                    const isCancelledLine = row.lineStatus === 'cancelled';
-                    const hasLineId = row.lineId != null;
-
-                    // Line-only action (cancel/restore line)
-                    const lineAction = hasLineId ? (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if (isCancelledLine) {
-                                    onUncancelLine(row.lineId);
-                                } else if (confirm(`Cancel this line?\n${row.skuCode}`)) {
-                                    onCancelLine(row.lineId);
-                                }
-                            }}
-                            disabled={isCancellingLine || isUncancellingLine}
-                            className={`p-1 rounded transition-colors disabled:opacity-50 ${
-                                isCancelledLine
-                                    ? 'text-green-500 hover:text-green-600 hover:bg-green-50'
-                                    : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
-                            }`}
-                            title={isCancelledLine ? 'Restore line' : 'Cancel line'}
-                        >
-                            {isCancelledLine ? <Undo2 size={12} /> : <X size={12} />}
-                        </button>
-                    ) : null;
-
-                    // Non-first lines only show line action
-                    if (!row.isFirstLine) {
-                        return <div className="flex items-center justify-end pr-1">{lineAction}</div>;
-                    }
-
-                    // First line shows "Manage" button that opens the panel
-                    // Check if order has lines ready to ship (partial ship support)
-                    const orderLines = order.orderLines || [];
-                    const activeLines = orderLines.filter((l: any) => l.lineStatus !== 'cancelled');
-                    const packedLines = activeLines.filter((l: any) => l.lineStatus === 'packed');
-                    const shippedLines = activeLines.filter((l: any) => l.lineStatus === 'shipped');
-                    const hasPackedLines = packedLines.length > 0;
-                    const hasShopifyAwb = !!(order.shopifyCache?.trackingNumber || order.awbNumber);
-                    // Show Ship button if there are packed lines with AWB (supports partial shipping)
-                    const canShip = hasPackedLines && hasShopifyAwb;
-                    // Visual indicator: all packed = full ship, some packed = partial ship
-                    const isPartialShip = shippedLines.length > 0 && hasPackedLines;
-
-                    return (
-                        <div className="flex items-center gap-1">
-                            {canShip && onShip ? (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onShip(order);
-                                    }}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded text-white transition-colors shadow-sm ${
-                                        isPartialShip
-                                            ? 'bg-amber-500 hover:bg-amber-600'
-                                            : 'bg-emerald-500 hover:bg-emerald-600'
-                                    }`}
-                                    title={isPartialShip ? `Ship ${packedLines.length} remaining item(s)` : 'Ship order'}
-                                >
-                                    <Truck size={12} />
-                                    {isPartialShip ? `Ship (${packedLines.length})` : 'Ship'}
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setActionPanelOrder(order);
-                                    }}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-700 transition-colors"
-                                >
-                                    Manage
-                                    <ChevronRight size={12} />
-                                </button>
-                            )}
-                            {lineAction}
-                        </div>
-                    );
-                },
-            },
         ].map(col => ({
             ...col,
             hide: !visibleColumns.has(col.colId!),
@@ -2131,7 +2030,6 @@ export function OrdersGrid({
             isCancellingOrder,
             isCancellingLine,
             isUncancellingLine,
-            isArchiving,
             isDeletingOrder,
             visibleColumns,
             onCustomize,
@@ -2371,26 +2269,6 @@ export function OrdersGrid({
                     </div>
                 </div>
             </>
-        ),
-        actionPanel: (
-            <OrderActionPanel
-                order={actionPanelOrder}
-                isOpen={!!actionPanelOrder}
-                onClose={() => setActionPanelOrder(null)}
-                onView={() => onViewOrder(actionPanelOrder?.id)}
-                onEdit={() => onEditOrder(actionPanelOrder)}
-                onCancel={(reason) => onCancelOrder(actionPanelOrder?.id, reason)}
-                onArchive={() => onArchiveOrder(actionPanelOrder?.id)}
-                onDelete={() => onDeleteOrder(actionPanelOrder?.id)}
-                onShip={onShip ? () => onShip(actionPanelOrder) : undefined}
-                onBookShipment={() => onEditOrder(actionPanelOrder)}
-                onCloseOrder={onCloseOrder ? () => onCloseOrder(actionPanelOrder?.id) : undefined}
-                canDelete={actionPanelOrder?.orderLines?.length === 0}
-                isCancelling={isCancellingOrder}
-                isArchiving={isArchiving}
-                isDeleting={isDeletingOrder}
-                isClosing={isClosingOrder}
-            />
         ),
         columnVisibilityDropdown: (
             <ColumnVisibilityDropdown

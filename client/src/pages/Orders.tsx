@@ -439,7 +439,6 @@ export default function Orders() {
     // Grid component - unified for all views
     const {
         gridComponent,
-        actionPanel,
         columnVisibilityDropdown,
         statusLegend,
         // User preferences
@@ -481,7 +480,6 @@ export default function Orders() {
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
-        onArchiveOrder: () => {}, // TODO: Add archiveOrder mutation if needed
         onCloseOrder: (id) => mutations.closeOrder.mutate(id),
         // Post-ship handlers
         onUnarchive: () => {}, // TODO: Add unarchiveOrder mutation if needed
@@ -489,7 +487,6 @@ export default function Orders() {
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
-        isArchiving: false, // TODO: Add archiveOrder mutation if needed
         isDeletingOrder: mutations.deleteOrder.isPending,
         isClosingOrder: mutations.closeOrder.isPending,
         isUnarchiving: false, // TODO: Add unarchiveOrder mutation if needed
@@ -840,8 +837,6 @@ export default function Orders() {
                 {!isLoading && filteredRows.length > 0 && (
                     <div>{gridComponent}</div>
                 )}
-                {/* Action Panel for order management */}
-                {actionPanel}
                 {!isLoading && filteredRows.length === 0 && (
                     <div className="text-center text-gray-400 py-16">
                         {tab === 'open' && dateRange ? 'No orders match your filters' : `No ${tab.replace('-', ' ')} orders`}
