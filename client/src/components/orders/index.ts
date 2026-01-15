@@ -5,11 +5,9 @@
 
 // Grids
 export { OrdersGrid } from './OrdersGrid';
-export { ShippedOrdersGrid } from './ShippedOrdersGrid';
-export { ArchivedOrdersGrid } from './ArchivedOrdersGrid';
-export { RtoOrdersGrid } from './RtoOrdersGrid';
-export { CodPendingGrid } from './CodPendingGrid';
-export { CancelledOrdersGrid } from './CancelledOrdersGrid';
+export type { OrderViewType } from './OrdersGrid';
+// Note: ShippedOrdersGrid, ArchivedOrdersGrid, RtoOrdersGrid, CodPendingGrid, CancelledOrdersGrid
+// are deprecated - use OrdersGrid with currentView prop instead
 
 // Primary Modals
 export { UnifiedOrderModal } from './UnifiedOrderModal';

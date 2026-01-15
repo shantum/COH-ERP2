@@ -422,6 +422,17 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     awb: 'AWB',
     courier: 'Courier',
     trackingStatus: 'Tracking',
+    // Post-ship columns
+    shippedAt: 'Shipped',
+    deliveredAt: 'Delivered',
+    deliveryDays: 'Del Days',
+    daysInTransit: 'Transit',
+    rtoInitiatedAt: 'RTO Date',
+    daysInRto: 'RTO Days',
+    daysSinceDelivery: 'Since Del',
+    codRemittedAt: 'COD Remitted',
+    archivedAt: 'Archived',
+    finalStatus: 'Status',
     actions: 'Actions',
 };
 

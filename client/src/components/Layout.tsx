@@ -50,7 +50,7 @@ const navGroups: NavGroup[] = [
         label: 'Shipping & Returns',
         collapsible: true,
         items: [
-            { to: '/shipments', icon: Truck, label: 'Shipments' },
+            { to: '/orders?tab=shipped', icon: Truck, label: 'Shipments' },
             { to: '/returns', icon: RotateCcw, label: 'Returns' },
             { to: '/returns-rto', icon: PackageX, label: 'RTO Inward' },
         ],

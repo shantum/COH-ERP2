@@ -22,7 +22,20 @@ npm run db:generate && npm run db:push
 
 **API**: REST `/api/*`, tRPC `/trpc` | **Integrations**: Shopify, iThink Logistics
 
-## Order System
+## Unified Orders System
+
+All order views are consolidated into a single page (`/orders`) with 6 tabs:
+- **Open** - Active orders in fulfillment pipeline
+- **Shipped** - Orders in transit or delivered
+- **RTO** - Return to origin orders
+- **COD Pending** - Delivered COD awaiting remittance
+- **Archived** - Completed historical orders
+- **Cancelled** - Cancelled orders
+
+**Key files:**
+- `client/src/pages/Orders.tsx` - Main orchestrator with 6 tabs
+- `client/src/components/orders/OrdersGrid.tsx` - Unified grid with `currentView` prop
+- `client/src/hooks/useUnifiedOrdersData.ts` - Data hook with background prefetch
 
 **Line status flow:** `pending → allocated → picked → packed → marked_shipped`
 
@@ -33,8 +46,14 @@ npm run db:generate && npm run db:push
 | `closedAt` | View visibility | null = open view, timestamp = shipped view |
 | `isArchived` | Archive state | false = active, true = archived |
 
+**View query logic:**
+- Open: `closedAt IS NULL` on any line
+- Shipped: All non-cancelled lines have `closedAt`, excludes RTO
+- RTO: `trackingStatus IN ('rto_in_transit', 'rto_delivered')`
+- COD Pending: `paymentMethod='COD' AND trackingStatus='delivered' AND codRemittedAt IS NULL`
+- Archived: `isArchived = true`
+
 **Key rules:**
-- Open view = orders with ANY line where `closedAt = null`
 - Cancelled lines stay visible (red + strikethrough) until closed
 - Allocate = immediate OUTWARD transaction (no RESERVED)
 - Close = sets `closedAt` only, no inventory action
@@ -46,9 +65,8 @@ npm run db:generate && npm run db:push
 
 ## Before Committing
 
-**Always run builds before pushing:**
 ```bash
-cd client && npm run build   # Catches TypeScript errors
+cd client && npm run build   # TypeScript + Vite build
 cd server && npx tsc --noEmit
 ```
 
@@ -59,17 +77,8 @@ cd server && npx tsc --noEmit
 3. **Dual cache invalidation**: Mutations must invalidate both TanStack Query and tRPC caches
 4. **Inventory cache**: Direct `prisma.inventoryTransaction.create()` requires `inventoryBalanceCache.invalidate([skuId])`
 5. **AG-Grid cellRenderer**: Return JSX elements, not HTML strings
+6. **OrdersGrid currentView**: Pass `currentView` prop to show view-appropriate columns
 
 ## Environment
 
 `.env` requires: `DATABASE_URL`, `JWT_SECRET`
-
-## Shell Tips
-
-```bash
-export TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@coh.com","password":"XOFiya@34"}' | jq -r '.token')
-
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/orders | jq .
-```

@@ -1,20 +1,17 @@
 /**
- * Orders page - Main orchestrator component
- * Uses extracted hooks, utilities, and components for maintainability
+ * Orders page - Unified order management with 6 view tabs
+ * All order views (open, shipped, rto, cod-pending, archived, cancelled) in one place
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useState, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Archive, Truck, RefreshCw, CheckSquare } from 'lucide-react';
 
 // Custom hooks
-import { useOrdersData } from '../hooks/useOrdersData';
+import { useUnifiedOrdersData, type UnifiedOrderTab } from '../hooks/useUnifiedOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useAuth } from '../hooks/useAuth';
-
-// Local types (simplified to 2 tabs)
-type OrderTab = 'open' | 'cancelled';
 
 // Utilities
 import {
@@ -26,7 +23,6 @@ import {
 // Components
 import {
     OrdersGrid,
-    CancelledOrdersGrid,
     CreateOrderModal,
     CustomerDetailModal,
     CustomizationModal,
@@ -40,26 +36,17 @@ import type { Order } from '../types';
 export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
-    const navigate = useNavigate();
 
     // Tab state - persisted in URL for back/forward navigation and refresh
     const [searchParams, setSearchParams] = useSearchParams();
-    const tab = (searchParams.get('tab') as OrderTab) || 'open';
-    const setTab = useCallback((newTab: OrderTab) => {
+    const tab = (searchParams.get('tab') as UnifiedOrderTab) || 'open';
+    const setTab = useCallback((newTab: UnifiedOrderTab) => {
         setSearchParams(prev => {
             const newParams = new URLSearchParams(prev);
             newParams.set('tab', newTab);
             return newParams;
         }, { replace: true }); // Use replace to avoid polluting browser history
     }, [setSearchParams]);
-
-    // Redirect old tab URLs to Shipments page
-    useEffect(() => {
-        const tabParam = searchParams.get('tab');
-        if (tabParam && ['shipped', 'rto', 'cod-pending', 'archived'].includes(tabParam)) {
-            navigate(`/shipments?tab=${tabParam}`, { replace: true });
-        }
-    }, [searchParams, navigate]);
 
     // Filter state (per-tab filtering, separate from GlobalOrderSearch)
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
@@ -93,23 +80,53 @@ export default function Orders() {
         notes?: string;
     } | null>(null);
 
-    // Data hooks - only open and cancelled orders needed
+    // Archived pagination state
+    const [archivedDays, setArchivedDays] = useState(90);
+    const [archivedLimit, setArchivedLimit] = useState(100);
+    const [shippedDays, setShippedDays] = useState(30);
+
+    // Data hooks - all 6 views
     const {
+        currentOrders,
         openOrders,
+        shippedOrders,
+        rtoOrders,
+        codPendingOrders,
         cancelledOrders,
+        archivedOrders,
+        tabCounts,
         allSkus,
         inventoryBalance,
         fabricStock,
         channels,
         lockedDates,
+        // shippedSummary, rtoSummary available for summary panels if needed
         customerDetail,
         customerLoading,
         isLoading,
         refetchOpen,
+        refetchShipped,
+        refetchRto,
+        refetchCodPending,
         refetchCancelled,
+        refetchArchived,
+        // refetchAll - available for bulk refresh
         isFetchingOpen,
+        isFetchingShipped,
+        isFetchingRto,
+        isFetchingCodPending,
         isFetchingCancelled,
-    } = useOrdersData({ activeTab: tab, selectedCustomerId });
+        isFetchingArchived,
+        archivedPagination,
+        setArchivedLimit: setArchivedLimitState,
+        setArchivedDays: setArchivedDaysState,
+    } = useUnifiedOrdersData({
+        activeTab: tab,
+        selectedCustomerId,
+        shippedDays,
+        archivedDays,
+        archivedLimit,
+    });
 
     // Unified modal handlers (must be after openOrders is available)
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' = 'view') => {
@@ -119,17 +136,12 @@ export default function Orders() {
 
     // Handler for OrdersGrid which passes orderId (not full order)
     const handleViewOrderById = useCallback((orderId: string) => {
-        // openOrders is EnrichedOrder[] from tRPC - cast through unknown for type compatibility
-        const order = openOrders?.find((o: any) => o.id === orderId);
+        // Search through current orders - cast through unknown for type compatibility
+        const order = currentOrders?.find((o: any) => o.id === orderId);
         if (order) {
             openUnifiedModal(order as unknown as Order, 'view');
         }
-    }, [openOrders, openUnifiedModal]);
-
-    // Handler for grids that pass full order
-    const handleViewOrder = useCallback((order: Order) => {
-        openUnifiedModal(order, 'view');
-    }, [openUnifiedModal]);
+    }, [currentOrders, openUnifiedModal]);
 
     // Handler to open in edit mode
     const handleEditOrderUnified = useCallback((order: Order) => {
@@ -160,61 +172,67 @@ export default function Orders() {
         },
     });
 
-    // Compute customer stats (no shipped orders needed for open view)
+    // Compute customer stats (used for all views)
     const customerStats = useMemo(
-        () => computeCustomerStats(openOrders, []),
-        [openOrders]
+        () => computeCustomerStats(currentOrders, []),
+        [currentOrders]
     );
 
-    // Flatten and filter orders for grid
-    const openRows = useMemo(
-        () => flattenOrders(openOrders, customerStats, inventoryBalance, fabricStock),
-        [openOrders, customerStats, inventoryBalance, fabricStock]
+    // Flatten orders for grid - use currentOrders which changes based on active tab
+    const currentRows = useMemo(
+        () => flattenOrders(currentOrders, customerStats, inventoryBalance, fabricStock),
+        [currentOrders, customerStats, inventoryBalance, fabricStock]
     );
 
-    const filteredOpenRows = useMemo(() => {
-        // Note: Global search now handles cross-tab search. Per-tab filtering uses AG-Grid's built-in filters.
-        let rows = filterRows(openRows, '', dateRange, tab === 'open');
+    // Apply filters (mainly for open tab)
+    const filteredRows = useMemo(() => {
+        // Date range filter only applies to open tab
+        const applyDateFilter = tab === 'open';
+        let rows = filterRows(currentRows, '', applyDateFilter ? dateRange : '', applyDateFilter);
 
-        // Apply allocated filter
-        if (allocatedFilter === 'yes') {
-            rows = rows.filter(row =>
-                row.lineStatus === 'allocated' ||
-                row.lineStatus === 'picked' ||
-                row.lineStatus === 'packed'
-            );
-        } else if (allocatedFilter === 'no') {
-            rows = rows.filter(row => row.lineStatus === 'pending');
-        }
-
-        // Apply production filter
-        if (productionFilter === 'scheduled') {
-            rows = rows.filter(row => row.productionBatchId);
-        } else if (productionFilter === 'needs') {
-            rows = rows.filter(row =>
-                row.lineStatus === 'pending' &&
-                !row.productionBatchId &&
-                (row.skuStock < row.qty || row.isCustomized)
-            );
-        } else if (productionFilter === 'ready') {
-            // Ready = all lines of the order are allocated/picked/packed
-            rows = rows.filter(row => {
-                const activeLines = row.order?.orderLines?.filter(
-                    (line: any) => line.lineStatus !== 'cancelled'
-                ) || [];
-                return activeLines.length > 0 && activeLines.every(
-                    (line: any) =>
-                        line.lineStatus === 'allocated' ||
-                        line.lineStatus === 'picked' ||
-                        line.lineStatus === 'packed'
+        // Open tab specific filters
+        if (tab === 'open') {
+            // Apply allocated filter
+            if (allocatedFilter === 'yes') {
+                rows = rows.filter(row =>
+                    row.lineStatus === 'allocated' ||
+                    row.lineStatus === 'picked' ||
+                    row.lineStatus === 'packed'
                 );
-            });
+            } else if (allocatedFilter === 'no') {
+                rows = rows.filter(row => row.lineStatus === 'pending');
+            }
+
+            // Apply production filter
+            if (productionFilter === 'scheduled') {
+                rows = rows.filter(row => row.productionBatchId);
+            } else if (productionFilter === 'needs') {
+                rows = rows.filter(row =>
+                    row.lineStatus === 'pending' &&
+                    !row.productionBatchId &&
+                    (row.skuStock < row.qty || row.isCustomized)
+                );
+            } else if (productionFilter === 'ready') {
+                // Ready = all lines of the order are allocated/picked/packed
+                rows = rows.filter(row => {
+                    const activeLines = row.order?.orderLines?.filter(
+                        (line: any) => line.lineStatus !== 'cancelled'
+                    ) || [];
+                    return activeLines.length > 0 && activeLines.every(
+                        (line: any) =>
+                            line.lineStatus === 'allocated' ||
+                            line.lineStatus === 'picked' ||
+                            line.lineStatus === 'packed'
+                    );
+                });
+            }
         }
 
         return rows;
-    }, [openRows, dateRange, tab, allocatedFilter, productionFilter]);
+    }, [currentRows, dateRange, tab, allocatedFilter, productionFilter]);
 
-    const uniqueOpenOrderCount = new Set(filteredOpenRows.map((r) => r.orderId)).size;
+    // Unique order count for Open tab (available for tab badge if needed)
+    // const uniqueOpenOrderCount = new Set(filteredRows.filter(r => tab === 'open').map((r) => r.orderId)).size;
 
     // Count lines marked as shipped (ready for batch processing)
     const markedShippedCount = useMemo(() => {
@@ -426,7 +444,7 @@ export default function Orders() {
         [customizingLine, isEditingCustomization, mutations.customizeLine, mutations.removeCustomization]
     );
 
-    // Grid component
+    // Grid component - unified for all views
     const {
         gridComponent,
         actionPanel,
@@ -441,8 +459,9 @@ export default function Orders() {
         isManager,
         savePreferencesToServer,
     } = OrdersGrid({
-        rows: filteredOpenRows,
+        rows: filteredRows,
         lockedDates: lockedDates || [],
+        currentView: tab,
         onAllocate: handleAllocate,
         onUnallocate: handleUnallocate,
         onPick: handlePick,
@@ -469,23 +488,55 @@ export default function Orders() {
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
-        onArchiveOrder: () => { }, // Not used on Orders page
+        onArchiveOrder: () => {}, // TODO: Add archiveOrder mutation if needed
         onCloseOrder: (id) => mutations.closeOrder.mutate(id),
+        // Post-ship handlers
+        onUnarchive: () => {}, // TODO: Add unarchiveOrder mutation if needed
         allocatingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
-        isArchiving: false, // Not used on Orders page
+        isArchiving: false, // TODO: Add archiveOrder mutation if needed
         isDeletingOrder: mutations.deleteOrder.isPending,
         isClosingOrder: mutations.closeOrder.isPending,
+        isUnarchiving: false, // TODO: Add unarchiveOrder mutation if needed
         isAdmin: user?.role === 'admin',
     });
 
-    // Tab configuration - only 2 tabs now
-    const tabs = [
-        { id: 'open' as const, label: 'Open', count: openOrders?.length || 0, filteredCount: dateRange ? uniqueOpenOrderCount : null },
-        { id: 'cancelled' as const, label: 'Cancelled', count: cancelledOrders?.length || 0 },
+    // Tab configuration - all 6 tabs
+    const tabs: { id: UnifiedOrderTab; label: string; count: number; highlight?: boolean }[] = [
+        { id: 'open', label: 'Open', count: tabCounts.open },
+        { id: 'shipped', label: 'Shipped', count: tabCounts.shipped },
+        { id: 'rto', label: 'RTO', count: tabCounts.rto, highlight: tabCounts.rto > 0 },
+        { id: 'cod-pending', label: 'COD Pending', count: tabCounts['cod-pending'], highlight: tabCounts['cod-pending'] > 0 },
+        { id: 'archived', label: 'Archived', count: tabCounts.archived },
+        { id: 'cancelled', label: 'Cancelled', count: tabCounts.cancelled },
     ];
+
+    // Get current refetch function based on active tab
+    const currentRefetch = useMemo(() => {
+        switch (tab) {
+            case 'open': return refetchOpen;
+            case 'shipped': return refetchShipped;
+            case 'rto': return refetchRto;
+            case 'cod-pending': return refetchCodPending;
+            case 'archived': return refetchArchived;
+            case 'cancelled': return refetchCancelled;
+            default: return refetchOpen;
+        }
+    }, [tab, refetchOpen, refetchShipped, refetchRto, refetchCodPending, refetchArchived, refetchCancelled]);
+
+    const currentIsFetching = useMemo(() => {
+        switch (tab) {
+            case 'open': return isFetchingOpen;
+            case 'shipped': return isFetchingShipped;
+            case 'rto': return isFetchingRto;
+            case 'cod-pending': return isFetchingCodPending;
+            case 'archived': return isFetchingArchived;
+            case 'cancelled': return isFetchingCancelled;
+            default: return false;
+        }
+    }, [tab, isFetchingOpen, isFetchingShipped, isFetchingRto, isFetchingCodPending, isFetchingArchived, isFetchingCancelled]);
 
     return (
         <div className="space-y-4">
@@ -494,19 +545,22 @@ export default function Orders() {
                 <h1 className="text-xl md:text-2xl font-bold text-gray-900">Orders</h1>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <GlobalOrderSearch
-                        onSelectOrder={(orderId, selectedTab, page) => {
-                            if (page === 'shipments') {
-                                // Navigate to Shipments page
-                                navigate(`/shipments?tab=${selectedTab}&orderId=${orderId}`);
-                            } else {
-                                // Stay on Orders page
-                                setTab(selectedTab as OrderTab);
-                                // Find the order and open it in the unified modal
-                                const order = [...(openOrders || []), ...(cancelledOrders || [])].find(o => o.id === orderId);
-                                if (order) {
-                                    setUnifiedModalOrder(order as unknown as Order);
-                                    setUnifiedModalMode('view');
-                                }
+                        onSelectOrder={(orderId, selectedTab) => {
+                            // All views are now on Orders page
+                            setTab(selectedTab as UnifiedOrderTab);
+                            // Find the order across all views
+                            const allOrders = [
+                                ...(openOrders || []),
+                                ...(shippedOrders || []),
+                                ...(rtoOrders || []),
+                                ...(codPendingOrders || []),
+                                ...(archivedOrders || []),
+                                ...(cancelledOrders || []),
+                            ];
+                            const order = allOrders.find(o => o.id === orderId);
+                            if (order) {
+                                setUnifiedModalOrder(order as unknown as Order);
+                                setUnifiedModalMode('view');
                             }
                         }}
                     />
@@ -551,18 +605,23 @@ export default function Orders() {
                                 key={t.id}
                                 className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${tab === t.id
                                         ? 'text-primary-600'
-                                        : 'text-gray-500 hover:text-gray-700'
+                                        : t.highlight
+                                            ? 'text-red-600 hover:text-red-700'
+                                            : 'text-gray-500 hover:text-gray-700'
                                     }`}
                                 onClick={() => setTab(t.id)}
                             >
                                 <span className="flex items-center gap-1.5">
                                     {t.label}
                                     {t.count > 0 && (
-                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${tab === t.id
+                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${
+                                            tab === t.id
                                                 ? 'bg-primary-100 text-primary-700'
-                                                : 'bg-gray-100 text-gray-500'
-                                            }`}>
-                                            {t.filteredCount !== undefined && t.filteredCount !== null ? `${t.filteredCount}/${t.count}` : t.count}
+                                                : t.highlight
+                                                    ? 'bg-red-100 text-red-700'
+                                                    : 'bg-gray-100 text-gray-500'
+                                        }`}>
+                                            {t.count}
                                         </span>
                                     )}
                                 </span>
@@ -673,6 +732,151 @@ export default function Orders() {
                     </div>
                 )}
 
+                {/* Shipped tab toolbar */}
+                {tab === 'shipped' && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={shippedDays}
+                                onChange={(e) => setShippedDays(Number(e.target.value))}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                            >
+                                <option value={7}>Last 7 days</option>
+                                <option value={14}>Last 14 days</option>
+                                <option value={30}>Last 30 days</option>
+                                <option value={60}>Last 60 days</option>
+                                <option value={90}>Last 90 days</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => currentRefetch()}
+                                disabled={currentIsFetching}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                            >
+                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
+                                Refresh
+                            </button>
+                            <div className="w-px h-4 bg-gray-200" />
+                            {columnVisibilityDropdown}
+                        </div>
+                    </div>
+                )}
+
+                {/* RTO tab toolbar */}
+                {tab === 'rto' && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-red-50/50 border-b border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-red-700">
+                                {tabCounts.rto} orders in RTO
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => currentRefetch()}
+                                disabled={currentIsFetching}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                            >
+                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
+                                Refresh
+                            </button>
+                            <div className="w-px h-4 bg-gray-200" />
+                            {columnVisibilityDropdown}
+                        </div>
+                    </div>
+                )}
+
+                {/* COD Pending tab toolbar */}
+                {tab === 'cod-pending' && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-50/50 border-b border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-amber-700">
+                                {tabCounts['cod-pending']} COD orders awaiting remittance
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => currentRefetch()}
+                                disabled={currentIsFetching}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                            >
+                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
+                                Refresh
+                            </button>
+                            <div className="w-px h-4 bg-gray-200" />
+                            {columnVisibilityDropdown}
+                        </div>
+                    </div>
+                )}
+
+                {/* Archived tab toolbar */}
+                {tab === 'archived' && (
+                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={archivedDays}
+                                onChange={(e) => {
+                                    setArchivedDays(Number(e.target.value));
+                                    setArchivedDaysState?.(Number(e.target.value));
+                                }}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                            >
+                                <option value={30}>Last 30 days</option>
+                                <option value={90}>Last 90 days</option>
+                                <option value={180}>Last 180 days</option>
+                                <option value={365}>Last year</option>
+                                <option value={0}>All time</option>
+                            </select>
+                            <select
+                                value={archivedLimit}
+                                onChange={(e) => {
+                                    setArchivedLimit(Number(e.target.value));
+                                    setArchivedLimitState?.(Number(e.target.value));
+                                }}
+                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                            >
+                                <option value={100}>100 orders</option>
+                                <option value={500}>500 orders</option>
+                                <option value={1000}>1000 orders</option>
+                                <option value={2500}>2500 orders</option>
+                            </select>
+                            {archivedPagination && (
+                                <span className="text-xs text-gray-500">
+                                    Showing {archivedOrders?.length || 0} of {archivedPagination.total}
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => currentRefetch()}
+                                disabled={currentIsFetching}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                            >
+                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
+                                Refresh
+                            </button>
+                            <div className="w-px h-4 bg-gray-200" />
+                            {columnVisibilityDropdown}
+                        </div>
+                    </div>
+                )}
+
+                {/* Cancelled tab toolbar */}
+                {tab === 'cancelled' && (
+                    <div className="flex items-center justify-end gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
+                        <button
+                            onClick={() => currentRefetch()}
+                            disabled={currentIsFetching}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                        >
+                            <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
+                            Refresh
+                        </button>
+                        <div className="w-px h-4 bg-gray-200" />
+                        {columnVisibilityDropdown}
+                    </div>
+                )}
+
                 {/* Loading */}
                 {isLoading && (
                     <div className="flex justify-center p-12">
@@ -680,40 +884,15 @@ export default function Orders() {
                     </div>
                 )}
 
-                {/* Open Orders Grid */}
-                {!isLoading && tab === 'open' && filteredOpenRows.length > 0 && (
+                {/* Unified Grid - same component for all views */}
+                {!isLoading && filteredRows.length > 0 && (
                     <div>{gridComponent}</div>
                 )}
                 {/* Action Panel for order management */}
                 {actionPanel}
-                {!isLoading && tab === 'open' && filteredOpenRows.length === 0 && (
+                {!isLoading && filteredRows.length === 0 && (
                     <div className="text-center text-gray-400 py-16">
-                        {dateRange ? 'No orders match your filters' : 'No open orders'}
-                    </div>
-                )}
-
-                {/* Cancelled Orders */}
-                {!isLoading && tab === 'cancelled' && (
-                    <div className="p-4">
-                        {/* Cancelled tab toolbar */}
-                        <div className="flex items-center justify-end mb-3">
-                            <button
-                                onClick={() => refetchCancelled()}
-                                disabled={isFetchingCancelled}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
-                                title="Refresh table data"
-                            >
-                                <RefreshCw size={12} className={isFetchingCancelled ? 'animate-spin' : ''} />
-                                {isFetchingCancelled ? 'Refreshing...' : 'Refresh'}
-                            </button>
-                        </div>
-                        <CancelledOrdersGrid
-                            orders={cancelledOrders || []}
-                            onViewOrder={handleViewOrder}
-                            onSelectCustomer={(customer) => setSelectedCustomerId(customer.id)}
-                            onRestore={(id) => mutations.uncancelOrder.mutate(id)}
-                            isRestoring={mutations.uncancelOrder.isPending}
-                        />
+                        {tab === 'open' && dateRange ? 'No orders match your filters' : `No ${tab.replace('-', ' ')} orders`}
                     </div>
                 )}
             </div>

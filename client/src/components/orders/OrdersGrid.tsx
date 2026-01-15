@@ -260,13 +260,21 @@ function ProductionDatePopover({
     );
 }
 
-// All column IDs in display order
+// View type for unified order views
+export type OrderViewType = 'open' | 'shipped' | 'rto' | 'cod-pending' | 'archived' | 'cancelled';
+
+// All column IDs in display order (includes post-ship columns)
 const ALL_COLUMN_IDS = [
     'orderDate', 'orderAge', 'shipByDate', 'orderNumber', 'customerName', 'city', 'orderValue',
     'discountCode', 'paymentMethod', 'rtoHistory', 'customerNotes', 'customerOrderCount',
     'customerLtv', 'skuCode', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine', 'shopifyStatus',
-    'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus', 'actions'
+    'shopifyAwb', 'shopifyCourier', 'awb', 'courier', 'trackingStatus',
+    // Post-ship columns (for shipped/rto/cod-pending/archived views)
+    'shippedAt', 'deliveredAt', 'deliveryDays', 'daysInTransit',
+    'rtoInitiatedAt', 'daysInRto', 'daysSinceDelivery', 'codRemittedAt',
+    'archivedAt', 'finalStatus',
+    'actions'
 ];
 
 // Row status legend component
@@ -399,11 +407,14 @@ const COURIER_OPTIONS = [
  * - rows: Flattened order data (order header row + multiple line rows per order)
  * - lockedDates: Production dates that cannot be edited in date picker
  * - allocatingLines: Set of lineIds currently being toggled (prevent double-click)
+ * - currentView: Which view is being displayed (affects column visibility and actions)
  * - All on* handlers support both fulfilled and unfulfilled line states
  */
 interface OrdersGridProps {
     rows: FlattenedOrderRow[];
     lockedDates: string[];
+    // Current view determines which columns and actions are shown
+    currentView?: OrderViewType;
     onAllocate: (lineId: string) => void;
     onUnallocate: (lineId: string) => void;
     onPick: (lineId: string) => void;
@@ -450,6 +461,15 @@ interface OrdersGridProps {
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
     onForceShipOrder?: (orderId: string, data: { awbNumber: string; courier: string }) => void;
+    // Post-ship action handlers (for shipped/rto/cod-pending/archived views)
+    onUnship?: (orderId: string) => void;
+    onMarkDelivered?: (orderId: string) => void;
+    onMarkRto?: (orderId: string) => void;
+    onUnarchive?: (orderId: string) => void;
+    onTrack?: (awbNumber: string, orderNumber: string) => void;
+    onMarkCodRemitted?: (orderId: string) => void;
+    onMarkRtoReceived?: (orderId: string) => void;
+    // Loading states
     allocatingLines: Set<string>;
     isCancellingOrder: boolean;
     isCancellingLine: boolean;
@@ -457,12 +477,17 @@ interface OrdersGridProps {
     isArchiving: boolean;
     isDeletingOrder: boolean;
     isClosingOrder?: boolean;
+    isUnshipping?: boolean;
+    isMarkingDelivered?: boolean;
+    isMarkingRto?: boolean;
+    isUnarchiving?: boolean;
     isAdmin?: boolean;
 }
 
 export function OrdersGrid({
     rows,
     lockedDates,
+    currentView = 'open',
     onAllocate,
     onUnallocate,
     onPick,
@@ -491,6 +516,15 @@ export function OrdersGrid({
     onRemoveCustomization,
     onUpdateShipByDate,
     onForceShipOrder,
+    // Post-ship action handlers (for future implementation)
+    onUnship: _onUnship,
+    onMarkDelivered: _onMarkDelivered,
+    onMarkRto: _onMarkRto,
+    onUnarchive: _onUnarchive,
+    onTrack: _onTrack,
+    onMarkCodRemitted,
+    onMarkRtoReceived: _onMarkRtoReceived,
+    // Loading states
     allocatingLines,
     isCancellingOrder,
     isCancellingLine,
@@ -498,6 +532,10 @@ export function OrdersGrid({
     isArchiving,
     isDeletingOrder,
     isClosingOrder,
+    isUnshipping: _isUnshipping,
+    isMarkingDelivered: _isMarkingDelivered,
+    isMarkingRto: _isMarkingRto,
+    isUnarchiving: _isUnarchiving,
     isAdmin,
 }: OrdersGridProps) {
     // Grid ref for API access
@@ -1781,6 +1819,207 @@ export function OrdersGrid({
                     );
                 },
             },
+            // ========================================
+            // POST-SHIP COLUMNS (for shipped/rto/cod-pending/archived views)
+            // ========================================
+            {
+                colId: 'shippedAt',
+                headerName: getHeaderName('shippedAt'),
+                field: 'order.shippedAt',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => {
+                    if (!params.data?.isFirstLine || !params.value) return '';
+                    const dt = formatDateTime(params.value);
+                    return dt.date;
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'deliveredAt',
+                headerName: getHeaderName('deliveredAt'),
+                field: 'order.deliveredAt',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => {
+                    if (!params.data?.isFirstLine || !params.value) return '';
+                    const dt = formatDateTime(params.value);
+                    return dt.date;
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'deliveryDays',
+                headerName: getHeaderName('deliveryDays'),
+                width: 60,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const order = params.data.order;
+                    if (!order?.shippedAt || !order?.deliveredAt) return null;
+                    const shipped = new Date(order.shippedAt);
+                    const delivered = new Date(order.deliveredAt);
+                    return Math.ceil((delivered.getTime() - shipped.getTime()) / (1000 * 60 * 60 * 24));
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (params.value === null) return null;
+                    const days = params.value as number;
+                    let colorClass = 'text-green-600';
+                    if (days > 7) colorClass = 'text-red-600';
+                    else if (days > 5) colorClass = 'text-amber-600';
+                    return <span className={`text-xs ${colorClass}`}>{days}d</span>;
+                },
+                sortable: true,
+            },
+            {
+                colId: 'daysInTransit',
+                headerName: getHeaderName('daysInTransit'),
+                width: 60,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const order = params.data.order;
+                    if (!order?.shippedAt || order?.deliveredAt) return null; // Don't show if already delivered
+                    const shipped = new Date(order.shippedAt);
+                    return Math.floor((Date.now() - shipped.getTime()) / (1000 * 60 * 60 * 24));
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (params.value === null) return null;
+                    const days = params.value as number;
+                    let colorClass = 'text-gray-600';
+                    if (days > 10) colorClass = 'text-red-600 font-semibold';
+                    else if (days > 7) colorClass = 'text-amber-600';
+                    return <span className={`text-xs ${colorClass}`}>{days}d</span>;
+                },
+                sortable: true,
+            },
+            {
+                colId: 'rtoInitiatedAt',
+                headerName: getHeaderName('rtoInitiatedAt'),
+                field: 'order.rtoInitiatedAt',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => {
+                    if (!params.data?.isFirstLine || !params.value) return '';
+                    const dt = formatDateTime(params.value);
+                    return dt.date;
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'daysInRto',
+                headerName: getHeaderName('daysInRto'),
+                width: 60,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const order = params.data.order;
+                    if (!order?.rtoInitiatedAt) return null;
+                    const rtoDate = new Date(order.rtoInitiatedAt);
+                    return Math.floor((Date.now() - rtoDate.getTime()) / (1000 * 60 * 60 * 24));
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (params.value === null) return null;
+                    const days = params.value as number;
+                    let colorClass = 'text-gray-600';
+                    if (days > 14) colorClass = 'text-red-600 font-semibold';
+                    else if (days > 7) colorClass = 'text-amber-600';
+                    return <span className={`text-xs ${colorClass}`}>{days}d RTO</span>;
+                },
+                sortable: true,
+            },
+            {
+                colId: 'daysSinceDelivery',
+                headerName: getHeaderName('daysSinceDelivery'),
+                width: 70,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const order = params.data.order;
+                    if (!order?.deliveredAt) return null;
+                    const delivered = new Date(order.deliveredAt);
+                    return Math.floor((Date.now() - delivered.getTime()) / (1000 * 60 * 60 * 24));
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (params.value === null) return null;
+                    const days = params.value as number;
+                    let colorClass = 'text-green-600';
+                    let bgClass = 'bg-green-50';
+                    if (days > 14) {
+                        colorClass = 'text-red-600 font-semibold';
+                        bgClass = 'bg-red-50';
+                    } else if (days > 7) {
+                        colorClass = 'text-amber-600';
+                        bgClass = 'bg-amber-50';
+                    }
+                    return <span className={`text-xs ${colorClass} ${bgClass} px-1.5 py-0.5 rounded`}>{days}d</span>;
+                },
+                sortable: true,
+            },
+            {
+                colId: 'codRemittedAt',
+                headerName: getHeaderName('codRemittedAt'),
+                field: 'order.codRemittedAt',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => {
+                    if (!params.data?.isFirstLine || !params.value) return '';
+                    const dt = formatDateTime(params.value);
+                    return dt.date;
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.data?.isFirstLine) return null;
+                    const order = params.data.order;
+                    if (order?.codRemittedAt) {
+                        const dt = formatDateTime(order.codRemittedAt);
+                        return <span className="text-xs text-green-600">{dt.date}</span>;
+                    }
+                    // Show "Mark Remitted" button for COD pending
+                    if (order?.paymentMethod === 'COD' && order?.trackingStatus === 'delivered' && onMarkCodRemitted) {
+                        return (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onMarkCodRemitted(order.id);
+                                }}
+                                className="text-xs px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200"
+                            >
+                                Mark Remitted
+                            </button>
+                        );
+                    }
+                    return null;
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'archivedAt',
+                headerName: getHeaderName('archivedAt'),
+                field: 'order.archivedAt',
+                width: 100,
+                valueFormatter: (params: ValueFormatterParams) => {
+                    if (!params.data?.isFirstLine || !params.value) return '';
+                    const dt = formatDateTime(params.value);
+                    return dt.date;
+                },
+                cellClass: 'text-xs',
+            },
+            {
+                colId: 'finalStatus',
+                headerName: getHeaderName('finalStatus'),
+                width: 100,
+                valueGetter: (params: ValueGetterParams) => {
+                    if (!params.data?.isFirstLine) return '';
+                    const order = params.data.order;
+                    return order?.terminalStatus || order?.trackingStatus || '';
+                },
+                cellRenderer: (params: ICellRendererParams) => {
+                    if (!params.value) return null;
+                    const status = params.value as string;
+                    const statusStyles: Record<string, string> = {
+                        delivered: 'bg-green-100 text-green-700',
+                        rto_received: 'bg-purple-100 text-purple-700',
+                        cancelled: 'bg-red-100 text-red-700',
+                        returned: 'bg-orange-100 text-orange-700',
+                        shipped: 'bg-blue-100 text-blue-700',
+                    };
+                    const style = statusStyles[status] || 'bg-gray-100 text-gray-700';
+                    const label = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    return <span className={`text-xs px-1.5 py-0.5 rounded ${style}`}>{label}</span>;
+                },
+            },
             {
                 colId: 'actions',
                 headerName: '',
@@ -1890,6 +2129,9 @@ export function OrdersGrid({
             onRemoveCustomization,
             onCancelLine,
             onUncancelLine,
+            // Post-ship handlers
+            onMarkCodRemitted,
+            currentView,
         ]
     );
 
