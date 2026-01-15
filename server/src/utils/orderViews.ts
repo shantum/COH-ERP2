@@ -505,10 +505,10 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
 ): Promise<EnrichedOrder[]> {
     if (!orders || orders.length === 0) return [];
 
-    console.log('[enrichOrdersForView] Processing', orders.length, 'orders');
+    // Removed console.log for performance
 
     // Always calculate totalAmount from orderLines if null (fallback for unmigrated data)
-    let enriched: EnrichedOrder[] = orders.map((order, idx) => {
+    let enriched: EnrichedOrder[] = orders.map((order) => {
         if (order.totalAmount != null) return order as EnrichedOrder;
 
         // Calculate from orderLines
@@ -520,27 +520,10 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
                 return sum + lineTotal;
             }, 0) || 0;
 
-        // Debug first order
-        if (idx === 0) {
-            console.log(
-                '[enrichOrdersForView] Order:',
-                order.orderNumber,
-                'db totalAmount:',
-                order.totalAmount,
-                'lines:',
-                order.orderLines?.length,
-                'linesTotal:',
-                linesTotal
-            );
-        }
-
-        // Fallback to shopifyCache rawData if no line prices
-        if (linesTotal === 0 && order.shopifyCache?.rawData) {
-            const rawData =
-                typeof order.shopifyCache.rawData === 'string'
-                    ? JSON.parse(order.shopifyCache.rawData)
-                    : order.shopifyCache.rawData;
-            return { ...order, totalAmount: parseFloat(rawData?.total_price) || null } as EnrichedOrder;
+        // Fallback to shopifyCache totalPrice if no line prices
+        const shopifyTotal = (order.shopifyCache as any)?.totalPrice;
+        if (linesTotal === 0 && shopifyTotal != null) {
+            return { ...order, totalAmount: Number(shopifyTotal) || null } as EnrichedOrder;
         }
 
         return { ...order, totalAmount: linesTotal > 0 ? linesTotal : null } as EnrichedOrder;
@@ -734,8 +717,7 @@ export const ORDER_UNIFIED_SELECT = {
             shippedAt: true,
             fulfillmentStatus: true,
             financialStatus: true,
-            rawData: true, // For tracking extraction
-            // Generated columns (auto-populated from rawData by PostgreSQL)
+            // rawData excluded for performance - use generated columns instead
             totalPrice: true,
             subtotalPrice: true,
             totalTax: true,

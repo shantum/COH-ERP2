@@ -427,6 +427,8 @@ model Order {
   @@index([terminalStatus, terminalAt]) // Compound: archive queue queries
   @@index([shippedAt])              // Shipped orders sorting
   @@index([status, shippedAt])      // Compound: shipped view filtering
+  @@index([isArchived, releasedToShipped]) // Compound: open view filtering
+  @@index([isArchived, releasedToShipped, orderDate]) // Compound: open view with date sort
 }
 
 // ============================================
