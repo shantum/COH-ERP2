@@ -24,9 +24,23 @@ npm run db:generate && npm run db:push
 
 ## Core Flows
 
-- **Order**: `pending → allocated → picked → packed → shipped → delivered`
-- **Inventory**: `Available = Balance - Reserved` where `Balance = SUM(inward) - SUM(outward)`
+- **Order line**: `pending → allocated → picked → packed → marked_shipped → closed`
+- **Inventory**: `Balance = SUM(inward) - SUM(outward)` (allocate creates OUTWARD directly, no RESERVED)
 - **Cost cascade**: SKU → Variation → Product → Global (null = fallback)
+
+## Order System: Three Orthogonal Dimensions
+
+| Dimension | Field | Controls | Values |
+|-----------|-------|----------|--------|
+| **Status** | `lineStatus` | What happened to line | pending, allocated, picked, packed, marked_shipped, cancelled |
+| **Visibility** | `closedAt` | Open vs shipped view | null = open view, timestamp = shipped view |
+| **Archive** | `isArchived` | Main vs archive views | false = active, true = archived |
+
+**Key behaviors:**
+- Open view = orders with ANY line where `closedAt = null`
+- Cancelled lines stay in open view (red + strikethrough) until manually closed
+- Closing a line just sets `closedAt` - no inventory action
+- Allocate = immediate inventory deduction (OUTWARD transaction)
 
 ## Before Committing
 
