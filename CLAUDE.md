@@ -22,25 +22,27 @@ npm run db:generate && npm run db:push
 
 **API**: REST `/api/*`, tRPC `/trpc` | **Integrations**: Shopify, iThink Logistics
 
-## Core Flows
+## Order System
 
-- **Order line**: `pending → allocated → picked → packed → marked_shipped → closed`
-- **Inventory**: `Balance = SUM(inward) - SUM(outward)` (allocate creates OUTWARD directly, no RESERVED)
-- **Cost cascade**: SKU → Variation → Product → Global (null = fallback)
+**Line status flow:** `pending → allocated → picked → packed → marked_shipped`
 
-## Order System: Three Orthogonal Dimensions
+**Three independent dimensions:**
+| Field | Controls | Values |
+|-------|----------|--------|
+| `lineStatus` | Fulfillment stage | pending, allocated, picked, packed, marked_shipped, cancelled |
+| `closedAt` | View visibility | null = open view, timestamp = shipped view |
+| `isArchived` | Archive state | false = active, true = archived |
 
-| Dimension | Field | Controls | Values |
-|-----------|-------|----------|--------|
-| **Status** | `lineStatus` | What happened to line | pending, allocated, picked, packed, marked_shipped, cancelled |
-| **Visibility** | `closedAt` | Open vs shipped view | null = open view, timestamp = shipped view |
-| **Archive** | `isArchived` | Main vs archive views | false = active, true = archived |
-
-**Key behaviors:**
+**Key rules:**
 - Open view = orders with ANY line where `closedAt = null`
-- Cancelled lines stay in open view (red + strikethrough) until manually closed
-- Closing a line just sets `closedAt` - no inventory action
-- Allocate = immediate inventory deduction (OUTWARD transaction)
+- Cancelled lines stay visible (red + strikethrough) until closed
+- Allocate = immediate OUTWARD transaction (no RESERVED)
+- Close = sets `closedAt` only, no inventory action
+
+## Other Flows
+
+- **Inventory**: `Balance = SUM(inward) - SUM(outward)`
+- **Cost cascade**: SKU → Variation → Product → Global (null = fallback)
 
 ## Before Committing
 
