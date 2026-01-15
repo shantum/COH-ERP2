@@ -101,15 +101,69 @@ export function computeCustomerStats(
     return stats;
 }
 
+/**
+ * Enrich server-flattened rows with client-side inventory/fabric data
+ * This is O(n) with O(1) Map lookups - much faster than full client-side flatten
+ *
+ * The server pre-flattens orders into rows (sorting, object creation, field extraction).
+ * The client only fills in inventory balances which are queried separately.
+ */
+export function enrichRowsWithInventory<T extends { skuId: string | null; skuStock?: number; fabricBalance?: number }>(
+    rows: T[],
+    inventoryBalance: any[] | undefined,
+    fabricStock: any[] | undefined
+): T[] {
+    if (!rows || rows.length === 0) return rows;
+
+    // Build O(1) lookup maps (reuses cached maps if data hasn't changed)
+    const invMap = getInventoryMap(inventoryBalance);
+    const fabMap = getFabricMap(fabricStock);
+
+    // If no inventory data, return rows as-is (server defaults skuStock/fabricBalance to 0)
+    if (invMap.size === 0 && fabMap.size === 0) {
+        return rows;
+    }
+
+    // Single O(n) pass to fill inventory data
+    return rows.map(row => {
+        // Skip rows without SKU (empty orders, etc.)
+        if (!row.skuId) return row;
+
+        const skuStock = invMap.get(row.skuId) ?? 0;
+        // Note: fabricBalance requires fabric ID which isn't on the row
+        // For now, keep server default (0). Could enhance later if needed.
+        const fabricBalance = row.fabricBalance ?? 0;
+
+        // Only create new object if values changed
+        if (row.skuStock === skuStock && row.fabricBalance === fabricBalance) {
+            return row;
+        }
+
+        return { ...row, skuStock, fabricBalance };
+    });
+}
+
 export interface FlattenedOrderRow {
+    // Order-level fields
     orderId: string;
     orderNumber: string;
     orderDate: string;
     shipByDate: string | null;
     customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    customerId: string | null;
     city: string;
     customerOrderCount: number;
     customerLtv: number;
+    customerTier: string | null;
+    customerRtoCount: number;
+    totalAmount: number | null;
+    paymentMethod: string | null;
+    channel: string | null;
+    internalNotes: string | null;
+
+    // Line-level fields
     productName: string;
     colorName: string;
     size: string;
@@ -119,16 +173,32 @@ export interface FlattenedOrderRow {
     lineId: string | null;
     lineStatus: string | null;
     lineNotes: string;
+
+    // Inventory (filled client-side)
     skuStock: number;
     fabricBalance: number;
+
+    // Shopify status
     shopifyStatus: string;
-    productionBatch: any;
+
+    // Production batch
+    productionBatch: {
+        id: string;
+        batchCode: string;
+        batchDate: string | null;
+        status: string;
+    } | null;
     productionBatchId: string | null;
     productionDate: string | null;
+
+    // Row metadata
     isFirstLine: boolean;
     totalLines: number;
-    fulfillmentStage: string;
+    fulfillmentStage: string | null;
+
+    // Full order reference (for modals, actions)
     order: any;
+
     // Customization fields
     isCustomized: boolean;
     isNonReturnable: boolean;
@@ -137,10 +207,29 @@ export interface FlattenedOrderRow {
     customizationValue: string | null;
     customizationNotes: string | null;
     originalSkuCode: string | null;
-    // Line-level tracking fields (pre-computed to avoid find() in valueGetters)
+
+    // Line-level tracking (pre-computed for O(1) access)
     lineShippedAt: string | null;
     lineDeliveredAt: string | null;
     lineTrackingStatus: string | null;
+    lineAwbNumber?: string | null;
+    lineCourier?: string | null;
+
+    // Enriched fields (from server enrichments)
+    daysInTransit?: number | null;
+    daysSinceDelivery?: number | null;
+    daysInRto?: number | null;
+    rtoStatus?: string | null;
+
+    // Shopify cache fields (for columns)
+    discountCodes?: string | null;
+    customerNotes?: string | null;
+    shopifyTags?: string | null;
+    shopifyAwb?: string | null;
+    shopifyCourier?: string | null;
+
+    // Customer tags
+    customerTags?: string[] | null;
 }
 
 /**
@@ -190,9 +279,18 @@ export function flattenOrders(
                 orderDate: order.orderDate,
                 shipByDate: order.shipByDate || null,
                 customerName: order.customerName,
+                customerEmail: order.customerEmail || null,
+                customerPhone: order.customerPhone || null,
+                customerId: order.customerId || null,
                 city: parseCity(order.shippingAddress),
                 customerOrderCount: serverOrderCount,
                 customerLtv: serverLtv,
+                customerTier: order.customerTier || null,
+                customerRtoCount: order.customerRtoCount || 0,
+                totalAmount: order.totalAmount || null,
+                paymentMethod: order.paymentMethod || null,
+                channel: order.channel || null,
+                internalNotes: order.internalNotes || null,
                 productName: '(no items)',
                 colorName: '-',
                 size: '-',
@@ -210,7 +308,7 @@ export function flattenOrders(
                 productionDate: null,
                 isFirstLine: true,
                 totalLines: 0,
-                fulfillmentStage: order.fulfillmentStage,
+                fulfillmentStage: order.fulfillmentStage || null,
                 order: order,
                 // Customization fields
                 isCustomized: false,
@@ -254,9 +352,18 @@ export function flattenOrders(
                 orderDate: order.orderDate,
                 shipByDate: order.shipByDate || null,
                 customerName: order.customerName,
+                customerEmail: order.customerEmail || null,
+                customerPhone: order.customerPhone || null,
+                customerId: order.customerId || null,
                 city: parseCity(order.shippingAddress),
                 customerOrderCount: serverOrderCount,
                 customerLtv: serverLtv,
+                customerTier: order.customerTier || null,
+                customerRtoCount: order.customerRtoCount || 0,
+                totalAmount: order.totalAmount || null,
+                paymentMethod: order.paymentMethod || null,
+                channel: order.channel || null,
+                internalNotes: order.internalNotes || null,
                 productName: line.sku?.variation?.product?.name || '-',
                 colorName: line.sku?.variation?.colorName || '-',
                 size: line.sku?.size || '-',
@@ -274,7 +381,7 @@ export function flattenOrders(
                 productionDate: productionBatch?.batchDate?.split('T')[0] || null,
                 isFirstLine: idx === 0,
                 totalLines: orderLines.length,
-                fulfillmentStage: order.fulfillmentStage,
+                fulfillmentStage: order.fulfillmentStage || null,
                 order: order,
                 // Customization fields
                 isCustomized,

@@ -21,7 +21,6 @@ import {
     getValidViewNames,
     getViewConfig,
     flattenOrdersToRows,
-    type FlattenedOrderRow,
 } from '../../utils/orderViews.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { updateCustomerTier } from '../../utils/tierUtils.js';

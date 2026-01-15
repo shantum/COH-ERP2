@@ -149,11 +149,12 @@ export default function Orders() {
         onEditSuccess: () => setUnifiedModalOrder(null),
     });
 
-    // Compute customer stats (still used for some order-level calculations)
-    const customerStats = useMemo(
+    // Compute customer stats (kept for backwards compatibility, may be removed later)
+    const _customerStats = useMemo(
         () => computeCustomerStats(orders, []),
         [orders]
     );
+    void _customerStats; // Suppress unused warning
 
     // Enrich server-flattened rows with client-side inventory data
     // This is O(n) with O(1) Map lookups - much faster than full flatten
