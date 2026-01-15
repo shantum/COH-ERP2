@@ -2,9 +2,9 @@
 
 ## Core Principles
 
-**Keep everything clean and simple.** Remove bloat as you find it - unused code, dead imports, redundant patterns. Simpler is always better.
+**Keep it clean and simple.** Remove bloat as you find it. Simpler is always better.
 
-**The code is the documentation.** Comment your code well so agents can understand context easily. Clear comments > external docs.
+**Code is documentation.** Comment well so agents understand context easily.
 
 ## Quick Start
 
@@ -18,54 +18,55 @@ npm run db:generate && npm run db:push
 
 ## Tech Stack
 
-**Backend**: Express + tRPC + Prisma + PostgreSQL | **Frontend**: React 19 + TanStack Query + AG-Grid + Tailwind
-
-**API**: REST `/api/*`, tRPC `/trpc` | **Integrations**: Shopify, iThink Logistics
+**Backend**: Express + tRPC + Prisma + PostgreSQL
+**Frontend**: React 19 + TanStack Query + AG-Grid + Tailwind
+**Integrations**: Shopify (orders), iThink Logistics (tracking)
 
 ## Orders System
 
-Single page (`/orders`) with 4 tabs:
-- **Open** - Active orders in fulfillment pipeline
-- **Shipped** - Orders in transit/delivered (includes RTO and COD Pending as toggle filters)
-- **Archived** - Completed historical orders
-- **Cancelled** - Cancelled orders
+Single page (`/orders`) with 4 tabs: Open, Shipped, Archived, Cancelled
 
 **Key files:**
-- `client/src/pages/Orders.tsx` - Main orchestrator with 4 tabs + shipped filters
-- `client/src/components/orders/OrdersGrid.tsx` - Unified grid with `currentView` prop
-- `client/src/hooks/useUnifiedOrdersData.ts` - Data hook with background prefetch
+- `client/src/pages/Orders.tsx` - Main orchestrator
+- `client/src/components/orders/OrdersGrid.tsx` - Unified grid
+- `server/src/utils/orderViews.ts` - View configs + `ORDER_UNIFIED_SELECT`
 
 **Line status flow:** `pending → allocated → picked → packed → shipped`
 
-**Unified status endpoint:** All line transitions use `POST /lines/:lineId/status`:
-- Frontend calls `ordersApi.setLineStatus(lineId, status)`
-- Backend validates transitions via `VALID_TRANSITIONS` matrix
-- Allocate creates OUTWARD transaction, unallocate deletes it
+**Data architecture:**
+- Each grid row = one order line (multiple rows per order)
+- `isFirstLine` flag distinguishes order header row from continuation rows
+- Tracking columns show data per-line with order-level fallback
 
-**Two independent dimensions:**
-| Field | Controls | Values |
-|-------|----------|--------|
-| `lineStatus` | Fulfillment stage | pending, allocated, picked, packed, shipped, cancelled |
-| `isArchived` | Archive state | false = active, true = archived |
-
-**Release workflow:** Shipped orders stay in Open tab until explicitly released via "Release to Shipped" button (`releasedToShipped` boolean on Order).
-
-**View query logic:**
-- Open: Any line not shipped/cancelled, OR fully shipped but `releasedToShipped=false`
-- Shipped: All lines shipped AND `releasedToShipped=true` (RTO/COD filtered client-side)
+**View logic:**
+- Open: Lines not shipped/cancelled, OR shipped but `releasedToShipped=false`
+- Shipped: All lines shipped AND `releasedToShipped=true`
 - Archived: `isArchived = true`
-- Cancelled: `lineStatus = 'cancelled'`
+
+## OrdersGrid Column Patterns
+
+```typescript
+// Line-level data with order fallback
+valueGetter: (params) => {
+    const line = params.data?.order?.orderLines?.find(l => l.id === params.data?.lineId);
+    return line?.fieldName || params.data?.order?.fieldName || null;
+}
+```
+
+**Data sources:**
+- `shopifyCache.*` - Use specific fields (discountCodes, paymentMethod, customerNotes, trackingNumber). NEVER use rawData.
+- `order.trackingStatus` - From iThink sync, NOT Shopify
+- Line-level: shippedAt, deliveredAt, trackingStatus, awbNumber, courier
 
 ## Inventory
 
 - **Balance**: `SUM(inward) - SUM(outward)`
-- **Allocate**: Creates OUTWARD transaction immediately (no RESERVED)
-- **Cost cascade**: SKU → Variation → Product → Global (null = fallback)
+- **Allocate**: Creates OUTWARD transaction immediately
 
 ## Before Committing
 
 ```bash
-cd client && npm run build   # TypeScript + Vite build
+cd client && npm run build
 cd server && npx tsc --noEmit
 ```
 
@@ -73,9 +74,9 @@ cd server && npx tsc --noEmit
 
 1. **Router order**: Specific routes before parameterized (`:id`)
 2. **AsyncHandler**: Wrap async routes with `asyncHandler()`
-3. **Dual cache invalidation**: Mutations must invalidate both TanStack Query and tRPC caches
-4. **AG-Grid cellRenderer**: Return JSX elements, not HTML strings
-5. **OrdersGrid currentView**: Pass `currentView` prop to show view-appropriate columns
+3. **Cache invalidation**: Mutations invalidate both TanStack Query and tRPC
+4. **AG-Grid cellRenderer**: Return JSX, not HTML strings
+5. **shopifyCache.rawData**: Excluded from queries for performance - derive data from specific fields
 
 ## Environment
 
