@@ -1,16 +1,15 @@
 /**
- * Orders page - Unified order management with 4 view tabs
- * All order views (open, shipped, archived, cancelled) in one place
- * RTO and COD Pending are now filters within the Shipped tab
+ * Orders page - Unified order management with dropdown view selector
+ * Views: Open, Shipped, RTO, COD Pending, Cancelled, Archived
  */
 
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Archive, RefreshCw, Send } from 'lucide-react';
+import { Plus, RefreshCw, Send, ChevronDown, Archive } from 'lucide-react';
 
 // Custom hooks
-import { useUnifiedOrdersData, type UnifiedOrderTab } from '../hooks/useUnifiedOrdersData';
+import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useAuth } from '../hooks/useAuth';
 
@@ -33,22 +32,32 @@ import {
 import { GridPreferencesToolbar } from '../components/common/grid';
 import type { Order } from '../types';
 
+// View configuration
+const VIEW_CONFIG: Record<OrderView, { label: string; color: string }> = {
+    open: { label: 'Open Orders', color: 'primary' },
+    shipped: { label: 'Shipped', color: 'blue' },
+    rto: { label: 'RTO', color: 'red' },
+    cod_pending: { label: 'COD Pending', color: 'amber' },
+    cancelled: { label: 'Cancelled', color: 'gray' },
+    archived: { label: 'Archived', color: 'gray' },
+};
+
 export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
 
-    // Tab state - persisted in URL for back/forward navigation and refresh
+    // View state - persisted in URL
     const [searchParams, setSearchParams] = useSearchParams();
-    const tab = (searchParams.get('tab') as UnifiedOrderTab) || 'open';
-    const setTab = useCallback((newTab: UnifiedOrderTab) => {
+    const view = (searchParams.get('view') as OrderView) || 'open';
+    const setView = useCallback((newView: OrderView) => {
         setSearchParams(prev => {
             const newParams = new URLSearchParams(prev);
-            newParams.set('tab', newTab);
+            newParams.set('view', newView);
             return newParams;
-        }, { replace: true }); // Use replace to avoid polluting browser history
+        }, { replace: true });
     }, [setSearchParams]);
 
-    // Filter state (per-tab filtering, separate from GlobalOrderSearch)
+    // Filter state (Open view only)
     const [dateRange, setDateRange] = useState<'' | '14' | '30' | '60' | '90' | '180' | '365'>('14');
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
@@ -56,11 +65,10 @@ export default function Orders() {
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-    // Unified modal state for viewing, editing, and shipping orders
     const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
     const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
 
-    // Optimistic updates handle button state - use empty set for grid interface compatibility
+    // Optimistic updates handle button state
     const allocatingLines = new Set<string>();
 
     // Customization modal state
@@ -79,20 +87,10 @@ export default function Orders() {
         notes?: string;
     } | null>(null);
 
-    // Archived pagination state
-    const [archivedDays, setArchivedDays] = useState(90);
-    const [archivedLimit, setArchivedLimit] = useState(100);
-    // Shipped filter state (RTO and COD Pending are now filters within Shipped)
-    const [shippedFilter, setShippedFilter] = useState<'all' | 'rto' | 'cod_pending'>('all');
-
-    // Data hooks - 4 main views (RTO and COD Pending are filters within Shipped)
+    // Data hook - simplified, single view
     const {
-        currentOrders,
-        openOrders,
-        shippedOrders,
-        cancelledOrders,
-        archivedOrders,
-        tabCounts,
+        orders,
+        viewCount,
         allSkus,
         inventoryBalance,
         fabricStock,
@@ -101,86 +99,62 @@ export default function Orders() {
         customerDetail,
         customerLoading,
         isLoading,
-        refetchOpen,
-        refetchShipped,
-        refetchCancelled,
-        refetchArchived,
-        isFetchingOpen,
-        isFetchingShipped,
-        isFetchingCancelled,
-        isFetchingArchived,
-        archivedPagination,
-        setArchivedLimit: setArchivedLimitState,
-        setArchivedDays: setArchivedDaysState,
+        isFetching,
+        refetch,
     } = useUnifiedOrdersData({
-        activeTab: tab,
+        currentView: view,
         selectedCustomerId,
-        archivedDays,
-        archivedLimit,
     });
 
-    // Unified modal handlers (must be after openOrders is available)
+    // Modal handlers
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' = 'view') => {
         setUnifiedModalOrder(order);
         setUnifiedModalMode(mode);
     }, []);
 
-    // Handler for OrdersGrid which passes orderId (not full order)
     const handleViewOrderById = useCallback((orderId: string) => {
-        // Search through current orders - cast through unknown for type compatibility
-        const order = currentOrders?.find((o: any) => o.id === orderId);
+        const order = orders?.find((o: any) => o.id === orderId);
         if (order) {
             openUnifiedModal(order as unknown as Order, 'view');
         }
-    }, [currentOrders, openUnifiedModal]);
+    }, [orders, openUnifiedModal]);
 
-    // Handler to open in edit mode
     const handleEditOrderUnified = useCallback((order: Order) => {
         openUnifiedModal(order, 'edit');
     }, [openUnifiedModal]);
 
-    // Handler to open in ship mode
     const handleShipOrderUnified = useCallback((order: Order) => {
         openUnifiedModal(order, 'ship');
     }, [openUnifiedModal]);
 
-    // Mutations hook with callbacks
+    // Mutations hook
     const mutations = useOrdersMutations({
-        onShipSuccess: () => {
-            setUnifiedModalOrder(null);
-        },
-        onCreateSuccess: () => {
-            setShowCreateOrder(false);
-        },
-        onDeleteSuccess: () => {
-            setUnifiedModalOrder(null);
-        },
-        onEditSuccess: () => {
-            setUnifiedModalOrder(null);
-        },
+        onShipSuccess: () => setUnifiedModalOrder(null),
+        onCreateSuccess: () => setShowCreateOrder(false),
+        onDeleteSuccess: () => setUnifiedModalOrder(null),
+        onEditSuccess: () => setUnifiedModalOrder(null),
     });
 
-    // Compute customer stats (used for all views)
+    // Compute customer stats
     const customerStats = useMemo(
-        () => computeCustomerStats(currentOrders, []),
-        [currentOrders]
+        () => computeCustomerStats(orders, []),
+        [orders]
     );
 
-    // Flatten orders for grid - use currentOrders which changes based on active tab
+    // Flatten orders for grid
     const currentRows = useMemo(
-        () => flattenOrders(currentOrders, customerStats, inventoryBalance, fabricStock),
-        [currentOrders, customerStats, inventoryBalance, fabricStock]
+        () => flattenOrders(orders, customerStats, inventoryBalance, fabricStock),
+        [orders, customerStats, inventoryBalance, fabricStock]
     );
 
-    // Apply filters (per-tab)
+    // Apply filters
     const filteredRows = useMemo(() => {
-        // Date range filter only applies to open tab
-        const applyDateFilter = tab === 'open';
+        // Date range filter only applies to open view
+        const applyDateFilter = view === 'open';
         let rows = filterRows(currentRows, '', applyDateFilter ? dateRange : '', applyDateFilter);
 
-        // Open tab specific filters
-        if (tab === 'open') {
-            // Apply allocated filter
+        // Open view specific filters
+        if (view === 'open') {
             if (allocatedFilter === 'yes') {
                 rows = rows.filter(row =>
                     row.lineStatus === 'allocated' ||
@@ -191,7 +165,6 @@ export default function Orders() {
                 rows = rows.filter(row => row.lineStatus === 'pending');
             }
 
-            // Apply production filter
             if (productionFilter === 'scheduled') {
                 rows = rows.filter(row => row.productionBatchId);
             } else if (productionFilter === 'needs') {
@@ -201,7 +174,6 @@ export default function Orders() {
                     (row.skuStock < row.qty || row.isCustomized)
                 );
             } else if (productionFilter === 'ready') {
-                // Ready = all lines of the order are allocated/picked/packed
                 rows = rows.filter(row => {
                     const activeLines = row.order?.orderLines?.filter(
                         (line: any) => line.lineStatus !== 'cancelled'
@@ -216,48 +188,28 @@ export default function Orders() {
             }
         }
 
-        // Shipped tab filters (RTO and COD Pending)
-        if (tab === 'shipped' && shippedFilter !== 'all') {
-            if (shippedFilter === 'rto') {
-                rows = rows.filter(row =>
-                    ['rto_in_transit', 'rto_delivered'].includes(row.order?.trackingStatus)
-                );
-            } else if (shippedFilter === 'cod_pending') {
-                rows = rows.filter(row =>
-                    row.order?.paymentMethod === 'COD' &&
-                    row.order?.trackingStatus === 'delivered' &&
-                    !row.order?.codRemittedAt
-                );
-            }
-        }
-
         return rows;
-    }, [currentRows, dateRange, tab, allocatedFilter, productionFilter, shippedFilter]);
+    }, [currentRows, dateRange, view, allocatedFilter, productionFilter]);
 
-    // Unique order count for Open tab (available for tab badge if needed)
-    // const uniqueOpenOrderCount = new Set(filteredRows.filter(r => tab === 'open').map((r) => r.orderId)).size;
-
-    // Count of fully shipped orders ready for release
-    // These are orders where all non-cancelled lines are shipped but releasedToShipped=false
+    // Count of fully shipped orders ready for release (Open view only)
     const releasableOrderCount = useMemo(() => {
-        if (!openOrders) return 0;
+        if (view !== 'open' || !orders) return 0;
         let count = 0;
-        for (const order of openOrders) {
+        for (const order of orders) {
             const lines = order.orderLines || [];
             const nonCancelledLines = lines.filter((l: any) => l.lineStatus !== 'cancelled');
             if (nonCancelledLines.length === 0) continue;
-            // Check if all non-cancelled lines are shipped
             const allShipped = nonCancelledLines.every((l: any) => l.lineStatus === 'shipped');
             if (allShipped) count++;
         }
         return count;
-    }, [openOrders]);
+    }, [view, orders]);
 
-    // Pipeline counts for simple status bar
+    // Pipeline counts (Open view only)
     const pipelineCounts = useMemo(() => {
-        if (!openOrders) return { pending: 0, allocated: 0, ready: 0 };
+        if (view !== 'open' || !orders) return { pending: 0, allocated: 0, ready: 0 };
         let pending = 0, allocated = 0, ready = 0;
-        for (const order of openOrders) {
+        for (const order of orders) {
             const lines = (order.orderLines || []).filter((l: any) => l.lineStatus !== 'cancelled');
             if (lines.length === 0) continue;
             const allAllocatedOrBetter = lines.every((l: any) =>
@@ -266,20 +218,14 @@ export default function Orders() {
             const allPackedOrBetter = lines.every((l: any) =>
                 ['packed', 'shipped'].includes(l.lineStatus)
             );
-            if (allPackedOrBetter) {
-                ready++;
-            } else if (allAllocatedOrBetter) {
-                allocated++;
-            } else {
-                pending++;
-            }
+            if (allPackedOrBetter) ready++;
+            else if (allAllocatedOrBetter) allocated++;
+            else pending++;
         }
         return { pending, allocated, ready };
-    }, [openOrders]);
+    }, [view, orders]);
 
-    // Note: ProcessShippedModal removed - using simplified direct ship flow
-
-    // Handlers - mark shipped workflow
+    // Handlers
     const handleMarkShippedLine = useCallback(
         (lineId: string, data?: { awbNumber?: string; courier?: string }) =>
             mutations.markShippedLine.mutate({ lineId, data }),
@@ -297,7 +243,6 @@ export default function Orders() {
         [mutations.updateLineTracking]
     );
 
-    // Optimistic updates handle UI state instantly - no need for loading tracking
     const handleAllocate = useCallback(
         (lineId: string) => mutations.allocate.mutate({ lineIds: [lineId] }),
         [mutations.allocate]
@@ -328,11 +273,8 @@ export default function Orders() {
         [mutations.unpackLine]
     );
 
-    // Ship line directly (packed → shipped) using unified status endpoint
     const handleShipLine = useCallback(
         (lineId: string, data: { awbNumber: string; courier: string }) => {
-            // Use the new unified status endpoint
-            // For now, fall back to markShippedLine which will be updated to ship directly
             mutations.markShippedLine.mutate({ lineId, data });
         },
         [mutations.markShippedLine]
@@ -398,8 +340,6 @@ export default function Orders() {
             if (!customizingLine) return;
 
             if (isEditingCustomization) {
-                // Edit mode: delete existing customization then create new one
-                // Using a chain of mutations for delete + create
                 mutations.removeCustomization.mutate({ lineId: customizingLine.lineId }, {
                     onSuccess: () => {
                         mutations.customizeLine.mutate(
@@ -410,14 +350,11 @@ export default function Orders() {
                                     setIsEditingCustomization(false);
                                     setCustomizationInitialData(null);
                                 },
-                                // Keep modal open on error so user can see the error message
                             }
                         );
                     },
-                    // Keep modal open on error
                 });
             } else {
-                // Create mode: just create new customization
                 mutations.customizeLine.mutate(
                     { lineId: customizingLine.lineId, data },
                     {
@@ -426,7 +363,6 @@ export default function Orders() {
                             setIsEditingCustomization(false);
                             setCustomizationInitialData(null);
                         },
-                        // Keep modal open on error so user can see the error message
                     }
                 );
             }
@@ -434,23 +370,21 @@ export default function Orders() {
         [customizingLine, isEditingCustomization, mutations.customizeLine, mutations.removeCustomization]
     );
 
-    // Grid component - unified for all views
+    // Grid component
     const {
         gridComponent,
         columnVisibilityDropdown,
         statusLegend,
-        // User preferences
         hasUserCustomizations,
         differsFromAdminDefaults,
         isSavingPrefs,
         resetToDefaults,
-        // Admin-only
         isManager,
         savePreferencesToServer,
     } = OrdersGrid({
         rows: filteredRows,
         lockedDates: lockedDates || [],
-        currentView: tab,
+        currentView: view,
         onAllocate: handleAllocate,
         onUnallocate: handleUnallocate,
         onPick: handlePick,
@@ -478,45 +412,15 @@ export default function Orders() {
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
-        // Post-ship handlers
-        onUnarchive: () => {}, // TODO: Add unarchiveOrder mutation if needed
+        onUnarchive: () => {},
         allocatingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
-        isUnarchiving: false, // TODO: Add unarchiveOrder mutation if needed
+        isUnarchiving: false,
         isAdmin: user?.role === 'admin',
     });
-
-    // Tab configuration - 4 tabs (RTO and COD Pending are filters within Shipped)
-    const tabs: { id: UnifiedOrderTab; label: string; count: number; highlight?: boolean }[] = [
-        { id: 'open', label: 'Open', count: tabCounts.open },
-        { id: 'shipped', label: 'Shipped', count: tabCounts.shipped },
-        { id: 'archived', label: 'Archived', count: tabCounts.archived },
-        { id: 'cancelled', label: 'Cancelled', count: tabCounts.cancelled },
-    ];
-
-    // Get current refetch function based on active tab
-    const currentRefetch = useMemo(() => {
-        switch (tab) {
-            case 'open': return refetchOpen;
-            case 'shipped': return refetchShipped;
-            case 'archived': return refetchArchived;
-            case 'cancelled': return refetchCancelled;
-            default: return refetchOpen;
-        }
-    }, [tab, refetchOpen, refetchShipped, refetchArchived, refetchCancelled]);
-
-    const currentIsFetching = useMemo(() => {
-        switch (tab) {
-            case 'open': return isFetchingOpen;
-            case 'shipped': return isFetchingShipped;
-            case 'archived': return isFetchingArchived;
-            case 'cancelled': return isFetchingCancelled;
-            default: return false;
-        }
-    }, [tab, isFetchingOpen, isFetchingShipped, isFetchingArchived, isFetchingCancelled]);
 
     return (
         <div className="space-y-4">
@@ -525,21 +429,19 @@ export default function Orders() {
                 <h1 className="text-xl md:text-2xl font-bold text-gray-900">Orders</h1>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <GlobalOrderSearch
-                        onSelectOrder={(orderId, selectedTab) => {
-                            // All views are now on Orders page
-                            // RTO and COD pending orders are now in shipped view
-                            const mappedTab = (selectedTab === 'rto' || selectedTab === 'cod-pending')
-                                ? 'shipped'
-                                : selectedTab;
-                            setTab(mappedTab as UnifiedOrderTab);
-                            // Find the order across all views
-                            const allOrders = [
-                                ...(openOrders || []),
-                                ...(shippedOrders || []),
-                                ...(archivedOrders || []),
-                                ...(cancelledOrders || []),
-                            ];
-                            const order = allOrders.find(o => o.id === orderId);
+                        onSelectOrder={(orderId, selectedView) => {
+                            // Map old view names to new
+                            const viewMap: Record<string, OrderView> = {
+                                'rto': 'rto',
+                                'cod-pending': 'cod_pending',
+                                'open': 'open',
+                                'shipped': 'shipped',
+                                'archived': 'archived',
+                                'cancelled': 'cancelled',
+                            };
+                            const mappedView = viewMap[selectedView] || 'open';
+                            setView(mappedView);
+                            const order = orders?.find(o => o.id === orderId);
                             if (order) {
                                 setUnifiedModalOrder(order as unknown as Order);
                                 setUnifiedModalMode('view');
@@ -556,271 +458,145 @@ export default function Orders() {
                 </div>
             </div>
 
-            {/* Pipeline Status Bar */}
-            <div className="flex items-center gap-4 px-4 py-2.5 bg-white border border-gray-200 rounded-lg">
-                <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                    <span className="text-sm text-gray-600">Pending</span>
-                    <span className="text-sm font-semibold text-gray-900">{pipelineCounts.pending}</span>
+            {/* Pipeline Status Bar - Only for Open view */}
+            {view === 'open' && (
+                <div className="flex items-center gap-4 px-4 py-2.5 bg-white border border-gray-200 rounded-lg">
+                    <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                        <span className="text-sm text-gray-600">Pending</span>
+                        <span className="text-sm font-semibold text-gray-900">{pipelineCounts.pending}</span>
+                    </div>
+                    <span className="text-gray-300">→</span>
+                    <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+                        <span className="text-sm text-gray-600">Allocated</span>
+                        <span className="text-sm font-semibold text-gray-900">{pipelineCounts.allocated}</span>
+                    </div>
+                    <span className="text-gray-300">→</span>
+                    <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                        <span className="text-sm text-gray-600">Ready</span>
+                        <span className="text-sm font-semibold text-gray-900">{pipelineCounts.ready}</span>
+                    </div>
                 </div>
-                <span className="text-gray-300">→</span>
-                <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-                    <span className="text-sm text-gray-600">Allocated</span>
-                    <span className="text-sm font-semibold text-gray-900">{pipelineCounts.allocated}</span>
-                </div>
-                <span className="text-gray-300">→</span>
-                <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                    <span className="text-sm text-gray-600">Ready</span>
-                    <span className="text-sm font-semibold text-gray-900">{pipelineCounts.ready}</span>
-                </div>
-            </div>
+            )}
 
-            {/* Tabs */}
+            {/* Main Content Card */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                {/* Tab Navigation - Clean row */}
-                <div className="flex items-center justify-between px-4 border-b border-gray-100">
-                    <div className="flex overflow-x-auto -mb-px">
-                        {tabs.map((t) => (
-                            <button
-                                key={t.id}
-                                className={`relative px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${tab === t.id
-                                        ? 'text-primary-600'
-                                        : t.highlight
-                                            ? 'text-red-600 hover:text-red-700'
-                                            : 'text-gray-500 hover:text-gray-700'
-                                    }`}
-                                onClick={() => setTab(t.id)}
-                            >
-                                <span className="flex items-center gap-1.5">
-                                    {t.label}
-                                    {t.count > 0 && (
-                                        <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium ${
-                                            tab === t.id
-                                                ? 'bg-primary-100 text-primary-700'
-                                                : t.highlight
-                                                    ? 'bg-red-100 text-red-700'
-                                                    : 'bg-gray-100 text-gray-500'
-                                        }`}>
-                                            {t.count}
-                                        </span>
-                                    )}
-                                </span>
-                                {tab === t.id && (
-                                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary-600 rounded-full" />
-                                )}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Tab-specific toolbar - Separate row */}
-                {tab === 'open' && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
-                        <div className="flex items-center gap-2">
+                {/* Toolbar */}
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50/80 border-b border-gray-100">
+                    {/* Left side: View selector + filters */}
+                    <div className="flex items-center gap-3">
+                        {/* View Dropdown */}
+                        <div className="relative">
                             <select
-                                value={dateRange}
-                                onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
-                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                                value={view}
+                                onChange={(e) => setView(e.target.value as OrderView)}
+                                className="appearance-none text-sm font-medium bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-300 cursor-pointer"
                             >
-                                <option value="">All time</option>
-                                <option value="14">Last 14 days</option>
-                                <option value="30">Last 30 days</option>
-                                <option value="60">Last 60 days</option>
-                                <option value="90">Last 90 days</option>
-                                <option value="180">Last 180 days</option>
-                                <option value="365">Last 365 days</option>
+                                <option value="open">Open Orders ({viewCount})</option>
+                                <option value="shipped">Shipped</option>
+                                <option value="rto">RTO</option>
+                                <option value="cod_pending">COD Pending</option>
+                                <option value="cancelled">Cancelled</option>
+                                <option value="archived">Archived</option>
                             </select>
-                            <select
-                                value={allocatedFilter}
-                                onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
-                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                            >
-                                <option value="">All status</option>
-                                <option value="yes">Allocated</option>
-                                <option value="no">Not allocated</option>
-                            </select>
-                            <select
-                                value={productionFilter}
-                                onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
-                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                            >
-                                <option value="">All production</option>
-                                <option value="scheduled">Scheduled</option>
-                                <option value="needs">Needs production</option>
-                                <option value="ready">Ready to ship</option>
-                            </select>
+                            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                         </div>
-                        <div className="flex items-center gap-2">
-                            {releasableOrderCount > 0 && (
-                                <button
-                                    onClick={() => {
-                                        if (confirm(`Release ${releasableOrderCount} shipped orders?\n\nThis will move them to the Shipped tab.`)) {
-                                            mutations.releaseToShipped.mutate(undefined);
-                                        }
-                                    }}
-                                    disabled={mutations.releaseToShipped.isPending}
-                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
-                                    title="Release all shipped orders to Shipped tab"
+
+                        {/* Open view filters */}
+                        {view === 'open' && (
+                            <>
+                                <div className="w-px h-5 bg-gray-200" />
+                                <select
+                                    value={dateRange}
+                                    onChange={(e) => setDateRange(e.target.value as typeof dateRange)}
+                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
                                 >
-                                    <Send size={12} />
-                                    Release {releasableOrderCount} to Shipped
-                                </button>
-                            )}
-                            {user?.role === 'admin' && (
-                                <button
-                                    onClick={() => mutations.migrateShopifyFulfilled.mutate()}
-                                    disabled={mutations.migrateShopifyFulfilled.isPending}
-                                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
-                                    title="Migrate orders fulfilled on Shopify (no inventory)"
+                                    <option value="">All time</option>
+                                    <option value="14">Last 14 days</option>
+                                    <option value="30">Last 30 days</option>
+                                    <option value="60">Last 60 days</option>
+                                    <option value="90">Last 90 days</option>
+                                </select>
+                                <select
+                                    value={allocatedFilter}
+                                    onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
+                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
                                 >
-                                    <Archive size={12} />
-                                    {mutations.migrateShopifyFulfilled.isPending ? 'Migrating...' : 'Migrate Fulfilled'}
-                                </button>
-                            )}
-                            {/* Refresh Button */}
-                            <button
-                                onClick={() => refetchOpen()}
-                                disabled={isFetchingOpen}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
-                                title="Refresh table data"
-                            >
-                                <RefreshCw size={12} className={isFetchingOpen ? 'animate-spin' : ''} />
-                                {isFetchingOpen ? 'Refreshing...' : 'Refresh'}
-                            </button>
-                            <div className="w-px h-4 bg-gray-200" />
-                            {statusLegend}
-                            {columnVisibilityDropdown}
-                            <GridPreferencesToolbar
-                                hasUserCustomizations={hasUserCustomizations}
-                                differsFromAdminDefaults={differsFromAdminDefaults}
-                                isSavingPrefs={isSavingPrefs}
-                                onResetToDefaults={resetToDefaults}
-                                isManager={isManager}
-                                onSaveAsDefaults={savePreferencesToServer}
-                            />
-                        </div>
+                                    <option value="">All status</option>
+                                    <option value="yes">Allocated</option>
+                                    <option value="no">Not allocated</option>
+                                </select>
+                                <select
+                                    value={productionFilter}
+                                    onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
+                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                                >
+                                    <option value="">All production</option>
+                                    <option value="scheduled">Scheduled</option>
+                                    <option value="needs">Needs production</option>
+                                    <option value="ready">Ready to ship</option>
+                                </select>
+                            </>
+                        )}
                     </div>
-                )}
 
-                {/* Shipped tab toolbar with RTO/COD filters */}
-                {tab === 'shipped' && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
-                        <div className="flex items-center gap-1.5">
+                    {/* Right side: Actions */}
+                    <div className="flex items-center gap-2">
+                        {/* Release button - Open view only */}
+                        {view === 'open' && releasableOrderCount > 0 && (
                             <button
-                                onClick={() => setShippedFilter('all')}
-                                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
-                                    shippedFilter === 'all'
-                                        ? 'bg-primary-100 text-primary-700 ring-1 ring-primary-200'
-                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                                }`}
-                            >
-                                All
-                            </button>
-                            <button
-                                onClick={() => setShippedFilter('rto')}
-                                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
-                                    shippedFilter === 'rto'
-                                        ? 'bg-red-100 text-red-700 ring-1 ring-red-200'
-                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
-                                }`}
-                            >
-                                RTO {tabCounts.rto > 0 && `(${tabCounts.rto})`}
-                            </button>
-                            <button
-                                onClick={() => setShippedFilter('cod_pending')}
-                                className={`px-2.5 py-1 text-xs rounded-md font-medium transition-colors ${
-                                    shippedFilter === 'cod_pending'
-                                        ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200'
-                                        : 'bg-white text-gray-600 border border-gray-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
-                                }`}
-                            >
-                                COD Pending {tabCounts.codPending > 0 && `(${tabCounts.codPending})`}
-                            </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => currentRefetch()}
-                                disabled={currentIsFetching}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
-                            >
-                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
-                                Refresh
-                            </button>
-                            <div className="w-px h-4 bg-gray-200" />
-                            {columnVisibilityDropdown}
-                        </div>
-                    </div>
-                )}
-
-                {/* Archived tab toolbar */}
-                {tab === 'archived' && (
-                    <div className="flex items-center justify-between gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
-                        <div className="flex items-center gap-2">
-                            <select
-                                value={archivedDays}
-                                onChange={(e) => {
-                                    setArchivedDays(Number(e.target.value));
-                                    setArchivedDaysState?.(Number(e.target.value));
+                                onClick={() => {
+                                    if (confirm(`Release ${releasableOrderCount} shipped orders?\n\nThis will move them to the Shipped view.`)) {
+                                        mutations.releaseToShipped.mutate(undefined);
+                                    }
                                 }}
-                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                                disabled={mutations.releaseToShipped.isPending}
+                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
                             >
-                                <option value={30}>Last 30 days</option>
-                                <option value={90}>Last 90 days</option>
-                                <option value={180}>Last 180 days</option>
-                                <option value={365}>Last year</option>
-                                <option value={0}>All time</option>
-                            </select>
-                            <select
-                                value={archivedLimit}
-                                onChange={(e) => {
-                                    setArchivedLimit(Number(e.target.value));
-                                    setArchivedLimitState?.(Number(e.target.value));
-                                }}
-                                className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                            >
-                                <option value={100}>100 orders</option>
-                                <option value={500}>500 orders</option>
-                                <option value={1000}>1000 orders</option>
-                                <option value={2500}>2500 orders</option>
-                            </select>
-                            {archivedPagination && (
-                                <span className="text-xs text-gray-500">
-                                    Showing {archivedOrders?.length || 0} of {archivedPagination.total}
-                                </span>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => currentRefetch()}
-                                disabled={currentIsFetching}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
-                            >
-                                <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
-                                Refresh
+                                <Send size={12} />
+                                Release {releasableOrderCount}
                             </button>
-                            <div className="w-px h-4 bg-gray-200" />
-                            {columnVisibilityDropdown}
-                        </div>
-                    </div>
-                )}
+                        )}
 
-                {/* Cancelled tab toolbar */}
-                {tab === 'cancelled' && (
-                    <div className="flex items-center justify-end gap-3 px-4 py-2 bg-gray-50/80 border-b border-gray-100">
+                        {/* Admin migrate button - Open view only */}
+                        {view === 'open' && user?.role === 'admin' && (
+                            <button
+                                onClick={() => mutations.migrateShopifyFulfilled.mutate()}
+                                disabled={mutations.migrateShopifyFulfilled.isPending}
+                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
+                            >
+                                <Archive size={12} />
+                                {mutations.migrateShopifyFulfilled.isPending ? 'Migrating...' : 'Migrate'}
+                            </button>
+                        )}
+
+                        {/* Refresh */}
                         <button
-                            onClick={() => currentRefetch()}
-                            disabled={currentIsFetching}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-all"
+                            onClick={() => refetch()}
+                            disabled={isFetching}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50"
                         >
-                            <RefreshCw size={12} className={currentIsFetching ? 'animate-spin' : ''} />
+                            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
                             Refresh
                         </button>
+
                         <div className="w-px h-4 bg-gray-200" />
+
+                        {/* Grid controls */}
+                        {view === 'open' && statusLegend}
                         {columnVisibilityDropdown}
+                        <GridPreferencesToolbar
+                            hasUserCustomizations={hasUserCustomizations}
+                            differsFromAdminDefaults={differsFromAdminDefaults}
+                            isSavingPrefs={isSavingPrefs}
+                            onResetToDefaults={resetToDefaults}
+                            isManager={isManager}
+                            onSaveAsDefaults={savePreferencesToServer}
+                        />
                     </div>
-                )}
+                </div>
 
                 {/* Loading */}
                 {isLoading && (
@@ -829,13 +605,13 @@ export default function Orders() {
                     </div>
                 )}
 
-                {/* Unified Grid - same component for all views */}
+                {/* Grid */}
                 {!isLoading && filteredRows.length > 0 && (
                     <div>{gridComponent}</div>
                 )}
                 {!isLoading && filteredRows.length === 0 && (
                     <div className="text-center text-gray-400 py-16">
-                        {tab === 'open' && dateRange ? 'No orders match your filters' : `No ${tab.replace('-', ' ')} orders`}
+                        No {VIEW_CONFIG[view].label.toLowerCase()}
                     </div>
                 )}
             </div>
@@ -851,8 +627,6 @@ export default function Orders() {
                     isCreating={mutations.createOrder.isPending}
                 />
             )}
-
-            {/* ProcessShippedModal removed - using simplified direct ship flow */}
 
             {selectedCustomerId && (
                 <CustomerDetailModal
@@ -878,7 +652,6 @@ export default function Orders() {
                 />
             )}
 
-            {/* Unified Order Modal - for viewing, editing, and shipping orders */}
             {unifiedModalOrder && (
                 <UnifiedOrderModal
                     order={unifiedModalOrder}
@@ -886,12 +659,10 @@ export default function Orders() {
                     onClose={() => setUnifiedModalOrder(null)}
                     onSuccess={() => {
                         setUnifiedModalOrder(null);
-                        // Invalidate queries to refresh data
-                        queryClient.invalidateQueries({ queryKey: ['openOrders'] });
+                        queryClient.invalidateQueries({ queryKey: ['orders'] });
                     }}
                 />
             )}
         </div>
     );
 }
-
