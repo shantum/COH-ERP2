@@ -259,7 +259,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         where: {
             isArchived: true,
         },
-        orderBy: { archivedAt: 'desc' },
+        orderBy: { orderDate: 'desc' },
         enrichment: ['customerStats'],
         defaultLimit: 100,
     },
