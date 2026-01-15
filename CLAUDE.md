@@ -28,6 +28,14 @@ npm run db:generate && npm run db:push
 - **Inventory**: `Available = Balance - Reserved` where `Balance = SUM(inward) - SUM(outward)`
 - **Cost cascade**: SKU → Variation → Product → Global (null = fallback)
 
+## Before Committing
+
+**Always run builds before pushing:**
+```bash
+cd client && npm run build   # Catches TypeScript errors
+cd server && npx tsc --noEmit
+```
+
 ## Critical Gotchas
 
 1. **Router order**: Specific routes before parameterized (`:id`)
