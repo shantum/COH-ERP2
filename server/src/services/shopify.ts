@@ -140,6 +140,10 @@ interface ShopifyFulfillment {
     tracking_urls?: string[];
     created_at: string;
     updated_at: string;
+    /** Line items included in this fulfillment (for partial/split shipments) */
+    line_items?: Array<{ id: number; quantity?: number }>;
+    /** Shipment status from carrier (in_transit, delivered, etc.) */
+    shipment_status?: string | null;
 }
 
 /**

@@ -378,40 +378,65 @@ export async function syncFulfillmentsToOrderLines(
     let syncedCount = 0;
 
     for (const fulfillment of fulfillments) {
-        // Skip if no line_items in this fulfillment
-        if (!fulfillment.line_items?.length) continue;
-
         const awbNumber = fulfillment.tracking_number || null;
         const courier = fulfillment.tracking_company || null;
-        const shippedAt = fulfillment.created_at ? new Date(fulfillment.created_at) : new Date();
         const trackingStatus = mapShipmentStatus(fulfillment.shipment_status);
 
-        // Get Shopify line IDs from this fulfillment
-        const shopifyLineIds = fulfillment.line_items.map((li: { id: number }) => String(li.id));
+        // CASE 1: line_items present - PRECISE sync to specific lines
+        if (fulfillment.line_items?.length) {
+            const shopifyLineIds = fulfillment.line_items.map((li: { id: number }) => String(li.id));
 
-        // Update matching OrderLines with tracking data from Shopify fulfillment
-        // NOTE: Does NOT change lineStatus - ERP is source of truth for shipping status
-        // Skip cancelled lines and lines already shipped (to preserve existing tracking)
-        const result = await prisma.orderLine.updateMany({
-            where: {
-                orderId,
-                shopifyLineId: { in: shopifyLineIds },
-                lineStatus: { notIn: ['cancelled', 'shipped'] },
-            },
-            data: {
+            // Update matching OrderLines with tracking data from Shopify fulfillment
+            // NOTE: Does NOT change lineStatus - ERP is source of truth for shipping status
+            const result = await prisma.orderLine.updateMany({
+                where: {
+                    orderId,
+                    shopifyLineId: { in: shopifyLineIds },
+                    lineStatus: { notIn: ['cancelled'] },
+                },
+                data: {
+                    awbNumber,
+                    courier,
+                    trackingStatus,
+                }
+            });
+
+            syncedCount += result.count;
+            syncLogger.info({
+                orderNumber: shopifyOrder.name,
+                fulfillmentId: fulfillment.id,
+                lineCount: shopifyLineIds.length,
+                updatedCount: result.count,
                 awbNumber,
-                courier,
-                trackingStatus,
-                // NOT setting lineStatus to 'shipped' - user must explicitly ship through ERP
-                // NOT setting shippedAt - this is set when ERP ships the order
+            }, 'Synced fulfillment tracking to specific lines');
+        }
+        // CASE 2: No line_items - FALLBACK: update all lines without AWB
+        // This handles single-fulfillment orders where Shopify may omit line_items
+        else if (awbNumber) {
+            const result = await prisma.orderLine.updateMany({
+                where: {
+                    orderId,
+                    awbNumber: null, // Only update lines without existing AWB (preserve split shipments)
+                    lineStatus: { notIn: ['cancelled'] },
+                },
+                data: {
+                    awbNumber,
+                    courier,
+                    trackingStatus,
+                }
+            });
+
+            syncedCount += result.count;
+            if (result.count > 0) {
+                syncLogger.info({
+                    orderNumber: shopifyOrder.name,
+                    fulfillmentId: fulfillment.id,
+                    updatedCount: result.count,
+                    awbNumber,
+                }, 'Synced fulfillment tracking via fallback (no line_items in fulfillment)');
             }
-        });
-
-        syncedCount += result.count;
+        }
     }
-
-    // NOTE: Not updating order status automatically - ERP is source of truth for shipping
-    // Tracking data is captured but order/line status remains unchanged
 
     return { synced: syncedCount, fulfillments: fulfillments.length };
 }
