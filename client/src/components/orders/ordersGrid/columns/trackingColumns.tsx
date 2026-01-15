@@ -280,17 +280,14 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('trackingStatus'),
             width: 110,
             cellRenderer: (params: ICellRendererParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
                 const order = params.data?.order;
 
                 // Get tracking status from iThink sync (order level)
                 let trackingStatus = order?.trackingStatus;
 
-                // Check if order/line has been shipped (use any available date)
-                const shippedAt = line?.shippedAt || order?.shippedAt;
-                const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                // Use pre-computed line fields (O(1)) with order-level fallback
+                const shippedAt = params.data?.lineShippedAt || order?.shippedAt;
+                const deliveredAt = params.data?.lineDeliveredAt || order?.deliveredAt;
 
                 // If no tracking status from iThink, derive from dates
                 if (!trackingStatus) {

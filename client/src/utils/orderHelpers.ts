@@ -137,6 +137,10 @@ export interface FlattenedOrderRow {
     customizationValue: string | null;
     customizationNotes: string | null;
     originalSkuCode: string | null;
+    // Line-level tracking fields (pre-computed to avoid find() in valueGetters)
+    lineShippedAt: string | null;
+    lineDeliveredAt: string | null;
+    lineTrackingStatus: string | null;
 }
 
 /**
@@ -216,6 +220,10 @@ export function flattenOrders(
                 customizationValue: null,
                 customizationNotes: null,
                 originalSkuCode: null,
+                // Line-level tracking (null for empty orders)
+                lineShippedAt: null,
+                lineDeliveredAt: null,
+                lineTrackingStatus: null,
             });
             continue;
         }
@@ -276,6 +284,10 @@ export function flattenOrders(
                 customizationValue,
                 customizationNotes,
                 originalSkuCode,
+                // Line-level tracking (pre-computed for O(1) access in valueGetters)
+                lineShippedAt: line.shippedAt || null,
+                lineDeliveredAt: line.deliveredAt || null,
+                lineTrackingStatus: line.trackingStatus || null,
             });
         }
     }
@@ -398,11 +410,13 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     city: 'City',
     orderValue: 'Value',
     discountCode: 'Discount',
+    tags: 'Tags',
     paymentMethod: 'Payment',
     rtoHistory: 'RTO Risk',
     customerNotes: 'Order Notes',
     customerOrderCount: 'Orders',
     customerLtv: 'LTV',
+    customerTags: 'Customer Tags',
     skuCode: 'SKU',
     productName: 'Product',
     customize: 'Custom',

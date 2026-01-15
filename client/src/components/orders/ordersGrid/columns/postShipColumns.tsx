@@ -28,11 +28,8 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('shippedAt'),
             width: 100,
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                // Fallback to order level if line level not available
-                return line?.shippedAt || params.data?.order?.shippedAt || null;
+                // Use pre-computed line field (O(1)) with order-level fallback
+                return params.data?.lineShippedAt || params.data?.order?.shippedAt || null;
             },
             valueFormatter: (params: ValueFormatterParams) => {
                 if (!params.value) return '';
@@ -48,11 +45,8 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('deliveredAt'),
             width: 100,
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                // Fallback to order level if line level not available
-                return line?.deliveredAt || params.data?.order?.deliveredAt || null;
+                // Use pre-computed line field (O(1)) with order-level fallback
+                return params.data?.lineDeliveredAt || params.data?.order?.deliveredAt || null;
             },
             valueFormatter: (params: ValueFormatterParams) => {
                 if (!params.value) return '';
@@ -68,13 +62,9 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('deliveryDays'),
             width: 60,
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                const order = params.data?.order;
-                // Fallback to order level
-                const shippedAt = line?.shippedAt || order?.shippedAt;
-                const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                // Use pre-computed line fields (O(1)) with order-level fallback
+                const shippedAt = params.data?.lineShippedAt || params.data?.order?.shippedAt;
+                const deliveredAt = params.data?.lineDeliveredAt || params.data?.order?.deliveredAt;
                 if (!shippedAt || !deliveredAt) return null;
                 const shipped = new Date(shippedAt);
                 const delivered = new Date(deliveredAt);
@@ -97,13 +87,9 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('daysInTransit'),
             width: 60,
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                const order = params.data?.order;
-                // Fallback to order level
-                const shippedAt = line?.shippedAt || order?.shippedAt;
-                const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                // Use pre-computed line fields (O(1)) with order-level fallback
+                const shippedAt = params.data?.lineShippedAt || params.data?.order?.shippedAt;
+                const deliveredAt = params.data?.lineDeliveredAt || params.data?.order?.deliveredAt;
                 if (!shippedAt || deliveredAt) return null; // Don't show if already delivered
                 const shipped = new Date(shippedAt);
                 return Math.floor((Date.now() - shipped.getTime()) / (1000 * 60 * 60 * 24));
@@ -161,12 +147,8 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('daysSinceDelivery'),
             width: 70,
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                const order = params.data?.order;
-                // Fallback to order level
-                const deliveredAt = line?.deliveredAt || order?.deliveredAt;
+                // Use pre-computed line field (O(1)) with order-level fallback
+                const deliveredAt = params.data?.lineDeliveredAt || params.data?.order?.deliveredAt;
                 if (!deliveredAt) return null;
                 const delivered = new Date(deliveredAt);
                 return Math.floor((Date.now() - delivered.getTime()) / (1000 * 60 * 60 * 24));
@@ -244,11 +226,8 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('finalStatus'),
             width: 100,
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                // Use line trackingStatus, fallback to order-level for backward compatibility
-                return line?.trackingStatus || params.data?.order?.terminalStatus || params.data?.order?.trackingStatus || '';
+                // Use pre-computed line field (O(1)), fallback to order-level for backward compatibility
+                return params.data?.lineTrackingStatus || params.data?.order?.terminalStatus || params.data?.order?.trackingStatus || '';
             },
             cellRenderer: (params: ICellRendererParams) => {
                 if (!params.value) return null;
