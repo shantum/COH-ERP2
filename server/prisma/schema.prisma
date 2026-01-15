@@ -906,6 +906,19 @@ model ShopifyOrderCache {
   subtotalPrice         Decimal?  @db.Decimal
   totalTax              Decimal?  @db.Decimal
   totalDiscounts        Decimal?  @db.Decimal
+
+  // Line item and order details (eliminates rawData parsing)
+  lineItemsJson         String?   // [{id, sku, title, variant_title, price, quantity, discount_allocations}]
+  shippingLinesJson     String?   // [{title, price}]
+  taxLinesJson          String?   // [{title, price, rate}]
+  noteAttributesJson    String?   // [{name, value}]
+
+  // Missing billing address fields
+  billingAddress1       String?
+  billingAddress2       String?
+  billingCountry        String?
+  billingCountryCode    String?
+
   order                 Order?
 
   @@index([orderNumber])

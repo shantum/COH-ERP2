@@ -301,7 +301,7 @@ export interface OrderLineWithAddress {
 }
 
 /**
- * Shopify cache data
+ * Shopify cache data (matches ShopifyOrderCache Prisma model)
  */
 export interface ShopifyCache {
     rawData?: string | null;
@@ -313,18 +313,29 @@ export interface ShopifyCache {
     tags?: string | null;
     trackingNumber?: string | null;
     trackingCompany?: string | null;
+    trackingUrl?: string | null;
     shippedAt?: Date | string | null;
+    shipmentStatus?: string | null;
+    deliveredAt?: Date | string | null;
+    fulfillmentUpdatedAt?: Date | string | null;
+    // Shipping address fields
+    shippingAddress1?: string | null;
+    shippingAddress2?: string | null;
+    shippingCity?: string | null;
+    shippingState?: string | null;
+    shippingProvince?: string | null;
+    shippingProvinceCode?: string | null;
+    shippingCountry?: string | null;
+    shippingCountryCode?: string | null;
+    shippingZip?: string | null;
+    shippingName?: string | null;
+    shippingPhone?: string | null;
 }
 
 /**
- * Enriched shopify cache with extracted tracking fields
+ * Enriched shopify cache (same fields, rawData excluded)
  */
-export interface EnrichedShopifyCache extends Omit<ShopifyCache, 'rawData'> {
-    trackingUrl?: string | null;
-    shipmentStatus?: string | null;
-    deliveredAt?: string | null;
-    fulfillmentUpdatedAt?: string | null;
-}
+export interface EnrichedShopifyCache extends Omit<ShopifyCache, 'rawData'> {}
 
 // ============================================
 // TRANSACTION HELPER TYPES
@@ -675,53 +686,28 @@ export async function enrichOrdersWithCustomerStats<T extends OrderForEnrichment
 }
 
 /**
- * Extract tracking fields from Shopify cache rawData
- * Used for shipped orders to get fulfillment details
+ * Extract tracking fields from Shopify cache
+ * Uses stored columns instead of parsing rawData
  */
 export function extractShopifyTrackingFields(shopifyCache: ShopifyCache | null | undefined): EnrichedShopifyCache | Record<string, never> {
     if (!shopifyCache) return {};
 
-    if (!shopifyCache.rawData) {
-        const { rawData: _rawData, ...rest } = shopifyCache as ShopifyCache & { rawData?: string };
-        return rest;
-    }
+    // Use stored columns directly - no rawData parsing needed!
+    const enrichedCache: EnrichedShopifyCache = {
+        ...shopifyCache,
+        trackingNumber: shopifyCache.trackingNumber || null,
+        trackingCompany: shopifyCache.trackingCompany || null,
+        trackingUrl: shopifyCache.trackingUrl || null,
+        shippedAt: shopifyCache.shippedAt || null,
+        shipmentStatus: shopifyCache.shipmentStatus || null,
+        deliveredAt: shopifyCache.deliveredAt || null,
+        fulfillmentUpdatedAt: shopifyCache.fulfillmentUpdatedAt || null,
+        customerNotes: shopifyCache.customerNotes || null,
+    };
 
-    try {
-        const shopifyOrder = JSON.parse(shopifyCache.rawData) as {
-            fulfillments?: Array<{
-                tracking_number?: string;
-                tracking_company?: string;
-                tracking_url?: string;
-                tracking_urls?: string[];
-                created_at?: string;
-                shipment_status?: string;
-                updated_at?: string;
-            }>;
-            note?: string;
-        };
-        const fulfillment =
-            shopifyOrder.fulfillments?.find((f) => f.tracking_number) || shopifyOrder.fulfillments?.[0];
-
-        const enrichedCache: EnrichedShopifyCache = {
-            ...shopifyCache,
-            trackingNumber: fulfillment?.tracking_number || null,
-            trackingCompany: fulfillment?.tracking_company || null,
-            trackingUrl: fulfillment?.tracking_url || fulfillment?.tracking_urls?.[0] || null,
-            shippedAt: fulfillment?.created_at || null,
-            shipmentStatus: fulfillment?.shipment_status || null,
-            deliveredAt: fulfillment?.shipment_status === 'delivered' ? fulfillment?.updated_at : null,
-            fulfillmentUpdatedAt: fulfillment?.updated_at || null,
-            customerNotes: shopifyOrder.note || null,
-        };
-
-        // Remove rawData from response (too large)
-        delete (enrichedCache as { rawData?: string }).rawData;
-        return enrichedCache;
-    } catch {
-        // If JSON parse fails, just remove rawData and return
-        const { rawData: _rawData, ...rest } = shopifyCache;
-        return rest;
-    }
+    // Remove rawData from response (too large)
+    delete (enrichedCache as { rawData?: string }).rawData;
+    return enrichedCache;
 }
 
 // ============================================
@@ -810,18 +796,21 @@ export function resolveLineShippingAddress(
         return order.shippingAddress;
     }
 
-    // 3. Shopify cache fallback
-    if (order.shopifyCache?.rawData) {
-        try {
-            const shopifyOrder = JSON.parse(order.shopifyCache.rawData) as {
-                shipping_address?: Record<string, unknown>;
-            };
-            if (shopifyOrder.shipping_address) {
-                return JSON.stringify(shopifyOrder.shipping_address);
-            }
-        } catch {
-            // Invalid JSON in cache, skip
-        }
+    // 3. Shopify cache fallback - use stored columns instead of rawData
+    const cache = order.shopifyCache;
+    if (cache?.shippingAddress1) {
+        return JSON.stringify({
+            address1: cache.shippingAddress1,
+            address2: cache.shippingAddress2 || null,
+            city: cache.shippingCity || null,
+            province: cache.shippingProvince || cache.shippingState || null,
+            province_code: cache.shippingProvinceCode || null,
+            country: cache.shippingCountry || null,
+            country_code: cache.shippingCountryCode || null,
+            zip: cache.shippingZip || null,
+            name: cache.shippingName || null,
+            phone: cache.shippingPhone || null,
+        });
     }
 
     return null;

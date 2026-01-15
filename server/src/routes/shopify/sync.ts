@@ -176,6 +176,141 @@ async function backfillOrderFields(prisma: PrismaClient, batchSize = 5000): Prom
   return { updated, errors, total: ordersToBackfill.length, remaining };
 }
 
+/**
+ * Backfill new JSON fields (lineItemsJson, shippingLinesJson, taxLinesJson, noteAttributesJson)
+ * and billing address fields from existing rawData
+ */
+async function backfillLineItemsJson(prisma: PrismaClient, batchSize = 500): Promise<BackfillResult> {
+  // Find cache entries that have rawData but no lineItemsJson
+  const cacheEntries = await prisma.shopifyOrderCache.findMany({
+    where: {
+      lineItemsJson: null,
+      rawData: { not: '' },
+    },
+    select: { id: true, rawData: true },
+    take: batchSize,
+  });
+
+  if (cacheEntries.length === 0) {
+    return { updated: 0, errors: [], total: 0, remaining: 0 };
+  }
+
+  shopifyLogger.info({ count: cacheEntries.length }, 'Backfill LineItemsJson: starting');
+
+  const results: BackfillResult = { updated: 0, errors: [], total: cacheEntries.length };
+
+  interface ShopifyLineItem {
+    id: number | string;
+    sku?: string;
+    title?: string;
+    variant_title?: string;
+    price?: string;
+    quantity?: number;
+    discount_allocations?: Array<{ amount: string }>;
+  }
+
+  interface ShopifyShippingLine {
+    title?: string;
+    price?: string;
+  }
+
+  interface ShopifyTaxLine {
+    title?: string;
+    price?: string;
+    rate?: number;
+  }
+
+  interface ShopifyNoteAttribute {
+    name?: string;
+    value?: string;
+  }
+
+  interface ShopifyBillingAddress {
+    address1?: string;
+    address2?: string;
+    country?: string;
+    country_code?: string;
+  }
+
+  interface ShopifyOrderData {
+    line_items?: ShopifyLineItem[];
+    shipping_lines?: ShopifyShippingLine[];
+    tax_lines?: ShopifyTaxLine[];
+    note_attributes?: ShopifyNoteAttribute[];
+    billing_address?: ShopifyBillingAddress;
+  }
+
+  const parallelBatchSize = 10;
+  for (let i = 0; i < cacheEntries.length; i += parallelBatchSize) {
+    const batch = cacheEntries.slice(i, i + parallelBatchSize);
+
+    await Promise.all(batch.map(async (entry) => {
+      try {
+        const shopifyOrder = JSON.parse(entry.rawData) as ShopifyOrderData;
+
+        // Extract line items JSON
+        const lineItemsJson = JSON.stringify(
+          (shopifyOrder.line_items || []).map(item => ({
+            id: item.id,
+            sku: item.sku || null,
+            title: item.title || null,
+            variant_title: item.variant_title || null,
+            price: item.price || null,
+            quantity: item.quantity || 0,
+            discount_allocations: item.discount_allocations || [],
+          }))
+        );
+
+        // Extract shipping lines JSON
+        const shippingLinesJson = JSON.stringify(
+          (shopifyOrder.shipping_lines || []).map(s => ({
+            title: s.title || null,
+            price: s.price || null,
+          }))
+        );
+
+        // Extract tax lines JSON
+        const taxLinesJson = JSON.stringify(
+          (shopifyOrder.tax_lines || []).map(t => ({
+            title: t.title || null,
+            price: t.price || null,
+            rate: t.rate || null,
+          }))
+        );
+
+        // Extract note attributes JSON
+        const noteAttributesJson = JSON.stringify(shopifyOrder.note_attributes || []);
+
+        // Extract billing address
+        const billing = shopifyOrder.billing_address;
+
+        await prisma.shopifyOrderCache.update({
+          where: { id: entry.id },
+          data: {
+            lineItemsJson,
+            shippingLinesJson,
+            taxLinesJson,
+            noteAttributesJson,
+            billingAddress1: billing?.address1 || null,
+            billingAddress2: billing?.address2 || null,
+            billingCountry: billing?.country || null,
+            billingCountryCode: billing?.country_code || null,
+          },
+        });
+        results.updated++;
+      } catch (entryError) {
+        const err = entryError as Error;
+        results.errors.push(`Cache ${entry.id}: ${err.message}`);
+      }
+    }));
+  }
+
+  results.remaining = await prisma.shopifyOrderCache.count({
+    where: { lineItemsJson: null, rawData: { not: '' } },
+  });
+  return results;
+}
+
 // ============================================
 // PRODUCT SYNC
 // ============================================
@@ -281,6 +416,10 @@ router.post('/backfill', authenticateToken, asyncHandler(async (req: Request, re
 
   if (shouldBackfillAll || fields.includes('orderFields')) {
     results.orderFields = await backfillOrderFields(req.prisma, batchSize);
+  }
+
+  if (shouldBackfillAll || fields.includes('lineItemsJson')) {
+    results.lineItemsJson = await backfillLineItemsJson(req.prisma, batchSize);
   }
 
   const totalUpdated = Object.values(results).reduce((sum, r) => sum + (r.updated || 0), 0);

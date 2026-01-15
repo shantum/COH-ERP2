@@ -178,6 +178,42 @@ function extractCacheData(
     // Extract shipping address
     const addr = order.shipping_address;
 
+    // Extract billing address
+    const billing = order.billing_address;
+
+    // Extract line items JSON (minimal fields needed for lookups and order details)
+    const lineItemsJson = JSON.stringify(
+        (order.line_items || []).map(item => ({
+            id: item.id,
+            sku: item.sku || null,
+            title: item.title || null,
+            variant_title: item.variant_title || null,
+            price: item.price || null,
+            quantity: item.quantity || 0,
+            discount_allocations: item.discount_allocations || [],
+        }))
+    );
+
+    // Extract shipping lines JSON
+    const shippingLinesJson = JSON.stringify(
+        (order.shipping_lines || []).map(s => ({
+            title: s.title || null,
+            price: s.price || null,
+        }))
+    );
+
+    // Extract tax lines JSON
+    const taxLinesJson = JSON.stringify(
+        (order.tax_lines || []).map(t => ({
+            title: t.title || null,
+            price: t.price || null,
+            rate: t.rate || null,
+        }))
+    );
+
+    // Extract note attributes JSON
+    const noteAttributesJson = JSON.stringify(order.note_attributes || []);
+
     return {
         id: orderId,
         rawData: JSON.stringify(order),
@@ -198,6 +234,16 @@ function extractCacheData(
         shippingCity: addr?.city || null,
         shippingState: addr?.province || null,
         shippingCountry: addr?.country || null,
+        // New JSON fields (eliminates rawData parsing)
+        lineItemsJson,
+        shippingLinesJson,
+        taxLinesJson,
+        noteAttributesJson,
+        // Billing address fields
+        billingAddress1: billing?.address1 || null,
+        billingAddress2: billing?.address2 || null,
+        billingCountry: billing?.country || null,
+        billingCountryCode: billing?.country_code || null,
         webhookTopic,
         lastWebhookAt: new Date(),
     };

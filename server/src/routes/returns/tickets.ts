@@ -373,26 +373,28 @@ router.get('/order/:orderId', authenticateToken, asyncHandler(async (req: Reques
     }
 
     // Try to get cached Shopify data for accurate discounted prices
+    // Uses lineItemsJson instead of parsing rawData
     const shopifyLineItems: Record<string, number> = {};
     if (order.orderNumber) {
         const cache = await req.prisma.shopifyOrderCache.findFirst({
             where: { orderNumber: order.orderNumber },
+            select: { lineItemsJson: true },
         });
-        if (cache?.rawData) {
+        if (cache?.lineItemsJson) {
             try {
-                const rawData = typeof cache.rawData === 'string' ? JSON.parse(cache.rawData) : cache.rawData;
-                interface ShopifyLineItem {
-                    sku?: string;
-                    price?: string;
+                interface CachedLineItem {
+                    sku?: string | null;
+                    price?: string | null;
                     quantity?: number;
-                    discount_allocations?: Array<{ amount?: string }>;
+                    discount_allocations?: Array<{ amount: string }>;
                 }
-                ((rawData as { line_items?: ShopifyLineItem[] }).line_items || []).forEach((item: ShopifyLineItem) => {
+                const lineItems: CachedLineItem[] = JSON.parse(cache.lineItemsJson);
+                lineItems.forEach((item) => {
                     if (item.sku) {
                         const originalPrice = parseFloat(item.price || '0') || 0;
                         const discountAllocations = item.discount_allocations || [];
                         const totalDiscount = discountAllocations.reduce(
-                            (sum: number, alloc: { amount?: string }) => sum + (parseFloat(alloc.amount || '0') || 0),
+                            (sum, alloc) => sum + (parseFloat(alloc.amount || '0') || 0),
                             0
                         );
                         const effectivePrice = originalPrice - (totalDiscount / (item.quantity || 1));
@@ -400,7 +402,7 @@ router.get('/order/:orderId', authenticateToken, asyncHandler(async (req: Reques
                     }
                 });
             } catch (e) {
-                console.error('Error parsing Shopify cache:', e);
+                console.error('Error parsing Shopify lineItemsJson:', e);
             }
         }
     }

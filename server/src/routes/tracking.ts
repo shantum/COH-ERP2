@@ -178,16 +178,6 @@ interface RateCheckBody {
     productMrp?: number;
 }
 
-/** Shopify address format */
-interface ShopifyAddress {
-    address1?: string;
-    address2?: string;
-    city?: string;
-    province?: string;
-    zip?: string;
-    phone?: string;
-}
-
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -747,36 +737,19 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
         );
     }
 
-    // Parse Shopify raw data if available
-    let shopifyShippingAddress: ShopifyAddress | null = null;
-    let shopifyPhone: string | null = null;
-    if (order.shopifyCache?.rawData) {
-        try {
-            const rawData = typeof order.shopifyCache.rawData === 'string'
-                ? JSON.parse(order.shopifyCache.rawData)
-                : order.shopifyCache.rawData;
-            shopifyShippingAddress = rawData.shipping_address || rawData.billing_address;
-            shopifyPhone = rawData.phone || rawData.billing_address?.phone || rawData.shipping_address?.phone;
-        } catch (e) {
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            console.error('Failed to parse shopify rawData:', errorMessage);
-        }
-    }
-
-    // Build customer address from order or customer record
-    // Note: Some fields come from Shopify cache, some from customer record
+    // Build customer address from Shopify cache columns (no rawData parsing needed!)
     const customer = order.customer;
-    const shopifyCache = order.shopifyCache;
+    const cache = order.shopifyCache;
 
     const customerData = {
-        name: order.customerName || `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim() || 'Customer',
-        phone: shopifyPhone || customer?.phone || '9999999999',
-        email: customer?.email || '',
-        address: shopifyShippingAddress?.address1 || '',
-        address2: shopifyShippingAddress?.address2 || '',
-        city: shopifyShippingAddress?.city || shopifyCache?.shippingCity || '',
-        state: shopifyShippingAddress?.province || shopifyCache?.shippingState || '',
-        pincode: shopifyShippingAddress?.zip || '',
+        name: order.customerName || cache?.shippingName || `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim() || 'Customer',
+        phone: cache?.shippingPhone || cache?.customerPhone || cache?.billingPhone || customer?.phone || '9999999999',
+        email: cache?.customerEmail || customer?.email || '',
+        address: cache?.shippingAddress1 || cache?.billingAddress1 || '',
+        address2: cache?.shippingAddress2 || cache?.billingAddress2 || '',
+        city: cache?.shippingCity || cache?.billingCity || '',
+        state: cache?.shippingProvince || cache?.shippingState || cache?.billingState || '',
+        pincode: cache?.shippingZip || cache?.billingZip || '',
     };
 
     // Validate required fields
@@ -834,7 +807,7 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
     // Determine payment mode and COD amount (use active order value, not original total)
     // Cast order to access paymentStatus field which exists on the model but not in the include type
     const orderWithPaymentStatus = order as typeof order & { paymentStatus?: string };
-    const paymentMode = orderWithPaymentStatus.paymentStatus === 'cod_pending' || shopifyCache?.financialStatus === 'pending' ? 'COD' : 'Prepaid';
+    const paymentMode = orderWithPaymentStatus.paymentStatus === 'cod_pending' || cache?.financialStatus === 'pending' ? 'COD' : 'Prepaid';
     const codAmount = paymentMode === 'COD' ? activeOrderValue : 0;
 
     try {

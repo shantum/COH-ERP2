@@ -89,6 +89,7 @@ interface ShopifyAddress {
     city?: string;
     province?: string;
     country?: string;
+    country_code?: string;
     zip?: string;
     phone?: string;
 }
@@ -179,6 +180,10 @@ interface ShopifyOrder {
     payment_gateway_names?: string[];
     /** Staff/internal notes from Shopify admin */
     note_attributes?: Array<{ name: string; value: string }>;
+    /** Shipping method details */
+    shipping_lines?: Array<{ title: string; price: string }>;
+    /** Tax breakdown */
+    tax_lines?: Array<{ title: string; price: string; rate: number }>;
 }
 
 /**

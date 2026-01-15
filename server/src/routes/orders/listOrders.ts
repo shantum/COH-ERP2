@@ -1357,25 +1357,38 @@ router.get('/:id', async (req: Request, res: Response) => {
         }
 
         let shopifyDetails: ShopifyDetails | null = null;
-        if (order.shopifyCache?.rawData) {
+        const cache = order.shopifyCache;
+        if (cache) {
             try {
-                const raw = JSON.parse(order.shopifyCache.rawData as string);
-
-                interface ShopifyLineItem {
+                // Parse the JSON fields we now store (no rawData parsing needed!)
+                interface CachedLineItem {
                     id: number | string;
-                    title: string;
-                    variant_title?: string;
-                    sku?: string;
-                    quantity: number;
-                    price: string;
-                    total_discount?: string;
+                    sku?: string | null;
+                    title?: string | null;
+                    variant_title?: string | null;
+                    price?: string | null;
+                    quantity?: number;
                     discount_allocations?: Array<{ amount: string }>;
-                    image?: { src: string };
+                }
+                interface CachedShippingLine {
+                    title?: string | null;
+                    price?: string | null;
+                }
+                interface CachedTaxLine {
+                    title?: string | null;
+                    price?: string | null;
+                    rate?: number | null;
                 }
 
-                const skuCodes = (raw.line_items || [] as ShopifyLineItem[])
-                    .map((item: ShopifyLineItem) => item.sku)
-                    .filter(Boolean) as string[];
+                const lineItems: CachedLineItem[] = cache.lineItemsJson ? JSON.parse(cache.lineItemsJson) : [];
+                const shippingLines: CachedShippingLine[] = cache.shippingLinesJson ? JSON.parse(cache.shippingLinesJson) : [];
+                const taxLines: CachedTaxLine[] = cache.taxLinesJson ? JSON.parse(cache.taxLinesJson) : [];
+                const noteAttributes = cache.noteAttributesJson ? JSON.parse(cache.noteAttributesJson) : [];
+
+                // Get SKU images from lineItems
+                const skuCodes = lineItems
+                    .map((item) => item.sku)
+                    .filter((sku): sku is string => Boolean(sku));
 
                 const skuImages: Record<string, string | null> = {};
                 if (skuCodes.length > 0) {
@@ -1398,49 +1411,81 @@ router.get('/:id', async (req: Request, res: Response) => {
                     }
                 }
 
+                // Build shipping address from cached columns
+                const shippingAddress = cache.shippingAddress1 ? {
+                    address1: cache.shippingAddress1,
+                    address2: cache.shippingAddress2 || null,
+                    city: cache.shippingCity || null,
+                    province: cache.shippingProvince || cache.shippingState || null,
+                    province_code: cache.shippingProvinceCode || null,
+                    country: cache.shippingCountry || null,
+                    country_code: cache.shippingCountryCode || null,
+                    zip: cache.shippingZip || null,
+                    name: cache.shippingName || null,
+                    phone: cache.shippingPhone || null,
+                } : null;
+
+                // Build billing address from cached columns
+                const billingAddress = cache.billingAddress1 ? {
+                    address1: cache.billingAddress1,
+                    address2: cache.billingAddress2 || null,
+                    city: cache.billingCity || null,
+                    province: cache.billingState || null,
+                    country: cache.billingCountry || null,
+                    country_code: cache.billingCountryCode || null,
+                    zip: cache.billingZip || null,
+                    name: cache.billingName || null,
+                    phone: cache.billingPhone || null,
+                } : null;
+
                 shopifyDetails = {
-                    subtotalPrice: raw.subtotal_price || raw.current_subtotal_price,
-                    totalPrice: raw.total_price || raw.current_total_price,
-                    totalTax: raw.total_tax || raw.current_total_tax,
-                    totalDiscounts: raw.total_discounts || raw.current_total_discounts,
-                    currency: raw.currency || 'INR',
-                    financialStatus: raw.financial_status,
-                    fulfillmentStatus: raw.fulfillment_status,
-                    discountCodes: raw.discount_codes || [],
-                    tags: raw.tags || null,
-                    customerNote: raw.note || null,
-                    // Customer contact info from Shopify
-                    customerEmail: raw.email || raw.contact_email || null,
-                    customerPhone: raw.phone || raw.shipping_address?.phone || null,
-                    // Include shipping and billing addresses from Shopify
-                    shippingAddress: raw.shipping_address || null,
-                    billingAddress: raw.billing_address || null,
-                    shippingLines: (raw.shipping_lines || []).map((s: { title: string; price: string }) => ({
-                        title: s.title,
-                        price: s.price,
+                    subtotalPrice: cache.subtotalPrice?.toString() || null,
+                    totalPrice: cache.totalPrice?.toString() || null,
+                    totalTax: cache.totalTax?.toString() || null,
+                    totalDiscounts: cache.totalDiscounts?.toString() || null,
+                    currency: cache.currency || 'INR',
+                    financialStatus: cache.financialStatus || null,
+                    fulfillmentStatus: cache.fulfillmentStatus || null,
+                    discountCodes: cache.discountCodes ? cache.discountCodes.split(', ').filter(Boolean).map(code => ({ code })) : [],
+                    tags: cache.tags || null,
+                    customerNote: cache.customerNotes || null,
+                    customerEmail: cache.customerEmail || null,
+                    customerPhone: cache.shippingPhone || cache.customerPhone || null,
+                    shippingAddress,
+                    billingAddress,
+                    shippingLines: shippingLines.map((s) => ({
+                        title: s.title || '',
+                        price: s.price || '0',
                     })),
-                    taxLines: (raw.tax_lines || []).map((t: { title: string; price: string; rate: number }) => ({
-                        title: t.title,
-                        price: t.price,
-                        rate: t.rate,
+                    taxLines: taxLines.map((t) => ({
+                        title: t.title || '',
+                        price: t.price || '0',
+                        rate: t.rate || 0,
                     })),
-                    lineItems: (raw.line_items || [] as ShopifyLineItem[]).map((item: ShopifyLineItem) => ({
-                        id: String(item.id),
-                        title: item.title,
-                        variantTitle: item.variant_title,
-                        sku: item.sku,
-                        quantity: item.quantity,
-                        price: item.price,
-                        totalDiscount: item.total_discount || '0.00',
-                        discountAllocations: (item.discount_allocations || []).map((d: { amount: string }) => ({
-                            amount: d.amount,
-                        })),
-                        imageUrl: item.image?.src || (item.sku ? skuImages[item.sku] : null) || null,
-                    })),
-                    noteAttributes: raw.note_attributes || [],
+                    lineItems: lineItems.map((item) => {
+                        const discountAllocations = item.discount_allocations || [];
+                        const totalDiscount = discountAllocations.reduce(
+                            (sum, d) => sum + (parseFloat(d.amount) || 0),
+                            0
+                        ).toFixed(2);
+                        return {
+                            id: String(item.id),
+                            title: item.title || '',
+                            variantTitle: item.variant_title || null,
+                            sku: item.sku || null,
+                            quantity: item.quantity || 0,
+                            price: item.price || '0',
+                            totalDiscount,
+                            discountAllocations: discountAllocations.map((d) => ({
+                                amount: d.amount,
+                            })),
+                            imageUrl: item.sku ? skuImages[item.sku] || null : null,
+                        };
+                    }),
+                    noteAttributes,
                 };
             } catch (e) {
-                orderLogger.error({ error: (e as Error).message }, 'Error parsing Shopify raw data');
+                orderLogger.error({ error: (e as Error).message }, 'Error parsing Shopify cached JSON fields');
             }
         }
 
