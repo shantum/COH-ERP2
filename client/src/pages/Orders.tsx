@@ -239,8 +239,9 @@ export default function Orders() {
             const lines = order.orderLines || [];
             for (const line of lines) {
                 // Line is closeable if marked_shipped or cancelled, and not already closed
-                if (['marked_shipped', 'cancelled'].includes(line.lineStatus) && !line.closedAt) {
-                    ids.push(line.id);
+                const status = line.lineStatus as string | null;
+                if (status && ['marked_shipped', 'cancelled'].includes(status) && !line.closedAt) {
+                    ids.push(line.id as string);
                 }
             }
         }
