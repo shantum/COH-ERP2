@@ -315,21 +315,27 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                 if (!row || row.lineStatus === 'cancelled') return null;
 
                 // Access dynamic values via ref for latest state
-                const { allocatingLines, onMarkShippedLine, isAdmin, onForceShipOrder } = handlersRef.current;
+                const { allocatingLines, onMarkShippedLine, onUnmarkShippedLine, isAdmin, onForceShipOrder } = handlersRef.current;
 
                 const isPacked = row.lineStatus === 'packed';
                 const isShipped = row.lineStatus === 'shipped';
                 const isToggling = allocatingLines.has(row.lineId);
 
-                // Already shipped - show green filled checkbox
+                // Already shipped - show green filled checkbox (can unship)
                 if (isShipped) {
                     return (
-                        <div
-                            className="w-5 h-5 rounded border-2 bg-green-500 border-green-500 text-white flex items-center justify-center mx-auto shadow-sm"
-                            title="Shipped"
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (isToggling) return;
+                                onUnmarkShippedLine(row.lineId);
+                            }}
+                            disabled={isToggling}
+                            className="w-5 h-5 rounded border-2 bg-green-500 border-green-500 text-white flex items-center justify-center mx-auto shadow-sm hover:bg-green-600 cursor-pointer disabled:opacity-50"
+                            title="Click to unship"
                         >
-                            <Check size={12} strokeWidth={3} />
-                        </div>
+                            {isToggling ? <span className="animate-spin text-xs">·</span> : <Check size={12} strokeWidth={3} />}
+                        </button>
                     );
                 }
 
