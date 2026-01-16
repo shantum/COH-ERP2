@@ -30,7 +30,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 1. **Router order**: specific routes before parameterized (`:id`)
 2. **Async routes**: wrap with `asyncHandler()`
 3. **Cache invalidation**: mutations MUST invalidate TanStack Query + tRPC + server caches
-4. **AG-Grid cellRenderer**: return JSX, not strings
+4. **AG-Grid cellRenderer**: return JSX, not strings; use centralized formatting from `ordersGrid/formatting/`
 5. **Shopify data**: lives in `shopifyCache.*`, NEVER use `rawData`
 6. **Line fields**: use pre-computed O(1) fields (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` O(n)
 7. **View filters**: shipped/cancelled orders stay in Open until Release clicked
@@ -38,13 +38,17 @@ Login: `admin@coh.com` / `XOFiya@34`
 9. **Dev URLs**: use `127.0.0.1` not `localhost`—IPv6 causes silent failures
 10. **tRPC params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
 11. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
+12. **Line-level tracking**: delivery/RTO mutations are line-level; orders can have mixed states (partial delivery, multi-AWB)
+13. **Admin ship**: use `adminShip` mutation (not `ship` with force flag); requires admin role + `ENABLE_ADMIN_SHIP=true`
 
 ## Orders Architecture
 
 ### Data Model
 - Single page `/orders` with dropdown selector
-- Views: Open, Shipped, RTO, COD Pending, Archived, Cancelled
+- Views: Open, Shipped, Cancelled (3 views)
+- Shipped has filter chips: All, RTO, COD Pending (server-side filtering via `shippedFilter`)
 - Each row = one order line (server-flattened), `isFirstLine` marks header for grouping
+- Note: Archived view hidden from UI but auto-archive runs silently
 
 ### Line Status State Machine
 
@@ -62,14 +66,16 @@ Reverse: shipped → packed → picked → allocated → pending (via un* mutati
 
 ### Views & Release Workflow
 
-| View | Condition |
-|------|-----------|
-| Open | Active orders OR shipped/cancelled but not released |
-| Shipped | All lines shipped AND `releasedToShipped=true` |
-| Cancelled | All lines cancelled AND `releasedToCancelled=true` |
-| RTO | RTO in transit or delivered |
-| COD Pending | COD awaiting remittance |
-| Archived | `isArchived=true` |
+| View | Condition | Notes |
+|------|-----------|-------|
+| Open | Active orders OR shipped/cancelled but not released | Default view |
+| Shipped | All lines shipped AND `releasedToShipped=true` | Has filter chips: All/RTO/COD Pending |
+| Cancelled | All lines cancelled AND `releasedToCancelled=true` | Line-level view |
+
+**Shipped Filters** (via `shippedFilter` param):
+- `all`: All shipped orders (default)
+- `rto`: RTO in transit or delivered
+- `cod_pending`: Delivered COD awaiting remittance
 
 ### Data Access Patterns
 ```typescript
@@ -110,9 +116,28 @@ inventoryBalanceCache.invalidateAll(); // bulk ops
 
 **Client uses tRPC.** Express handles webhooks & batch operations.
 
+### tRPC Quick Reference
+```typescript
+import { trpc } from '@/services/trpc';
+
+// Query
+const { data, isLoading } = trpc.orders.list.useQuery({ view: 'open' });
+
+// Mutation
+const utils = trpc.useUtils();
+const mutation = trpc.orders.ship.useMutation({
+  onSuccess: () => utils.orders.list.invalidate(),
+});
+mutation.mutate({ orderLineIds, awbNumber, courier });
+```
+
 ### tRPC Procedures (`server/src/trpc/routers/orders.ts`)
 - **Queries**: `list`, `get`
-- **Mutations**: `create`, `allocate`, `ship`, `markPaid`, `setLineStatus`, `cancelOrder`, `uncancelOrder`, `markDelivered`, `markRto`, `receiveRto`
+- **Mutations**:
+  - Status: `setLineStatus`, `cancelOrder`, `uncancelOrder`
+  - Fulfillment: `allocate`, `ship`, `markPaid`
+  - Delivery (line-level): `markLineDelivered`, `markLineRto`, `receiveLineRto`
+  - Admin: `adminShip` (requires admin role + `ENABLE_ADMIN_SHIP=true`)
 
 ### Client Mutation Hooks (`hooks/orders/`)
 ```typescript
@@ -120,7 +145,7 @@ const mutations = useOrdersMutations(); // Facade with optimistic updates
 mutations.pickLine.mutate(lineId);
 ```
 
-Focused hooks: `useOrderWorkflowMutations` (allocate/pick/pack), `useOrderShipMutations`, `useOrderCrudMutations`, `useOrderStatusMutations`, `useOrderDeliveryMutations`, `useOrderLineMutations`, `useOrderReleaseMutations`
+Focused hooks: `useOrderWorkflowMutations` (allocate/pick/pack), `useOrderShipMutations` (ship/adminShip), `useOrderCrudMutations`, `useOrderStatusMutations`, `useOrderDeliveryMutations` (line-level delivery/RTO), `useOrderLineMutations`, `useOrderReleaseMutations`
 
 ## Shopify Order Processor
 
@@ -136,32 +161,44 @@ Source of truth: `server/src/services/shopifyOrderProcessor.ts`
 
 ### Client
 ```
-pages/Orders.tsx                      # Page orchestrator
-components/orders/OrdersGrid.tsx      # Grid component
-components/orders/ordersGrid/columns/ # 6 modular column files
-hooks/useOrdersMutations.ts           # Facade composing all mutation hooks
-hooks/useUnifiedOrdersData.ts         # Main data hook
-hooks/orders/                         # Focused mutation hooks
-utils/orderHelpers.ts                 # flattenOrders, enrichRowsWithInventory
+pages/Orders.tsx                         # Page orchestrator
+components/orders/OrdersGrid.tsx         # Grid component
+components/orders/ordersGrid/columns/    # 6 modular column files
+components/orders/ordersGrid/formatting/ # Centralized AG-Grid styles (colors, statuses, thresholds)
+hooks/useOrdersMutations.ts              # Facade composing all mutation hooks
+hooks/useUnifiedOrdersData.ts            # Main data hook
+hooks/orders/                            # Focused mutation hooks
+utils/orderHelpers.ts                    # flattenOrders, enrichRowsWithInventory
 ```
 
 ### Server
 ```
+config/                               # Centralized configuration system
 routes/orders/mutations/              # crud, lifecycle, archive, lineOps, customization
 routes/orders/queries/                # views, search, summaries, analytics
 utils/orderStateMachine.ts            # Line status state machine
-utils/orderViews.ts                   # VIEW_CONFIGS
+utils/orderViews.ts                   # VIEW_CONFIGS (flattening, enrichment)
 utils/orderEnrichment/                # Enrichment pipeline (9 files)
 utils/patterns/                       # Query patterns (inventory, transactions, etc.)
 services/inventoryBalanceCache.ts     # Inventory cache
 services/customerStatsCache.ts        # Customer stats cache
+services/adminShipService.ts          # Admin force ship (isolated, feature-flagged)
 trpc/routers/orders.ts                # tRPC procedures
 ```
+
+## Configuration
+
+Centralized config system in `/server/src/config/`:
+- **Mappings**: `/mappings/` - Payment gateways, tracking status codes
+- **Thresholds**: `/thresholds/` - Customer tiers, order timing, inventory
+- **Sync**: `/sync/` - Shopify & iThink integration settings
 
 ## Dev & Deploy
 
 - **Scripts**: `server/src/scripts/` — run with `npx ts-node src/scripts/scriptName.ts`
-- **Env**: `DATABASE_URL`, `JWT_SECRET` in `.env`
+- **Env vars**:
+  - `DATABASE_URL`, `JWT_SECRET` (required)
+  - `ENABLE_ADMIN_SHIP` (default: true) - Enable admin force ship feature
 - **Deploy**: Railway (`railway` CLI)
 
 ## When to Use Agents
@@ -172,3 +209,6 @@ trpc/routers/orders.ts                # tRPC procedures
 - **Logic verification** → `logic-auditor`
 - **Documentation** → `doc-optimizer` or `codebase-steward`
 - **Planning** → `Plan` agent
+
+---
+**Updated till commit:** `fcf23c1` (2026-01-16)
