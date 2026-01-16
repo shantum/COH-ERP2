@@ -11,7 +11,7 @@
  *
  * Design principles:
  * 1. Forward progression: pending → allocated → picked → packed → shipped
- * 2. Backward corrections: Each status can go back one step (except shipped)
+ * 2. Backward corrections: Each status can go back one step
  * 3. Cancellation: Any non-shipped status can be cancelled
  * 4. Uncancellation: cancelled → pending (restores to start)
  *
@@ -198,8 +198,13 @@ export const LINE_STATUS_TRANSITIONS: Record<LineStatus, TransitionDefinition[]>
     ],
 
     shipped: [
-        // No transitions allowed via standard endpoint
-        // Post-ship statuses (delivered, RTO) are handled by separate procedures
+        {
+            to: 'packed',  // Unship
+            inventoryEffect: 'none',  // Inventory still allocated
+            timestamps: [{ field: 'shippedAt', action: 'clear' }],
+            description: 'Unship (return to packed, clear AWB)',
+        },
+        // Note: Post-ship statuses (delivered, RTO) are handled by separate procedures
     ],
 
     cancelled: [
@@ -458,6 +463,13 @@ export async function executeTransition(
         updateData.awbNumber = shipData.awbNumber;
         updateData.courier = shipData.courier;
         updateData.trackingStatus = 'in_transit';
+    }
+
+    // 6b. Clear ship data if unshipping
+    if (from === 'shipped' && to === 'packed') {
+        updateData.awbNumber = null;
+        updateData.courier = null;
+        updateData.trackingStatus = null;
     }
 
     // 7. Update the line

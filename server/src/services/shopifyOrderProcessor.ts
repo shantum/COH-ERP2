@@ -17,7 +17,7 @@
  * - Idempotent: Can safely re-process same order multiple times
  * - Race condition safe: Uses withOrderLock to prevent concurrent processing
  * - Fulfillment mapping: Maps Shopify line-level fulfillments to OrderLines via shopifyLineId
- * - ERP is source of truth for shipping: Shopify fulfillment captures tracking data but does NOT auto-ship
+ * - Shopify fulfillment syncs AWB, courier, AND lineStatus=shipped to lines
  *
  * @module services/shopifyOrderProcessor
  * @requires ./shopify
@@ -31,7 +31,7 @@ import type { ShopifyOrder, ShopifyFulfillment, ShopifyLineItem, ShopifyAddress,
 import { findOrCreateCustomer, type ShopifyCustomerData } from '../utils/customerUtils.js';
 import { withOrderLock } from '../utils/orderLock.js';
 import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice } from '../utils/shopifyHelpers.js';
-import { updateCustomerTier } from '../utils/tierUtils.js';
+import { updateCustomerTier, incrementCustomerOrderCount } from '../utils/tierUtils.js';
 import { syncLogger } from '../utils/logger.js';
 
 // ============================================
@@ -471,19 +471,22 @@ export async function syncFulfillmentsToOrderLines(
         // CASE 1: line_items present - PRECISE sync to specific lines
         if (fulfillment.line_items?.length) {
             const shopifyLineIds = fulfillment.line_items.map((li: { id: number }) => String(li.id));
+            const fulfillmentShippedAt = fulfillment.created_at ? new Date(fulfillment.created_at) : new Date();
 
-            // Update matching OrderLines with tracking data from Shopify fulfillment
-            // NOTE: Does NOT change lineStatus - ERP is source of truth for shipping status
+            // Update matching OrderLines with tracking data AND mark as shipped
+            // Shopify fulfillment = physically shipped, so we update lineStatus too
             const result = await prisma.orderLine.updateMany({
                 where: {
                     orderId,
                     shopifyLineId: { in: shopifyLineIds },
-                    lineStatus: { notIn: ['cancelled'] },
+                    lineStatus: { notIn: ['cancelled', 'shipped'] },
                 },
                 data: {
                     awbNumber,
                     courier,
                     trackingStatus,
+                    lineStatus: 'shipped',
+                    shippedAt: fulfillmentShippedAt,
                 }
             });
 
@@ -499,16 +502,20 @@ export async function syncFulfillmentsToOrderLines(
         // CASE 2: No line_items - FALLBACK: update all lines without AWB
         // This handles single-fulfillment orders where Shopify may omit line_items
         else if (awbNumber) {
+            const fulfillmentShippedAt = fulfillment.created_at ? new Date(fulfillment.created_at) : new Date();
+
             const result = await prisma.orderLine.updateMany({
                 where: {
                     orderId,
                     awbNumber: null, // Only update lines without existing AWB (preserve split shipments)
-                    lineStatus: { notIn: ['cancelled'] },
+                    lineStatus: { notIn: ['cancelled', 'shipped'] },
                 },
                 data: {
                     awbNumber,
                     courier,
                     trackingStatus,
+                    lineStatus: 'shipped',
+                    shippedAt: fulfillmentShippedAt,
                 }
             });
 
@@ -522,6 +529,11 @@ export async function syncFulfillmentsToOrderLines(
                 }, 'Synced fulfillment tracking via fallback (no line_items in fulfillment)');
             }
         }
+    }
+
+    // Update order status if all lines are now shipped
+    if (syncedCount > 0) {
+        await updateOrderStatusFromLines(prisma, orderId);
     }
 
     return { synced: syncedCount, fulfillments: fulfillments.length };
@@ -819,9 +831,12 @@ async function createNewOrderWithLines(
         }
     }
 
-    // Update customer tier based on new order
-    if (orderData.customerId && orderData.totalAmount > 0) {
-        await updateCustomerTier(prisma, orderData.customerId);
+    // Update customer stats: increment orderCount and update tier
+    if (orderData.customerId) {
+        await incrementCustomerOrderCount(prisma, orderData.customerId);
+        if (orderData.totalAmount > 0) {
+            await updateCustomerTier(prisma, orderData.customerId);
+        }
     }
 
     return {

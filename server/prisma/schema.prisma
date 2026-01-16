@@ -338,6 +338,7 @@ model Customer {
   exchangeCount     Int             @default(0)
   returnCount       Int             @default(0)
   rtoCount          Int             @default(0)
+  orderCount        Int             @default(0)  // Denormalized count of non-cancelled orders (for fast stats lookup)
   tier              String          @default("bronze")
   ltv               Int             @default(0)  // Stored LTV, updated incrementally on order changes
   feedback          Feedback[]
@@ -431,6 +432,9 @@ model Order {
   @@index([isArchived, releasedToShipped]) // Compound: open view filtering
   @@index([isArchived, releasedToShipped, orderDate]) // Compound: open view with date sort
   @@index([isArchived, releasedToCancelled]) // Compound: cancelled view filtering
+  // Performance: Tracking and COD views
+  @@index([trackingStatus, isArchived]) // RTO view filtering
+  @@index([paymentMethod, trackingStatus, codRemittedAt]) // COD pending view
 }
 
 // ============================================
@@ -515,6 +519,9 @@ model OrderLine {
   @@index([awbNumber])
   @@index([skuId, rtoCondition])
   @@index([orderId, rtoCondition])
+  // Performance: Line queries with SKU
+  @@index([lineStatus, skuId]) // Status + SKU lookups for inventory
+  @@index([skuId, lineStatus]) // SKU-first queries
 }
 
 model ReturnRequest {

@@ -102,39 +102,24 @@ class CustomerStatsCache {
 
     /**
      * Fetch customer stats from database
-     * Runs two queries in parallel: customer data + order counts
+     * Single fast query using denormalized orderCount field
      */
     private async fetchFromDb(
         prisma: PrismaClient,
         customerIds: string[]
     ): Promise<Map<string, Omit<CachedCustomerStats, 'cachedAt'>>> {
-        // Run both queries in parallel
-        const [customers, orderCounts] = await Promise.all([
-            // Query 1: Get stored LTV and rtoCount from customers
-            prisma.customer.findMany({
-                where: { id: { in: customerIds } },
-                select: { id: true, ltv: true, rtoCount: true },
-            }),
-            // Query 2: Get order counts (non-cancelled)
-            prisma.order.groupBy({
-                by: ['customerId'],
-                where: { customerId: { in: customerIds }, status: { not: 'cancelled' } },
-                _count: { id: true },
-            }),
-        ]);
+        // Single query - orderCount is now denormalized on Customer table
+        const customers = await prisma.customer.findMany({
+            where: { id: { in: customerIds } },
+            select: { id: true, ltv: true, orderCount: true, rtoCount: true },
+        });
 
-        // Build count map
-        const countMap = new Map<string, number>();
-        for (const stat of orderCounts) {
-            if (stat.customerId) countMap.set(stat.customerId, stat._count.id);
-        }
-
-        // Build result map
+        // Build result map directly from denormalized fields
         const result = new Map<string, Omit<CachedCustomerStats, 'cachedAt'>>();
         for (const c of customers) {
             result.set(c.id, {
                 ltv: c.ltv || 0,
-                orderCount: countMap.get(c.id) || 0,
+                orderCount: c.orderCount || 0,
                 rtoCount: c.rtoCount || 0,
             });
         }

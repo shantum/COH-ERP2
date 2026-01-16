@@ -207,11 +207,71 @@ export async function recalculateCustomerLtv(
 }
 
 // ============================================
+// ORDER COUNT MAINTENANCE
+// ============================================
+
+/**
+ * Increment customer's orderCount (call when creating non-cancelled order)
+ */
+export async function incrementCustomerOrderCount(
+    prisma: PrismaClient,
+    customerId: string
+): Promise<void> {
+    if (!customerId) return;
+    await prisma.customer.update({
+        where: { id: customerId },
+        data: { orderCount: { increment: 1 } }
+    });
+}
+
+/**
+ * Decrement customer's orderCount (call when cancelling order)
+ */
+export async function decrementCustomerOrderCount(
+    prisma: PrismaClient,
+    customerId: string
+): Promise<void> {
+    if (!customerId) return;
+    // Use raw SQL to prevent going below 0
+    await prisma.$executeRaw`
+        UPDATE "Customer"
+        SET "orderCount" = GREATEST(0, "orderCount" - 1)
+        WHERE id = ${customerId}::uuid
+    `;
+}
+
+/**
+ * Adjust orderCount by delta (positive or negative)
+ * Safe: will not go below 0
+ */
+export async function adjustCustomerOrderCount(
+    prisma: PrismaClient,
+    customerId: string,
+    delta: number
+): Promise<void> {
+    if (!customerId || delta === 0) return;
+
+    if (delta > 0) {
+        await prisma.customer.update({
+            where: { id: customerId },
+            data: { orderCount: { increment: delta } }
+        });
+    } else {
+        // Decrement but don't go below 0
+        await prisma.$executeRaw`
+            UPDATE "Customer"
+            SET "orderCount" = GREATEST(0, "orderCount" + ${delta})
+            WHERE id = ${customerId}::uuid
+        `;
+    }
+}
+
+// ============================================
 // BATCH OPERATIONS
 // ============================================
 
 /**
- * Batch recalculate all customer LTVs
+ * Batch recalculate all customer LTVs and orderCounts
  * Run as maintenance job after backfill or corrections
  */
 export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<{ total: number; updated: number }> {
@@ -219,7 +279,7 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
     const thresholds = await getTierThresholds(prisma);
 
     const totalCount = await prisma.customer.count();
-    console.log(`[Tier] Recalculating LTV for ${totalCount} customers`);
+    console.log(`[Tier] Recalculating LTV and orderCount for ${totalCount} customers`);
 
     let processed = 0;
     let updated = 0;
@@ -233,36 +293,57 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
 
         if (customers.length === 0) break;
 
-        // Get LTV for all customers in chunk
         const customerIds = customers.map(c => c.id);
-        const stats = await prisma.order.groupBy({
-            by: ['customerId'],
-            where: {
-                customerId: { in: customerIds },
-                status: { not: 'cancelled' },
-                OR: [
-                    { trackingStatus: null },
-                    { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
-                ],
-                totalAmount: { gt: 0 }
-            },
-            _sum: { totalAmount: true }
-        });
 
-        // Build update map
+        // Get LTV and order counts in parallel
+        const [ltvStats, countStats] = await Promise.all([
+            // LTV: sum of non-cancelled, non-RTO orders
+            prisma.order.groupBy({
+                by: ['customerId'],
+                where: {
+                    customerId: { in: customerIds },
+                    status: { not: 'cancelled' },
+                    OR: [
+                        { trackingStatus: null },
+                        { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
+                    ],
+                    totalAmount: { gt: 0 }
+                },
+                _sum: { totalAmount: true }
+            }),
+            // Order count: count of non-cancelled orders
+            prisma.order.groupBy({
+                by: ['customerId'],
+                where: {
+                    customerId: { in: customerIds },
+                    status: { not: 'cancelled' }
+                },
+                _count: { id: true }
+            })
+        ]);
+
+        // Build maps
         const ltvMap = new Map<string, number>();
-        for (const stat of stats) {
+        for (const stat of ltvStats) {
             if (stat.customerId) {
                 ltvMap.set(stat.customerId, stat._sum.totalAmount || 0);
+            }
+        }
+
+        const countMap = new Map<string, number>();
+        for (const stat of countStats) {
+            if (stat.customerId) {
+                countMap.set(stat.customerId, stat._count.id || 0);
             }
         }
 
         // Update all customers in chunk
         const updates = customerIds.map(id => {
             const ltv = ltvMap.get(id) || 0;
+            const orderCount = countMap.get(id) || 0;
             return prisma.customer.update({
                 where: { id },
-                data: { ltv, tier: calculateTier(ltv, thresholds) }
+                data: { ltv, orderCount, tier: calculateTier(ltv, thresholds) }
             });
         });
 
