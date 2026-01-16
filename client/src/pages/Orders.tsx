@@ -535,10 +535,9 @@ export default function Orders() {
                             const viewMap: Record<string, OrderView> = {
                                 'open': 'open',
                                 'shipped': 'shipped',
-                                'rto': 'shipped',        // RTO routes to shipped with filter
+                                'rto': 'shipped',         // RTO routes to shipped with filter
                                 'cod-pending': 'shipped', // COD Pending routes to shipped with filter
-                                'cod_pending': 'shipped',
-                                'archived': 'shipped',   // Archived orders route to shipped view
+                                'archived': 'shipped',    // Archived orders route to shipped view
                                 'cancelled': 'cancelled',
                             };
                             const mappedView = viewMap[selectedView] || 'open';
@@ -546,7 +545,7 @@ export default function Orders() {
                             // Set shipped filter based on search result tab
                             if (selectedView === 'rto') {
                                 setShippedFilter('rto');
-                            } else if (selectedView === 'cod-pending' || selectedView === 'cod_pending') {
+                            } else if (selectedView === 'cod-pending') {
                                 setShippedFilter('cod_pending');
                             } else if (mappedView === 'shipped') {
                                 setShippedFilter('all');

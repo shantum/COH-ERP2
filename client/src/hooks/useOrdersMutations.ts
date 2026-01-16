@@ -63,7 +63,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
 
     // Compose all sub-hooks with optimistic update options
     const workflow = useOrderWorkflowMutations(optimisticOptions);
-    const ship = useOrderShipMutations({ onShipSuccess: options.onShipSuccess });
+    const ship = useOrderShipMutations({ ...optimisticOptions, onShipSuccess: options.onShipSuccess });
     const crud = useOrderCrudMutations({
         onCreateSuccess: options.onCreateSuccess,
         onDeleteSuccess: options.onDeleteSuccess,
