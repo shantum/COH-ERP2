@@ -340,17 +340,17 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                 }
 
                 // Packed - show empty checkbox (can ship)
-                // Clicking will trigger ship with Shopify AWB or prompt for AWB
+                // Clicking will trigger ship with existing AWB or prompt for AWB
                 if (isPacked) {
-                    const shopifyAwb = row.shopifyAwb || row.awbNumber;
+                    const existingAwb = row.lineAwbNumber || row.shopifyAwb;
                     return (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (isToggling) return;
-                                if (shopifyAwb) {
+                                if (existingAwb) {
                                     // Has AWB - ship directly
-                                    onMarkShippedLine(row.lineId, { awbNumber: shopifyAwb, courier: row.courier || 'Unknown' });
+                                    onMarkShippedLine(row.lineId, { awbNumber: existingAwb, courier: row.lineCourier || row.shopifyCourier || 'Unknown' });
                                 } else {
                                     // No AWB - prompt for it
                                     const awb = prompt('AWB Number (required):');
@@ -361,7 +361,7 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                             }}
                             disabled={isToggling}
                             className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm disabled:opacity-50"
-                            title={shopifyAwb ? `Ship with AWB: ${shopifyAwb}` : 'Click to ship (will prompt for AWB)'}
+                            title={existingAwb ? `Ship with AWB: ${existingAwb}` : 'Click to ship (will prompt for AWB)'}
                         >
                             {isToggling ? <span className="animate-spin text-xs">·</span> : null}
                         </button>
