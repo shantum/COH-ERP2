@@ -26,7 +26,7 @@ import {
 export interface UseOrderStatusMutationsOptions {
     currentView?: string;
     page?: number;
-    shippedFilter?: 'shipped' | 'not_shipped';
+    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions = {}) {

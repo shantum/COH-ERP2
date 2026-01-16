@@ -49,8 +49,8 @@ interface UseOrdersMutationsOptions {
     currentView?: string;
     /** Current page for optimistic update cache targeting */
     page?: number;
-    /** Shipped filter for archived view (for cache targeting) */
-    shippedFilter?: 'shipped' | 'not_shipped';
+    /** Shipped view filter (rto, cod_pending) for cache targeting */
+    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {

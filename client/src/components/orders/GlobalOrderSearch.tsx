@@ -35,14 +35,15 @@ interface GlobalOrderSearchProps {
     onSelectOrder: (orderId: string, tab: AllTabs, page: 'orders' | 'shipments') => void;
 }
 
-// Map API tab names to tab types (archived routes to shipped since archived view is hidden)
+// Map API tab names to tab types
+// RTO and COD Pending now route to Shipped (with filter chips in UI)
 const tabMapping: Record<string, AllTabs> = {
     open: 'open',
     cancelled: 'cancelled',
     shipped: 'shipped',
-    rto: 'rto',
-    cod_pending: 'cod-pending',
-    archived: 'shipped', // Archived orders route to shipped view
+    rto: 'shipped',       // RTO routes to shipped view (filter chip)
+    cod_pending: 'shipped', // COD Pending routes to shipped view (filter chip)
+    archived: 'shipped',  // Archived orders route to shipped view
 };
 
 // Tabs that belong to the Orders page (open, cancelled)

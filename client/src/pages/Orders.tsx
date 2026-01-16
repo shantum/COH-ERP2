@@ -65,6 +65,10 @@ export default function Orders() {
             newParams.set('page', '1'); // Reset to page 1 on view change
             return newParams;
         }, { replace: true });
+        // Reset shipped filter when leaving shipped view
+        if (newView !== 'shipped') {
+            setShippedFilter('all');
+        }
     }, [setSearchParams]);
 
     const setPage = useCallback((newPage: number) => {
@@ -78,6 +82,8 @@ export default function Orders() {
     // Filter state (Open view only)
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
+    // Filter state (Shipped view only) - for RTO and COD Pending sub-filters
+    const [shippedFilter, setShippedFilter] = useState<ShippedFilter>('all');
 
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
@@ -129,6 +135,8 @@ export default function Orders() {
         page,
         selectedCustomerId,
         isSSEConnected,
+        // Pass shipped filter for server-side filtering (rto, cod_pending)
+        shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
     });
 
     // Modal handlers
@@ -161,6 +169,7 @@ export default function Orders() {
         onEditSuccess: () => setUnifiedModalOrder(null),
         currentView: view,
         page,
+        shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
     });
 
     // Enrich server-flattened rows with client-side inventory data
@@ -209,7 +218,7 @@ export default function Orders() {
             }
         }
 
-        // Note: Archived view shipped filter is applied server-side
+        // Note: Shipped view filters (RTO, COD Pending) are applied server-side
 
         return rows;
     }, [currentRows, view, allocatedFilter, productionFilter]);
@@ -505,7 +514,7 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onForceShipLine: (lineId, data) => mutations.shipLines.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }),
+        onForceShipLine: (lineId, data) => mutations.shipLines.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier, force: true }),
         allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
@@ -522,17 +531,26 @@ export default function Orders() {
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <GlobalOrderSearch
                         onSelectOrder={(orderId, selectedView) => {
-                            // Map old view names to new (archived routes to shipped since archived view is hidden)
+                            // Map search results to views (RTO/COD route to Shipped with filter)
                             const viewMap: Record<string, OrderView> = {
-                                'rto': 'rto',
-                                'cod-pending': 'cod_pending',
                                 'open': 'open',
                                 'shipped': 'shipped',
-                                'archived': 'shipped', // Archived orders route to shipped view
+                                'rto': 'shipped',        // RTO routes to shipped with filter
+                                'cod-pending': 'shipped', // COD Pending routes to shipped with filter
+                                'cod_pending': 'shipped',
+                                'archived': 'shipped',   // Archived orders route to shipped view
                                 'cancelled': 'cancelled',
                             };
                             const mappedView = viewMap[selectedView] || 'open';
                             setView(mappedView);
+                            // Set shipped filter based on search result tab
+                            if (selectedView === 'rto') {
+                                setShippedFilter('rto');
+                            } else if (selectedView === 'cod-pending' || selectedView === 'cod_pending') {
+                                setShippedFilter('cod_pending');
+                            } else if (mappedView === 'shipped') {
+                                setShippedFilter('all');
+                            }
                             const order = orders?.find(o => o.id === orderId);
                             if (order) {
                                 setUnifiedModalOrder(order as unknown as Order);
@@ -588,8 +606,6 @@ export default function Orders() {
                             >
                                 <option value="open">Open Orders{pagination?.total ? ` (${pagination.total})` : ''}</option>
                                 <option value="shipped">Shipped</option>
-                                <option value="rto">RTO</option>
-                                <option value="cod_pending">COD Pending</option>
                                 <option value="cancelled">Cancelled</option>
                             </select>
                             <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -618,6 +634,45 @@ export default function Orders() {
                                     <option value="needs">Needs production</option>
                                     <option value="ready">Ready to ship</option>
                                 </select>
+                            </>
+                        )}
+
+                        {/* Shipped view filter chips */}
+                        {view === 'shipped' && (
+                            <>
+                                <div className="w-px h-5 bg-gray-200" />
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => { setShippedFilter('all'); setPage(1); }}
+                                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                                            shippedFilter === 'all'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        }`}
+                                    >
+                                        All
+                                    </button>
+                                    <button
+                                        onClick={() => { setShippedFilter('rto'); setPage(1); }}
+                                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                                            shippedFilter === 'rto'
+                                                ? 'bg-orange-600 text-white'
+                                                : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
+                                        }`}
+                                    >
+                                        RTO
+                                    </button>
+                                    <button
+                                        onClick={() => { setShippedFilter('cod_pending'); setPage(1); }}
+                                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                                            shippedFilter === 'cod_pending'
+                                                ? 'bg-amber-600 text-white'
+                                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                        }`}
+                                    >
+                                        COD Pending
+                                    </button>
+                                </div>
                             </>
                         )}
                     </div>

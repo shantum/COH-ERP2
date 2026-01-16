@@ -30,7 +30,7 @@ import {
 export interface UseOrderWorkflowMutationsOptions {
     currentView?: string;
     page?: number;
-    shippedFilter?: 'shipped' | 'not_shipped';
+    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOptions = {}) {

@@ -62,34 +62,36 @@ const list = protectedProcedure
             days: z.number().int().positive().optional(),
             search: z.string().optional(),
             sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt']).optional(),
-            // Archived view sub-filter
-            shippedFilter: z.enum(['shipped', 'not_shipped']).optional(),
+            // Shipped view sub-filters (rto, cod_pending) - replaces separate RTO/COD views
+            shippedFilter: z.enum(['rto', 'cod_pending']).optional(),
         })
     )
     .query(async ({ input, ctx }) => {
         const { view, page, limit, days, search, sortBy, shippedFilter } = input;
 
+        // Handle shipped view with sub-filters (rto, cod_pending)
+        // When shippedFilter is set, use that view's config instead
+        let effectiveView = view;
+        if (view === 'shipped' && shippedFilter) {
+            effectiveView = shippedFilter; // Use 'rto' or 'cod_pending' view config
+        }
+
         // Validate view
-        const viewConfig = getViewConfig(view);
+        const viewConfig = getViewConfig(effectiveView);
         if (!viewConfig) {
             throw new TRPCError({
                 code: 'BAD_REQUEST',
-                message: `Invalid view: ${view}. Valid views: ${getValidViewNames().join(', ')}`,
+                message: `Invalid view: ${effectiveView}. Valid views: ${getValidViewNames().join(', ')}`,
             });
         }
 
         // Calculate offset from page
         const offset = (page - 1) * limit;
 
-        // Build WHERE clause using view config
-        const additionalFilters: Record<string, unknown> = {};
-        if (view === 'archived' && shippedFilter) {
-            additionalFilters.releasedToShipped = shippedFilter === 'shipped';
-        }
-        const where = buildViewWhereClause(view, {
+        // Build WHERE clause using effective view config
+        const where = buildViewWhereClause(effectiveView, {
             days: days?.toString(),
             search,
-            additionalFilters,
         });
 
         // Determine sort order
@@ -522,10 +524,19 @@ const ship = protectedProcedure
                 .trim()
                 .transform((val) => val.toUpperCase()),
             courier: z.string().min(1, 'Courier is required').trim(),
+            force: z.boolean().optional(), // Admin only: skip status validation
         })
     )
     .mutation(async ({ input, ctx }) => {
-        const { lineIds, awbNumber, courier } = input;
+        const { lineIds, awbNumber, courier, force } = input;
+
+        // Force ship requires admin role
+        if (force && ctx.user.role !== 'admin') {
+            throw new TRPCError({
+                code: 'FORBIDDEN',
+                message: 'Force ship requires admin role',
+            });
+        }
         const uniqueLineIds = Array.from(new Set(lineIds));
 
         // Validate lines exist
@@ -555,6 +566,7 @@ const ship = protectedProcedure
                 awbNumber,
                 courier,
                 userId: ctx.user.id,
+                skipStatusValidation: force,
             });
         });
 

@@ -20,7 +20,7 @@ export interface OrdersQueryInput {
     view: string;
     page: number;
     limit: number;
-    shippedFilter?: 'shipped' | 'not_shipped';
+    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 // Type for the orders list response (must match tRPC orders.list return type)
@@ -45,7 +45,7 @@ export interface OrdersListData {
 export function getOrdersQueryInput(
     currentView: string,
     page: number,
-    shippedFilter?: 'shipped' | 'not_shipped'
+    shippedFilter?: 'rto' | 'cod_pending'
 ): OrdersQueryInput {
     const input: OrdersQueryInput = {
         view: currentView,
@@ -53,8 +53,8 @@ export function getOrdersQueryInput(
         limit: PAGE_SIZE,
     };
 
-    // Only include shippedFilter for archived view when it has a value
-    if (currentView === 'archived' && shippedFilter) {
+    // Only include shippedFilter for shipped view when it has a value
+    if (currentView === 'shipped' && shippedFilter) {
         input.shippedFilter = shippedFilter;
     }
 

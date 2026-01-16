@@ -28,7 +28,7 @@ export interface UseOrderShipMutationsOptions {
     onShipSuccess?: () => void;
     currentView?: string;
     page?: number;
-    shippedFilter?: 'shipped' | 'not_shipped';
+    shippedFilter?: 'rto' | 'cod_pending';
 }
 
 export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}) {

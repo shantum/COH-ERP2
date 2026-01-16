@@ -5,10 +5,10 @@
  * Loading strategy (hybrid):
  * 1. Current view loads immediately
  * 2. Shipped prefetches after Open completes
- * 3. All other views load on-demand when selected
+ * 3. Cancelled loads on-demand when selected
  *
- * Views: open, shipped, rto, cod_pending, cancelled
- * Note: Archived view hidden from UI but auto-archive still runs
+ * Views: open, shipped, cancelled (3 views)
+ * Shipped view has sub-filters: all, rto, cod_pending (server-side filtering)
  * Pagination: 500 orders per page
  */
 
@@ -30,8 +30,11 @@ const GC_TIME = 5 * 60 * 1000;
 // Orders per page
 const PAGE_SIZE = 500;
 
-// All available views (archived hidden from UI but kept on server for auto-archive)
-export type OrderView = 'open' | 'shipped' | 'rto' | 'cod_pending' | 'cancelled';
+// All available views (3 views - RTO and COD Pending are now filter chips in Shipped)
+export type OrderView = 'open' | 'shipped' | 'cancelled';
+
+// Shipped view sub-filters (server-side filtering)
+export type ShippedFilter = 'rto' | 'cod_pending';
 
 // Legacy type alias for backwards compatibility
 export type UnifiedOrderTab = OrderView;
@@ -42,6 +45,8 @@ interface UseUnifiedOrdersDataOptions {
     selectedCustomerId?: string | null;
     /** Whether SSE is connected - disables polling when true */
     isSSEConnected?: boolean;
+    /** Filter for shipped view (rto, cod_pending) */
+    shippedFilter?: ShippedFilter;
 }
 
 export function useUnifiedOrdersData({
@@ -49,6 +54,7 @@ export function useUnifiedOrdersData({
     page,
     selectedCustomerId,
     isSSEConnected = false,
+    shippedFilter,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
 
@@ -74,6 +80,8 @@ export function useUnifiedOrdersData({
             view: currentView,
             page,
             limit: PAGE_SIZE,
+            // Pass shipped filter for server-side filtering (rto, cod_pending)
+            ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
         },
         {
             staleTime: STALE_TIME,
@@ -116,6 +124,7 @@ export function useUnifiedOrdersData({
         const baseInput = {
             view: currentView,
             limit: PAGE_SIZE,
+            ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
         };
 
         // Prefetch next page if it exists
@@ -133,7 +142,7 @@ export function useUnifiedOrdersData({
                 staleTime: STALE_TIME,
             });
         }
-    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient]);
+    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient, shippedFilter]);
 
     // ==========================================
     // SUPPORTING DATA QUERIES
