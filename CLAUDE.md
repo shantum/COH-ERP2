@@ -137,6 +137,35 @@ Environment variables:
 cd client && npm run build && cd ../server && npx tsc --noEmit
 ```
 
+## tRPC Orders Router
+
+The orders tRPC router (`server/src/trpc/routers/orders.ts`) provides type-safe procedures:
+
+| Procedure | Type | Purpose |
+|-----------|------|---------|
+| `list` | Query | View-based order listing with server-side flattening |
+| `get` | Query | Single order by ID |
+| `create` | Mutation | Create new order |
+| `allocate` | Mutation | Batch allocate lines (reserve inventory) |
+| `ship` | Mutation | Ship lines with AWB/courier |
+| `markPaid` | Mutation | Mark order payment as paid |
+| `setLineStatus` | Mutation | Unified line status transitions |
+| `cancelOrder` | Mutation | Cancel order with inventory release |
+| `uncancelOrder` | Mutation | Restore cancelled order |
+| `markDelivered` | Mutation | Mark shipped order as delivered |
+| `markRto` | Mutation | Initiate RTO for shipped order |
+| `receiveRto` | Mutation | Receive RTO, restore inventory |
+
+**Client usage** (`useOrdersMutations.ts`):
+```typescript
+// tRPC mutations with wrapper for API compatibility
+const pickLine = trpc.orders.setLineStatus.useMutation({...});
+pickLine.mutate({ lineId, status: 'picked' });
+
+const cancelOrder = trpc.orders.cancelOrder.useMutation({...});
+cancelOrder.mutate({ orderId: id, reason: 'Customer request' });
+```
+
 ## Gotchas
 
 1. Router: specific routes before parameterized (`:id`)
@@ -195,7 +224,10 @@ server/src/
   services/
     inventoryBalanceCache.ts          # Inventory cache singleton
     customerStatsCache.ts             # Customer stats cache singleton
-  trpc/routers/orders.ts              # tRPC procedures
+  trpc/routers/orders.ts              # tRPC procedures (12 total)
+    # Queries: list, get
+    # Mutations: create, allocate, ship, markPaid, setLineStatus,
+    #            cancelOrder, uncancelOrder, markDelivered, markRto, receiveRto
   scripts/                            # One-time migration scripts
 ```
 

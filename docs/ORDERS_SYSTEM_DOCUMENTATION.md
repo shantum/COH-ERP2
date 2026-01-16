@@ -642,8 +642,25 @@ Line Status:    pending → allocated → picked → packed → shipped → deli
 
 | File | Description |
 |------|-------------|
-| `server/src/trpc/routers/orders.ts` | Type-safe tRPC router for orders - `list`, `getById`, `create`, `update` procedures |
+| `server/src/trpc/routers/orders.ts` | Type-safe tRPC router for orders (12 procedures) |
 | `server/src/trpc/routers/index.ts` | Root tRPC router that includes orders router |
+
+#### tRPC Orders Procedures
+
+| Procedure | Type | Description |
+|-----------|------|-------------|
+| `list` | Query | View-based order listing with server-side row flattening and inventory enrichment |
+| `get` | Query | Single order by ID with full details |
+| `create` | Mutation | Create new order with customer lookup/creation |
+| `allocate` | Mutation | Batch allocate lines - reserves inventory via OUTWARD transactions |
+| `ship` | Mutation | Ship lines with AWB/courier, updates order status when all shipped |
+| `markPaid` | Mutation | Mark order payment as paid (for offline orders) |
+| `setLineStatus` | Mutation | Unified line status transitions (pending/allocated/picked/packed/cancelled) |
+| `cancelOrder` | Mutation | Cancel entire order, releases allocated inventory |
+| `uncancelOrder` | Mutation | Restore cancelled order to open status |
+| `markDelivered` | Mutation | Mark shipped order as delivered |
+| `markRto` | Mutation | Initiate RTO for shipped order, increments customer RTO count |
+| `receiveRto` | Mutation | Receive RTO package, creates INWARD transactions to restore inventory |
 
 ---
 
