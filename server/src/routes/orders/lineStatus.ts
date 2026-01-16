@@ -26,6 +26,7 @@ import {
     ConflictError,
     BusinessLogicError,
 } from '../../utils/errors.js';
+import { broadcastOrderUpdate } from '../sse.js';
 import {
     calculateInventoryBalance,
     TXN_TYPE,
@@ -231,6 +232,15 @@ router.post('/lines/:lineId/status', authenticateToken, asyncHandler(async (req:
             data: updateData,
         });
     });
+
+    // Broadcast SSE update to other users (excludes the user who made the change)
+    broadcastOrderUpdate({
+        type: 'line_status',
+        view: 'open',
+        lineId,
+        orderId: line.orderId,
+        changes: { lineStatus: status },
+    }, req.user?.id);
 
     res.json(updated);
 }));

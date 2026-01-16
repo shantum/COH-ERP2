@@ -11,6 +11,7 @@ import { Plus, RefreshCw, Send, ChevronDown, Archive, ChevronLeft, ChevronRight,
 // Custom hooks
 import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersData';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
+import { useOrderSSE } from '../hooks/useOrderSSE';
 import { useAuth } from '../hooks/useAuth';
 
 // Utilities
@@ -79,8 +80,8 @@ export default function Orders() {
     const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
     const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
 
-    // Optimistic updates handle button state
-    const allocatingLines = new Set<string>();
+    // Track which lines are currently being processed (for loading spinners)
+    const [processingLines, setProcessingLines] = useState<Set<string>>(new Set());
 
     // Customization modal state
     const [customizingLine, setCustomizingLine] = useState<{
@@ -97,6 +98,9 @@ export default function Orders() {
         value: string;
         notes?: string;
     } | null>(null);
+
+    // Real-time updates via SSE (for multi-user collaboration)
+    useOrderSSE({ currentView: view });
 
     // Data hook - simplified, single view with pagination
     const {
@@ -254,59 +258,122 @@ export default function Orders() {
         return { pending, allocated, ready };
     }, [view, orders]);
 
-    // Handlers
+    // Helper to add/remove lineId from processingLines set
+    const startProcessing = useCallback((lineId: string) => {
+        setProcessingLines(prev => new Set(prev).add(lineId));
+    }, []);
+
+    const stopProcessing = useCallback((lineId: string) => {
+        setProcessingLines(prev => {
+            const next = new Set(prev);
+            next.delete(lineId);
+            return next;
+        });
+    }, []);
+
+    // Handlers with loading state tracking
     const handleMarkShippedLine = useCallback(
-        (lineId: string, data?: { awbNumber?: string; courier?: string }) =>
-            mutations.markShippedLine.mutate({ lineId, data }),
-        [mutations.markShippedLine]
+        (lineId: string, data?: { awbNumber?: string; courier?: string }) => {
+            startProcessing(lineId);
+            mutations.markShippedLine.mutate(
+                { lineId, data },
+                { onSettled: () => stopProcessing(lineId) }
+            );
+        },
+        [mutations.markShippedLine, startProcessing, stopProcessing]
     );
 
     const handleUnmarkShippedLine = useCallback(
-        (lineId: string) => mutations.unmarkShippedLine.mutate(lineId),
-        [mutations.unmarkShippedLine]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.unmarkShippedLine.mutate(lineId, {
+                onSettled: () => stopProcessing(lineId)
+            });
+        },
+        [mutations.unmarkShippedLine, startProcessing, stopProcessing]
     );
 
     const handleUpdateLineTracking = useCallback(
-        (lineId: string, data: { awbNumber?: string; courier?: string }) =>
-            mutations.updateLineTracking.mutate({ lineId, data }),
-        [mutations.updateLineTracking]
+        (lineId: string, data: { awbNumber?: string; courier?: string }) => {
+            startProcessing(lineId);
+            mutations.updateLineTracking.mutate(
+                { lineId, data },
+                { onSettled: () => stopProcessing(lineId) }
+            );
+        },
+        [mutations.updateLineTracking, startProcessing, stopProcessing]
     );
 
     const handleAllocate = useCallback(
-        (lineId: string) => mutations.allocate.mutate({ lineIds: [lineId] }),
-        [mutations.allocate]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.allocate.mutate(
+                { lineIds: [lineId] },
+                { onSettled: () => stopProcessing(lineId) }
+            );
+        },
+        [mutations.allocate, startProcessing, stopProcessing]
     );
 
     const handleUnallocate = useCallback(
-        (lineId: string) => mutations.unallocate.mutate(lineId),
-        [mutations.unallocate]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.unallocate.mutate(lineId, {
+                onSettled: () => stopProcessing(lineId)
+            });
+        },
+        [mutations.unallocate, startProcessing, stopProcessing]
     );
 
     const handlePick = useCallback(
-        (lineId: string) => mutations.pickLine.mutate(lineId),
-        [mutations.pickLine]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.pickLine.mutate(lineId, {
+                onSettled: () => stopProcessing(lineId)
+            });
+        },
+        [mutations.pickLine, startProcessing, stopProcessing]
     );
 
     const handleUnpick = useCallback(
-        (lineId: string) => mutations.unpickLine.mutate(lineId),
-        [mutations.unpickLine]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.unpickLine.mutate(lineId, {
+                onSettled: () => stopProcessing(lineId)
+            });
+        },
+        [mutations.unpickLine, startProcessing, stopProcessing]
     );
 
     const handlePack = useCallback(
-        (lineId: string) => mutations.packLine.mutate(lineId),
-        [mutations.packLine]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.packLine.mutate(lineId, {
+                onSettled: () => stopProcessing(lineId)
+            });
+        },
+        [mutations.packLine, startProcessing, stopProcessing]
     );
 
     const handleUnpack = useCallback(
-        (lineId: string) => mutations.unpackLine.mutate(lineId),
-        [mutations.unpackLine]
+        (lineId: string) => {
+            startProcessing(lineId);
+            mutations.unpackLine.mutate(lineId, {
+                onSettled: () => stopProcessing(lineId)
+            });
+        },
+        [mutations.unpackLine, startProcessing, stopProcessing]
     );
 
     const handleShipLine = useCallback(
         (lineId: string, data: { awbNumber: string; courier: string }) => {
-            mutations.markShippedLine.mutate({ lineId, data });
+            startProcessing(lineId);
+            mutations.markShippedLine.mutate(
+                { lineId, data },
+                { onSettled: () => stopProcessing(lineId) }
+            );
         },
-        [mutations.markShippedLine]
+        [mutations.markShippedLine, startProcessing, stopProcessing]
     );
 
     const handleCustomize = useCallback(
@@ -433,8 +500,14 @@ export default function Orders() {
         onEditOrder: handleEditOrderUnified,
         onCancelOrder: (id, reason) => mutations.cancelOrder.mutate({ id, reason }),
         onDeleteOrder: (id) => mutations.deleteOrder.mutate(id),
-        onCancelLine: (lineId) => mutations.cancelLine.mutate(lineId),
-        onUncancelLine: (lineId) => mutations.uncancelLine.mutate(lineId),
+        onCancelLine: (lineId) => {
+            startProcessing(lineId);
+            mutations.cancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
+        },
+        onUncancelLine: (lineId) => {
+            startProcessing(lineId);
+            mutations.uncancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
+        },
         onSelectCustomer: setSelectedCustomerId,
         onCustomize: handleCustomize,
         onEditCustomization: handleEditCustomization,
@@ -442,7 +515,7 @@ export default function Orders() {
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
         onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
         onUnarchive: () => {},
-        allocatingLines,
+        allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,

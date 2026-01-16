@@ -23,8 +23,6 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
     const {
         getHeaderName,
         allocatingLines,
-        isCancellingLine,
-        isUncancellingLine,
         isDateLocked,
         isAdmin,
         onAllocate,
@@ -317,6 +315,7 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
 
                 const isPacked = row.lineStatus === 'packed';
                 const isShipped = row.lineStatus === 'shipped';
+                const isToggling = allocatingLines.has(row.lineId);
 
                 // Already shipped - show green filled checkbox
                 if (isShipped) {
@@ -338,6 +337,7 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
+                                if (isToggling) return;
                                 if (shopifyAwb) {
                                     // Has AWB - ship directly
                                     onMarkShippedLine(row.lineId, { awbNumber: shopifyAwb, courier: row.courier || 'Unknown' });
@@ -349,9 +349,12 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                                     onMarkShippedLine(row.lineId, { awbNumber: awb.trim(), courier });
                                 }
                             }}
-                            className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm"
+                            disabled={isToggling}
+                            className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm disabled:opacity-50"
                             title={shopifyAwb ? `Ship with AWB: ${shopifyAwb}` : 'Click to ship (will prompt for AWB)'}
-                        />
+                        >
+                            {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+                        </button>
                     );
                 }
 
@@ -396,7 +399,7 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                 if (!row || !row.lineId) return null;
 
                 const isCancelled = row.lineStatus === 'cancelled';
-                const isToggling = isCancellingLine || isUncancellingLine;
+                const isToggling = allocatingLines.has(row.lineId);
 
                 // Cancelled - show red X (can restore)
                 if (isCancelled) {
@@ -410,7 +413,7 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                             className="w-5 h-5 rounded border-2 bg-red-500 border-red-500 text-white flex items-center justify-center mx-auto hover:bg-red-600 hover:border-red-600 shadow-sm disabled:opacity-50"
                             title="Click to restore line"
                         >
-                            <X size={12} strokeWidth={3} />
+                            {isToggling ? <span className="animate-spin text-xs">·</span> : <X size={12} strokeWidth={3} />}
                         </button>
                     );
                 }
@@ -425,7 +428,9 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                         disabled={isToggling}
                         className="w-5 h-5 rounded border-2 border-red-300 bg-white hover:bg-red-50 hover:border-red-400 flex items-center justify-center mx-auto cursor-pointer shadow-sm disabled:opacity-50"
                         title="Click to cancel line"
-                    />
+                    >
+                        {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+                    </button>
                 );
             },
             cellClass: 'text-center',

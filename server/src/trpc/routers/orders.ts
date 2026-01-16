@@ -31,6 +31,7 @@ import {
 } from '../../utils/queryPatterns.js';
 import { shipOrderLines } from '../../services/shipOrderService.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
+import { broadcastOrderUpdate } from '../../routes/sse.js';
 
 // ============================================
 // LIST ORDERS PROCEDURE
@@ -433,6 +434,22 @@ const allocate = protectedProcedure
 
             return { allocated, failed };
         });
+
+        // Broadcast SSE update for each allocated line (excludes the user who made the change)
+        for (const lineId of result.allocated) {
+            broadcastOrderUpdate({
+                type: 'line_status',
+                view: 'open',
+                lineId,
+                changes: { lineStatus: 'allocated' },
+            }, ctx.user.id);
+        }
+
+        // Invalidate inventory balance cache for affected SKUs
+        const affectedSkuIds = Array.from(skuRequirements.keys());
+        if (affectedSkuIds.length > 0) {
+            inventoryBalanceCache.invalidate(affectedSkuIds);
+        }
 
         return {
             allocated: result.allocated.length,

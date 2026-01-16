@@ -18,8 +18,9 @@ import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 
 // Poll intervals - active view refreshes more frequently
-const POLL_INTERVAL_ACTIVE = 15000;   // 15 seconds for 'open' view
-const POLL_INTERVAL_PASSIVE = 60000;  // 60 seconds for other views
+// Reduced for faster multi-user sync (optimistic updates handle own actions instantly)
+const POLL_INTERVAL_ACTIVE = 5000;    // 5 seconds for 'open' view
+const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views
 // Stale time prevents double-fetches when data is still fresh
 const STALE_TIME = 25000;
 // Cache retention time (5 minutes) - keeps stale data for instant display
