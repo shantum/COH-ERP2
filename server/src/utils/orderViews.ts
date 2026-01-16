@@ -1119,7 +1119,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                     status: productionBatch.status,
                 } : null,
                 productionBatchId: productionBatch?.id || null,
-                productionDate: productionBatch?.batchDate?.split('T')[0] || null,
+                productionDate: productionBatch?.batchDate ? new Date(productionBatch.batchDate).toISOString().split('T')[0] : null,
                 isFirstLine: idx === 0,
                 totalLines: lineCount,
                 fulfillmentStage: (order.fulfillmentStage as string) || null,

@@ -36,7 +36,7 @@ const getAuthToken = () => {
  */
 const getTRPCUrl = () => {
     const apiBaseUrl = import.meta.env.VITE_API_URL ||
-        (import.meta.env.PROD ? '' : 'http://localhost:3001');
+        (import.meta.env.PROD ? '' : 'http://127.0.0.1:3001');
     return `${apiBaseUrl}/trpc`;
 };
 

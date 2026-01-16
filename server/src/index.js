@@ -161,6 +161,10 @@ app.use(
     trpcExpress.createExpressMiddleware({
         router: appRouter,
         createContext,
+        onError({ error, path }) {
+            console.error(`[tRPC Error] ${path}:`, error.message);
+            console.error(error.stack);
+        },
     })
 );
 

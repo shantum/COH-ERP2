@@ -25,11 +25,16 @@ interface SSEEvent {
 interface UseOrderSSEOptions {
     /** The current view being displayed (to know which cache to update) */
     currentView: string;
+    /** Current page number (to match query key) */
+    page?: number;
     /** Enable/disable SSE connection */
     enabled?: boolean;
 }
 
-export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions) {
+// Page size must match useUnifiedOrdersData.ts
+const PAGE_SIZE = 500;
+
+export function useOrderSSE({ currentView, page = 1, enabled = true }: UseOrderSSEOptions) {
     const trpcUtils = trpc.useUtils();
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -49,9 +54,9 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
 
             // Handle line status changes
             if (data.type === 'line_status' && data.lineId && data.changes) {
-                // Update the current view's cache
+                // Update the current view's cache with correct query key
                 trpcUtils.orders.list.setData(
-                    { view: currentView, limit: 2000 },
+                    { view: currentView, page, limit: PAGE_SIZE },
                     (old) => {
                         if (!old) return old;
 
@@ -87,9 +92,9 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
 
             // Handle order deleted
             if (data.type === 'order_deleted' && data.orderId) {
-                // Remove from cache
+                // Remove from cache with correct query key
                 trpcUtils.orders.list.setData(
-                    { view: currentView, limit: 2000 },
+                    { view: currentView, page, limit: PAGE_SIZE },
                     (old) => {
                         if (!old) return old;
                         return {
@@ -102,31 +107,17 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
             }
 
             // Handle inventory updates (after inward/outward transactions)
-            if (data.type === 'inventory_updated' && data.skuId && data.changes) {
-                const { availableBalance } = data.changes as { availableBalance?: number };
-                if (availableBalance !== undefined) {
-                    trpcUtils.orders.list.setData(
-                        { view: currentView, limit: 2000 },
-                        (old) => {
-                            if (!old) return old;
-                            return {
-                                ...old,
-                                rows: old.rows.map((row: any) =>
-                                    row.skuId === data.skuId
-                                        ? { ...row, skuStock: availableBalance }
-                                        : row
-                                ),
-                            };
-                        }
-                    );
-                    console.log(`SSE: Updated skuStock for SKU ${data.skuId} to ${availableBalance}`);
-                }
+            // Use invalidate() instead of setData() to ensure fresh data from server
+            // This is more reliable since the server-side cache is already invalidated
+            if (data.type === 'inventory_updated' && data.skuId) {
+                trpcUtils.orders.list.invalidate({ view: currentView });
+                console.log(`SSE: Invalidated orders cache for view '${currentView}' after inventory update`);
             }
 
             // Handle order updates (cancel/uncancel)
             if (data.type === 'order_updated' && data.orderId && data.changes) {
                 trpcUtils.orders.list.setData(
-                    { view: currentView, limit: 2000 },
+                    { view: currentView, page, limit: PAGE_SIZE },
                     (old) => {
                         if (!old) return old;
 
@@ -160,7 +151,7 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
         } catch (err) {
             console.error('SSE: Failed to parse event', err);
         }
-    }, [currentView, trpcUtils]);
+    }, [currentView, page, trpcUtils]);
 
     const connect = useCallback(() => {
         // Don't connect if disabled

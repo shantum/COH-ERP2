@@ -72,7 +72,8 @@ export function useUnifiedOrdersData({
             view: currentView,
             page,
             limit: PAGE_SIZE,
-            shippedFilter: currentView === 'archived' ? shippedFilter : undefined,
+            // Only include shippedFilter when it has a value (avoids serializing undefined)
+            ...(currentView === 'archived' && shippedFilter ? { shippedFilter } : {}),
         },
         {
             staleTime: STALE_TIME,

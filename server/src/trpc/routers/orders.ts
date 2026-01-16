@@ -122,10 +122,13 @@ const list = protectedProcedure
         }
 
         // Enrich rows with inventory stock (server-side)
-        const rowsWithInventory = rows.map(row => ({
-            ...row,
-            skuStock: row.skuId ? (inventoryMap.get(row.skuId)?.availableBalance ?? 0) : 0,
-        }));
+        const rowsWithInventory = rows.map(row => {
+            const balance = row.skuId ? inventoryMap.get(row.skuId) : null;
+            return {
+                ...row,
+                skuStock: row.skuId ? (balance?.availableBalance ?? 0) : 0,
+            };
+        });
 
         return {
             rows: rowsWithInventory,

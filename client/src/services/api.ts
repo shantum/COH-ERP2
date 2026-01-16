@@ -27,9 +27,9 @@ import type {
     CompleteBatchData,
 } from '../types';
 
-// In production, use relative URL; in development, use localhost
+// In production, use relative URL; in development, use 127.0.0.1 (IPv4)
 const API_BASE_URL = import.meta.env.VITE_API_URL ||
-    (import.meta.env.PROD ? '/api' : 'http://localhost:3001/api');
+    (import.meta.env.PROD ? '/api' : 'http://127.0.0.1:3001/api');
 
 const api = axios.create({
     baseURL: API_BASE_URL,

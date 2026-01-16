@@ -16,7 +16,6 @@ import { useAuth } from '../hooks/useAuth';
 
 // Utilities
 import {
-    computeCustomerStats,
     enrichRowsWithInventory,
 } from '../utils/orderHelpers';
 
@@ -101,7 +100,7 @@ export default function Orders() {
 
     // Real-time updates via SSE (for multi-user collaboration)
     // When SSE is connected, polling is reduced since SSE handles updates
-    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view });
+    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page });
 
     // Data hook - simplified, single view with pagination
     const {
@@ -154,13 +153,6 @@ export default function Orders() {
         onDeleteSuccess: () => setUnifiedModalOrder(null),
         onEditSuccess: () => setUnifiedModalOrder(null),
     });
-
-    // Compute customer stats (kept for backwards compatibility, may be removed later)
-    const _customerStats = useMemo(
-        () => computeCustomerStats(orders, []),
-        [orders]
-    );
-    void _customerStats; // Suppress unused warning
 
     // Enrich server-flattened rows with client-side inventory data
     // This is O(n) with O(1) Map lookups - much faster than full flatten
@@ -489,7 +481,6 @@ export default function Orders() {
         onUnpick: handleUnpick,
         onPack: handlePack,
         onUnpack: handleUnpack,
-        onShipLine: handleShipLine,
         onMarkShippedLine: handleMarkShippedLine,
         onUnmarkShippedLine: handleUnmarkShippedLine,
         onUpdateLineTracking: handleUpdateLineTracking,
