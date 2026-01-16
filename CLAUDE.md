@@ -166,11 +166,35 @@ client/src/
   tests/orders-production.spec.ts     # E2E tests
 
 server/src/
-  utils/orderViews.ts                 # VIEW_CONFIGS with where/orderBy/enrichments
-  utils/queryPatterns.ts              # ORDER_UNIFIED_SELECT, accessors
-  utils/dateHelpers.ts                # Safe Date-to-string conversions
-  services/inventoryBalanceCache.ts   # Inventory cache singleton
-  services/customerStatsCache.ts      # Customer stats cache singleton
+  routes/orders/
+    mutations/                        # Order mutations (decomposed)
+      index.ts                        # Barrel export + router combiner
+      crud.ts                         # create, update, delete
+      lifecycle.ts                    # cancel, uncancel, hold, release
+      archive.ts                      # archive, unarchive, autoArchive, release workflow
+      lineOps.ts                      # line-level operations
+      customization.ts                # custom SKU workflow
+    queries/                          # Order queries (decomposed)
+      index.ts                        # Barrel export + router combiner
+      views.ts                        # GET /, GET /:id
+      search.ts                       # GET /search-all
+      summaries.ts                    # RTO, shipped, archived summaries
+      analytics.ts                    # /analytics, /dashboard-stats
+  utils/
+    orderViews.ts                     # VIEW_CONFIGS with where/orderBy/enrichments
+    queryPatterns.ts                  # Re-export barrel for patterns/
+    patterns/                         # Query patterns (decomposed)
+      index.ts                        # Barrel export
+      types.ts                        # Types + constants (TXN_TYPE, TXN_REASON)
+      orderSelects.ts                 # ORDER_LIST_SELECT, ORDER_LINES_INCLUDE
+      orderHelpers.ts                 # enrichOrdersWithCustomerStats, Shopify accessors
+      inventory.ts                    # calculateInventoryBalance, fabric balance
+      transactions.ts                 # allocation, sale, RTO transactions
+      customization.ts                # createCustomSku, removeCustomization
+    dateHelpers.ts                    # Safe Date-to-string conversions
+  services/
+    inventoryBalanceCache.ts          # Inventory cache singleton
+    customerStatsCache.ts             # Customer stats cache singleton
   trpc/routers/orders.ts              # tRPC procedures
   scripts/                            # One-time migration scripts
 ```
