@@ -32,7 +32,7 @@ import fabricRoutes from './routes/fabrics/index.js';
 import inventoryRoutes from './routes/inventory/index.js';
 import inventoryReconciliationRoutes from './routes/inventory-reconciliation.js';
 import orderRoutes from './routes/orders/index.js';
-import { autoArchiveOldOrders } from './routes/orders/mutations.js';
+import { autoArchiveOldOrders } from './routes/orders/mutations/index.js';
 import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
 import customerRoutes from './routes/customers.js';
 import returnRoutes from './routes/returns/index.js';

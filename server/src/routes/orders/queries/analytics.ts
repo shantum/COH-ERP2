@@ -1,0 +1,515 @@
+/**
+ * Order Analytics
+ * Analytics for open orders and dashboard stats
+ */
+
+import { Router } from 'express';
+import type { Request, Response } from 'express';
+import { orderLogger } from '../../../utils/logger.js';
+
+const router: Router = Router();
+
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+
+interface AnalyticsOrder {
+    id: string;
+    paymentMethod: string | null;
+    totalAmount: number | null;
+    orderLines: Array<{
+        qty: number;
+        lineStatus: string | null;
+        sku: {
+            variation: {
+                imageUrl: string | null;
+                product: { id: string; name: string; imageUrl: string | null } | null;
+            } | null;
+        } | null;
+    }>;
+}
+
+interface RevenueOrder {
+    totalAmount: number | null;
+    paymentMethod: string | null;
+    orderDate: Date | null;
+    customerId: string | null;
+}
+
+interface ProductData {
+    id: string;
+    name: string;
+    imageUrl: string | null;
+    qty: number;
+    orderCount: number;
+    salesValue: number;
+    variants: Record<string, { name: string; qty: number }>;
+}
+
+interface RevenuePeriod {
+    total: number;
+    orderCount: number;
+}
+
+interface CustomerStats {
+    newCustomers: number;
+    returningCustomers: number;
+    newPercent: number;
+    returningPercent: number;
+}
+
+interface RevenuePeriodFull extends RevenuePeriod {
+    change: number | null;
+    customers: CustomerStats;
+}
+
+// ============================================
+// ORDERS ANALYTICS
+// ============================================
+
+/**
+ * GET /orders/analytics
+ * Returns analytics for open orders: pending count, payment split, top products
+ */
+router.get('/analytics', async (req: Request, res: Response) => {
+    try {
+        // Get open orders with their lines for analysis
+        const openOrders = await req.prisma.order.findMany({
+            where: {
+                status: 'open',
+                isArchived: false,
+            },
+            select: {
+                id: true,
+                paymentMethod: true,
+                totalAmount: true,
+                orderLines: {
+                    where: { lineStatus: { not: 'cancelled' } },
+                    select: {
+                        qty: true,
+                        lineStatus: true,
+                        sku: {
+                            select: {
+                                variation: {
+                                    select: {
+                                        imageUrl: true,
+                                        product: {
+                                            select: { id: true, name: true, imageUrl: true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }) as AnalyticsOrder[];
+
+        // Get orders for revenue calculations across multiple time periods
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        // Current periods
+        const yesterdayStart = new Date(todayStart);
+        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+        const last7DaysStart = new Date(todayStart);
+        last7DaysStart.setDate(last7DaysStart.getDate() - 7);
+        const last30DaysStart = new Date(todayStart);
+        last30DaysStart.setDate(last30DaysStart.getDate() - 30);
+        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        // Comparison periods
+        const dayBeforeYesterdayStart = new Date(todayStart);
+        dayBeforeYesterdayStart.setDate(dayBeforeYesterdayStart.getDate() - 2);
+        const prior7DaysStart = new Date(todayStart);
+        prior7DaysStart.setDate(prior7DaysStart.getDate() - 14);
+        const prior7DaysEnd = new Date(todayStart);
+        prior7DaysEnd.setDate(prior7DaysEnd.getDate() - 7);
+        const prior30DaysStart = new Date(todayStart);
+        prior30DaysStart.setDate(prior30DaysStart.getDate() - 60);
+        const prior30DaysEnd = new Date(todayStart);
+        prior30DaysEnd.setDate(prior30DaysEnd.getDate() - 30);
+        const monthBeforeLastStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const monthBeforeLastEnd = lastMonthStart;
+
+        // For same-time comparisons
+        const yesterdaySameTime = new Date(now);
+        yesterdaySameTime.setDate(yesterdaySameTime.getDate() - 1);
+        const lastMonthSameDateTime = new Date(now);
+        lastMonthSameDateTime.setMonth(lastMonthSameDateTime.getMonth() - 1);
+
+        // Get ALL orders from 60+ days ago for all comparisons
+        const recentOrders = await req.prisma.order.findMany({
+            where: {
+                orderDate: { gte: monthBeforeLastStart },
+            },
+            select: {
+                totalAmount: true,
+                paymentMethod: true,
+                orderDate: true,
+                customerId: true,
+            }
+        }) as RevenueOrder[];
+
+        // Get first order date for each customer
+        const customerFirstOrders = await req.prisma.order.groupBy({
+            by: ['customerId'],
+            _min: { orderDate: true },
+            where: { customerId: { not: null } },
+        });
+        const customerFirstOrderMap = new Map<string, Date>();
+        customerFirstOrders.forEach((c) => {
+            if (c.customerId && c._min.orderDate) {
+                customerFirstOrderMap.set(c.customerId, new Date(c._min.orderDate));
+            }
+        });
+
+        const filterByDateRange = (orders: RevenueOrder[], start: Date, end: Date | null = null): RevenueOrder[] => {
+            return orders.filter((o) => {
+                if (!o.orderDate) return false;
+                const date = new Date(o.orderDate);
+                if (end) {
+                    return date >= start && date < end;
+                }
+                return date >= start;
+            });
+        };
+
+        const calcRevenue = (orders: RevenueOrder[]): RevenuePeriod => ({
+            total: orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
+            orderCount: orders.length,
+        });
+
+        const calcCustomerStats = (orders: RevenueOrder[], periodStart: Date): CustomerStats => {
+            let newCustomers = 0;
+            let returningCustomers = 0;
+            const seenCustomers = new Set<string>();
+
+            orders.forEach((o) => {
+                if (!o.customerId || seenCustomers.has(o.customerId)) return;
+                seenCustomers.add(o.customerId);
+
+                const firstOrderDate = customerFirstOrderMap.get(o.customerId);
+                if (firstOrderDate && firstOrderDate >= periodStart) {
+                    newCustomers++;
+                } else {
+                    returningCustomers++;
+                }
+            });
+
+            const total = newCustomers + returningCustomers;
+            return {
+                newCustomers,
+                returningCustomers,
+                newPercent: total > 0 ? Math.round((newCustomers / total) * 100) : 0,
+                returningPercent: total > 0 ? Math.round((returningCustomers / total) * 100) : 0,
+            };
+        };
+
+        const calcChange = (current: number, previous: number): number | null => {
+            if (!previous || previous === 0) return null;
+            return ((current - previous) / previous) * 100;
+        };
+
+        // Calculate all revenue periods
+        const todayOrders = filterByDateRange(recentOrders, todayStart);
+        const yesterdayOrders = filterByDateRange(recentOrders, yesterdayStart, todayStart);
+        const last7DaysOrders = filterByDateRange(recentOrders, last7DaysStart);
+        const last30DaysOrdersFiltered = filterByDateRange(recentOrders, last30DaysStart);
+        const lastMonthOrders = filterByDateRange(recentOrders, lastMonthStart, lastMonthEnd);
+        const thisMonthOrders = filterByDateRange(recentOrders, thisMonthStart);
+
+        const todayRevenue = calcRevenue(todayOrders);
+        const yesterdaySameTimeRevenue = calcRevenue(filterByDateRange(recentOrders, yesterdayStart, yesterdaySameTime));
+        const yesterdayRevenue = calcRevenue(yesterdayOrders);
+        const dayBeforeYesterdayRevenue = calcRevenue(filterByDateRange(recentOrders, dayBeforeYesterdayStart, yesterdayStart));
+        const last7DaysRevenue = calcRevenue(last7DaysOrders);
+        const prior7DaysRevenue = calcRevenue(filterByDateRange(recentOrders, prior7DaysStart, prior7DaysEnd));
+        const last30DaysRevenue = calcRevenue(last30DaysOrdersFiltered);
+        const prior30DaysRevenue = calcRevenue(filterByDateRange(recentOrders, prior30DaysStart, prior30DaysEnd));
+        const lastMonthRevenue = calcRevenue(lastMonthOrders);
+        const monthBeforeLastRevenue = calcRevenue(filterByDateRange(recentOrders, monthBeforeLastStart, monthBeforeLastEnd));
+        const thisMonthRevenue = calcRevenue(thisMonthOrders);
+        const lastMonthSamePeriodRevenue = calcRevenue(filterByDateRange(recentOrders, lastMonthStart, lastMonthSameDateTime));
+
+        // Calculate customer stats
+        const todayCustomers = calcCustomerStats(todayOrders, todayStart);
+        const yesterdayCustomers = calcCustomerStats(yesterdayOrders, yesterdayStart);
+        const last7DaysCustomers = calcCustomerStats(last7DaysOrders, last7DaysStart);
+        const last30DaysCustomers = calcCustomerStats(last30DaysOrdersFiltered, last30DaysStart);
+        const lastMonthCustomers = calcCustomerStats(lastMonthOrders, lastMonthStart);
+        const thisMonthCustomers = calcCustomerStats(thisMonthOrders, thisMonthStart);
+
+        const revenue: Record<string, RevenuePeriodFull> = {
+            today: { ...todayRevenue, change: calcChange(todayRevenue.total, yesterdaySameTimeRevenue.total), customers: todayCustomers },
+            yesterday: { ...yesterdayRevenue, change: calcChange(yesterdayRevenue.total, dayBeforeYesterdayRevenue.total), customers: yesterdayCustomers },
+            last7Days: { ...last7DaysRevenue, change: calcChange(last7DaysRevenue.total, prior7DaysRevenue.total), customers: last7DaysCustomers },
+            last30Days: { ...last30DaysRevenue, change: calcChange(last30DaysRevenue.total, prior30DaysRevenue.total), customers: last30DaysCustomers },
+            lastMonth: { ...lastMonthRevenue, change: calcChange(lastMonthRevenue.total, monthBeforeLastRevenue.total), customers: lastMonthCustomers },
+            thisMonth: { ...thisMonthRevenue, change: calcChange(thisMonthRevenue.total, lastMonthSamePeriodRevenue.total), customers: thisMonthCustomers },
+        };
+
+        // Count pending orders
+        const pendingOrders = openOrders.filter((o) =>
+            o.orderLines.some((l) => l.lineStatus === 'pending')
+        ).length;
+
+        // Count allocated orders
+        const allocatedOrders = openOrders.filter((o) =>
+            o.orderLines.length > 0 && o.orderLines.every((l) => l.lineStatus !== 'pending')
+        ).length;
+
+        // Count ready to ship
+        const readyToShip = openOrders.filter((o) =>
+            o.orderLines.length > 0 && o.orderLines.every((l) => l.lineStatus === 'packed')
+        ).length;
+
+        // Payment method split
+        const codOrders = openOrders.filter((o) => o.paymentMethod?.toLowerCase() === 'cod');
+        const prepaidOrders = openOrders.filter((o) => o.paymentMethod?.toLowerCase() !== 'cod');
+
+        const paymentSplit = {
+            cod: {
+                count: codOrders.length,
+                amount: codOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0)
+            },
+            prepaid: {
+                count: prepaidOrders.length,
+                amount: prepaidOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0)
+            }
+        };
+
+        // Top products by quantity sold in last 30 days
+        const last30DaysOrdersForProducts = await req.prisma.order.findMany({
+            where: {
+                orderDate: { gte: last30DaysStart },
+            },
+            select: {
+                totalAmount: true,
+                orderLines: {
+                    select: {
+                        qty: true,
+                        unitPrice: true,
+                        sku: {
+                            select: {
+                                variation: {
+                                    select: {
+                                        id: true,
+                                        colorName: true,
+                                        imageUrl: true,
+                                        product: {
+                                            select: { id: true, name: true, imageUrl: true }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        interface ProductOrderLine {
+            qty: number;
+            unitPrice: number;
+            sku: {
+                variation: {
+                    id: string;
+                    colorName: string | null;
+                    imageUrl: string | null;
+                    product: { id: string; name: string; imageUrl: string | null } | null;
+                } | null;
+            } | null;
+        }
+
+        interface ProductOrder {
+            totalAmount: number | null;
+            orderLines: ProductOrderLine[];
+        }
+
+        const productData: Record<string, ProductData> = {};
+        (last30DaysOrdersForProducts as ProductOrder[]).forEach((order) => {
+            order.orderLines.forEach((line) => {
+                const variation = line.sku?.variation;
+                const product = variation?.product;
+                const productId = product?.id;
+                if (!productId) return;
+
+                if (!productData[productId]) {
+                    const imageUrl = variation?.imageUrl || product?.imageUrl || null;
+                    productData[productId] = {
+                        id: productId,
+                        name: product.name,
+                        imageUrl,
+                        qty: 0,
+                        orderCount: 0,
+                        salesValue: 0,
+                        variants: {},
+                    };
+                }
+                productData[productId].qty += line.qty;
+                productData[productId].orderCount += 1;
+                productData[productId].salesValue += (line.unitPrice || 0) * line.qty;
+
+                const variantId = variation?.id;
+                const variantName = variation?.colorName || 'Unknown';
+                if (variantId) {
+                    if (!productData[productId].variants[variantId]) {
+                        productData[productId].variants[variantId] = {
+                            name: variantName,
+                            qty: 0,
+                        };
+                    }
+                    productData[productId].variants[variantId].qty += line.qty;
+                }
+            });
+        });
+
+        interface ProductDataWithVariantsArray extends Omit<ProductData, 'variants'> {
+            variants: Array<{ name: string; qty: number }>;
+        }
+
+        const productDataArray: ProductDataWithVariantsArray[] = Object.values(productData).map((product) => ({
+            ...product,
+            variants: Object.values(product.variants)
+                .sort((a, b) => b.qty - a.qty)
+                .slice(0, 5),
+        }));
+
+        const topProducts = productDataArray
+            .sort((a, b) => b.qty - a.qty)
+            .slice(0, 10);
+
+        // Total units in open orders
+        const totalUnits = openOrders.reduce((sum, o) =>
+            sum + o.orderLines.reduce((lineSum, l) => lineSum + l.qty, 0), 0
+        );
+
+        res.json({
+            totalOrders: openOrders.length,
+            pendingOrders,
+            allocatedOrders,
+            readyToShip,
+            totalUnits,
+            paymentSplit,
+            topProducts,
+            revenue,
+        });
+    } catch (error) {
+        orderLogger.error({ error: (error as Error).message }, 'Orders analytics error');
+        res.status(500).json({ error: 'Failed to fetch orders analytics' });
+    }
+});
+
+// ============================================
+// DASHBOARD STATS
+// ============================================
+
+/**
+ * GET /orders/dashboard-stats
+ * Returns counts for all action queues (for dashboard summary)
+ */
+router.get('/dashboard-stats', async (req: Request, res: Response) => {
+    try {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        // Run all count queries in parallel
+        const [
+            readyToShip,
+            needsAttention,
+            inTransit,
+            rtoInProgress,
+            codAtRisk,
+            pendingPayment,
+            completed,
+        ] = await Promise.all([
+            // Ready to ship: Open, not on hold, not archived
+            req.prisma.order.count({
+                where: {
+                    status: 'open',
+                    isArchived: false,
+                    isOnHold: false,
+                },
+            }),
+
+            // Needs attention: On hold OR RTO delivered but not processed
+            req.prisma.order.count({
+                where: {
+                    OR: [
+                        { isOnHold: true },
+                        { trackingStatus: 'rto_delivered', terminalStatus: null },
+                    ],
+                    isArchived: false,
+                },
+            }),
+
+            // In transit: Shipped, no terminal status, not RTO
+            req.prisma.order.count({
+                where: {
+                    status: 'shipped',
+                    terminalStatus: null,
+                    isArchived: false,
+                    NOT: {
+                        trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                    },
+                },
+            }),
+
+            // RTO in progress
+            req.prisma.order.count({
+                where: {
+                    trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] },
+                    isArchived: false,
+                },
+            }),
+
+            // COD at risk: COD shipped > 7 days ago, not terminal
+            req.prisma.order.count({
+                where: {
+                    status: 'shipped',
+                    paymentMethod: 'COD',
+                    terminalStatus: null,
+                    shippedAt: { lt: sevenDaysAgo },
+                    isArchived: false,
+                },
+            }),
+
+            // Pending payment: Delivered COD awaiting remittance
+            req.prisma.order.count({
+                where: {
+                    terminalStatus: 'delivered',
+                    paymentMethod: 'COD',
+                    codRemittedAt: null,
+                    isArchived: false,
+                },
+            }),
+
+            // Completed (last 15 days for reference)
+            req.prisma.order.count({
+                where: {
+                    terminalStatus: { not: null },
+                    isArchived: false,
+                },
+            }),
+        ]);
+
+        res.json({
+            readyToShip,
+            needsAttention,
+            inTransit,
+            watchList: rtoInProgress + codAtRisk,
+            rtoInProgress,
+            codAtRisk,
+            pendingPayment,
+            completed,
+        });
+    } catch (error) {
+        orderLogger.error({ error: (error as Error).message }, 'Dashboard stats error');
+        res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+    }
+});
+
+export default router;

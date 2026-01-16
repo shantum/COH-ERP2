@@ -4,9 +4,9 @@
  */
 
 import { Router } from 'express';
-import listOrdersRouter from './listOrders.js';
+import listOrdersRouter from './queries/index.js';
 import fulfillmentRouter from './fulfillment.js';
-import mutationsRouter from './mutations.js';
+import mutationsRouter from './mutations/index.js';
 import lineStatusRouter from './lineStatus.js';
 
 const router: Router = Router();
