@@ -30,10 +30,14 @@ export interface OrderUpdateEvent {
         // Shipping events
         | 'order_shipped'
         | 'lines_shipped'
-        // Delivery events
+        // Delivery events (order-level)
         | 'order_delivered'
         | 'order_rto'
         | 'order_rto_received'
+        // Delivery events (line-level)
+        | 'line_delivered'
+        | 'line_rto'
+        | 'line_rto_received'
         // Cancel events
         | 'order_cancelled'
         | 'order_uncancelled'

@@ -97,7 +97,8 @@ export interface DynamicColumnHandlers {
 
     // Admin actions (optional)
     isAdmin?: boolean;
-    onForceShipOrder?: (orderId: string, data: { awbNumber: string; courier: string }) => void;
+    // Line-level force ship (ships single line without packed validation)
+    onForceShipLine?: (lineId: string, data: { awbNumber: string; courier: string }) => void;
 
     // Production handlers
     onCreateBatch: (data: any) => void;

@@ -1,6 +1,7 @@
 /**
  * Orders page - Unified order management with dropdown view selector
- * Views: Open, Shipped, RTO, COD Pending, Cancelled
+ * Views: Open, Shipped, Cancelled
+ * Shipped view has filter chips for: All, RTO, COD Pending
  * Note: Archived view hidden from UI but auto-archive still runs. Search shows archived orders.
  */
 
@@ -34,14 +35,16 @@ import {
 import { GridPreferencesToolbar } from '../components/common/grid';
 import type { Order } from '../types';
 
-// View configuration (archived removed - auto-archive runs silently, search still finds archived orders)
+// View configuration (3 views: Open, Shipped, Cancelled)
+// RTO and COD Pending are now filter chips within Shipped view
 const VIEW_CONFIG: Record<OrderView, { label: string; color: string }> = {
     open: { label: 'Open Orders', color: 'primary' },
     shipped: { label: 'Shipped', color: 'blue' },
-    rto: { label: 'RTO', color: 'red' },
-    cod_pending: { label: 'COD Pending', color: 'amber' },
     cancelled: { label: 'Cancelled', color: 'gray' },
 };
+
+// Shipped view filter options
+type ShippedFilter = 'all' | 'rto' | 'cod_pending';
 
 export default function Orders() {
     const queryClient = useQueryClient();

@@ -57,7 +57,11 @@ interface UseUnifiedOrderModalProps {
 
 export function useUnifiedOrderModal({ order, initialMode }: UseUnifiedOrderModalProps) {
   // Determine available modes based on order state
-  const canEdit = order.status === 'open';
+  // Line-level: can edit if ANY line is not shipped/cancelled (not just order.status)
+  const hasEditableLines = order.orderLines?.some(
+    l => l.lineStatus !== 'shipped' && l.lineStatus !== 'cancelled'
+  );
+  const canEdit = hasEditableLines ?? order.status === 'open';
   const canShip = order.fulfillmentStage === 'ready_to_ship' ||
     order.orderLines?.some(l => l.lineStatus === 'packed');
 

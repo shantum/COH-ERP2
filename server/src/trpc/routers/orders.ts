@@ -991,20 +991,365 @@ const uncancelOrder = protectedProcedure
     });
 
 // ============================================
-// MARK DELIVERED PROCEDURE
+// LINE-LEVEL DELIVERY/RTO MUTATIONS
 // ============================================
 
 /**
- * Mark a shipped order as delivered
+ * Mark a single line as delivered
+ * Line-level operation - updates OrderLine.deliveredAt
+ * If all shipped lines are delivered, sets Order.terminalStatus='delivered'
+ */
+const markLineDelivered = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+        deliveredAt: z.string().datetime().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId, deliveredAt } = input;
+        const deliveryTime = deliveredAt ? new Date(deliveredAt) : new Date();
+
+        // Fetch line with order context
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: {
+                id: true,
+                lineStatus: true,
+                deliveredAt: true,
+                orderId: true,
+                order: {
+                    select: { id: true, customerId: true },
+                },
+            },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Validate line is shipped
+        if (line.lineStatus !== 'shipped') {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: `Cannot mark as delivered: line status is '${line.lineStatus}', must be 'shipped'`,
+            });
+        }
+
+        // Already delivered - idempotent
+        if (line.deliveredAt) {
+            return { lineId, deliveredAt: line.deliveredAt, orderId: line.orderId };
+        }
+
+        const result = await ctx.prisma.$transaction(async (tx) => {
+            // Update line-level deliveredAt and trackingStatus
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    deliveredAt: deliveryTime,
+                    trackingStatus: 'delivered',
+                },
+            });
+
+            // Check if ALL shipped lines are now delivered
+            const undeliveredShippedLines = await tx.orderLine.count({
+                where: {
+                    orderId: line.orderId,
+                    lineStatus: 'shipped',
+                    deliveredAt: null,
+                    id: { not: lineId }, // Exclude the line we just updated
+                },
+            });
+
+            let orderTerminal = false;
+            if (undeliveredShippedLines === 0) {
+                // All shipped lines are delivered - set order terminal status
+                await tx.order.update({
+                    where: { id: line.orderId },
+                    data: {
+                        terminalStatus: 'delivered',
+                        terminalAt: deliveryTime,
+                        // Also update order-level deliveredAt for backward compat
+                        deliveredAt: deliveryTime,
+                        status: 'delivered',
+                    },
+                });
+                orderTerminal = true;
+            }
+
+            return { orderTerminal };
+        });
+
+        // Broadcast SSE update
+        broadcastOrderUpdate({
+            type: 'line_delivered',
+            lineId,
+            orderId: line.orderId,
+            affectedViews: ['shipped', 'cod_pending'],
+            changes: {
+                deliveredAt: deliveryTime.toISOString(),
+                trackingStatus: 'delivered',
+                ...(result.orderTerminal ? { terminalStatus: 'delivered' } : {}),
+            },
+        }, ctx.user.id);
+
+        return {
+            lineId,
+            deliveredAt: deliveryTime,
+            orderId: line.orderId,
+            orderTerminal: result.orderTerminal,
+        };
+    });
+
+/**
+ * Initiate RTO for a single line
+ * Line-level operation - updates OrderLine.rtoInitiatedAt
+ * Increments customer rtoCount only once per line
+ */
+const markLineRto = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId } = input;
+        const now = new Date();
+
+        // Fetch line with order context
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: {
+                id: true,
+                lineStatus: true,
+                rtoInitiatedAt: true,
+                orderId: true,
+                order: {
+                    select: { id: true, customerId: true },
+                },
+            },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Validate line is shipped
+        if (line.lineStatus !== 'shipped') {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: `Cannot initiate RTO: line status is '${line.lineStatus}', must be 'shipped'`,
+            });
+        }
+
+        // Already RTO initiated - idempotent
+        if (line.rtoInitiatedAt) {
+            return { lineId, rtoInitiatedAt: line.rtoInitiatedAt, orderId: line.orderId };
+        }
+
+        await ctx.prisma.$transaction(async (tx) => {
+            // Update line-level rtoInitiatedAt and trackingStatus
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    rtoInitiatedAt: now,
+                    trackingStatus: 'rto_initiated',
+                },
+            });
+
+            // Increment customer RTO count (only first RTO per line)
+            if (line.order?.customerId) {
+                await tx.customer.update({
+                    where: { id: line.order.customerId },
+                    data: { rtoCount: { increment: 1 } },
+                });
+            }
+
+            // Also update order-level rtoInitiatedAt for backward compat (if not already set)
+            await tx.order.update({
+                where: { id: line.orderId },
+                data: {
+                    rtoInitiatedAt: now,
+                },
+            });
+        });
+
+        // Broadcast SSE update
+        broadcastOrderUpdate({
+            type: 'line_rto',
+            lineId,
+            orderId: line.orderId,
+            affectedViews: ['shipped', 'rto'],
+            changes: {
+                rtoInitiatedAt: now.toISOString(),
+                trackingStatus: 'rto_initiated',
+            },
+        }, ctx.user.id);
+
+        return {
+            lineId,
+            rtoInitiatedAt: now,
+            orderId: line.orderId,
+        };
+    });
+
+/**
+ * Receive RTO for a single line
+ * Line-level operation - updates OrderLine.rtoReceivedAt and creates inventory inward
+ * If all RTO lines are received, sets Order.terminalStatus='rto_received'
+ */
+const receiveLineRto = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+        condition: z.enum(['good', 'damaged', 'missing']).optional(),
+        notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId, condition, notes } = input;
+        const now = new Date();
+
+        // Fetch line with order context
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: {
+                id: true,
+                lineStatus: true,
+                rtoInitiatedAt: true,
+                rtoReceivedAt: true,
+                skuId: true,
+                qty: true,
+                orderId: true,
+                order: {
+                    select: { id: true },
+                },
+            },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Validate line has RTO initiated
+        if (!line.rtoInitiatedAt) {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: 'Cannot receive RTO: RTO has not been initiated for this line',
+            });
+        }
+
+        // Already received - idempotent
+        if (line.rtoReceivedAt) {
+            return { lineId, rtoReceivedAt: line.rtoReceivedAt, orderId: line.orderId };
+        }
+
+        const result = await ctx.prisma.$transaction(async (tx) => {
+            // Update line-level rtoReceivedAt, condition, and trackingStatus
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    rtoReceivedAt: now,
+                    rtoCondition: condition || 'good',
+                    rtoNotes: notes || null,
+                    trackingStatus: 'rto_delivered',
+                },
+            });
+
+            // Create inventory inward transaction for this line only
+            await tx.inventoryTransaction.create({
+                data: {
+                    skuId: line.skuId,
+                    txnType: TXN_TYPE.INWARD,
+                    qty: line.qty,
+                    reason: TXN_REASON.RTO_RECEIVED,
+                    referenceId: lineId,
+                    createdById: ctx.user.id,
+                },
+            });
+
+            // Check if ALL RTO-initiated lines are now received
+            const unreceived = await tx.orderLine.count({
+                where: {
+                    orderId: line.orderId,
+                    rtoInitiatedAt: { not: null },
+                    rtoReceivedAt: null,
+                    id: { not: lineId }, // Exclude line we just updated
+                },
+            });
+
+            let orderTerminal = false;
+            if (unreceived === 0) {
+                // All RTO lines received - set order terminal status
+                await tx.order.update({
+                    where: { id: line.orderId },
+                    data: {
+                        terminalStatus: 'rto_received',
+                        terminalAt: now,
+                        // Also update order-level for backward compat
+                        rtoReceivedAt: now,
+                    },
+                });
+                orderTerminal = true;
+            }
+
+            return { orderTerminal };
+        });
+
+        // Invalidate inventory cache
+        inventoryBalanceCache.invalidate([line.skuId]);
+
+        // Broadcast SSE update
+        broadcastOrderUpdate({
+            type: 'line_rto_received',
+            lineId,
+            orderId: line.orderId,
+            affectedViews: ['rto', 'open'],
+            changes: {
+                rtoReceivedAt: now.toISOString(),
+                rtoCondition: condition || 'good',
+                trackingStatus: 'rto_delivered',
+                ...(result.orderTerminal ? { terminalStatus: 'rto_received' } : {}),
+            },
+        }, ctx.user.id);
+
+        return {
+            lineId,
+            rtoReceivedAt: now,
+            rtoCondition: condition || 'good',
+            orderId: line.orderId,
+            orderTerminal: result.orderTerminal,
+        };
+    });
+
+// ============================================
+// MARK DELIVERED PROCEDURE (ORDER-LEVEL - delegates to line-level)
+// ============================================
+
+/**
+ * Mark all shipped lines of an order as delivered
+ * @deprecated Prefer markLineDelivered for line-level control
+ * This procedure delegates to line-level logic for backward compatibility
  */
 const markDelivered = protectedProcedure
     .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
     .mutation(async ({ input, ctx }) => {
         const { orderId } = input;
+        const now = new Date();
 
         const order = await ctx.prisma.order.findUnique({
             where: { id: orderId },
-            select: { id: true, status: true },
+            select: {
+                id: true,
+                status: true,
+                orderLines: {
+                    where: { lineStatus: 'shipped', deliveredAt: null },
+                    select: { id: true },
+                },
+            },
         });
 
         if (!order) {
@@ -1020,40 +1365,82 @@ const markDelivered = protectedProcedure
             phase: 'pre',
         });
 
-        await ctx.prisma.order.update({
-            where: { id: orderId },
-            data: {
-                status: 'delivered',
-                deliveredAt: new Date(),
-            },
-        });
+        const shippedLineIds = order.orderLines.map(l => l.id);
+
+        if (shippedLineIds.length === 0) {
+            // No shipped lines to deliver - just update order status for backward compat
+            await ctx.prisma.order.update({
+                where: { id: orderId },
+                data: {
+                    status: 'delivered',
+                    deliveredAt: now,
+                    terminalStatus: 'delivered',
+                    terminalAt: now,
+                },
+            });
+        } else {
+            // Update all shipped lines to delivered
+            await ctx.prisma.$transaction(async (tx) => {
+                // Update all shipped lines
+                await tx.orderLine.updateMany({
+                    where: { id: { in: shippedLineIds } },
+                    data: {
+                        deliveredAt: now,
+                        trackingStatus: 'delivered',
+                    },
+                });
+
+                // Update order status
+                await tx.order.update({
+                    where: { id: orderId },
+                    data: {
+                        status: 'delivered',
+                        deliveredAt: now,
+                        terminalStatus: 'delivered',
+                        terminalAt: now,
+                    },
+                });
+            });
+        }
 
         // Broadcast SSE update with new event type
         broadcastOrderUpdate({
             type: 'order_delivered',
             orderId,
             affectedViews: ['shipped', 'cod_pending'],
-            changes: { status: 'delivered', deliveredAt: new Date().toISOString() },
+            changes: { status: 'delivered', deliveredAt: now.toISOString() },
         }, ctx.user.id);
 
-        return { orderId, status: 'delivered' };
+        return { orderId, status: 'delivered', linesDelivered: shippedLineIds.length };
     });
 
 // ============================================
-// MARK RTO PROCEDURE
+// MARK RTO PROCEDURE (ORDER-LEVEL - delegates to line-level)
 // ============================================
 
 /**
- * Initiate RTO for a shipped order
+ * Initiate RTO for all shipped lines of an order
+ * @deprecated Prefer markLineRto for line-level control
+ * This procedure delegates to line-level logic for backward compatibility
  */
 const markRto = protectedProcedure
     .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
     .mutation(async ({ input, ctx }) => {
         const { orderId } = input;
+        const now = new Date();
 
         const order = await ctx.prisma.order.findUnique({
             where: { id: orderId },
-            select: { id: true, status: true, customerId: true, rtoInitiatedAt: true },
+            select: {
+                id: true,
+                status: true,
+                customerId: true,
+                rtoInitiatedAt: true,
+                orderLines: {
+                    where: { lineStatus: 'shipped', rtoInitiatedAt: null },
+                    select: { id: true },
+                },
+            },
         });
 
         if (!order) {
@@ -1069,17 +1456,33 @@ const markRto = protectedProcedure
             phase: 'pre',
         });
 
+        const shippedLineIds = order.orderLines.map(l => l.id);
+        const linesInitiated = shippedLineIds.length;
+
         const updated = await ctx.prisma.$transaction(async (tx) => {
+            // Update all shipped lines to RTO initiated
+            if (shippedLineIds.length > 0) {
+                await tx.orderLine.updateMany({
+                    where: { id: { in: shippedLineIds } },
+                    data: {
+                        rtoInitiatedAt: now,
+                        trackingStatus: 'rto_initiated',
+                    },
+                });
+            }
+
+            // Update order-level rtoInitiatedAt
             const updatedOrder = await tx.order.update({
                 where: { id: orderId },
-                data: { rtoInitiatedAt: new Date() },
+                data: { rtoInitiatedAt: now },
             });
 
-            // Increment customer RTO count on first RTO initiation
-            if (!order.rtoInitiatedAt && order.customerId) {
+            // Increment customer RTO count based on number of lines (not order)
+            // Each line counts as one RTO for customer stats
+            if (linesInitiated > 0 && order.customerId) {
                 await tx.customer.update({
                     where: { id: order.customerId },
-                    data: { rtoCount: { increment: 1 } },
+                    data: { rtoCount: { increment: linesInitiated } },
                 });
             }
 
@@ -1091,27 +1494,40 @@ const markRto = protectedProcedure
             type: 'order_rto',
             orderId,
             affectedViews: ['shipped', 'rto'],
-            changes: { rtoInitiatedAt: new Date().toISOString() },
+            changes: { rtoInitiatedAt: now.toISOString() },
         }, ctx.user.id);
 
-        return { orderId, rtoInitiatedAt: updated.rtoInitiatedAt };
+        return { orderId, rtoInitiatedAt: updated.rtoInitiatedAt, linesInitiated };
     });
 
 // ============================================
-// RECEIVE RTO PROCEDURE
+// RECEIVE RTO PROCEDURE (ORDER-LEVEL - delegates to line-level)
 // ============================================
 
 /**
- * Receive RTO package (creates inventory inward)
+ * Receive RTO for all RTO-initiated lines of an order
+ * @deprecated Prefer receiveLineRto for line-level control
+ * This procedure delegates to line-level logic for backward compatibility
+ * Only processes lines that have rtoInitiatedAt set and rtoReceivedAt not set
  */
 const receiveRto = protectedProcedure
     .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
     .mutation(async ({ input, ctx }) => {
         const { orderId } = input;
+        const now = new Date();
 
         const order = await ctx.prisma.order.findUnique({
             where: { id: orderId },
-            include: { orderLines: true },
+            select: {
+                id: true,
+                orderLines: {
+                    where: {
+                        rtoInitiatedAt: { not: null },
+                        rtoReceivedAt: null,
+                    },
+                    select: { id: true, skuId: true, qty: true },
+                },
+            },
         });
 
         if (!order) {
@@ -1127,19 +1543,43 @@ const receiveRto = protectedProcedure
             phase: 'pre',
         });
 
-        // Collect SKU IDs for cache invalidation
-        const affectedSkuIds = order.orderLines.map(l => l.skuId);
+        // Only process lines with RTO initiated (not all lines)
+        const rtoLines = order.orderLines;
+        const affectedSkuIds = rtoLines.map(l => l.skuId);
+        const lineIds = rtoLines.map(l => l.id);
+
+        if (rtoLines.length === 0) {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: 'No RTO-initiated lines to receive',
+            });
+        }
 
         await ctx.prisma.$transaction(async (tx) => {
-            await tx.order.update({
-                where: { id: orderId },
-                data: { rtoReceivedAt: new Date() },
+            // Update all RTO-initiated lines
+            await tx.orderLine.updateMany({
+                where: { id: { in: lineIds } },
+                data: {
+                    rtoReceivedAt: now,
+                    rtoCondition: 'good', // Default condition
+                    trackingStatus: 'rto_delivered',
+                },
             });
 
-            // Create inward transactions to restore inventory using batch create
-            if (order.orderLines.length > 0) {
+            // Update order-level for backward compat
+            await tx.order.update({
+                where: { id: orderId },
+                data: {
+                    rtoReceivedAt: now,
+                    terminalStatus: 'rto_received',
+                    terminalAt: now,
+                },
+            });
+
+            // Create inward transactions only for RTO lines (not all lines)
+            if (rtoLines.length > 0) {
                 await tx.inventoryTransaction.createMany({
-                    data: order.orderLines.map(line => ({
+                    data: rtoLines.map(line => ({
                         skuId: line.skuId,
                         txnType: TXN_TYPE.INWARD,
                         qty: line.qty,
@@ -1161,10 +1601,10 @@ const receiveRto = protectedProcedure
             type: 'order_rto_received',
             orderId,
             affectedViews: ['rto', 'open'],
-            changes: { rtoReceivedAt: new Date().toISOString() },
+            changes: { rtoReceivedAt: now.toISOString() },
         }, ctx.user.id);
 
-        return { orderId, rtoReceivedAt: new Date() };
+        return { orderId, rtoReceivedAt: now, linesReceived: rtoLines.length };
     });
 
 // ============================================
@@ -1184,6 +1624,11 @@ export const ordersRouter = router({
     setLineStatus,
     cancelOrder,
     uncancelOrder,
+    // Line-level delivery/RTO mutations (preferred)
+    markLineDelivered,
+    markLineRto,
+    receiveLineRto,
+    // Order-level mutations (backward compat - delegate to line-level)
     markDelivered,
     markRto,
     receiveRto,

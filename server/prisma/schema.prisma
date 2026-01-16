@@ -366,14 +366,20 @@ model Order {
   archivedAt           DateTime?
   releasedToShipped    Boolean            @default(false)
   releasedToCancelled  Boolean            @default(false)
+  // @deprecated Use OrderLine.awbNumber - kept for backward compat, may have different AWBs per line
   awbNumber            String?
+  // @deprecated Use OrderLine.courier - kept for backward compat, may have different couriers per line
   courier              String?
+  // @deprecated Use OrderLine.shippedAt - kept for backward compat, lines may ship at different times
   shippedAt            DateTime?
+  // @deprecated Use OrderLine.deliveredAt - kept for backward compat, lines may deliver at different times
   deliveredAt          DateTime?
   totalAmount          Float
   createdAt            DateTime           @default(now())
   syncedAt             DateTime?
+  // @deprecated Use OrderLine.rtoInitiatedAt - kept for backward compat, RTO is line-level
   rtoInitiatedAt       DateTime?
+  // @deprecated Use OrderLine.rtoReceivedAt - kept for backward compat, RTO receipt is line-level
   rtoReceivedAt        DateTime?
   courierStatusCode    String?
   deliveryAttempts     Int                @default(0)

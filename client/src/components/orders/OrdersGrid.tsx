@@ -139,7 +139,7 @@ interface OrdersGridProps {
     }) => void;
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
-    onForceShipOrder?: (orderId: string, data: { awbNumber: string; courier: string }) => void;
+    onForceShipLine?: (lineId: string, data: { awbNumber: string; courier: string }) => void;
     // Post-ship action handlers (for shipped/rto/cod-pending/archived views)
     onUnship?: (orderId: string) => void;
     onMarkDelivered?: (orderId: string) => void;
@@ -191,7 +191,7 @@ export function OrdersGrid({
     onEditCustomization,
     onRemoveCustomization,
     onUpdateShipByDate,
-    onForceShipOrder,
+    onForceShipLine,
     // Post-ship action handlers (for future implementation)
     onUnship: _onUnship,
     onMarkDelivered: _onMarkDelivered,
@@ -365,7 +365,7 @@ export function OrdersGrid({
         onMarkShippedLine,
         onUnmarkShippedLine: _onUnmarkShippedLine,
         isAdmin,
-        onForceShipOrder,
+        onForceShipLine,
         onCreateBatch,
         onUpdateBatch,
         onDeleteBatch,
@@ -399,7 +399,7 @@ export function OrdersGrid({
         onMarkShippedLine,
         onUnmarkShippedLine: _onUnmarkShippedLine,
         isAdmin,
-        onForceShipOrder,
+        onForceShipLine,
         onCreateBatch,
         onUpdateBatch,
         onDeleteBatch,
