@@ -138,6 +138,71 @@ type OrderWithLines = Prisma.OrderGetPayload<{
     include: { orderLines: true };
 }>;
 
+/**
+ * SKU lookup abstraction for DB queries or Map lookups
+ * Returns { id: string } to match Prisma's minimal select pattern
+ */
+type SkuLookupFn = (variantId: string | null, skuCode: string | null) => Promise<{ id: string } | null>;
+
+/**
+ * Context for building order data
+ */
+interface OrderBuildContext {
+    shopifyOrder: ExtendedShopifyOrder;
+    existingOrder: OrderWithLines | null;
+    customerId: string | null;
+}
+
+/**
+ * Result of order line creation
+ */
+interface OrderLinesResult {
+    orderLinesData: Prisma.OrderLineCreateWithoutOrderInput[];
+    totalLineItems: number;
+    shouldSkip: boolean;
+    skipReason?: string;
+}
+
+/**
+ * Result of change detection
+ */
+interface ChangeDetectionResult {
+    needsUpdate: boolean;
+    changeType: ProcessResult['action'];
+}
+
+/**
+ * Tracking info extracted from fulfillments
+ */
+interface TrackingInfo {
+    awbNumber: string | null;
+    courier: string | null;
+    shippedAt: Date | null;
+}
+
+/**
+ * Order data object built for create/update operations
+ */
+interface OrderDataPayload {
+    shopifyOrderId: string;
+    orderNumber: string;
+    channel: string;
+    status: string;
+    customerId: string | null;
+    customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    shippingAddress: string | null;
+    totalAmount: number;
+    orderDate: Date;
+    internalNotes: string | null;
+    paymentMethod: string;
+    awbNumber: string | null;
+    courier: string | null;
+    shippedAt: Date | null;
+    syncedAt: Date;
+}
+
 // ============================================
 // CACHE MANAGEMENT FUNCTIONS
 // ============================================
@@ -463,6 +528,312 @@ export async function syncFulfillmentsToOrderLines(
 }
 
 // ============================================
+// ORDER PROCESSING HELPERS (Shared Logic)
+// ============================================
+
+/**
+ * Build customer data object for findOrCreateCustomer
+ */
+function buildCustomerData(customer: ShopifyCustomer | undefined | null): ShopifyCustomerData | null {
+    if (!customer) return null;
+    return {
+        id: customer.id,
+        email: customer.email,
+        first_name: customer.first_name,
+        last_name: customer.last_name,
+        phone: customer.phone,
+        default_address: customer.default_address,
+    };
+}
+
+/**
+ * Determine order status with ERP precedence rules
+ * - ERP-managed statuses (shipped, delivered) are preserved over Shopify
+ * - ERP is source of truth: Shopify fulfillment does NOT auto-ship orders
+ */
+function determineOrderStatus(
+    shopifyOrder: ExtendedShopifyOrder,
+    existingOrder: OrderWithLines | null
+): string {
+    let status: string = shopifyClient.mapOrderStatus(shopifyOrder);
+
+    if (existingOrder) {
+        const erpManagedStatuses: string[] = ['shipped', 'delivered'];
+        if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
+            status = existingOrder.status;
+        } else if (existingOrder.status === 'open') {
+            status = 'open';
+        }
+    }
+
+    return status;
+}
+
+/**
+ * Extract tracking info from Shopify fulfillments
+ * Preserves existing tracking data if present
+ */
+function extractOrderTrackingInfo(
+    shopifyOrder: ExtendedShopifyOrder,
+    existingOrder: OrderWithLines | null
+): TrackingInfo {
+    let awbNumber = existingOrder?.awbNumber || null;
+    let courier = existingOrder?.courier || null;
+    let shippedAt = existingOrder?.shippedAt || null;
+
+    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
+        const fulfillment = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
+        awbNumber = fulfillment.tracking_number || awbNumber;
+        courier = fulfillment.tracking_company || courier;
+        if (fulfillment.created_at && !shippedAt) {
+            shippedAt = new Date(fulfillment.created_at);
+        }
+    }
+
+    return { awbNumber, courier, shippedAt };
+}
+
+/**
+ * Build customer display name from shipping address or customer
+ */
+function buildCustomerName(
+    shippingAddress: ShopifyAddress | undefined | null,
+    customer: ShopifyCustomer | undefined | null
+): string {
+    if (shippingAddress) {
+        return `${shippingAddress.first_name || ''} ${shippingAddress.last_name || ''}`.trim() || 'Unknown';
+    }
+    if (customer?.first_name) {
+        return `${customer.first_name} ${customer.last_name || ''}`.trim();
+    }
+    return 'Unknown';
+}
+
+/**
+ * Build complete order data payload for create/update
+ */
+function buildOrderData(
+    ctx: OrderBuildContext,
+    status: string,
+    tracking: TrackingInfo
+): OrderDataPayload {
+    const { shopifyOrder, existingOrder, customerId } = ctx;
+    const shopifyOrderId = String(shopifyOrder.id);
+    const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
+    const customer = shopifyOrder.customer;
+    const shippingAddress = shopifyOrder.shipping_address;
+
+    const customerName = buildCustomerName(shippingAddress, customer);
+    const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
+    const internalNote = extractInternalNote(shopifyOrder.note_attributes);
+
+    let internalNotes = existingOrder?.internalNotes || internalNote || null;
+
+    // Add cancellation note if cancelled
+    if (shopifyOrder.cancelled_at && !existingOrder?.internalNotes?.includes('Cancelled via Shopify')) {
+        internalNotes = existingOrder?.internalNotes
+            ? `${existingOrder.internalNotes}\nCancelled via Shopify at ${shopifyOrder.cancelled_at}`
+            : `Cancelled via Shopify at ${shopifyOrder.cancelled_at}`;
+    }
+
+    return {
+        shopifyOrderId,
+        orderNumber: orderNumber || `SHOP-${shopifyOrderId.slice(-8)}`,
+        channel: shopifyClient.mapOrderChannel(shopifyOrder),
+        status,
+        customerId,
+        customerName,
+        customerEmail: customer?.email || shopifyOrder.email || null,
+        customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
+        shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+        totalAmount: parseFloat(shopifyOrder.total_price) || 0,
+        orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
+        internalNotes,
+        paymentMethod,
+        awbNumber: tracking.awbNumber,
+        courier: tracking.courier,
+        shippedAt: tracking.shippedAt,
+        syncedAt: new Date(),
+    };
+}
+
+/**
+ * Detect if an existing order needs update and determine change type
+ */
+function detectOrderChanges(
+    existingOrder: OrderWithLines,
+    orderData: OrderDataPayload,
+    shopifyOrder: ExtendedShopifyOrder
+): ChangeDetectionResult {
+    const needsUpdate =
+        existingOrder.status !== orderData.status ||
+        existingOrder.awbNumber !== orderData.awbNumber ||
+        existingOrder.courier !== orderData.courier ||
+        existingOrder.paymentMethod !== orderData.paymentMethod ||
+        existingOrder.customerEmail !== orderData.customerEmail ||
+        existingOrder.customerPhone !== orderData.customerPhone ||
+        existingOrder.totalAmount !== orderData.totalAmount ||
+        existingOrder.shippingAddress !== orderData.shippingAddress;
+
+    let changeType: ProcessResult['action'] = 'updated';
+    if (shopifyOrder.cancelled_at && existingOrder.status !== 'cancelled') {
+        changeType = 'cancelled';
+    } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
+        changeType = 'fulfilled';
+    }
+
+    return { needsUpdate, changeType };
+}
+
+/**
+ * Create order lines data with SKU lookup abstraction
+ * @param shopifyOrder - The Shopify order
+ * @param skuLookup - Function to look up SKU by variant ID or SKU code
+ * @param skipNoSku - If true, return shouldSkip when no SKUs match; if false, allow empty lines
+ */
+async function createOrderLinesData(
+    shopifyOrder: ExtendedShopifyOrder,
+    skuLookup: SkuLookupFn,
+    skipNoSku: boolean
+): Promise<OrderLinesResult> {
+    const lineItems = shopifyOrder.line_items || [];
+    const shippingAddress = shopifyOrder.shipping_address;
+    const orderLinesData: Prisma.OrderLineCreateWithoutOrderInput[] = [];
+
+    for (const item of lineItems) {
+        const shopifyVariantId = item.variant_id ? String(item.variant_id) : null;
+
+        // Look up SKU using the provided lookup function
+        const sku = await skuLookup(shopifyVariantId, item.sku || null);
+
+        if (sku) {
+            const originalPrice = parseFloat(item.price) || 0;
+            const effectiveUnitPrice = calculateEffectiveUnitPrice(
+                originalPrice,
+                item.quantity,
+                item.discount_allocations
+            );
+
+            orderLinesData.push({
+                shopifyLineId: String(item.id),
+                sku: { connect: { id: sku.id } },
+                qty: item.quantity,
+                unitPrice: effectiveUnitPrice,
+                lineStatus: 'pending',
+                shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
+            });
+        }
+    }
+
+    // Handle no matching SKUs
+    if (orderLinesData.length === 0 && skipNoSku) {
+        return {
+            orderLinesData: [],
+            totalLineItems: lineItems.length,
+            shouldSkip: true,
+            skipReason: 'no_matching_skus',
+        };
+    }
+
+    return {
+        orderLinesData,
+        totalLineItems: lineItems.length,
+        shouldSkip: false,
+    };
+}
+
+/**
+ * Handle update for an existing order
+ * Returns ProcessResult if update was performed or skipped, null to continue to creation
+ */
+async function handleExistingOrderUpdate(
+    prisma: PrismaClient,
+    existingOrder: OrderWithLines,
+    orderData: OrderDataPayload,
+    shopifyOrder: ExtendedShopifyOrder
+): Promise<ProcessResult> {
+    const { needsUpdate, changeType } = detectOrderChanges(existingOrder, orderData, shopifyOrder);
+
+    if (needsUpdate) {
+        await prisma.order.update({
+            where: { id: existingOrder.id },
+            data: orderData
+        });
+
+        // If order is being cancelled via Shopify, also cancel all order lines
+        if (changeType === 'cancelled') {
+            await prisma.orderLine.updateMany({
+                where: {
+                    orderId: existingOrder.id,
+                    lineStatus: { not: 'cancelled' }
+                },
+                data: { lineStatus: 'cancelled' }
+            });
+        }
+
+        const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+        return { action: changeType, orderId: existingOrder.id, fulfillmentSync };
+    }
+
+    // Even if order data hasn't changed, sync fulfillments (they may have updated)
+    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
+        const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
+        if (fulfillmentSync.synced > 0) {
+            return { action: 'fulfillment_synced', orderId: existingOrder.id, fulfillmentSync };
+        }
+    }
+
+    return { action: 'skipped', orderId: existingOrder.id };
+}
+
+/**
+ * Create new order with lines and post-processing
+ */
+async function createNewOrderWithLines(
+    prisma: PrismaClient,
+    orderData: OrderDataPayload,
+    linesResult: OrderLinesResult,
+    shopifyOrder: ExtendedShopifyOrder
+): Promise<ProcessResult> {
+    const newOrder = await prisma.order.create({
+        data: {
+            ...orderData,
+            orderLines: {
+                create: linesResult.orderLinesData
+            }
+        }
+    });
+
+    // Sync fulfillments to order lines if order came in already fulfilled
+    // Guarded - fulfillment sync failure shouldn't fail order creation
+    let fulfillmentSync: FulfillmentSyncResult | null = null;
+    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
+        try {
+            fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
+        } catch (fulfillmentError: unknown) {
+            syncLogger.warn({
+                orderId: newOrder.id,
+                shopifyOrderId: String(shopifyOrder.id),
+                error: fulfillmentError instanceof Error ? fulfillmentError.message : 'Unknown error'
+            }, 'Failed to sync fulfillments for new order - order was created successfully');
+        }
+    }
+
+    // Update customer tier based on new order
+    if (orderData.customerId && orderData.totalAmount > 0) {
+        await updateCustomerTier(prisma, orderData.customerId);
+    }
+
+    return {
+        action: 'created',
+        orderId: newOrder.id,
+        linesCreated: linesResult.orderLinesData.length,
+        totalLineItems: linesResult.totalLineItems,
+        fulfillmentSync: fulfillmentSync || undefined,
+    };
+}
+
+// ============================================
 // ORDER PROCESSING
 // ============================================
 
@@ -500,13 +871,10 @@ export async function processShopifyOrderToERP(
 ): Promise<ProcessResult> {
     const { skipNoSku = false } = options;
     const shopifyOrderId = String(shopifyOrder.id);
-    const orderName = shopifyOrder.name || String(shopifyOrder.order_number) || shopifyOrderId;
-
-    // Check if order exists - first by shopifyOrderId, then by orderNumber
-    // This handles both synced orders (have shopifyOrderId) and manual orders (only have orderNumber)
     const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
 
-    let existingOrder = await prisma.order.findFirst({
+    // Check if order exists - first by shopifyOrderId, then by orderNumber
+    const existingOrder = await prisma.order.findFirst({
         where: {
             OR: [
                 { shopifyOrderId },
@@ -516,253 +884,56 @@ export async function processShopifyOrderToERP(
         include: { orderLines: true }
     });
 
-    // Extract customer and shipping info
-    const customer = shopifyOrder.customer;
-    const shippingAddress = shopifyOrder.shipping_address;
-
-    // Convert ShopifyCustomer to ShopifyCustomerData for findOrCreateCustomer
-    const customerData: ShopifyCustomerData | null = customer ? {
-        id: customer.id,
-        email: customer.email,
-        first_name: customer.first_name,
-        last_name: customer.last_name,
-        phone: customer.phone,
-        default_address: customer.default_address,
-    } : null;
-
-    // Find or create customer using shared utility
+    // Find or create customer
+    const customerData = buildCustomerData(shopifyOrder.customer);
     const { customer: dbCustomer } = await findOrCreateCustomer(
         prisma,
         customerData,
         {
-            shippingAddress: shippingAddress as Record<string, unknown> | undefined,
+            shippingAddress: shopifyOrder.shipping_address as Record<string, unknown> | undefined,
             orderDate: new Date(shopifyOrder.created_at),
         }
     );
     const customerId = dbCustomer?.id || null;
 
-    // Determine order status
-    // ERP is source of truth - Shopify fulfillment does NOT auto-ship orders
-    let status: string = shopifyClient.mapOrderStatus(shopifyOrder);
+    // Use shared helpers for status and tracking
+    const status = determineOrderStatus(shopifyOrder, existingOrder);
+    const tracking = extractOrderTrackingInfo(shopifyOrder, existingOrder);
 
-    if (existingOrder) {
-        const erpManagedStatuses: string[] = ['shipped', 'delivered'];
-
-        if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
-            // Preserve ERP-managed statuses (shipped, delivered)
-            status = existingOrder.status;
-        } else if (existingOrder.status === 'open') {
-            // ERP is source of truth: ignore Shopify fulfillment status for open orders
-            // User must explicitly ship through ERP
-            status = 'open';
-        }
-    }
-
-    // Determine payment method using shared utility
-    // NOTE: Once an order is COD, it stays COD even after payment (don't confuse with Prepaid)
-    const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
-
-    // Extract tracking info from fulfillments
-    let awbNumber = existingOrder?.awbNumber || null;
-    let courier = existingOrder?.courier || null;
-    let shippedAt = existingOrder?.shippedAt || null;
-
-    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-        const fulfillment = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
-        awbNumber = fulfillment.tracking_number || awbNumber;
-        courier = fulfillment.tracking_company || courier;
-        if (fulfillment.created_at && !shippedAt) {
-            shippedAt = new Date(fulfillment.created_at);
-        }
-    }
-
-    // Build customer name
-    const customerName = shippingAddress
-        ? `${shippingAddress.first_name || ''} ${shippingAddress.last_name || ''}`.trim()
-        : customer?.first_name
-            ? `${customer.first_name} ${customer.last_name || ''}`.trim()
-            : 'Unknown';
-
-    // NOTE: discountCodes, customerNotes, shopifyFulfillmentStatus are stored in ShopifyOrderCache only
-    // Access them via order.shopifyCache JOIN pattern (like VLOOKUP)
-
-    // Extract internal notes from Shopify note_attributes (staff-only notes)
-    const internalNote = extractInternalNote(shopifyOrder.note_attributes);
-
-    // Build order data - ONLY ERP-owned fields (not Shopify fields)
-    // Shopify data is accessed via order.shopifyCache relation
-    const orderData = {
-        shopifyOrderId,
-        orderNumber: orderNumber || `SHOP-${shopifyOrderId.slice(-8)}`,
-        channel: shopifyClient.mapOrderChannel(shopifyOrder),
+    // Build order data using shared helper
+    const orderData = buildOrderData(
+        { shopifyOrder, existingOrder, customerId },
         status,
-        customerId,
-        customerName: customerName || 'Unknown',
-        customerEmail: customer?.email || shopifyOrder.email || null,
-        customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
-        shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-        totalAmount: parseFloat(shopifyOrder.total_price) || 0,
-        orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
-        // Preserve existing internal notes, append Shopify note_attributes if present
-        internalNotes: existingOrder?.internalNotes || internalNote || null,
-        paymentMethod,
-        awbNumber,
-        courier,
-        shippedAt,
-        syncedAt: new Date(),
-    };
+        tracking
+    );
 
-    // Add cancellation note if cancelled
-    if (shopifyOrder.cancelled_at && !existingOrder?.internalNotes?.includes('Cancelled via Shopify')) {
-        orderData.internalNotes = existingOrder?.internalNotes
-            ? `${existingOrder.internalNotes}\nCancelled via Shopify at ${shopifyOrder.cancelled_at}`
-            : `Cancelled via Shopify at ${shopifyOrder.cancelled_at}`;
-    }
-
+    // Handle existing order update
     if (existingOrder) {
-        // Update detection - only check ERP-owned fields
-        // Shopify fields (discountCode, customerNotes, shopifyFulfillmentStatus) are in cache only
-        const needsUpdate =
-            // Core status changes
-            existingOrder.status !== status ||
-            // Fulfillment/shipping info
-            existingOrder.awbNumber !== awbNumber ||
-            existingOrder.courier !== courier ||
-            // Payment
-            existingOrder.paymentMethod !== paymentMethod ||
-            // Contact info (can change if customer updates)
-            existingOrder.customerEmail !== orderData.customerEmail ||
-            existingOrder.customerPhone !== orderData.customerPhone ||
-            // Amounts (can change with refunds/modifications)
-            existingOrder.totalAmount !== orderData.totalAmount ||
-            // Shipping address changes
-            existingOrder.shippingAddress !== orderData.shippingAddress;
-
-        if (needsUpdate) {
-            await prisma.order.update({
-                where: { id: existingOrder.id },
-                data: orderData
-            });
-
-            // Determine change type for logging
-            let changeType: ProcessResult['action'] = 'updated';
-            if (shopifyOrder.cancelled_at && existingOrder.status !== 'cancelled') {
-                changeType = 'cancelled';
-            } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
-                changeType = 'fulfilled';
-            }
-
-            // If order is being cancelled via Shopify, also cancel all order lines
-            if (changeType === 'cancelled') {
-                await prisma.orderLine.updateMany({
-                    where: {
-                        orderId: existingOrder.id,
-                        lineStatus: { not: 'cancelled' }
-                    },
-                    data: { lineStatus: 'cancelled' }
-                });
-            }
-
-            // Sync fulfillments to order lines (partial shipment support)
-            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
-
-            return { action: changeType, orderId: existingOrder.id, fulfillmentSync };
-        }
-
-        // Even if order data hasn't changed, sync fulfillments (they may have updated)
-        if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
-            if (fulfillmentSync.synced > 0) {
-                return { action: 'fulfillment_synced', orderId: existingOrder.id, fulfillmentSync };
-            }
-        }
-
-        return { action: 'skipped', orderId: existingOrder.id };
+        return handleExistingOrderUpdate(prisma, existingOrder, orderData, shopifyOrder);
     }
 
-    // Create new order with lines
-    const lineItems = shopifyOrder.line_items || [];
-    const orderLinesData = [];
-
-    for (const item of lineItems) {
-        const shopifyVariantId = item.variant_id ? String(item.variant_id) : null;
-
-        // Try to find matching SKU
-        let sku = null;
-        if (shopifyVariantId) {
-            sku = await prisma.sku.findFirst({ where: { shopifyVariantId } });
+    // Create order lines with DB-based SKU lookup
+    const dbSkuLookup: SkuLookupFn = async (variantId, skuCode) => {
+        if (variantId) {
+            const sku = await prisma.sku.findFirst({ where: { shopifyVariantId: variantId } });
+            if (sku) return { id: sku.id };
         }
-        if (!sku && item.sku) {
-            sku = await prisma.sku.findFirst({ where: { skuCode: item.sku } });
+        if (skuCode) {
+            const sku = await prisma.sku.findFirst({ where: { skuCode } });
+            if (sku) return { id: sku.id };
         }
-
-        if (sku) {
-            // Calculate effective unit price after discounts using typed helper
-            const originalPrice = parseFloat(item.price) || 0;
-            const effectiveUnitPrice = calculateEffectiveUnitPrice(
-                originalPrice,
-                item.quantity,
-                item.discount_allocations
-            );
-
-            orderLinesData.push({
-                shopifyLineId: String(item.id),
-                sku: { connect: { id: sku.id } },
-                qty: item.quantity,
-                unitPrice: effectiveUnitPrice,
-                lineStatus: 'pending',
-                shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-            });
-        }
-    }
-
-    // Handle no matching SKUs
-    if (orderLinesData.length === 0) {
-        if (skipNoSku) {
-            return { action: 'skipped', reason: 'no_matching_skus' };
-        }
-        // For webhooks, still create order but with no lines (so it's visible)
-        // This allows manual intervention
-    }
-
-    const newOrder = await prisma.order.create({
-        data: {
-            ...orderData,
-            orderLines: {
-                create: orderLinesData
-            }
-        }
-    });
-
-    // Sync fulfillments to order lines if order came in already fulfilled
-    // This handles orders that were fulfilled before sync
-    // Guarded - fulfillment sync failure shouldn't fail order creation
-    let fulfillmentSync: FulfillmentSyncResult | null = null;
-    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-        try {
-            fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
-        } catch (fulfillmentError: unknown) {
-            syncLogger.warn({
-                orderId: newOrder.id,
-                shopifyOrderId: String(shopifyOrder.id),
-                error: fulfillmentError instanceof Error ? fulfillmentError.message : 'Unknown error'
-            }, 'Failed to sync fulfillments for new order - order was created successfully');
-        }
-    }
-
-    // Update customer tier based on new order
-    // New orders with totalAmount > 0 may qualify customer for tier upgrade
-    if (orderData.customerId && orderData.totalAmount > 0) {
-        await updateCustomerTier(prisma, orderData.customerId);
-    }
-
-    return {
-        action: 'created',
-        orderId: newOrder.id,
-        linesCreated: orderLinesData.length,
-        totalLineItems: lineItems.length,
-        fulfillmentSync: fulfillmentSync || undefined,
+        return null;
     };
+
+    const linesResult = await createOrderLinesData(shopifyOrder, dbSkuLookup, skipNoSku);
+
+    // Handle skip case (batch processing with no matching SKUs)
+    if (linesResult.shouldSkip) {
+        return { action: 'skipped', reason: linesResult.skipReason };
+    }
+
+    // For webhooks (skipNoSku=false), allow empty orders for manual intervention
+    return createNewOrderWithLines(prisma, orderData, linesResult, shopifyOrder);
 }
 
 /**
@@ -992,226 +1163,60 @@ async function processOrderWithContext(
     const shopifyOrderId = String(shopifyOrder.id);
     const orderNumber = shopifyOrder.name || String(shopifyOrder.order_number);
 
-    // Look up existing order from pre-fetched map
-    let existingOrder = context.existingOrdersMap.get(`shopify:${shopifyOrderId}`)
-        || (orderNumber ? context.existingOrdersMap.get(`number:${orderNumber}`) : undefined);
-
-    // Extract customer and shipping info
-    const customer = shopifyOrder.customer;
-    const shippingAddress = shopifyOrder.shipping_address;
-
-    // Convert ShopifyCustomer to ShopifyCustomerData for findOrCreateCustomer
-    const customerData: ShopifyCustomerData | null = customer ? {
-        id: customer.id,
-        email: customer.email,
-        first_name: customer.first_name,
-        last_name: customer.last_name,
-        phone: customer.phone,
-        default_address: customer.default_address,
-    } : null;
+    // Look up existing order from pre-fetched map (O(1) instead of DB query)
+    const existingOrder = context.existingOrdersMap.get(`shopify:${shopifyOrderId}`)
+        || (orderNumber ? context.existingOrdersMap.get(`number:${orderNumber}`) : undefined)
+        || null;
 
     // Find or create customer (this still does DB query, but is fast)
+    const customerData = buildCustomerData(shopifyOrder.customer);
     const { customer: dbCustomer } = await findOrCreateCustomer(
         prisma,
         customerData,
         {
-            shippingAddress: shippingAddress as Record<string, unknown> | undefined,
+            shippingAddress: shopifyOrder.shipping_address as Record<string, unknown> | undefined,
             orderDate: new Date(shopifyOrder.created_at),
         }
     );
     const customerId = dbCustomer?.id || null;
 
-    // Determine order status
-    let status: string = shopifyClient.mapOrderStatus(shopifyOrder);
+    // Use shared helpers for status and tracking
+    const status = determineOrderStatus(shopifyOrder, existingOrder);
+    const tracking = extractOrderTrackingInfo(shopifyOrder, existingOrder);
 
-    if (existingOrder) {
-        const erpManagedStatuses: string[] = ['shipped', 'delivered'];
-        if (erpManagedStatuses.includes(existingOrder.status) && status !== 'cancelled') {
-            status = existingOrder.status;
-        } else if (existingOrder.status === 'open') {
-            status = 'open';
-        }
-    }
-
-    // Determine payment method
-    const paymentMethod = detectPaymentMethod(shopifyOrder, existingOrder?.paymentMethod);
-
-    // Extract tracking info
-    let awbNumber = existingOrder?.awbNumber || null;
-    let courier = existingOrder?.courier || null;
-    let shippedAt = existingOrder?.shippedAt || null;
-
-    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-        const fulfillment = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
-        awbNumber = fulfillment.tracking_number || awbNumber;
-        courier = fulfillment.tracking_company || courier;
-        if (fulfillment.created_at && !shippedAt) {
-            shippedAt = new Date(fulfillment.created_at);
-        }
-    }
-
-    // Build customer name
-    const customerName = shippingAddress
-        ? `${shippingAddress.first_name || ''} ${shippingAddress.last_name || ''}`.trim()
-        : customer?.first_name
-            ? `${customer.first_name} ${customer.last_name || ''}`.trim()
-            : 'Unknown';
-
-    const internalNote = extractInternalNote(shopifyOrder.note_attributes);
-
-    // Build order data
-    const orderData = {
-        shopifyOrderId,
-        orderNumber: orderNumber || `SHOP-${shopifyOrderId.slice(-8)}`,
-        channel: shopifyClient.mapOrderChannel(shopifyOrder),
+    // Build order data using shared helper
+    const orderData = buildOrderData(
+        { shopifyOrder, existingOrder, customerId },
         status,
-        customerId,
-        customerName: customerName || 'Unknown',
-        customerEmail: customer?.email || shopifyOrder.email || null,
-        customerPhone: shippingAddress?.phone || customer?.phone || shopifyOrder.phone || null,
-        shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-        totalAmount: parseFloat(shopifyOrder.total_price) || 0,
-        orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
-        internalNotes: existingOrder?.internalNotes || internalNote || null,
-        paymentMethod,
-        awbNumber,
-        courier,
-        shippedAt,
-        syncedAt: new Date(),
-    };
+        tracking
+    );
 
-    // Add cancellation note if cancelled
-    if (shopifyOrder.cancelled_at && !existingOrder?.internalNotes?.includes('Cancelled via Shopify')) {
-        orderData.internalNotes = existingOrder?.internalNotes
-            ? `${existingOrder.internalNotes}\nCancelled via Shopify at ${shopifyOrder.cancelled_at}`
-            : `Cancelled via Shopify at ${shopifyOrder.cancelled_at}`;
-    }
-
+    // Handle existing order update
     if (existingOrder) {
-        // Update detection
-        const needsUpdate =
-            existingOrder.status !== status ||
-            existingOrder.awbNumber !== awbNumber ||
-            existingOrder.courier !== courier ||
-            existingOrder.paymentMethod !== paymentMethod ||
-            existingOrder.customerEmail !== orderData.customerEmail ||
-            existingOrder.customerPhone !== orderData.customerPhone ||
-            existingOrder.totalAmount !== orderData.totalAmount ||
-            existingOrder.shippingAddress !== orderData.shippingAddress;
-
-        if (needsUpdate) {
-            await prisma.order.update({
-                where: { id: existingOrder.id },
-                data: orderData
-            });
-
-            let changeType: ProcessResult['action'] = 'updated';
-            if (shopifyOrder.cancelled_at && existingOrder.status !== 'cancelled') {
-                changeType = 'cancelled';
-            } else if (shopifyOrder.fulfillment_status === 'fulfilled') {
-                changeType = 'fulfilled';
-            }
-
-            // If order is being cancelled via Shopify, also cancel all order lines
-            if (changeType === 'cancelled') {
-                await prisma.orderLine.updateMany({
-                    where: {
-                        orderId: existingOrder.id,
-                        lineStatus: { not: 'cancelled' }
-                    },
-                    data: { lineStatus: 'cancelled' }
-                });
-            }
-
-            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
-            return { action: changeType, orderId: existingOrder.id, fulfillmentSync };
-        }
-
-        // Sync fulfillments even if order data hasn't changed
-        if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-            const fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, existingOrder.id, shopifyOrder);
-            if (fulfillmentSync.synced > 0) {
-                return { action: 'fulfillment_synced', orderId: existingOrder.id, fulfillmentSync };
-            }
-        }
-
-        return { action: 'skipped', orderId: existingOrder.id };
+        return handleExistingOrderUpdate(prisma, existingOrder, orderData, shopifyOrder);
     }
 
-    // Create new order with lines - USE PRE-FETCHED SKUs
-    const lineItems = shopifyOrder.line_items || [];
-    const orderLinesData = [];
-
-    for (const item of lineItems) {
-        const shopifyVariantId = item.variant_id ? String(item.variant_id) : null;
-
-        // Look up SKU from pre-fetched maps (O(1) instead of DB query)
-        let sku: { id: string } | undefined;
-        if (shopifyVariantId) {
-            sku = context.skuByVariantId.get(shopifyVariantId);
+    // Create order lines with Map-based SKU lookup (O(1) per item)
+    const mapSkuLookup: SkuLookupFn = async (variantId, skuCode) => {
+        if (variantId) {
+            const sku = context.skuByVariantId.get(variantId);
+            if (sku) return sku;
         }
-        if (!sku && item.sku) {
-            sku = context.skuByCode.get(item.sku);
+        if (skuCode) {
+            const sku = context.skuByCode.get(skuCode);
+            if (sku) return sku;
         }
-
-        if (sku) {
-            const originalPrice = parseFloat(item.price) || 0;
-            const effectiveUnitPrice = calculateEffectiveUnitPrice(
-                originalPrice,
-                item.quantity,
-                item.discount_allocations
-            );
-
-            orderLinesData.push({
-                shopifyLineId: String(item.id),
-                sku: { connect: { id: sku.id } },
-                qty: item.quantity,
-                unitPrice: effectiveUnitPrice,
-                lineStatus: 'pending',
-                shippingAddress: shippingAddress ? JSON.stringify(shippingAddress) : null,
-            });
-        }
-    }
-
-    // Handle no matching SKUs
-    if (orderLinesData.length === 0) {
-        return { action: 'skipped', reason: 'no_matching_skus' };
-    }
-
-    const newOrder = await prisma.order.create({
-        data: {
-            ...orderData,
-            orderLines: {
-                create: orderLinesData
-            }
-        }
-    });
-
-    // Sync fulfillments
-    let fulfillmentSync: FulfillmentSyncResult | null = null;
-    if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
-        try {
-            fulfillmentSync = await syncFulfillmentsToOrderLines(prisma, newOrder.id, shopifyOrder);
-        } catch (fulfillmentError: unknown) {
-            syncLogger.warn({
-                orderId: newOrder.id,
-                error: fulfillmentError instanceof Error ? fulfillmentError.message : 'Unknown error'
-            }, 'Failed to sync fulfillments for new order');
-        }
-    }
-
-    // Update customer tier
-    if (orderData.customerId && orderData.totalAmount > 0) {
-        await updateCustomerTier(prisma, orderData.customerId);
-    }
-
-    return {
-        action: 'created',
-        orderId: newOrder.id,
-        linesCreated: orderLinesData.length,
-        totalLineItems: lineItems.length,
-        fulfillmentSync: fulfillmentSync || undefined,
+        return null;
     };
+
+    // Batch processing always skips orders with no matching SKUs
+    const linesResult = await createOrderLinesData(shopifyOrder, mapSkuLookup, true);
+
+    if (linesResult.shouldSkip) {
+        return { action: 'skipped', reason: linesResult.skipReason };
+    }
+
+    return createNewOrderWithLines(prisma, orderData, linesResult, shopifyOrder);
 }
 
 /**

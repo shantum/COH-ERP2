@@ -558,10 +558,17 @@ If a cache entry fails to process:
 │               ↓                   ↓                              │
 │   ┌─────────────────────────────────────────────────────────┐   │
 │   │                 ORDER PROCESSOR                          │   │
-│   │  - Match/Create Customer                                │   │
-│   │  - Match/Create Order                                   │   │
-│   │  - Match SKUs for Line Items                            │   │
-│   │  - Track Fulfillment Details                            │   │
+│   │  Shared Helpers (single source of truth):               │   │
+│   │  - buildCustomerData() → Extract customer info          │   │
+│   │  - determineOrderStatus() → ERP precedence rules        │   │
+│   │  - buildOrderData() → Complete order payload            │   │
+│   │  - createOrderLinesData() → SKU lookup abstraction      │   │
+│   │  - handleExistingOrderUpdate() → Update flow            │   │
+│   │  - createNewOrderWithLines() → Create flow              │   │
+│   │                                                          │   │
+│   │  Entry Points:                                           │   │
+│   │  - processShopifyOrderToERP() (webhooks, DB lookups)    │   │
+│   │  - processOrderWithContext() (batch, O(1) Map lookups)  │   │
 │   └────────┬─────────────────────┬──────────────────────────┘   │
 │            │                     │                              │
 │            ↓                     ↓                              │
@@ -603,12 +610,30 @@ If a cache entry fails to process:
 | File | Purpose |
 |------|---------|
 | `server/src/services/shopify.ts` | Shopify API client |
-| `server/src/services/shopifyOrderProcessor.ts` | Order processing logic |
+| `server/src/services/shopifyOrderProcessor.ts` | Order processing logic (shared helpers + entry points) |
 | `server/src/routes/webhooks.ts` | Webhook handlers |
 | `server/src/routes/shopify/sync.ts` | Sync API endpoints |
 | `server/src/routes/shopify/jobs.ts` | Background job endpoints |
 | `server/src/routes/shopify/cache.ts` | Cache management endpoints |
 | `client/src/components/settings/tabs/ShopifyTab.tsx` | Settings UI |
+
+### Order Processor Architecture
+
+The `shopifyOrderProcessor.ts` uses shared helper functions to eliminate duplication:
+
+**Shared Helpers:**
+- `buildCustomerData()` - Extract ShopifyCustomerData from order
+- `determineOrderStatus()` - Calculate status with ERP precedence
+- `extractOrderTrackingInfo()` - Get tracking from fulfillments
+- `buildOrderData()` - Build complete order data payload
+- `detectOrderChanges()` - Check if existing order needs update
+- `createOrderLinesData()` - Build order lines with SKU lookup abstraction
+- `handleExistingOrderUpdate()` - Process update for existing orders
+- `createNewOrderWithLines()` - Create order with post-processing
+
+**Entry Points:**
+- `processShopifyOrderToERP()` - For webhooks/single orders (DB-based SKU lookups)
+- `processOrderWithContext()` - For batch processing (Map-based O(1) SKU lookups)
 
 ---
 

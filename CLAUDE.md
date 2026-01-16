@@ -117,6 +117,51 @@ p.data?.shopifyCache?.discountCodes
 - `order.trackingStatus` - iThink logistics (not Shopify)
 - Pre-computed: `lineShippedAt`, `lineDeliveredAt`, `lineTrackingStatus`, `daysInTransit`, `rtoStatus`
 
+## Shopify Order Processor
+
+Single source of truth: `server/src/services/shopifyOrderProcessor.ts`
+
+### Architecture
+The processor uses **shared helper functions** for order processing, with two entry points:
+- `processShopifyOrderToERP()` - Webhooks/single orders (DB-based SKU lookups)
+- `processOrderWithContext()` - Batch processing (Map-based O(1) SKU lookups)
+
+### Shared Helpers
+| Helper | Purpose |
+|--------|---------|
+| `buildCustomerData()` | Extract ShopifyCustomerData from order |
+| `determineOrderStatus()` | Calculate status with ERP precedence |
+| `extractOrderTrackingInfo()` | Get tracking from fulfillments |
+| `buildOrderData()` | Build complete order data payload |
+| `detectOrderChanges()` | Check if existing order needs update |
+| `createOrderLinesData()` | Build order lines with SKU lookup abstraction |
+| `handleExistingOrderUpdate()` | Process update for existing orders |
+| `createNewOrderWithLines()` | Create order with post-processing |
+
+### Key Pattern: SkuLookupFn Abstraction
+```typescript
+// DB lookup (webhooks) - slower but works for single orders
+const dbSkuLookup: SkuLookupFn = async (variantId, skuCode) => {
+    if (variantId) {
+        const sku = await prisma.sku.findFirst({ where: { shopifyVariantId: variantId } });
+        if (sku) return { id: sku.id };
+    }
+    // fallback to skuCode...
+};
+
+// Map lookup (batch) - O(1), uses pre-fetched data
+const mapSkuLookup: SkuLookupFn = async (variantId, skuCode) => {
+    if (variantId) return context.skuByVariantId.get(variantId) || null;
+    if (skuCode) return context.skuByCode.get(skuCode) || null;
+    return null;
+};
+```
+
+### Status Precedence
+- ERP is source of truth for `shipped`, `delivered` statuses
+- Shopify fulfillment captures tracking data but does NOT auto-ship
+- `open` status preserved over Shopify fulfillment status
+
 ## Caching Architecture
 
 ### Server-Side Caches
