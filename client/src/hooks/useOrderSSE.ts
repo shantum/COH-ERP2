@@ -48,6 +48,7 @@ interface SSEEvent {
     skuId?: string;
     changes?: Record<string, unknown>;
     affectedViews?: string[];
+    rowData?: Record<string, unknown>;
     userId?: string;
 }
 
