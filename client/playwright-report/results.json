@@ -1,0 +1,191 @@
+{
+  "config": {
+    "configFile": "/Users/shantumgupta/Desktop/COH-ERP2/client/playwright.config.ts",
+    "rootDir": "/Users/shantumgupta/Desktop/COH-ERP2/client/tests",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "reporter": [
+      [
+        "html",
+        {
+          "outputFolder": "playwright-report"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "playwright-report/results.json"
+        }
+      ],
+      [
+        "list",
+        null
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "quiet": false,
+    "projects": [
+      {
+        "outputDir": "/Users/shantumgupta/Desktop/COH-ERP2/client/test-output",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/Users/shantumgupta/Desktop/COH-ERP2/client/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.57.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "orders-production.spec.ts",
+      "file": "orders-production.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Orders Page Production Tests",
+          "file": "orders-production.spec.ts",
+          "line": 301,
+          "column": 6,
+          "specs": [
+            {
+              "title": "1. Page Loading - Orders page loads successfully",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 16918,
+                      "error": {
+                        "message": "Error: Login failed: Login failed",
+                        "stack": "Error: Login failed: Login failed\n    at login (/Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts:263:13)\n    at /Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts:304:5",
+                        "location": {
+                          "file": "/Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts",
+                          "column": 13,
+                          "line": 263
+                        },
+                        "snippet": "  261 |     const errorMsg = await page.locator('.bg-red-50').textContent().catch(() => null);\n  262 |     if (errorMsg) {\n> 263 |       throw new Error(`Login failed: ${errorMsg}`);\n      |             ^\n  264 |     }\n  265 |     throw new Error('Login failed: timeout waiting for redirect');\n  266 |   }"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts",
+                            "column": 13,
+                            "line": 263
+                          },
+                          "message": "Error: Login failed: Login failed\n\n  261 |     const errorMsg = await page.locator('.bg-red-50').textContent().catch(() => null);\n  262 |     if (errorMsg) {\n> 263 |       throw new Error(`Login failed: ${errorMsg}`);\n      |             ^\n  264 |     }\n  265 |     throw new Error('Login failed: timeout waiting for redirect');\n  266 |   }\n    at login (/Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts:263:13)\n    at /Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts:304:5"
+                        }
+                      ],
+                      "stdout": [
+                        {
+                          "text": "\n========== TEST METRICS SUMMARY ==========\n"
+                        },
+                        {
+                          "text": "Page Load Time: N/Ams\n"
+                        },
+                        {
+                          "text": "Data Load Time: N/Ams\n"
+                        },
+                        {
+                          "text": "Data Freshness: N/Ams\n"
+                        },
+                        {
+                          "text": "Page Change Time: N/Ams\n"
+                        },
+                        {
+                          "text": "View Switch Time: N/Ams\n"
+                        },
+                        {
+                          "text": "Row Count: N/A\n"
+                        },
+                        {
+                          "text": "==========================================\n\n"
+                        },
+                        {
+                          "text": "All metrics within acceptable thresholds\n"
+                        }
+                      ],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-01-15T15:32:19.632Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/shantumgupta/Desktop/COH-ERP2/client/test-output/orders-production-Orders-P-f94fb-ers-page-loads-successfully-chromium/test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/shantumgupta/Desktop/COH-ERP2/client/test-output/orders-production-Orders-P-f94fb-ers-page-loads-successfully-chromium/error-context.md"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/shantumgupta/Desktop/COH-ERP2/client/tests/orders-production.spec.ts",
+                        "column": 13,
+                        "line": 263
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "f10fcc92d159b61b8914-b7f0c1735e46bd1f1fbe",
+              "file": "orders-production.spec.ts",
+              "line": 307,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-01-15T15:32:19.219Z",
+    "duration": 18164.635000000002,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

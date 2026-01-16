@@ -359,17 +359,6 @@ export default function Orders() {
         [mutations.unpackLine, startProcessing, stopProcessing]
     );
 
-    const handleShipLine = useCallback(
-        (lineId: string, data: { awbNumber: string; courier: string }) => {
-            startProcessing(lineId);
-            mutations.markShippedLine.mutate(
-                { lineId, data },
-                { onSettled: () => stopProcessing(lineId) }
-            );
-        },
-        [mutations.markShippedLine, startProcessing, stopProcessing]
-    );
-
     const handleCustomize = useCallback(
         (_lineId: string, lineData: {
             lineId: string;

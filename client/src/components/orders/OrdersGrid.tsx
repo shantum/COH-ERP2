@@ -61,7 +61,7 @@
  * return <>{gridComponent}</>;
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect, type MutableRefObject } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
@@ -101,9 +101,6 @@ interface OrdersGridProps {
     onUnpick: (lineId: string) => void;
     onPack: (lineId: string) => void;
     onUnpack: (lineId: string) => void;
-    // Ship line directly (simplified flow: packed → shipped)
-    onShipLine?: (lineId: string, data: { awbNumber: string; courier: string }) => void;
-    // Legacy mark shipped (deprecated - use onShipLine)
     onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
     onUnmarkShippedLine: (lineId: string) => void;
     onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
@@ -116,7 +113,6 @@ interface OrdersGridProps {
     onEditOrder: (order: any) => void;
     onCancelOrder: (id: string, reason?: string) => void;
     onDeleteOrder: (id: string) => void;
-    onCloseOrder?: (id: string) => void;  // Close order (move to shipped view)
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
     onSelectCustomer: (customerId: string) => void;
@@ -156,7 +152,6 @@ interface OrdersGridProps {
     isCancellingLine: boolean;
     isUncancellingLine: boolean;
     isDeletingOrder: boolean;
-    isClosingOrder?: boolean;
     isUnshipping?: boolean;
     isMarkingDelivered?: boolean;
     isMarkingRto?: boolean;
@@ -174,7 +169,6 @@ export function OrdersGrid({
     onUnpick,
     onPack,
     onUnpack,
-    onShipLine: _onShipLine,
     onMarkShippedLine,
     onUnmarkShippedLine: _onUnmarkShippedLine,
     onUpdateLineTracking,
@@ -187,7 +181,6 @@ export function OrdersGrid({
     onEditOrder: _onEditOrder,
     onCancelOrder: _onCancelOrder,
     onDeleteOrder: _onDeleteOrder,
-    onCloseOrder: _onCloseOrder,
     onCancelLine,
     onUncancelLine,
     onSelectCustomer,
@@ -210,7 +203,6 @@ export function OrdersGrid({
     isCancellingLine,
     isUncancellingLine,
     isDeletingOrder,
-    isClosingOrder: _isClosingOrder,
     isUnshipping: _isUnshipping,
     isMarkingDelivered: _isMarkingDelivered,
     isMarkingRto: _isMarkingRto,

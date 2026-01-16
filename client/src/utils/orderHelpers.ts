@@ -125,11 +125,15 @@ export function enrichRowsWithInventory<T extends { skuId: string | null; skuSto
     }
 
     // Single O(n) pass to fill inventory data
+    // Only overwrite skuStock if we have inventory data (otherwise preserve server value)
+    const hasInventoryData = invMap.size > 0;
+
     return rows.map(row => {
         // Skip rows without SKU (empty orders, etc.)
         if (!row.skuId) return row;
 
-        const skuStock = invMap.get(row.skuId) ?? 0;
+        // Only use client inventory data if available; otherwise preserve server's skuStock
+        const skuStock = hasInventoryData ? (invMap.get(row.skuId) ?? 0) : (row.skuStock ?? 0);
         // Note: fabricBalance requires fabric ID which isn't on the row
         // For now, keep server default (0). Could enhance later if needed.
         const fabricBalance = row.fabricBalance ?? 0;

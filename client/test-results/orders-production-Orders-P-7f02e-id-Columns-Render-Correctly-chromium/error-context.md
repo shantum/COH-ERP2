@@ -1,0 +1,780 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: COH
+        - generic [ref=e8]: ERP
+      - navigation [ref=e9]:
+        - generic [ref=e11]:
+          - link "Dashboard" [ref=e12] [cursor=pointer]:
+            - /url: /
+            - img [ref=e13]
+            - generic [ref=e18]: Dashboard
+          - link "Search" [ref=e19] [cursor=pointer]:
+            - /url: /order-search
+            - img [ref=e20]
+            - generic [ref=e23]: Search
+        - generic [ref=e24]:
+          - generic [ref=e26]: Orders
+          - link "Orders" [ref=e28] [cursor=pointer]:
+            - /url: /orders
+            - img [ref=e29]
+            - generic [ref=e33]: Orders
+        - generic [ref=e34]:
+          - generic [ref=e36]: Catalog
+          - generic [ref=e37]:
+            - link "Catalog" [ref=e38] [cursor=pointer]:
+              - /url: /catalog
+              - img [ref=e39]
+              - generic [ref=e41]: Catalog
+            - link "Inventory" [ref=e42] [cursor=pointer]:
+              - /url: /inventory
+              - img [ref=e43]
+              - generic [ref=e47]: Inventory
+            - link "Fabrics" [ref=e48] [cursor=pointer]:
+              - /url: /fabrics
+              - img [ref=e49]
+              - generic [ref=e55]: Fabrics
+        - generic [ref=e56]:
+          - generic [ref=e57] [cursor=pointer]:
+            - generic [ref=e58]: Shipping & Returns
+            - img [ref=e59]
+          - generic [ref=e61]:
+            - link "Shipments" [ref=e62] [cursor=pointer]:
+              - /url: /orders?tab=shipped
+              - img [ref=e63]
+              - generic [ref=e68]: Shipments
+            - link "Returns" [ref=e69] [cursor=pointer]:
+              - /url: /returns
+              - img [ref=e70]
+              - generic [ref=e73]: Returns
+            - link "RTO Inward" [ref=e74] [cursor=pointer]:
+              - /url: /returns-rto
+              - img [ref=e75]
+              - generic [ref=e80]: RTO Inward
+        - generic [ref=e81]:
+          - generic [ref=e83]: Operations
+          - generic [ref=e84]:
+            - link "Production" [ref=e85] [cursor=pointer]:
+              - /url: /production
+              - img [ref=e86]
+              - generic [ref=e88]: Production
+            - link "Inventory Inward" [ref=e89] [cursor=pointer]:
+              - /url: /inventory-inward
+              - img [ref=e90]
+              - generic [ref=e94]: Inventory Inward
+        - generic [ref=e95]:
+          - generic [ref=e96] [cursor=pointer]:
+            - generic [ref=e97]: Counts
+            - img [ref=e98]
+          - generic [ref=e100]:
+            - link "Fabric Count" [ref=e101] [cursor=pointer]:
+              - /url: /fabric-reconciliation
+              - img [ref=e102]
+              - generic [ref=e106]: Fabric Count
+            - link "Inventory Count" [ref=e107] [cursor=pointer]:
+              - /url: /inventory-count
+              - img [ref=e108]
+              - generic [ref=e111]: Inventory Count
+        - generic [ref=e112]:
+          - generic [ref=e113] [cursor=pointer]:
+            - generic [ref=e114]: Reports
+            - img [ref=e115]
+          - generic [ref=e117]:
+            - link "Customers" [ref=e118] [cursor=pointer]:
+              - /url: /customers
+              - img [ref=e119]
+              - generic [ref=e124]: Customers
+            - link "Ledgers" [ref=e125] [cursor=pointer]:
+              - /url: /ledgers
+              - img [ref=e126]
+              - generic [ref=e128]: Ledgers
+            - link "Analytics" [ref=e129] [cursor=pointer]:
+              - /url: /analytics
+              - img [ref=e130]
+              - generic [ref=e132]: Analytics
+        - generic [ref=e133]:
+          - generic [ref=e134] [cursor=pointer]:
+            - generic [ref=e135]: Admin
+            - img [ref=e136]
+          - link "Settings" [ref=e139] [cursor=pointer]:
+            - /url: /settings
+            - img [ref=e140]
+            - generic [ref=e143]: Settings
+      - button "Collapse" [ref=e145] [cursor=pointer]:
+        - img [ref=e146]
+        - generic [ref=e148]: Collapse
+      - generic [ref=e150]:
+        - generic [ref=e151]:
+          - paragraph [ref=e152]: Admin
+          - paragraph [ref=e153]: admin
+        - button "Logout" [ref=e154] [cursor=pointer]:
+          - img [ref=e155]
+  - main [ref=e158]:
+    - generic [ref=e160]:
+      - heading "Dashboard" [level=1] [ref=e161]
+      - generic [ref=e162]:
+        - generic [ref=e163] [cursor=pointer]:
+          - generic [ref=e164]:
+            - generic [ref=e167]:
+              - generic [ref=e168]: Pending
+              - generic [ref=e169]: "468"
+            - generic [ref=e170]: →
+            - generic [ref=e173]:
+              - generic [ref=e174]: Allocated
+              - generic [ref=e175]: "0"
+            - generic [ref=e176]: →
+            - generic [ref=e179]:
+              - generic [ref=e180]: Ready
+              - generic [ref=e181]: "0"
+          - generic [ref=e183]:
+            - generic [ref=e184]: COD341
+            - generic [ref=e187]: 129Prepaid
+          - button [ref=e188]:
+            - img [ref=e189]
+        - generic [ref=e191]:
+          - generic [ref=e193]:
+            - generic [ref=e195]:
+              - generic [ref=e196]: Today
+              - generic [ref=e197]:
+                - generic [ref=e198]: ₹1.07L
+                - generic [ref=e199]:
+                  - img [ref=e200]
+                  - text: 158%
+              - generic [ref=e203]: 19 orders
+              - generic [ref=e204]:
+                - generic [ref=e205]:
+                  - img [ref=e206]
+                  - text: 56%
+                - generic [ref=e209]: "|"
+                - generic [ref=e210]:
+                  - img [ref=e211]
+                  - text: 44%
+            - generic [ref=e217]:
+              - generic [ref=e218]: Yesterday
+              - generic [ref=e219]:
+                - generic [ref=e220]: ₹55.84K
+                - generic [ref=e221]:
+                  - img [ref=e222]
+                  - text: 15%
+              - generic [ref=e225]: 19 orders
+              - generic [ref=e226]:
+                - generic [ref=e227]:
+                  - img [ref=e228]
+                  - text: 35%
+                - generic [ref=e231]: "|"
+                - generic [ref=e232]:
+                  - img [ref=e233]
+                  - text: 65%
+            - generic [ref=e239]:
+              - generic [ref=e240]: 7 Days
+              - generic [ref=e241]:
+                - generic [ref=e242]: ₹6.82L
+                - generic [ref=e243]:
+                  - img [ref=e244]
+                  - text: 1%
+              - generic [ref=e247]:
+                - text: 153 orders
+                - generic [ref=e248]: (₹97.40K/d)
+              - generic [ref=e249]:
+                - generic [ref=e250]:
+                  - img [ref=e251]
+                  - text: 48%
+                - generic [ref=e254]: "|"
+                - generic [ref=e255]:
+                  - img [ref=e256]
+                  - text: 52%
+            - generic [ref=e262]:
+              - generic [ref=e263]: 30 Days
+              - generic [ref=e264]:
+                - generic [ref=e265]: ₹25.50L
+                - generic [ref=e266]:
+                  - img [ref=e267]
+                  - text: 9%
+              - generic [ref=e270]:
+                - text: 592 orders
+                - generic [ref=e271]: (₹84.99K/d)
+              - generic [ref=e272]:
+                - generic [ref=e273]:
+                  - img [ref=e274]
+                  - text: 56%
+                - generic [ref=e277]: "|"
+                - generic [ref=e278]:
+                  - img [ref=e279]
+                  - text: 44%
+            - generic [ref=e285]:
+              - generic [ref=e286]: Last Month
+              - generic [ref=e287]:
+                - generic [ref=e288]: ₹23.43L
+                - generic [ref=e289]:
+                  - img [ref=e290]
+                  - text: 1%
+              - generic [ref=e293]:
+                - text: 587 orders
+                - generic [ref=e294]: (₹75.58K/d)
+              - generic [ref=e295]:
+                - generic [ref=e296]:
+                  - img [ref=e297]
+                  - text: 55%
+                - generic [ref=e300]: "|"
+                - generic [ref=e301]:
+                  - img [ref=e302]
+                  - text: 45%
+            - generic [ref=e308]:
+              - generic [ref=e309]: This Month
+              - generic [ref=e310]:
+                - generic [ref=e311]: ₹13.57L
+                - generic [ref=e312]:
+                  - img [ref=e313]
+                  - text: 20%
+              - generic [ref=e316]:
+                - text: 302 orders
+                - generic [ref=e317]: (₹90.49K/d)
+              - generic [ref=e318]:
+                - generic [ref=e319]:
+                  - img [ref=e320]
+                  - text: 52%
+                - generic [ref=e323]: "|"
+                - generic [ref=e324]:
+                  - img [ref=e325]
+                  - text: 48%
+          - generic [ref=e330]:
+            - generic [ref=e331]:
+              - generic [ref=e332]: Top 30d
+              - generic [ref=e333]:
+                - generic [ref=e334]:
+                  - generic [ref=e335]: The Rib V Neck
+                  - generic [ref=e336]: "136"
+                - generic [ref=e337]:
+                  - generic [ref=e338]: The Linen Wide Leg Pants
+                  - generic [ref=e339]: "58"
+                - generic [ref=e340]:
+                  - generic [ref=e341]: The Linen Day Shirt
+                  - generic [ref=e342]: "52"
+                - generic [ref=e343]:
+                  - generic [ref=e344]: The Rib Tank
+                  - generic [ref=e345]: "50"
+                - generic [ref=e346]:
+                  - generic [ref=e347]: The Linen V Neck Top
+                  - generic [ref=e348]: "40"
+                - generic [ref=e349]:
+                  - generic [ref=e350]: The Linen Boat Neck Top
+                  - generic [ref=e351]: "36"
+            - generic [ref=e352]:
+              - generic [ref=e353]: Open Units
+              - generic [ref=e354]: "807"
+      - generic [ref=e355]:
+        - generic [ref=e356]:
+          - generic [ref=e357]:
+            - generic [ref=e358]:
+              - img [ref=e359]
+              - heading "Top Products" [level=2] [ref=e362]
+            - generic [ref=e363]:
+              - generic [ref=e364]:
+                - button "Product" [ref=e365] [cursor=pointer]:
+                  - img [ref=e366]
+                  - generic [ref=e370]: Product
+                - button "Variation" [ref=e371] [cursor=pointer]:
+                  - img [ref=e372]
+                  - generic [ref=e378]: Variation
+              - combobox [ref=e379]:
+                - option "7d"
+                - option "14d"
+                - option "30d" [selected]
+                - option "90d"
+          - generic [ref=e380]:
+            - generic [ref=e381]:
+              - generic [ref=e382]: "1"
+              - img "The Rib V Neck" [ref=e383]
+              - generic [ref=e384]:
+                - generic [ref=e386]: The Rib V Neck
+                - generic [ref=e387]:
+                  - generic [ref=e388]: 89 orders
+                  - generic [ref=e389]: •
+                  - generic [ref=e390]: Carbon Black, Marshmallow White +3
+              - generic [ref=e391]:
+                - generic [ref=e392]: 112 units
+                - generic [ref=e393]: ₹1.6L
+            - generic [ref=e394]:
+              - generic [ref=e395]: "2"
+              - img "The Linen Wide Leg Pants" [ref=e396]
+              - generic [ref=e397]:
+                - generic [ref=e399]: The Linen Wide Leg Pants
+                - generic [ref=e400]:
+                  - generic [ref=e401]: 43 orders
+                  - generic [ref=e402]: •
+                  - generic [ref=e403]: Slate Grey, Lavender +3
+              - generic [ref=e404]:
+                - generic [ref=e405]: 50 units
+                - generic [ref=e406]: ₹1.6L
+            - generic [ref=e407]:
+              - generic [ref=e408]: "3"
+              - img "The Rib Tank" [ref=e409]
+              - generic [ref=e410]:
+                - generic [ref=e412]: The Rib Tank
+                - generic [ref=e413]:
+                  - generic [ref=e414]: 37 orders
+                  - generic [ref=e415]: •
+                  - generic [ref=e416]: Carbon Black, Marshmallow White +2
+              - generic [ref=e417]:
+                - generic [ref=e418]: 46 units
+                - generic [ref=e419]: ₹62.1K
+            - generic [ref=e420]:
+              - generic [ref=e421]: "4"
+              - img "The Linen V Neck Top" [ref=e422]
+              - generic [ref=e423]:
+                - generic [ref=e425]: The Linen V Neck Top
+                - generic [ref=e426]:
+                  - generic [ref=e427]: 28 orders
+                  - generic [ref=e428]: •
+                  - generic [ref=e429]: Cloud White, Vintage Pink +3
+              - generic [ref=e430]:
+                - generic [ref=e431]: 35 units
+                - generic [ref=e432]: ₹75.2K
+            - generic [ref=e433]:
+              - generic [ref=e434]: "5"
+              - img "The Linen Boat Neck Top" [ref=e435]
+              - generic [ref=e436]:
+                - generic [ref=e438]: The Linen Boat Neck Top
+                - generic [ref=e439]:
+                  - generic [ref=e440]: 27 orders
+                  - generic [ref=e441]: •
+                  - generic [ref=e442]: Indian Red, Mustard +3
+              - generic [ref=e443]:
+                - generic [ref=e444]: 33 units
+                - generic [ref=e445]: ₹64.5K
+            - generic [ref=e446]:
+              - generic [ref=e447]: "6"
+              - img "The Linen Day Shirt" [ref=e448]
+              - generic [ref=e449]:
+                - generic [ref=e451]: The Linen Day Shirt
+                - generic [ref=e452]:
+                  - generic [ref=e453]: 26 orders
+                  - generic [ref=e454]: •
+                  - generic [ref=e455]: Taupe, Indian Red +3
+              - generic [ref=e456]:
+                - generic [ref=e457]: 32 units
+                - generic [ref=e458]: ₹1.2L
+            - generic [ref=e459]:
+              - generic [ref=e460]: "7"
+              - img "The Linen Shirt" [ref=e461]
+              - generic [ref=e462]:
+                - generic [ref=e464]: The Linen Shirt
+                - generic [ref=e465]:
+                  - generic [ref=e466]: 18 orders
+                  - generic [ref=e467]: •
+                  - generic [ref=e468]: Olive Green, Tree Trunk Brown +3
+              - generic [ref=e469]:
+                - generic [ref=e470]: 23 units
+                - generic [ref=e471]: ₹86.8K
+            - generic [ref=e472]:
+              - generic [ref=e473]: "8"
+              - img "The Linen Sleeveless Shirt" [ref=e474]
+              - generic [ref=e475]:
+                - generic [ref=e477]: The Linen Sleeveless Shirt
+                - generic [ref=e478]:
+                  - generic [ref=e479]: 22 orders
+                  - generic [ref=e480]: •
+                  - generic [ref=e481]: Tree Trunk Brown, Lavender +3
+              - generic [ref=e482]:
+                - generic [ref=e483]: 23 units
+                - generic [ref=e484]: ₹66.3K
+            - generic [ref=e485]:
+              - generic [ref=e486]: "9"
+              - img "The Linen Midi Dress" [ref=e487]
+              - generic [ref=e488]:
+                - generic [ref=e490]: The Linen Midi Dress
+                - generic [ref=e491]:
+                  - generic [ref=e492]: 20 orders
+                  - generic [ref=e493]: •
+                  - generic [ref=e494]: Mustard, Aqua +3
+              - generic [ref=e495]:
+                - generic [ref=e496]: 22 units
+                - generic [ref=e497]: ₹86.4K
+            - generic [ref=e498]:
+              - generic [ref=e499]: "10"
+              - img "The Linen V Neck Tank" [ref=e500]
+              - generic [ref=e501]:
+                - generic [ref=e503]: The Linen V Neck Tank
+                - generic [ref=e504]:
+                  - generic [ref=e505]: 20 orders
+                  - generic [ref=e506]: •
+                  - generic [ref=e507]: Midnight Black, Vintage Pink +3
+              - generic [ref=e508]:
+                - generic [ref=e509]: 22 units
+                - generic [ref=e510]: ₹43.5K
+            - generic [ref=e511]:
+              - generic [ref=e512]: "11"
+              - img "The Linen Round Neck Tank" [ref=e513]
+              - generic [ref=e514]:
+                - generic [ref=e516]: The Linen Round Neck Tank
+                - generic [ref=e517]:
+                  - generic [ref=e518]: 17 orders
+                  - generic [ref=e519]: •
+                  - generic [ref=e520]: Mustard, Indian Red +3
+              - generic [ref=e521]:
+                - generic [ref=e522]: 20 units
+                - generic [ref=e523]: ₹34.0K
+            - generic [ref=e524]:
+              - generic [ref=e525]: "12"
+              - img "The Linen Shirt | Short Sleeve" [ref=e526]
+              - generic [ref=e527]:
+                - generic [ref=e529]: The Linen Shirt | Short Sleeve
+                - generic [ref=e530]:
+                  - generic [ref=e531]: 11 orders
+                  - generic [ref=e532]: •
+                  - generic [ref=e533]: Slate Grey, Wildflower Blue +3
+              - generic [ref=e534]:
+                - generic [ref=e535]: 20 units
+                - generic [ref=e536]: ₹68.2K
+            - generic [ref=e537]:
+              - generic [ref=e538]: "13"
+              - img "The Linen Easy Pants" [ref=e539]
+              - generic [ref=e540]:
+                - generic [ref=e542]: The Linen Easy Pants
+                - generic [ref=e543]:
+                  - generic [ref=e544]: 13 orders
+                  - generic [ref=e545]: •
+                  - generic [ref=e546]: Midnight Black, Ginger +3
+              - generic [ref=e547]:
+                - generic [ref=e548]: 16 units
+                - generic [ref=e549]: ₹52.2K
+            - generic [ref=e550]:
+              - generic [ref=e551]: "14"
+              - img "The Pima Crew | Long Sleeve" [ref=e552]
+              - generic [ref=e553]:
+                - generic [ref=e555]: The Pima Crew | Long Sleeve
+                - generic [ref=e556]:
+                  - generic [ref=e557]: 12 orders
+                  - generic [ref=e558]: •
+                  - generic [ref=e559]: Deep Sea Blue, Carbon Black
+              - generic [ref=e560]:
+                - generic [ref=e561]: 14 units
+                - generic [ref=e562]: ₹27.0K
+            - generic [ref=e563]:
+              - generic [ref=e564]: "15"
+              - img "The Rib Boat Neck" [ref=e565]
+              - generic [ref=e566]:
+                - generic [ref=e568]: The Rib Boat Neck
+                - generic [ref=e569]:
+                  - generic [ref=e570]: 12 orders
+                  - generic [ref=e571]: •
+                  - generic [ref=e572]: Carbon Black, Marshmallow White +1
+              - generic [ref=e573]:
+                - generic [ref=e574]: 13 units
+                - generic [ref=e575]: ₹21.1K
+        - generic [ref=e576]:
+          - generic [ref=e577]:
+            - generic [ref=e578]:
+              - img [ref=e579]
+              - heading "Top Fabrics" [level=2] [ref=e583]
+            - generic [ref=e584]:
+              - generic [ref=e585]:
+                - button "Type" [ref=e586] [cursor=pointer]:
+                  - img [ref=e587]
+                  - generic [ref=e591]: Type
+                - button "Color" [ref=e592] [cursor=pointer]:
+                  - img [ref=e593]
+                  - generic [ref=e599]: Color
+              - combobox [ref=e600]:
+                - option "7d"
+                - option "14d"
+                - option "30d" [selected]
+                - option "60d"
+                - option "90d"
+          - generic [ref=e601]:
+            - generic [ref=e602]:
+              - generic [ref=e603]: "1"
+              - generic [ref=e604]:
+                - generic [ref=e606]: Default
+                - generic [ref=e607]:
+                  - generic [ref=e608]: 51 products
+                  - generic [ref=e609]: ·
+                  - generic [ref=e610]: 270 orders
+                  - generic [ref=e611]: ·
+                  - generic [ref=e612]: Default
+              - generic [ref=e613]:
+                - generic [ref=e614]: ₹13.6L
+                - generic [ref=e615]: 423 units
+            - generic [ref=e616]:
+              - generic [ref=e617]: "2"
+              - generic [ref=e618]:
+                - generic [ref=e620]: Rib
+                - generic [ref=e621]:
+                  - generic [ref=e622]: 6 products
+                  - generic [ref=e623]: ·
+                  - generic [ref=e624]: 152 orders
+                  - generic [ref=e625]: ·
+                  - generic [ref=e626]: Carbon Black, Marshmallow White
+              - generic [ref=e627]:
+                - generic [ref=e628]: ₹2.9L
+                - generic [ref=e629]: 198 units
+            - generic [ref=e630]:
+              - generic [ref=e631]: "3"
+              - generic [ref=e632]:
+                - generic [ref=e634]: Supima Single Jersey
+                - generic [ref=e635]:
+                  - generic [ref=e636]: 14 products
+                  - generic [ref=e637]: ·
+                  - generic [ref=e638]: 69 orders
+                  - generic [ref=e639]: ·
+                  - generic [ref=e640]: Deep Sea Blue, Carbon Black
+              - generic [ref=e641]:
+                - generic [ref=e642]: ₹1.7L
+                - generic [ref=e643]: 84 units
+            - generic [ref=e644]:
+              - generic [ref=e645]: "4"
+              - generic [ref=e646]:
+                - generic [ref=e648]: Supima French Terry
+                - generic [ref=e649]:
+                  - generic [ref=e650]: 5 products
+                  - generic [ref=e651]: ·
+                  - generic [ref=e652]: 12 orders
+                  - generic [ref=e653]: ·
+                  - generic [ref=e654]: Military Green, Walnut Brown
+              - generic [ref=e655]:
+                - generic [ref=e656]: ₹35.7K
+                - generic [ref=e657]: 18 units
+            - generic [ref=e658]:
+              - generic [ref=e659]: "5"
+              - generic [ref=e660]:
+                - generic [ref=e662]: Vintage
+                - generic [ref=e663]:
+                  - generic [ref=e664]: 1 products
+                  - generic [ref=e665]: ·
+                  - generic [ref=e666]: 4 orders
+                  - generic [ref=e667]: ·
+                  - generic [ref=e668]: Castle Grey, Marine Green
+              - generic [ref=e669]:
+                - generic [ref=e670]: ₹6.1K
+                - generic [ref=e671]: 4 units
+        - generic [ref=e672]:
+          - generic [ref=e673]:
+            - generic [ref=e674]:
+              - img [ref=e675]
+              - heading "Top Customers" [level=2] [ref=e680]
+            - combobox [ref=e681]:
+              - option "This Month"
+              - option "Last Month"
+              - option "3 Months" [selected]
+              - option "6 Months"
+              - option "1 Year"
+          - generic [ref=e682]:
+            - generic [ref=e683]:
+              - generic [ref=e684]: "1"
+              - generic [ref=e685]:
+                - generic [ref=e686]:
+                  - generic [ref=e687]: Shobhana chitale
+                  - generic [ref=e688]:
+                    - img [ref=e689]
+                    - text: platinum
+                - generic [ref=e692]:
+                  - generic [ref=e693]: Mumbai •
+                  - text: 8 orders • 58 units
+                - generic [ref=e694]:
+                  - generic [ref=e695]:
+                    - text: The Linen Sleeveless Shirt
+                    - generic [ref=e696]: (8)
+                  - generic [ref=e697]:
+                    - text: The Linen Day Shirt
+                    - generic [ref=e698]: (4)
+                  - generic [ref=e699]:
+                    - text: The Rib Tank
+                    - generic [ref=e700]: (11)
+              - generic [ref=e702]: ₹1.2L
+            - generic [ref=e703]:
+              - generic [ref=e704]: "2"
+              - generic [ref=e705]:
+                - generic [ref=e706]:
+                  - generic [ref=e707]: raghavendran v
+                  - generic [ref=e708]:
+                    - img [ref=e709]
+                    - text: platinum
+                - generic [ref=e712]:
+                  - generic [ref=e713]: Chennai •
+                  - text: 5 orders • 22 units
+                - generic [ref=e714]:
+                  - generic [ref=e715]:
+                    - text: The Linen Shirt | Short Sleeve
+                    - generic [ref=e716]: (12)
+                  - generic [ref=e717]:
+                    - text: The Linen Easy Pants
+                    - generic [ref=e718]: (10)
+              - generic [ref=e720]: ₹81.5K
+            - generic [ref=e721]:
+              - generic [ref=e722]: "3"
+              - generic [ref=e723]:
+                - generic [ref=e724]:
+                  - generic [ref=e725]: B greesma
+                  - generic [ref=e726]:
+                    - img [ref=e727]
+                    - text: platinum
+                - generic [ref=e730]:
+                  - generic [ref=e731]: Hyderabad •
+                  - text: 2 orders • 12 units
+                - generic [ref=e732]:
+                  - generic [ref=e733]:
+                    - text: The Linen V Neck Shift Dress
+                    - generic [ref=e734]: (5)
+                  - generic [ref=e735]:
+                    - text: The Linen Midi Dress
+                    - generic [ref=e736]: (3)
+                  - generic [ref=e737]:
+                    - text: Linen Co-ord Set with Sleeveless Shirt and Oversized Pants
+                    - generic [ref=e738]: (1)
+              - generic [ref=e740]: ₹70.7K
+            - generic [ref=e741]:
+              - generic [ref=e742]: "4"
+              - generic [ref=e743]:
+                - generic [ref=e744]:
+                  - generic [ref=e745]: Nirupama Kulkarni
+                  - generic [ref=e746]:
+                    - img [ref=e747]
+                    - text: platinum
+                - generic [ref=e750]:
+                  - generic [ref=e751]: Mumbai •
+                  - text: 2 orders • 6 units
+                - generic [ref=e752]:
+                  - generic [ref=e753]:
+                    - text: The Linen Cutaway Maxi Dress
+                    - generic [ref=e754]: (5)
+                  - generic [ref=e755]:
+                    - text: The Linen Midi Dress
+                    - generic [ref=e756]: (1)
+              - generic [ref=e758]: ₹42.5K
+            - generic [ref=e759]:
+              - generic [ref=e760]: "5"
+              - generic [ref=e761]:
+                - generic [ref=e762]:
+                  - generic [ref=e763]: Sheetal shah
+                  - generic [ref=e764]:
+                    - img [ref=e765]
+                    - text: gold
+                - generic [ref=e768]:
+                  - generic [ref=e769]: Mumbai •
+                  - text: 5 orders • 14 units
+                - generic [ref=e770]:
+                  - generic [ref=e771]:
+                    - text: The Linen Wide Leg Pants
+                    - generic [ref=e772]: (6)
+                  - generic [ref=e773]:
+                    - text: The Linen Day Shirt
+                    - generic [ref=e774]: (2)
+                  - generic [ref=e775]:
+                    - text: The Linen Boat Neck Top
+                    - generic [ref=e776]: (3)
+              - generic [ref=e778]: ₹37.6K
+            - generic [ref=e779]:
+              - generic [ref=e780]: "6"
+              - generic [ref=e781]:
+                - generic [ref=e782]:
+                  - generic [ref=e783]: Meghna Salgia
+                  - generic [ref=e784]:
+                    - img [ref=e785]
+                    - text: gold
+                - generic [ref=e788]:
+                  - generic [ref=e789]: Mumbai •
+                  - text: 5 orders • 10 units
+                - generic [ref=e790]:
+                  - generic [ref=e791]:
+                    - text: The Linen Day Shirt
+                    - generic [ref=e792]: (4)
+                  - generic [ref=e793]:
+                    - text: The Linen Oversized Pants
+                    - generic [ref=e794]: (3)
+                  - generic [ref=e795]:
+                    - text: The Linen Wide Leg Pants
+                    - generic [ref=e796]: (2)
+              - generic [ref=e798]: ₹35.1K
+            - generic [ref=e799]:
+              - generic [ref=e800]: "7"
+              - generic [ref=e801]:
+                - generic [ref=e802]:
+                  - generic [ref=e803]: Mohan verghese chunkath
+                  - generic [ref=e804]:
+                    - img [ref=e805]
+                    - text: gold
+                - generic [ref=e808]:
+                  - generic [ref=e809]: Chennai •
+                  - text: 6 orders • 9 units
+                - generic [ref=e810]:
+                  - generic [ref=e811]:
+                    - text: The Linen Wide Leg Pants
+                    - generic [ref=e812]: (6)
+                  - generic [ref=e813]:
+                    - text: The Linen Oversized Pants
+                    - generic [ref=e814]: (1)
+                  - generic [ref=e815]:
+                    - text: The Linen V Neck Top
+                    - generic [ref=e816]: (1)
+              - generic [ref=e818]: ₹32.2K
+            - generic [ref=e819]:
+              - generic [ref=e820]: "8"
+              - generic [ref=e821]:
+                - generic [ref=e822]:
+                  - generic [ref=e823]: supreeti garg
+                  - generic [ref=e824]:
+                    - img [ref=e825]
+                    - text: gold
+                - generic [ref=e828]:
+                  - generic [ref=e829]: Gurgaon •
+                  - text: 4 orders • 9 units
+                - generic [ref=e830]:
+                  - generic [ref=e831]:
+                    - text: The Linen Wide Leg Pants
+                    - generic [ref=e832]: (2)
+                  - generic [ref=e833]:
+                    - text: The Linen Midi Dress
+                    - generic [ref=e834]: (1)
+                  - generic [ref=e835]:
+                    - text: Linen Co-ord Set with Boat Neck Top and Wide Leg Pants
+                    - generic [ref=e836]: (1)
+              - generic [ref=e838]: ₹31.4K
+            - generic [ref=e839]:
+              - generic [ref=e840]: "9"
+              - generic [ref=e841]:
+                - generic [ref=e842]:
+                  - generic [ref=e843]: Sushma kalvade
+                  - generic [ref=e844]:
+                    - img [ref=e845]
+                    - text: platinum
+                - generic [ref=e848]:
+                  - generic [ref=e849]: Pune •
+                  - text: 3 orders • 9 units
+                - generic [ref=e850]:
+                  - generic [ref=e851]:
+                    - text: The Linen Shirt
+                    - generic [ref=e852]: (3)
+                  - generic [ref=e853]:
+                    - text: The Linen Wide Leg Pants
+                    - generic [ref=e854]: (3)
+                  - generic [ref=e855]:
+                    - text: The Linen Sleeveless Shirt
+                    - generic [ref=e856]: (1)
+              - generic [ref=e858]: ₹29.2K
+            - generic [ref=e859]:
+              - generic [ref=e860]: "10"
+              - generic [ref=e861]:
+                - generic [ref=e862]:
+                  - generic [ref=e863]: Jaya Chandrasekaran
+                  - generic [ref=e864]:
+                    - img [ref=e865]
+                    - text: gold
+                - generic [ref=e868]:
+                  - generic [ref=e869]: Chennai •
+                  - text: 2 orders • 8 units
+                - generic [ref=e870]:
+                  - generic [ref=e871]:
+                    - text: The Linen Wide Leg Pants
+                    - generic [ref=e872]: (2)
+                  - generic [ref=e873]:
+                    - text: The Linen Sleeveless Shirt
+                    - generic [ref=e874]: (2)
+                  - generic [ref=e875]:
+                    - text: The Linen Oversized Pants
+                    - generic [ref=e876]: (1)
+              - generic [ref=e878]: ₹28.1K
+```

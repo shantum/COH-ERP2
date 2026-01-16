@@ -27,8 +27,6 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'on-first-retry',
-    // Persist storage state (cookies/localStorage) between tests
-    storageState: 'test-output/.auth/user.json',
 
     // Record HAR files for detailed network analysis (optional)
     ...(process.env.RECORD_HAR === 'true' && {
@@ -46,6 +44,7 @@ export default defineConfig({
       name: 'setup',
       testMatch: /global\.setup\.ts/,
       teardown: 'cleanup',
+      use: { storageState: undefined }, // Don't use storage state for setup
     },
     {
       name: 'cleanup',
