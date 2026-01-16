@@ -421,28 +421,6 @@ function mapShipmentStatus(shopifyStatus: string | null | undefined): string {
 }
 
 /**
- * Update order status based on line statuses
- * Order becomes 'shipped' when ALL non-cancelled lines are shipped
- */
-async function updateOrderStatusFromLines(prisma: PrismaClient, orderId: string): Promise<void> {
-    const lines = await prisma.orderLine.findMany({
-        where: { orderId, lineStatus: { not: 'cancelled' } },
-        select: { lineStatus: true }
-    });
-
-    if (lines.length === 0) return;
-
-    const allShipped = lines.every(l => l.lineStatus === 'shipped');
-
-    if (allShipped) {
-        await prisma.order.update({
-            where: { id: orderId },
-            data: { status: 'shipped' }
-        });
-    }
-}
-
-/**
  * Sync fulfillment data from Shopify to OrderLines
  * Maps each fulfillment's line_items to ERP OrderLines via shopifyLineId
  *
@@ -471,22 +449,19 @@ export async function syncFulfillmentsToOrderLines(
         // CASE 1: line_items present - PRECISE sync to specific lines
         if (fulfillment.line_items?.length) {
             const shopifyLineIds = fulfillment.line_items.map((li: { id: number }) => String(li.id));
-            const fulfillmentShippedAt = fulfillment.created_at ? new Date(fulfillment.created_at) : new Date();
 
-            // Update matching OrderLines with tracking data AND mark as shipped
-            // Shopify fulfillment = physically shipped, so we update lineStatus too
+            // Sync tracking data only - ERP is source of truth for shipped status
+            // lineStatus changes must go through ERP workflow (allocate → pick → pack → ship)
             const result = await prisma.orderLine.updateMany({
                 where: {
                     orderId,
                     shopifyLineId: { in: shopifyLineIds },
-                    lineStatus: { notIn: ['cancelled', 'shipped'] },
+                    lineStatus: { not: 'cancelled' },
                 },
                 data: {
                     awbNumber,
                     courier,
                     trackingStatus,
-                    lineStatus: 'shipped',
-                    shippedAt: fulfillmentShippedAt,
                 }
             });
 
@@ -501,21 +476,18 @@ export async function syncFulfillmentsToOrderLines(
         }
         // CASE 2: No line_items - FALLBACK: update all lines without AWB
         // This handles single-fulfillment orders where Shopify may omit line_items
+        // Sync tracking data only - ERP is source of truth for shipped status
         else if (awbNumber) {
-            const fulfillmentShippedAt = fulfillment.created_at ? new Date(fulfillment.created_at) : new Date();
-
             const result = await prisma.orderLine.updateMany({
                 where: {
                     orderId,
                     awbNumber: null, // Only update lines without existing AWB (preserve split shipments)
-                    lineStatus: { notIn: ['cancelled', 'shipped'] },
+                    lineStatus: { not: 'cancelled' },
                 },
                 data: {
                     awbNumber,
                     courier,
                     trackingStatus,
-                    lineStatus: 'shipped',
-                    shippedAt: fulfillmentShippedAt,
                 }
             });
 
@@ -531,10 +503,8 @@ export async function syncFulfillmentsToOrderLines(
         }
     }
 
-    // Update order status if all lines are now shipped
-    if (syncedCount > 0) {
-        await updateOrderStatusFromLines(prisma, orderId);
-    }
+    // Note: We no longer auto-update order status here
+    // ERP is source of truth - shipped status must go through ERP workflow
 
     return { synced: syncedCount, fulfillments: fulfillments.length };
 }
