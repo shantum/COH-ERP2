@@ -172,4 +172,17 @@ export {
     rtoNotAlreadyInitiated,
     rtoMustBeInitiated,
     rtoNotAlreadyReceived,
+
+    // Inventory rules
+    inventoryRules,
+    lineStatusMustBePending,
+    allLinesMustBePending,
+    sufficientStockAvailable,
+    lineMustBeAllocated,
+
+    // Line edit rules
+    lineEditRules,
+    lineEditableStatus,
+    lineNotShippedForEdit,
+    orderOpenForAddLine,
 } from './definitions/index.js';

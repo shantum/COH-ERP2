@@ -12,6 +12,8 @@ import { shippingRules } from './shipping.js';
 import { holdRules, VALID_ORDER_HOLD_REASONS, VALID_LINE_HOLD_REASONS } from './hold.js';
 import { archiveRules, TERMINAL_STATUSES } from './archive.js';
 import { rtoRules } from './rto.js';
+import { inventoryRules } from './inventory.js';
+import { lineEditRules } from './lineEdit.js';
 
 // ============================================
 // RE-EXPORT INDIVIDUAL RULES
@@ -22,6 +24,8 @@ export * from './shipping.js';
 export * from './hold.js';
 export * from './archive.js';
 export * from './rto.js';
+export * from './inventory.js';
+export * from './lineEdit.js';
 
 // ============================================
 // AGGREGATED RULE COLLECTIONS
@@ -36,6 +40,8 @@ export const allRules: RuleDefinition<unknown>[] = [
     ...holdRules,
     ...archiveRules,
     ...rtoRules,
+    ...inventoryRules,
+    ...lineEditRules,
 ] as RuleDefinition<unknown>[];
 
 // ============================================

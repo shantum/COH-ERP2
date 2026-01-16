@@ -181,15 +181,15 @@ router.put(
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
 
-        // Notes can be updated regardless of line status
-        // qty/unitPrice require pending status
+        // Enforce rules for line editing
         const hasQtyOrPrice = qty !== undefined || unitPrice !== undefined;
-        if (hasQtyOrPrice && line.lineStatus !== 'pending') {
-            throw new BusinessLogicError(
-                `Can only edit qty/price on pending lines (current: ${line.lineStatus})`,
-                'INVALID_STATUS_FOR_EDIT'
-            );
-        }
+        await enforceRulesInExpress('editLine', req, {
+            data: {
+                line: { id: line.id, lineStatus: line.lineStatus },
+                hasQtyOrPriceChange: hasQtyOrPrice,
+            },
+            phase: 'pre',
+        });
 
         const updateData: Prisma.OrderLineUpdateInput = {};
         if (qty !== undefined) updateData.qty = qty;
@@ -251,12 +251,11 @@ router.post(
             throw new NotFoundError('Order not found', 'Order', orderId);
         }
 
-        if (order.status !== 'open') {
-            throw new BusinessLogicError(
-                `Can only add lines to open orders (current: ${order.status})`,
-                'INVALID_STATUS_FOR_ADD_LINE'
-            );
-        }
+        // Enforce rules for adding lines
+        await enforceRulesInExpress('addLine', req, {
+            data: { order: { id: order.id, status: order.status } },
+            phase: 'pre',
+        });
 
         await req.prisma.$transaction(async (tx) => {
             await tx.orderLine.create({

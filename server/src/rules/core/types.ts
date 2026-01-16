@@ -18,6 +18,7 @@ export type RuleCategory =
     | 'hold'
     | 'archive'
     | 'lineEdit'
+    | 'inventory'
     | 'rto';
 
 /**
@@ -45,6 +46,9 @@ export type RuleOperation =
     // Line Edit
     | 'editLine'
     | 'addLine'
+    // Inventory
+    | 'allocateLine'
+    | 'unallocateLine'
     // RTO
     | 'initiateRto'
     | 'receiveRto'
