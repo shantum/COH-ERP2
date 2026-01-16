@@ -38,7 +38,9 @@ export interface OrderUpdateEvent {
         | 'order_cancelled'
         | 'order_uncancelled'
         // Batch update
-        | 'lines_batch_update';
+        | 'lines_batch_update'
+        // Buffer overflow (client should refetch)
+        | 'buffer_overflow';
     view?: string;
     orderId?: string;
     lineId?: string;
@@ -46,6 +48,9 @@ export interface OrderUpdateEvent {
     skuId?: string;
     changes?: Record<string, unknown>;
     affectedViews?: string[];
+    // Full row data for direct cache update (eliminates need for refetch)
+    rowData?: Record<string, unknown>;
+    rowsData?: Array<Record<string, unknown>>;
 }
 
 // Event ID generation
@@ -73,16 +78,17 @@ function storeEvent(event: StoredEvent) {
 
 /**
  * Get events since a given event ID for replay
+ * Returns gapDetected: true if the event ID was not found in buffer (events were lost)
  */
-function getEventsSince(lastEventId: string): StoredEvent[] {
+function getEventsSince(lastEventId: string): { events: StoredEvent[]; gapDetected: boolean } {
     const idx = recentEvents.findIndex(e => e.id === lastEventId);
     if (idx >= 0) {
         // Return all events after the last seen event
-        return recentEvents.slice(idx + 1);
+        return { events: recentEvents.slice(idx + 1), gapDetected: false };
     }
-    // If event ID not found (possibly expired), return empty
-    // Client should do a full refetch in this case
-    return [];
+    // Event ID not found - buffer overflow or expired events
+    // Client needs to do a full refetch
+    return { events: [], gapDetected: true };
 }
 
 /**
@@ -154,8 +160,14 @@ router.get('/', sseAuth, (req: Request, res: Response): void => {
 
     // Replay missed events if Last-Event-ID provided
     if (lastEventId) {
-        const missedEvents = getEventsSince(lastEventId);
-        if (missedEvents.length > 0) {
+        const { events: missedEvents, gapDetected } = getEventsSince(lastEventId);
+
+        if (gapDetected) {
+            // Buffer overflow - client missed events and needs to refetch
+            console.log(`SSE: Buffer overflow detected for user ${userId}, sending refetch signal`);
+            const overflowEventId = generateEventId();
+            res.write(`id: ${overflowEventId}\ndata: ${JSON.stringify({ type: 'buffer_overflow' })}\n\n`);
+        } else if (missedEvents.length > 0) {
             console.log(`SSE: Replaying ${missedEvents.length} missed events for user ${userId}`);
             missedEvents.forEach(evt => {
                 res.write(`id: ${evt.id}\ndata: ${JSON.stringify(evt.data)}\n\n`);
@@ -193,9 +205,11 @@ router.get('/', sseAuth, (req: Request, res: Response): void => {
  * Broadcast an order update to all connected clients
  *
  * @param data - The event data to broadcast
- * @param excludeUserId - Optional user ID to exclude from broadcast (the user who made the change)
+ * @param _excludeUserId - DEPRECATED: Previously excluded initiating user from broadcast.
+ *                         Now ignored - all users receive broadcasts to ensure consistency
+ *                         even if optimistic updates fail.
  */
-export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: string | null = null): void {
+export function broadcastOrderUpdate(data: OrderUpdateEvent, _excludeUserId: string | null = null): void {
     const eventId = generateEventId();
     const storedEvent: StoredEvent = { id: eventId, data, timestamp: Date.now() };
     storeEvent(storedEvent);
@@ -204,16 +218,18 @@ export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: stri
 
     let broadcastCount = 0;
     clients.forEach((clientSet, userId) => {
-        // Skip the user who initiated the change (they have optimistic update)
-        if (userId === excludeUserId) return;
-
+        // Broadcast to ALL users including initiator - ensures consistency even if optimistic update fails
         clientSet.forEach(client => {
             try {
                 client.write(message);
                 broadcastCount++;
             } catch (err: any) {
-                // Client disconnected, will be cleaned up on next request
+                // Client disconnected - clean up immediately to avoid repeated failures
                 console.error(`SSE broadcast error for user ${userId}:`, err.message);
+                clientSet.delete(client);
+                if (clientSet.size === 0) {
+                    clients.delete(userId);
+                }
             }
         });
     });

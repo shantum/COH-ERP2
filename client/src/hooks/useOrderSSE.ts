@@ -38,7 +38,9 @@ interface SSEEvent {
         | 'order_cancelled'
         | 'order_uncancelled'
         // Batch update
-        | 'lines_batch_update';
+        | 'lines_batch_update'
+        // Buffer overflow (client should refetch)
+        | 'buffer_overflow';
     view?: string;
     orderId?: string;
     lineId?: string;
@@ -87,6 +89,16 @@ export function useOrderSSE({
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const reconnectAttempts = useRef(0);
     const lastEventIdRef = useRef<string | null>(null);
+
+    // Refs to avoid reconnection when view/page changes (Issue 3 fix)
+    const currentViewRef = useRef(currentView);
+    const pageRef = useRef(page);
+
+    // Keep refs updated without triggering reconnection
+    useEffect(() => {
+        currentViewRef.current = currentView;
+        pageRef.current = page;
+    }, [currentView, page]);
 
     const [isConnected, setIsConnected] = useState(false);
     const [connectionHealth, setConnectionHealth] = useState<ConnectionHealth>({
@@ -163,13 +175,24 @@ export function useOrderSSE({
                 return;
             }
 
-            // Build query input for cache operations
-            const queryInput = { view: currentView, page, limit: PAGE_SIZE };
+            // Handle buffer overflow - server lost events, need full refetch
+            if (data.type === 'buffer_overflow') {
+                console.log('SSE: Buffer overflow detected, triggering full refetch');
+                trpcUtils.orders.list.invalidate();
+                return;
+            }
+
+            // Build query input for cache operations (using refs to avoid reconnection on view/page change)
+            const queryInput = { view: currentViewRef.current, page: pageRef.current, limit: PAGE_SIZE };
 
             // Handle line status changes
-            if (data.type === 'line_status' && data.lineId && data.changes) {
+            // Now supports full rowData for complete row replacement (no merge needed)
+            if (data.type === 'line_status' && data.lineId) {
+                // Use full rowData if provided, otherwise fall back to partial changes
+                const updateData = data.rowData || data.changes || {};
+
                 // Try AG-Grid transaction first
-                const usedTransaction = updateWithTransaction(data.lineId, data.changes);
+                const usedTransaction = updateWithTransaction(data.lineId, updateData);
 
                 if (!usedTransaction) {
                     // Fallback to cache update
@@ -178,7 +201,9 @@ export function useOrderSSE({
 
                         const newRows = old.rows.map((row: any) =>
                             row.lineId === data.lineId
-                                ? { ...row, ...data.changes }
+                                ? data.rowData
+                                    ? { ...row, ...data.rowData }  // Full row from SSE
+                                    : { ...row, ...data.changes }  // Partial merge (legacy)
                                 : row
                         );
 
@@ -247,8 +272,8 @@ export function useOrderSSE({
 
             // Handle inventory updates
             if (data.type === 'inventory_updated' && data.skuId) {
-                trpcUtils.orders.list.invalidate({ view: currentView });
-                console.log(`SSE: Invalidated orders cache for view '${currentView}' after inventory update`);
+                trpcUtils.orders.list.invalidate({ view: currentViewRef.current });
+                console.log(`SSE: Invalidated orders cache for view '${currentViewRef.current}' after inventory update`);
             }
 
             // Handle order updates (cancel/uncancel/general updates)
@@ -344,7 +369,8 @@ export function useOrderSSE({
         } catch (err) {
             console.error('SSE: Failed to parse event', err);
         }
-    }, [currentView, page, trpcUtils, updateWithTransaction, updateBatchWithTransaction]);
+    // Using refs for currentView/page to avoid reconnection on navigation (Issue 3 fix)
+    }, [trpcUtils, updateWithTransaction, updateBatchWithTransaction]);
 
     const connect = useCallback(() => {
         // Don't connect if disabled
