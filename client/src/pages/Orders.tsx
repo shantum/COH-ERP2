@@ -1,6 +1,7 @@
 /**
  * Orders page - Unified order management with dropdown view selector
- * Views: Open, Shipped, RTO, COD Pending, Cancelled, Archived
+ * Views: Open, Shipped, RTO, COD Pending, Cancelled
+ * Note: Archived view hidden from UI but auto-archive still runs. Search shows archived orders.
  */
 
 import { useState, useMemo, useCallback, useRef } from 'react';
@@ -33,14 +34,13 @@ import {
 import { GridPreferencesToolbar } from '../components/common/grid';
 import type { Order } from '../types';
 
-// View configuration
+// View configuration (archived removed - auto-archive runs silently, search still finds archived orders)
 const VIEW_CONFIG: Record<OrderView, { label: string; color: string }> = {
     open: { label: 'Open Orders', color: 'primary' },
     shipped: { label: 'Shipped', color: 'blue' },
     rto: { label: 'RTO', color: 'red' },
     cod_pending: { label: 'COD Pending', color: 'amber' },
     cancelled: { label: 'Cancelled', color: 'gray' },
-    archived: { label: 'Archived', color: 'gray' },
 };
 
 export default function Orders() {
@@ -75,8 +75,6 @@ export default function Orders() {
     // Filter state (Open view only)
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
-    // Filter state (Archived view only)
-    const [archivedShipFilter, setArchivedShipFilter] = useState<'' | 'shipped' | 'not_shipped'>('');
 
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
@@ -127,7 +125,6 @@ export default function Orders() {
         currentView: view,
         page,
         selectedCustomerId,
-        shippedFilter: archivedShipFilter || undefined,
         isSSEConnected,
     });
 
@@ -161,7 +158,6 @@ export default function Orders() {
         onEditSuccess: () => setUnifiedModalOrder(null),
         currentView: view,
         page,
-        shippedFilter: archivedShipFilter || undefined,
     });
 
     // Enrich server-flattened rows with client-side inventory data
@@ -506,14 +502,12 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onForceShipOrder: (orderId, data) => mutations.forceShip.mutate({ id: orderId, data }),
-        onUnarchive: () => {},
+        onForceShipLine: (lineId, data) => mutations.shipLines.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }),
         allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
-        isUnarchiving: false,
         isAdmin: user?.role === 'admin',
     });
 
@@ -525,13 +519,13 @@ export default function Orders() {
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <GlobalOrderSearch
                         onSelectOrder={(orderId, selectedView) => {
-                            // Map old view names to new
+                            // Map old view names to new (archived routes to shipped since archived view is hidden)
                             const viewMap: Record<string, OrderView> = {
                                 'rto': 'rto',
                                 'cod-pending': 'cod_pending',
                                 'open': 'open',
                                 'shipped': 'shipped',
-                                'archived': 'archived',
+                                'archived': 'shipped', // Archived orders route to shipped view
                                 'cancelled': 'cancelled',
                             };
                             const mappedView = viewMap[selectedView] || 'open';
@@ -594,7 +588,6 @@ export default function Orders() {
                                 <option value="rto">RTO</option>
                                 <option value="cod_pending">COD Pending</option>
                                 <option value="cancelled">Cancelled</option>
-                                <option value="archived">Archived</option>
                             </select>
                             <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                         </div>
@@ -621,25 +614,6 @@ export default function Orders() {
                                     <option value="scheduled">Scheduled</option>
                                     <option value="needs">Needs production</option>
                                     <option value="ready">Ready to ship</option>
-                                </select>
-                            </>
-                        )}
-
-                        {/* Archived view filters */}
-                        {view === 'archived' && (
-                            <>
-                                <div className="w-px h-5 bg-gray-200" />
-                                <select
-                                    value={archivedShipFilter}
-                                    onChange={(e) => {
-                                        setArchivedShipFilter(e.target.value as typeof archivedShipFilter);
-                                        setPage(1); // Reset to page 1 when filter changes
-                                    }}
-                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
-                                >
-                                    <option value="">All orders</option>
-                                    <option value="shipped">Shipped</option>
-                                    <option value="not_shipped">Not shipped</option>
                                 </select>
                             </>
                         )}

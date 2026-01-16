@@ -2,7 +2,7 @@
  * Post-Ship Columns
  *
  * Columns: shippedAt, deliveredAt, deliveryDays, daysInTransit, rtoInitiatedAt,
- *          daysInRto, daysSinceDelivery, codRemittedAt, archivedAt, finalStatus
+ *          daysInRto, daysSinceDelivery, codRemittedAt, finalStatus
  */
 
 import type {
@@ -194,20 +194,6 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
                     );
                 }
                 return null;
-            },
-            cellClass: 'text-xs',
-        },
-
-        // Archived At
-        {
-            colId: 'archivedAt',
-            headerName: getHeaderName('archivedAt'),
-            field: 'order.archivedAt',
-            width: 100,
-            valueFormatter: (params: ValueFormatterParams) => {
-                if (!params.value) return '';
-                const dt = formatDateTime(params.value);
-                return dt.date;
             },
             cellClass: 'text-xs',
         },

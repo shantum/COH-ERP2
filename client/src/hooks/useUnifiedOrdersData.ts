@@ -7,7 +7,8 @@
  * 2. Shipped prefetches after Open completes
  * 3. All other views load on-demand when selected
  *
- * Views: open, shipped, rto, cod_pending, cancelled, archived
+ * Views: open, shipped, rto, cod_pending, cancelled
+ * Note: Archived view hidden from UI but auto-archive still runs
  * Pagination: 500 orders per page
  */
 
@@ -29,8 +30,8 @@ const GC_TIME = 5 * 60 * 1000;
 // Orders per page
 const PAGE_SIZE = 500;
 
-// All available views
-export type OrderView = 'open' | 'shipped' | 'rto' | 'cod_pending' | 'cancelled' | 'archived';
+// All available views (archived hidden from UI but kept on server for auto-archive)
+export type OrderView = 'open' | 'shipped' | 'rto' | 'cod_pending' | 'cancelled';
 
 // Legacy type alias for backwards compatibility
 export type UnifiedOrderTab = OrderView;
@@ -39,7 +40,6 @@ interface UseUnifiedOrdersDataOptions {
     currentView: OrderView;
     page: number;
     selectedCustomerId?: string | null;
-    shippedFilter?: 'shipped' | 'not_shipped';
     /** Whether SSE is connected - disables polling when true */
     isSSEConnected?: boolean;
 }
@@ -48,7 +48,6 @@ export function useUnifiedOrdersData({
     currentView,
     page,
     selectedCustomerId,
-    shippedFilter,
     isSSEConnected = false,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
@@ -75,8 +74,6 @@ export function useUnifiedOrdersData({
             view: currentView,
             page,
             limit: PAGE_SIZE,
-            // Only include shippedFilter when it has a value (avoids serializing undefined)
-            ...(currentView === 'archived' && shippedFilter ? { shippedFilter } : {}),
         },
         {
             staleTime: STALE_TIME,
@@ -119,7 +116,6 @@ export function useUnifiedOrdersData({
         const baseInput = {
             view: currentView,
             limit: PAGE_SIZE,
-            ...(currentView === 'archived' && shippedFilter ? { shippedFilter } : {}),
         };
 
         // Prefetch next page if it exists
@@ -137,7 +133,7 @@ export function useUnifiedOrdersData({
                 staleTime: STALE_TIME,
             });
         }
-    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient, shippedFilter]);
+    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient]);
 
     // ==========================================
     // SUPPORTING DATA QUERIES

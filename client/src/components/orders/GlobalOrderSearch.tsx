@@ -35,14 +35,14 @@ interface GlobalOrderSearchProps {
     onSelectOrder: (orderId: string, tab: AllTabs, page: 'orders' | 'shipments') => void;
 }
 
-// Map API tab names to tab types
+// Map API tab names to tab types (archived routes to shipped since archived view is hidden)
 const tabMapping: Record<string, AllTabs> = {
     open: 'open',
     cancelled: 'cancelled',
     shipped: 'shipped',
     rto: 'rto',
     cod_pending: 'cod-pending',
-    archived: 'archived',
+    archived: 'shipped', // Archived orders route to shipped view
 };
 
 // Tabs that belong to the Orders page (open, cancelled)
@@ -102,7 +102,8 @@ export function GlobalOrderSearch({ onSelectOrder }: GlobalOrderSearchProps) {
             case 'shipped': return 'bg-green-100 text-green-700';
             case 'rto': return 'bg-orange-100 text-orange-700';
             case 'cod_pending': return 'bg-amber-100 text-amber-700';
-            case 'archived': return 'bg-gray-100 text-gray-600';
+            case 'archived': return 'bg-gray-200 text-gray-600'; // Archived still shows in search results
+            case 'cancelled': return 'bg-red-100 text-red-700';
             default: return 'bg-gray-100 text-gray-600';
         }
     };
