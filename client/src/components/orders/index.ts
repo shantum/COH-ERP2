@@ -5,6 +5,7 @@
 
 // Grids
 export { OrdersGrid } from './OrdersGrid';
+export { OrdersGridSkeleton } from './OrdersGridSkeleton';
 export type { OrderViewType } from './OrdersGrid';
 
 // Modals

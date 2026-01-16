@@ -270,13 +270,13 @@ export async function shipOrderLines(
         linesToShip.push(line);
     }
 
-    // Process lines - no inventory operations needed (handled at allocation)
-    for (const line of linesToShip) {
+    // Process lines - use batch update for better performance
+    // NOTE: Inventory already deducted at allocation time
+    if (linesToShip.length > 0) {
         try {
-            // Update line status and tracking info
-            // NOTE: Inventory already deducted at allocation time
-            await tx.orderLine.update({
-                where: { id: line.id },
+            // Batch update all lines in a single query
+            await tx.orderLine.updateMany({
+                where: { id: { in: linesToShip.map(l => l.id) } },
                 data: {
                     lineStatus: 'shipped',
                     shippedAt: now,
@@ -286,18 +286,24 @@ export async function shipOrderLines(
                 },
             });
 
-            shipped.push({
-                lineId: line.id,
-                skuCode: line.sku?.skuCode,
-                qty: line.qty,
-            });
+            // Record all shipped lines
+            for (const line of linesToShip) {
+                shipped.push({
+                    lineId: line.id,
+                    skuCode: line.sku?.skuCode,
+                    qty: line.qty,
+                });
+            }
         } catch (error) {
-            errors.push({
-                lineId: line.id,
-                skuCode: line.sku?.skuCode,
-                error: error instanceof Error ? error.message : String(error),
-                code: 'PROCESSING_ERROR',
-            });
+            // If batch update fails, record error for all lines
+            for (const line of linesToShip) {
+                errors.push({
+                    lineId: line.id,
+                    skuCode: line.sku?.skuCode,
+                    error: error instanceof Error ? error.message : String(error),
+                    code: 'PROCESSING_ERROR',
+                });
+            }
         }
     }
 

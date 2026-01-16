@@ -3,7 +3,8 @@
  * Views: Open, Shipped, RTO, COD Pending, Cancelled, Archived
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import type { AgGridReact } from 'ag-grid-react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, RefreshCw, Send, ChevronDown, Archive, ChevronLeft, ChevronRight, XCircle } from 'lucide-react';
@@ -22,6 +23,7 @@ import {
 // Components
 import {
     OrdersGrid,
+    OrdersGridSkeleton,
     CreateOrderModal,
     CustomerDetailModal,
     CustomizationModal,
@@ -44,6 +46,9 @@ const VIEW_CONFIG: Record<OrderView, { label: string; color: string }> = {
 export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
+
+    // Grid ref for AG-Grid transaction-based updates from SSE
+    const gridRef = useRef<AgGridReact>(null);
 
     // View and page state - persisted in URL
     const [searchParams, setSearchParams] = useSearchParams();
@@ -100,7 +105,8 @@ export default function Orders() {
 
     // Real-time updates via SSE (for multi-user collaboration)
     // When SSE is connected, polling is reduced since SSE handles updates
-    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page });
+    // Pass gridRef for AG-Grid transaction-based updates (faster than cache updates)
+    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page, gridRef });
 
     // Data hook - simplified, single view with pagination
     const {
@@ -468,6 +474,7 @@ export default function Orders() {
         rows: filteredRows,
         lockedDates: lockedDates || [],
         currentView: view,
+        externalGridRef: gridRef,
         onAllocate: handleAllocate,
         onUnallocate: handleUnallocate,
         onPick: handlePick,
@@ -714,10 +721,10 @@ export default function Orders() {
                     </div>
                 </div>
 
-                {/* Loading - only show blocking spinner for initial load (no cached data) */}
+                {/* Loading - show skeleton for initial load (no cached data) */}
                 {isLoading && filteredRows.length === 0 && (
-                    <div className="flex justify-center p-12">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div>
+                    <div className="px-4 py-2">
+                        <OrdersGridSkeleton rowCount={25} columnCount={10} />
                     </div>
                 )}
 

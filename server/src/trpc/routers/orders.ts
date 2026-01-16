@@ -545,6 +545,22 @@ const ship = protectedProcedure
             }
         }
 
+        // Broadcast SSE update for shipped lines
+        if (result.shipped.length > 0) {
+            broadcastOrderUpdate({
+                type: 'order_shipped',
+                orderId: result.orderId ?? undefined,
+                lineIds: result.shipped.map(l => l.lineId),
+                affectedViews: ['open', 'shipped'],
+                changes: {
+                    lineStatus: 'shipped',
+                    awbNumber,
+                    courier,
+                    shippedAt: new Date().toISOString(),
+                },
+            }, ctx.user.id);
+        }
+
         return {
             shipped: result.shipped.length,
             lineIds: result.shipped.map((l) => l.lineId),
@@ -823,11 +839,11 @@ const cancelOrder = protectedProcedure
             await updateCustomerTier(ctx.prisma, order.customerId);
         }
 
-        // Broadcast SSE update
+        // Broadcast SSE update with new event type
         broadcastOrderUpdate({
-            type: 'order_updated',
-            view: 'open',
+            type: 'order_cancelled',
             orderId,
+            affectedViews: ['open', 'cancelled'],
             changes: { status: 'cancelled', lineStatus: 'cancelled' },
         }, ctx.user.id);
 
@@ -888,11 +904,11 @@ const uncancelOrder = protectedProcedure
             await updateCustomerTier(ctx.prisma, order.customerId);
         }
 
-        // Broadcast SSE update
+        // Broadcast SSE update with new event type
         broadcastOrderUpdate({
-            type: 'order_updated',
-            view: 'open',
+            type: 'order_uncancelled',
             orderId,
+            affectedViews: ['open', 'cancelled'],
             changes: { status: 'open', lineStatus: 'pending' },
         }, ctx.user.id);
 
@@ -938,12 +954,12 @@ const markDelivered = protectedProcedure
             },
         });
 
-        // Broadcast SSE update
+        // Broadcast SSE update with new event type
         broadcastOrderUpdate({
-            type: 'order_updated',
-            view: 'shipped',
+            type: 'order_delivered',
             orderId,
-            changes: { status: 'delivered' },
+            affectedViews: ['shipped', 'cod_pending'],
+            changes: { status: 'delivered', deliveredAt: new Date().toISOString() },
         }, ctx.user.id);
 
         return { orderId, status: 'delivered' };
@@ -997,12 +1013,12 @@ const markRto = protectedProcedure
             return updatedOrder;
         });
 
-        // Broadcast SSE update
+        // Broadcast SSE update with new event type
         broadcastOrderUpdate({
-            type: 'order_updated',
-            view: 'shipped',
+            type: 'order_rto',
             orderId,
-            changes: { rtoInitiatedAt: new Date() },
+            affectedViews: ['shipped', 'rto'],
+            changes: { rtoInitiatedAt: new Date().toISOString() },
         }, ctx.user.id);
 
         return { orderId, rtoInitiatedAt: updated.rtoInitiatedAt };
@@ -1055,17 +1071,17 @@ const receiveRto = protectedProcedure
                 data: { rtoReceivedAt: new Date() },
             });
 
-            // Create inward transactions to restore inventory
-            for (const line of order.orderLines) {
-                await tx.inventoryTransaction.create({
-                    data: {
+            // Create inward transactions to restore inventory using batch create
+            if (order.orderLines.length > 0) {
+                await tx.inventoryTransaction.createMany({
+                    data: order.orderLines.map(line => ({
                         skuId: line.skuId,
                         txnType: TXN_TYPE.INWARD,
                         qty: line.qty,
                         reason: TXN_REASON.RTO_RECEIVED,
                         referenceId: line.id,
                         createdById: ctx.user.id,
-                    },
+                    })),
                 });
             }
         });
@@ -1075,12 +1091,12 @@ const receiveRto = protectedProcedure
             inventoryBalanceCache.invalidate(affectedSkuIds);
         }
 
-        // Broadcast SSE update
+        // Broadcast SSE update with new event type
         broadcastOrderUpdate({
-            type: 'order_updated',
-            view: 'rto',
+            type: 'order_rto_received',
             orderId,
-            changes: { rtoReceivedAt: new Date() },
+            affectedViews: ['rto', 'open'],
+            changes: { rtoReceivedAt: new Date().toISOString() },
         }, ctx.user.id);
 
         return { orderId, rtoReceivedAt: new Date() };

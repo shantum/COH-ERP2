@@ -286,66 +286,130 @@ router.post('/lines/bulk-status', authenticateToken, asyncHandler(async (req: Re
         failed: [],
     };
 
-    // Process each line (could be optimized for batch operations)
+    // Batch fetch all lines in a single query (optimization)
+    const lines = await req.prisma.orderLine.findMany({
+        where: { id: { in: uniqueLineIds } },
+        select: { id: true, lineStatus: true, skuId: true, qty: true },
+    });
+
+    // Build a map for O(1) lookups
+    const lineMap = new Map(lines.map(l => [l.id, l]));
+
+    // Find missing lines
+    const foundIds = new Set(lines.map(l => l.id));
     for (const lineId of uniqueLineIds) {
-        try {
-            // Fetch line data including SKU for inventory checks
-            const line = await req.prisma.orderLine.findUnique({
-                where: { id: lineId },
-                select: { lineStatus: true, skuId: true, qty: true },
+        if (!foundIds.has(lineId)) {
+            results.failed.push({ lineId, reason: 'Line not found' });
+        }
+    }
+
+    // Pre-validate all transitions and collect lines to process
+    const linesToProcess: Array<{
+        lineId: string;
+        skuId: string;
+        qty: number;
+        currentStatus: LineStatus;
+    }> = [];
+
+    for (const line of lines) {
+        const currentStatus = line.lineStatus as LineStatus;
+
+        // Validate transition using state machine
+        if (!isValidTransition(currentStatus, status)) {
+            results.failed.push({
+                lineId: line.id,
+                reason: buildTransitionError(currentStatus, status)
             });
+            continue;
+        }
 
-            if (!line) {
-                results.failed.push({ lineId, reason: 'Line not found' });
-                continue;
-            }
+        linesToProcess.push({
+            lineId: line.id,
+            skuId: line.skuId,
+            qty: line.qty,
+            currentStatus,
+        });
+    }
 
-            const currentStatus = line.lineStatus as LineStatus;
+    // For allocate, batch check stock availability
+    if (status === 'allocated' && linesToProcess.length > 0) {
+        // Get unique SKU IDs and their required quantities
+        const skuRequirements = new Map<string, number>();
+        for (const line of linesToProcess) {
+            skuRequirements.set(
+                line.skuId,
+                (skuRequirements.get(line.skuId) || 0) + line.qty
+            );
+        }
 
-            // Validate transition using state machine
-            if (!isValidTransition(currentStatus, status)) {
+        // Batch fetch inventory balances
+        const skuIds = Array.from(skuRequirements.keys());
+        const balances = await req.prisma.inventoryTransaction.groupBy({
+            by: ['skuId'],
+            where: { skuId: { in: skuIds } },
+            _sum: { qty: true },
+        });
+
+        const balanceMap = new Map<string, number>();
+        for (const b of balances) {
+            balanceMap.set(b.skuId, b._sum.qty || 0);
+        }
+
+        // Check each line's stock requirement
+        const linesToRemove = new Set<string>();
+        for (const line of linesToProcess) {
+            const available = balanceMap.get(line.skuId) || 0;
+            if (available < line.qty) {
                 results.failed.push({
-                    lineId,
-                    reason: buildTransitionError(currentStatus, status)
+                    lineId: line.lineId,
+                    reason: `Insufficient stock: ${available} available`,
                 });
-                continue;
+                linesToRemove.add(line.lineId);
             }
+        }
 
-            // For allocate, check stock
-            if (status === 'allocated') {
-                const balance = await calculateInventoryBalance(req.prisma, line.skuId);
-                if (balance.availableBalance < line.qty) {
-                    results.failed.push({
-                        lineId,
-                        reason: `Insufficient stock: ${balance.availableBalance} available`
+        // Filter out lines that failed stock check
+        if (linesToRemove.size > 0) {
+            linesToProcess.splice(
+                0,
+                linesToProcess.length,
+                ...linesToProcess.filter(l => !linesToRemove.has(l.lineId))
+            );
+        }
+    }
+
+    // Execute all transitions in a single transaction for consistency
+    if (linesToProcess.length > 0) {
+        try {
+            await req.prisma.$transaction(async (tx) => {
+                for (const line of linesToProcess) {
+                    const transitionResult = await executeTransition(tx, line.currentStatus, status, {
+                        lineId: line.lineId,
+                        skuId: line.skuId,
+                        qty: line.qty,
+                        userId: req.user!.id,
                     });
-                    continue;
+
+                    if (transitionResult.success) {
+                        results.success.push(line.lineId);
+                    } else {
+                        results.failed.push({
+                            lineId: line.lineId,
+                            reason: transitionResult.error || 'Transition failed'
+                        });
+                    }
+                }
+            }, { timeout: 30000 }); // 30 second timeout for bulk operations
+        } catch (error) {
+            // If transaction fails, mark all remaining as failed
+            for (const line of linesToProcess) {
+                if (!results.success.includes(line.lineId)) {
+                    results.failed.push({
+                        lineId: line.lineId,
+                        reason: error instanceof Error ? error.message : 'Transaction failed'
+                    });
                 }
             }
-
-            // Execute transition using state machine
-            const transitionResult = await req.prisma.$transaction(async (tx) => {
-                return executeTransition(tx, currentStatus, status, {
-                    lineId,
-                    skuId: line.skuId,
-                    qty: line.qty,
-                    userId: req.user!.id,
-                });
-            });
-
-            if (transitionResult.success) {
-                results.success.push(lineId);
-            } else {
-                results.failed.push({
-                    lineId,
-                    reason: transitionResult.error || 'Transition failed'
-                });
-            }
-        } catch (error) {
-            results.failed.push({
-                lineId,
-                reason: error instanceof Error ? error.message : 'Unknown error'
-            });
         }
     }
 

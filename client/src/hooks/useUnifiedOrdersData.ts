@@ -93,7 +93,7 @@ export function useUnifiedOrdersData({
     );
 
     // ==========================================
-    // HYBRID LOADING: Prefetch shipped page 1 after open loads
+    // HYBRID LOADING: Prefetch adjacent pages and related views
     // ==========================================
 
     useEffect(() => {
@@ -105,6 +105,36 @@ export function useUnifiedOrdersData({
             });
         }
     }, [currentView, page, ordersQuery.isSuccess, queryClient]);
+
+    // Prefetch adjacent pages for smoother pagination
+    useEffect(() => {
+        if (!ordersQuery.isSuccess || !ordersQuery.data?.pagination) return;
+
+        const { totalPages } = ordersQuery.data.pagination;
+
+        // Build base query input
+        const baseInput = {
+            view: currentView,
+            limit: PAGE_SIZE,
+            ...(currentView === 'archived' && shippedFilter ? { shippedFilter } : {}),
+        };
+
+        // Prefetch next page if it exists
+        if (page < totalPages) {
+            queryClient.prefetchQuery({
+                queryKey: [['orders', 'list'], { input: { ...baseInput, page: page + 1 }, type: 'query' }],
+                staleTime: STALE_TIME,
+            });
+        }
+
+        // Prefetch previous page if it exists
+        if (page > 1) {
+            queryClient.prefetchQuery({
+                queryKey: [['orders', 'list'], { input: { ...baseInput, page: page - 1 }, type: 'query' }],
+                staleTime: STALE_TIME,
+            });
+        }
+    }, [currentView, page, ordersQuery.isSuccess, ordersQuery.data?.pagination, queryClient, shippedFilter]);
 
     // ==========================================
     // SUPPORTING DATA QUERIES

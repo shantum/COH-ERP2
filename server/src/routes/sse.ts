@@ -3,6 +3,12 @@
  *
  * Enables push notifications when order data changes (status transitions, new orders, etc.)
  * Clients subscribe via EventSource and receive updates for all orders they have access to.
+ *
+ * Features:
+ * - Event ID tracking for resumable connections
+ * - Circular buffer for event replay on reconnect
+ * - Connection health monitoring via heartbeat
+ * - Multiple event types for different order state changes
  */
 
 import { Router } from 'express';
@@ -12,15 +18,85 @@ import type { JwtPayload } from '../types/express.js';
 
 const router: Router = Router();
 
-// Type for SSE event data
+// Type for SSE event data with expanded event types
 export interface OrderUpdateEvent {
-    type: 'line_status' | 'order_created' | 'order_updated' | 'order_deleted' | 'inventory_updated';
+    type:
+        | 'connected'
+        | 'line_status'
+        | 'order_created'
+        | 'order_updated'
+        | 'order_deleted'
+        | 'inventory_updated'
+        // Shipping events
+        | 'order_shipped'
+        | 'lines_shipped'
+        // Delivery events
+        | 'order_delivered'
+        | 'order_rto'
+        | 'order_rto_received'
+        // Cancel events
+        | 'order_cancelled'
+        | 'order_uncancelled'
+        // Batch update
+        | 'lines_batch_update';
     view?: string;
     orderId?: string;
     lineId?: string;
+    lineIds?: string[];
     skuId?: string;
     changes?: Record<string, unknown>;
+    affectedViews?: string[];
 }
+
+// Event ID generation
+let globalEventId = 0;
+function generateEventId(): string {
+    return `${Date.now()}-${++globalEventId}`;
+}
+
+// Circular buffer for event replay (last 100 events)
+interface StoredEvent {
+    id: string;
+    data: OrderUpdateEvent;
+    timestamp: number;
+}
+const recentEvents: StoredEvent[] = [];
+const MAX_EVENTS = 100;
+const EVENT_TTL = 5 * 60 * 1000; // 5 minutes - events older than this are stale
+
+function storeEvent(event: StoredEvent) {
+    recentEvents.push(event);
+    if (recentEvents.length > MAX_EVENTS) {
+        recentEvents.shift();
+    }
+}
+
+/**
+ * Get events since a given event ID for replay
+ */
+function getEventsSince(lastEventId: string): StoredEvent[] {
+    const idx = recentEvents.findIndex(e => e.id === lastEventId);
+    if (idx >= 0) {
+        // Return all events after the last seen event
+        return recentEvents.slice(idx + 1);
+    }
+    // If event ID not found (possibly expired), return empty
+    // Client should do a full refetch in this case
+    return [];
+}
+
+/**
+ * Clean up old events from the buffer
+ */
+function cleanupOldEvents() {
+    const now = Date.now();
+    while (recentEvents.length > 0 && now - recentEvents[0].timestamp > EVENT_TTL) {
+        recentEvents.shift();
+    }
+}
+
+// Run cleanup every minute
+setInterval(cleanupOldEvents, 60000);
 
 /**
  * Map of connected clients: userId -> Set<Response>
@@ -55,9 +131,13 @@ const sseAuth = (req: Request, res: Response, next: NextFunction): void => {
  * GET /api/events
  *
  * Client connects and keeps connection open to receive real-time updates
+ * Supports Last-Event-ID header for resumable connections
  */
 router.get('/', sseAuth, (req: Request, res: Response): void => {
     const userId = req.user!.id;
+
+    // Get Last-Event-ID from header or query param (for initial connection with replay)
+    const lastEventId = (req.headers['last-event-id'] as string) || (req.query.lastEventId as string);
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
@@ -68,8 +148,20 @@ router.get('/', sseAuth, (req: Request, res: Response): void => {
     // Prevent response timeout
     req.socket.setTimeout(0);
 
-    // Send initial connection confirmation
-    res.write(`data: ${JSON.stringify({ type: 'connected', userId })}\n\n`);
+    // Send initial connection confirmation with event ID
+    const connectEventId = generateEventId();
+    res.write(`id: ${connectEventId}\ndata: ${JSON.stringify({ type: 'connected', userId })}\n\n`);
+
+    // Replay missed events if Last-Event-ID provided
+    if (lastEventId) {
+        const missedEvents = getEventsSince(lastEventId);
+        if (missedEvents.length > 0) {
+            console.log(`SSE: Replaying ${missedEvents.length} missed events for user ${userId}`);
+            missedEvents.forEach(evt => {
+                res.write(`id: ${evt.id}\ndata: ${JSON.stringify(evt.data)}\n\n`);
+            });
+        }
+    }
 
     // Add this client to the set
     if (!clients.has(userId)) {
@@ -78,8 +170,10 @@ router.get('/', sseAuth, (req: Request, res: Response): void => {
     clients.get(userId)!.add(res);
 
     // Heartbeat to keep connection alive (every 30s)
+    // Include event ID so client can track last seen event
     const heartbeatInterval = setInterval(() => {
-        res.write(`: heartbeat\n\n`);
+        const heartbeatId = generateEventId();
+        res.write(`id: ${heartbeatId}\n: heartbeat\n\n`);
     }, 30000);
 
     // Cleanup on disconnect
@@ -102,7 +196,11 @@ router.get('/', sseAuth, (req: Request, res: Response): void => {
  * @param excludeUserId - Optional user ID to exclude from broadcast (the user who made the change)
  */
 export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: string | null = null): void {
-    const event = `data: ${JSON.stringify(data)}\n\n`;
+    const eventId = generateEventId();
+    const storedEvent: StoredEvent = { id: eventId, data, timestamp: Date.now() };
+    storeEvent(storedEvent);
+
+    const message = `id: ${eventId}\ndata: ${JSON.stringify(data)}\n\n`;
 
     let broadcastCount = 0;
     clients.forEach((clientSet, userId) => {
@@ -111,7 +209,7 @@ export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: stri
 
         clientSet.forEach(client => {
             try {
-                client.write(event);
+                client.write(message);
                 broadcastCount++;
             } catch (err: any) {
                 // Client disconnected, will be cleaned up on next request
@@ -121,7 +219,7 @@ export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: stri
     });
 
     if (broadcastCount > 0) {
-        console.log(`SSE: Broadcast ${data.type} to ${broadcastCount} clients`);
+        console.log(`SSE: Broadcast ${data.type} (id: ${eventId}) to ${broadcastCount} clients`);
     }
 }
 
@@ -134,6 +232,13 @@ export function getConnectedClientCount(): { totalConnections: number; uniqueUse
         total += clientSet.size;
     });
     return { totalConnections: total, uniqueUsers: clients.size };
+}
+
+/**
+ * Get recent events count (for debugging/monitoring)
+ */
+export function getRecentEventsCount(): number {
+    return recentEvents.length;
 }
 
 export default router;

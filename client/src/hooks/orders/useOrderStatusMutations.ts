@@ -8,14 +8,17 @@
  * 3. onSettled: Invalidate to ensure consistency (background revalidation)
  */
 
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ordersApi } from '../../services/api';
 import { trpc } from '../../services/trpc';
+import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import {
     getOrdersQueryInput,
     optimisticCancelLine,
     optimisticUncancelLine,
+    optimisticCancelOrder,
+    optimisticUncancelOrder,
     type OrdersListData,
     type OptimisticUpdateContext,
 } from './optimisticUpdateHelpers';
@@ -28,6 +31,7 @@ export interface UseOrderStatusMutationsOptions {
 
 export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions = {}) {
     const { currentView = 'open', page = 1, shippedFilter } = options;
+    const queryClient = useQueryClient();
     const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders, invalidateCancelledOrders } = useOrderInvalidation();
 
@@ -39,13 +43,32 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         return trpcUtils.orders.list.getData(queryInput);
     };
 
-    // Cancel/uncancel order using tRPC (no optimistic update - these are less frequent)
+    // Cancel order with optimistic update
     const cancelOrderMutation = trpc.orders.cancelOrder.useMutation({
-        onSuccess: () => {
+        onMutate: async ({ orderId }) => {
+            await trpcUtils.orders.list.cancel(queryInput);
+            const previousData = getCachedData();
+
+            // Optimistically cancel all lines in the order
+            trpcUtils.orders.list.setData(
+                queryInput,
+                (old: any) => optimisticCancelOrder(old, orderId) as any
+            );
+
+            return { previousData, queryInput } as OptimisticUpdateContext;
+        },
+        onError: (err, _vars, context) => {
+            // Rollback on error
+            if (context?.previousData) {
+                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+            }
+            alert(err.message || 'Failed to cancel order');
+        },
+        onSettled: () => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
-        },
-        onError: (err) => alert(err.message || 'Failed to cancel order')
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
+        }
     });
 
     // Wrapper to match existing API (id instead of orderId)
@@ -59,12 +82,31 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         error: cancelOrderMutation.error,
     };
 
+    // Uncancel order with optimistic update
     const uncancelOrderMutation = trpc.orders.uncancelOrder.useMutation({
-        onSuccess: () => {
+        onMutate: async ({ orderId }) => {
+            // For uncancel, we may be in cancelled view
+            const cancelledQueryInput = getOrdersQueryInput('cancelled', page, undefined);
+            await trpcUtils.orders.list.cancel(cancelledQueryInput);
+            const previousData = trpcUtils.orders.list.getData(cancelledQueryInput);
+
+            trpcUtils.orders.list.setData(
+                cancelledQueryInput,
+                (old: any) => optimisticUncancelOrder(old, orderId) as any
+            );
+
+            return { previousData, queryInput: cancelledQueryInput } as OptimisticUpdateContext;
+        },
+        onError: (err, _vars, context) => {
+            if (context?.previousData) {
+                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+            }
+            alert(err.message || 'Failed to restore order');
+        },
+        onSettled: () => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
-        },
-        onError: (err) => alert(err.message || 'Failed to restore order')
+        }
     });
 
     const uncancelOrder = {
@@ -103,6 +145,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         },
         onSettled: () => {
             invalidateOpenOrders();
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
     });
 

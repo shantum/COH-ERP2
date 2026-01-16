@@ -95,6 +95,8 @@ interface OrdersGridProps {
     lockedDates: string[];
     // Current view determines which columns and actions are shown
     currentView?: OrderViewType;
+    // External grid ref for AG-Grid transaction-based updates
+    externalGridRef?: React.RefObject<AgGridReact | null>;
     onAllocate: (lineId: string) => void;
     onUnallocate: (lineId: string) => void;
     onPick: (lineId: string) => void;
@@ -163,6 +165,7 @@ export function OrdersGrid({
     rows,
     lockedDates,
     currentView = 'open',
+    externalGridRef,
     onAllocate,
     onUnallocate,
     onPick,
@@ -209,8 +212,9 @@ export function OrdersGrid({
     isUnarchiving: _isUnarchiving,
     isAdmin,
 }: OrdersGridProps) {
-    // Grid ref for API access
-    const gridRef = useRef<AgGridReact>(null);
+    // Grid ref for API access - use external ref if provided, otherwise create internal one
+    const internalGridRef = useRef<AgGridReact>(null);
+    const gridRef = externalGridRef || internalGridRef;
 
     // Track previous row data to detect lineStatus changes
     const prevRowsRef = useRef<Map<string, string>>(new Map());
@@ -459,6 +463,8 @@ export function OrdersGrid({
     }, []);
 
     return {
+        // Expose grid ref for transaction-based updates from SSE
+        gridRef,
         gridComponent: (
             <>
                 <style>{gridRowStyles}</style>
@@ -487,7 +493,7 @@ export function OrdersGrid({
                             onColumnResized={onColumnResized}
                             maintainColumnOrder={true}
                             // Performance optimizations for large datasets
-                            rowBuffer={25}                    // Render 25 rows beyond viewport (smoother scroll)
+                            rowBuffer={50}                    // Render 50 rows beyond viewport (smoother scroll)
                             debounceVerticalScrollbar={true}  // Debounce scroll events
                             suppressAnimationFrame={false}    // Keep animation frame for smooth updates
                         />
