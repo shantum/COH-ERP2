@@ -209,8 +209,11 @@ Each item (line) in an order has its own status that progresses through the fulf
 You can only move **forward** through the fulfillment process, with these exceptions:
 
 - **Going backward** (for corrections): allocated → pending, picked → allocated, etc.
-- **Cancellation:** Any status → cancelled
+- **Cancellation:** Any non-shipped status → cancelled
+- **Uncancellation:** cancelled → pending
 - **Hold/Release:** Any status ↔ on_hold
+
+> **Technical Note:** All transitions are governed by the state machine in `server/src/utils/orderStateMachine.ts`. This file is the single source of truth for valid transitions, inventory effects, and timestamp handling.
 
 ---
 
@@ -607,6 +610,7 @@ Line Status:    pending → allocated → picked → packed → shipped → deli
 
 | File | Description |
 |------|-------------|
+| `server/src/utils/orderStateMachine.ts` | **Line status state machine.** Single source of truth for valid transitions, inventory effects, and timestamps. Use `executeTransition()` for all status changes |
 | `server/src/utils/orderStatus.ts` | **Order status computation engine.** Computes order status from line states, validates transitions, calculates processing times |
 | `server/src/utils/orderViews.ts` | **View configuration system.** Defines all 12 order views (open, shipped, rto, etc.) with filtering and sorting rules |
 | `server/src/utils/orderEnrichment/` | **Order enrichment pipeline.** Modular enrichment system (see table below) |
@@ -799,6 +803,7 @@ Focused mutation hooks split by domain for better tree-shaking and maintainabili
 
 | File | Description |
 |------|-------------|
+| `server/src/utils/__tests__/orderStateMachine.test.ts` | Unit tests for state machine: transition validation, inventory effects, timestamps |
 | `server/src/__tests__/ordersApi.test.js` | API endpoint tests for order CRUD operations |
 | `server/src/__tests__/orders-inventory.test.js` | Tests for inventory transactions during order processing |
 | `server/src/__tests__/orderLock.test.js` | Tests for distributed locking during concurrent order updates |

@@ -42,6 +42,43 @@ Single page `/orders` with dropdown selector. Views: Open, Shipped, RTO, COD Pen
 - `isFirstLine` marks header row for grouping
 - Line status: `pending → allocated → picked → packed → shipped`
 
+### Line Status State Machine
+
+Single source of truth: `server/src/utils/orderStateMachine.ts`
+
+```
+Status Flow:
+pending → allocated → picked → packed → shipped
+   ↓         ↓          ↓        ↓
+cancelled cancelled  cancelled cancelled
+   ↓
+pending (uncancel)
+```
+
+**Key functions:**
+```typescript
+import {
+    isValidTransition,      // Check if transition is valid
+    executeTransition,      // Execute with all side effects
+    hasAllocatedInventory,  // Check if status has reserved inventory
+    buildTransitionError,   // Build error message
+} from '../utils/orderStateMachine.js';
+
+// Always use executeTransition inside a transaction
+const result = await prisma.$transaction(async (tx) => {
+    return executeTransition(tx, currentStatus, newStatus, {
+        lineId, skuId, qty, userId, shipData
+    });
+});
+```
+
+**Inventory effects (handled automatically by `executeTransition`):**
+| Transition | Effect |
+|------------|--------|
+| pending → allocated | Create OUTWARD transaction |
+| allocated → pending (unallocate) | Delete OUTWARD transaction |
+| allocated/picked/packed → cancelled | Delete OUTWARD transaction |
+
 ### Views & Release Workflow
 | View | Condition |
 |------|-----------|
@@ -238,6 +275,7 @@ server/src/
       summaries.ts                    # RTO, shipped, archived summaries
       analytics.ts                    # /analytics, /dashboard-stats
   utils/
+    orderStateMachine.ts              # Line status state machine (single source of truth)
     orderViews.ts                     # VIEW_CONFIGS with where/orderBy/flattening
     orderEnrichment/                  # Order enrichment pipeline (modular)
       index.ts                        # Pipeline orchestrator + exports
