@@ -2,6 +2,7 @@
  * Type definitions for OrdersGrid component
  */
 
+import type { MutableRefObject } from 'react';
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
 
 /**
@@ -73,31 +74,16 @@ export interface EditCustomizationData extends CustomizeLineData {
 }
 
 /**
- * Context passed to column builder functions
- * Contains all handlers and state needed to render columns
+ * Dynamic values that change frequently - accessed via ref for stable column context
+ * This prevents column definitions from rebuilding on every state change.
  */
-export interface ColumnBuilderContext {
-    // Header customization
-    getHeaderName: (colId: string) => string;
-    setCustomHeader: (colId: string, value: string) => void;
-
-    // Current view (affects column visibility and behavior)
-    currentView?: 'open' | 'shipped' | 'rto' | 'cod_pending' | 'archived' | 'cancelled';
-
-    // UI State
+export interface DynamicColumnHandlers {
+    // UI State (changes on every action)
     allocatingLines: Set<string>;
     isCancellingLine: boolean;
     isUncancellingLine: boolean;
     isCancellingOrder: boolean;
     isDeletingOrder: boolean;
-
-    // Utilities
-    isDateLocked: (date: string) => boolean;
-
-    // Order Info handlers
-    onViewOrder: (orderId: string) => void;
-    onSelectCustomer: (customerId: string) => void;
-    onUpdateShipByDate?: (orderId: string, date: string | null) => void;
 
     // Fulfillment handlers
     onAllocate: (lineId: string) => void;
@@ -132,4 +118,39 @@ export interface ColumnBuilderContext {
     // Post-ship handlers
     onMarkCodRemitted?: (orderId: string) => void;
     onTrack?: (awbNumber: string, orderNumber: string) => void;
+
+    // Order Info handlers
+    onViewOrder: (orderId: string) => void;
+    onSelectCustomer: (customerId: string) => void;
+    onUpdateShipByDate?: (orderId: string, date: string | null) => void;
 }
+
+/**
+ * Context passed to column builder functions
+ * Contains stable refs and static values - does NOT rebuild on handler changes.
+ *
+ * PERFORMANCE: Dynamic values accessed via handlersRef.current to avoid
+ * column definition rebuilds on every state change.
+ */
+export interface ColumnBuilderContext {
+    // Header customization (stable - uses useCallback)
+    getHeaderName: (colId: string) => string;
+    setCustomHeader: (colId: string, value: string) => void;
+
+    // Current view (changes rarely)
+    currentView?: 'open' | 'shipped' | 'rto' | 'cod_pending' | 'archived' | 'cancelled';
+
+    // Utilities (stable)
+    isDateLocked: (date: string) => boolean;
+
+    // All dynamic handlers accessed via ref for stability
+    // CellRenderers should use: ctx.handlersRef.current.onAllocate(lineId)
+    handlersRef: MutableRefObject<DynamicColumnHandlers>;
+}
+
+/**
+ * Legacy ColumnBuilderContext with all props directly accessible.
+ * Used during migration - cellRenderers can access both patterns.
+ * @deprecated Use handlersRef.current.xxx instead of direct access
+ */
+export interface LegacyColumnBuilderContext extends ColumnBuilderContext, DynamicColumnHandlers {}

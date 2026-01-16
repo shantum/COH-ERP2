@@ -34,6 +34,7 @@ import {
 } from '../../utils/errors.js';
 import { updateCustomerTier, adjustCustomerLtv, recalculateAllCustomerLtvs } from '../../utils/tierUtils.js';
 import { orderLogger } from '../../utils/logger.js';
+import { broadcastOrderUpdate } from '../sse.js';
 
 const router: Router = Router();
 
@@ -421,6 +422,14 @@ router.post(
             await updateCustomerTier(req.prisma, order.customerId);
         }
 
+        // Broadcast SSE update to other users
+        broadcastOrderUpdate({
+            type: 'order_updated',
+            view: 'open',
+            orderId,
+            changes: { status: 'cancelled', lineStatus: 'cancelled' },
+        }, req.user?.id);
+
         const updated = await req.prisma.order.findUnique({
             where: { id: orderId },
             include: { orderLines: true },
@@ -473,6 +482,14 @@ router.post(
         if (order.customerId) {
             await updateCustomerTier(req.prisma, order.customerId);
         }
+
+        // Broadcast SSE update to other users
+        broadcastOrderUpdate({
+            type: 'order_updated',
+            view: 'open',
+            orderId,
+            changes: { status: 'open', lineStatus: 'pending' },
+        }, req.user?.id);
 
         const updated = await req.prisma.order.findUnique({
             where: { id: orderId },
@@ -1234,6 +1251,14 @@ router.post(
             adjustCustomerLtv(req.prisma, line.order.customerId, -lineAmount).catch(() => {});
         }
 
+        // Broadcast SSE update to other users
+        broadcastOrderUpdate({
+            type: 'line_status',
+            view: 'open',
+            lineId,
+            changes: { lineStatus: 'cancelled' },
+        }, req.user?.id);
+
         res.json({ id: lineId, lineStatus: 'cancelled' });
     })
 );
@@ -1270,6 +1295,14 @@ router.post(
             const lineAmount = line.qty * line.unitPrice;
             adjustCustomerLtv(req.prisma, line.order.customerId, lineAmount).catch(() => {});
         }
+
+        // Broadcast SSE update to other users
+        broadcastOrderUpdate({
+            type: 'line_status',
+            view: 'open',
+            lineId,
+            changes: { lineStatus: 'pending' },
+        }, req.user?.id);
 
         res.json({ id: lineId, lineStatus: 'pending' });
     })

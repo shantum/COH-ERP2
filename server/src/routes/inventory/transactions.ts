@@ -22,6 +22,7 @@ import {
     BusinessLogicError,
 } from '../../utils/errors.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
+import { broadcastOrderUpdate } from '../sse.js';
 import type {
     SkuWithRelations,
     ProductionBatch,
@@ -135,6 +136,13 @@ router.post('/inward', authenticateToken, requirePermission('inventory:inward'),
     // Get updated balance
     const balance = await calculateInventoryBalance(req.prisma, skuId);
 
+    // Broadcast inventory update to all clients (including initiator for consistency)
+    broadcastOrderUpdate({
+        type: 'inventory_updated',
+        skuId,
+        changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
+    });
+
     res.status(201).json({
         ...transaction,
         newBalance: balance.currentBalance,
@@ -223,6 +231,13 @@ router.post('/outward', authenticateToken, requirePermission('inventory:outward'
 
     // Get updated balance
     const newBalance = await calculateInventoryBalance(req.prisma, skuId);
+
+    // Broadcast inventory update to all clients
+    broadcastOrderUpdate({
+        type: 'inventory_updated',
+        skuId,
+        changes: { availableBalance: newBalance.availableBalance, currentBalance: newBalance.currentBalance },
+    });
 
     res.status(201).json({
         ...transaction,
@@ -317,6 +332,13 @@ router.post('/quick-inward', authenticateToken, requirePermission('inventory:inw
 
     // Invalidate cache for this SKU
     inventoryBalanceCache.invalidate([sku.id]);
+
+    // Broadcast inventory update to all clients (quick-inward is heavily used)
+    broadcastOrderUpdate({
+        type: 'inventory_updated',
+        skuId: sku.id,
+        changes: { availableBalance: result.balance.availableBalance, currentBalance: result.balance.currentBalance },
+    });
 
     res.status(201).json({
         transaction: result.transaction,
@@ -439,6 +461,16 @@ router.put('/inward/:id', authenticateToken, asyncHandler(async (req: Request, r
     // Invalidate cache
     inventoryBalanceCache.invalidate([existing.skuId]);
 
+    // Broadcast inventory update if qty changed
+    if (qty !== undefined && qty !== existing.qty) {
+        const balance = await calculateInventoryBalance(req.prisma, existing.skuId);
+        broadcastOrderUpdate({
+            type: 'inventory_updated',
+            skuId: existing.skuId,
+            changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
+        });
+    }
+
     res.json(updated);
 }));
 
@@ -490,6 +522,13 @@ router.delete('/inward/:id', authenticateToken, requirePermission('inventory:del
 
     // Get updated balance
     const balance = await calculateInventoryBalance(req.prisma, existing.skuId);
+
+    // Broadcast inventory update
+    broadcastOrderUpdate({
+        type: 'inventory_updated',
+        skuId: existing.skuId,
+        changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
+    });
 
     res.json({
         success: true,
@@ -661,6 +700,13 @@ router.delete('/transactions/:id', authenticateToken, requireAnyPermission('inve
 
     // Get updated balance
     const balance = await calculateInventoryBalance(req.prisma, existing.skuId);
+
+    // Broadcast inventory update
+    broadcastOrderUpdate({
+        type: 'inventory_updated',
+        skuId: existing.skuId,
+        changes: { availableBalance: balance.availableBalance, currentBalance: balance.currentBalance },
+    });
 
     // Build response message
     let message = 'Transaction deleted';

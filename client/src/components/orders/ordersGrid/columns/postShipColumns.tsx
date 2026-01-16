@@ -19,7 +19,7 @@ import { formatDateTime } from '../../../../utils/orderHelpers';
  * These columns are primarily shown in shipped/rto/cod-pending/archived views
  */
 export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
-    const { getHeaderName, onMarkCodRemitted } = ctx;
+    const { getHeaderName, handlersRef } = ctx;
 
     return [
         // Shipped At
@@ -188,6 +188,7 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
                     return <span className="text-xs text-green-600">{dt.date}</span>;
                 }
                 // Show "Mark Remitted" button only on first line (order-level action)
+                const { onMarkCodRemitted } = handlersRef.current;
                 if (params.data?.isFirstLine && order?.paymentMethod === 'COD' && order?.trackingStatus === 'delivered' && onMarkCodRemitted) {
                     return (
                         <button

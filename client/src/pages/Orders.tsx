@@ -100,7 +100,8 @@ export default function Orders() {
     } | null>(null);
 
     // Real-time updates via SSE (for multi-user collaboration)
-    useOrderSSE({ currentView: view });
+    // When SSE is connected, polling is reduced since SSE handles updates
+    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view });
 
     // Data hook - simplified, single view with pagination
     const {
@@ -122,6 +123,7 @@ export default function Orders() {
         page,
         selectedCustomerId,
         shippedFilter: archivedShipFilter || undefined,
+        isSSEConnected,
     });
 
     // Modal handlers

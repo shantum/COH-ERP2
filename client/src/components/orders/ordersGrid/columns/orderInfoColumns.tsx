@@ -20,7 +20,7 @@ import { calculateOrderTotal } from '../../../../utils/orderPricing';
  * Build order info column definitions
  */
 export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
-    const { getHeaderName, onViewOrder, onSelectCustomer, onUpdateShipByDate } = ctx;
+    const { getHeaderName, handlersRef } = ctx;
 
     return [
         // Order Date
@@ -65,7 +65,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             headerName: getHeaderName('shipByDate'),
             field: 'shipByDate',
             width: 100,
-            editable: (params: EditableCallbackParams) => !!params.data?.isFirstLine && !!onUpdateShipByDate,
+            editable: (params: EditableCallbackParams) => !!params.data?.isFirstLine && !!handlersRef.current.onUpdateShipByDate,
             cellEditor: 'agDateStringCellEditor',
             cellEditorParams: {
                 min: new Date().toISOString().split('T')[0],
@@ -77,6 +77,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
                 return new Date(shipByDate).toISOString().split('T')[0];
             },
             valueSetter: (params: ValueSetterParams) => {
+                const { onUpdateShipByDate } = handlersRef.current;
                 if (params.data?.isFirstLine && params.data.order?.id && onUpdateShipByDate) {
                     const newDate = params.newValue || null;
                     onUpdateShipByDate(params.data.order.id, newDate);
@@ -86,7 +87,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (!params.data?.isFirstLine) return null;
                 const shipByDate = params.data.order?.shipByDate;
-                const isEditable = !!onUpdateShipByDate;
+                const isEditable = !!handlersRef.current.onUpdateShipByDate;
 
                 if (!shipByDate) {
                     return (
@@ -142,6 +143,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             width: 110,
             cellRenderer: (params: ICellRendererParams) => {
                 if (!params.data?.isFirstLine) return null;
+                const { onViewOrder } = handlersRef.current;
                 const isExchange = params.data.order?.isExchange;
                 return (
                     <div className="flex items-center gap-1">
@@ -177,6 +179,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             width: 150,
             cellRenderer: (params: ICellRendererParams) => {
                 if (!params.data?.isFirstLine) return null;
+                const { onSelectCustomer } = handlersRef.current;
                 const order = params.data.order;
                 const customerId = order?.customerId;
                 const fullName = params.value || '';

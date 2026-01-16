@@ -18,28 +18,14 @@ import { ProductionDatePopover } from '../cellRenderers';
 
 /**
  * Build fulfillment action column definitions
+ *
+ * PERFORMANCE: Dynamic handlers accessed via handlersRef.current to avoid
+ * column rebuilds on every state change. The ref is stable, but its .current
+ * value is updated every render with latest handlers.
  */
 export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
-    const {
-        getHeaderName,
-        allocatingLines,
-        isDateLocked,
-        isAdmin,
-        onAllocate,
-        onUnallocate,
-        onPick,
-        onUnpick,
-        onPack,
-        onUnpack,
-        onMarkShippedLine,
-        onCreateBatch,
-        onUpdateBatch,
-        onDeleteBatch,
-        onUpdateLineNotes,
-        onCancelLine,
-        onUncancelLine,
-        onForceShipOrder,
-    } = ctx;
+    // Static values accessed directly
+    const { getHeaderName, isDateLocked, handlersRef } = ctx;
 
     return [
         // Allocate
@@ -50,6 +36,9 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row || row.lineStatus === 'cancelled') return null;
+
+                // Access dynamic values via ref for latest state
+                const { allocatingLines, onAllocate, onUnallocate } = handlersRef.current;
 
                 const hasStock = row.skuStock >= row.qty;
                 const isAllocated =
@@ -110,6 +99,10 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row) return null;
+
+                // Access dynamic values via ref for latest state
+                const { onCreateBatch, onUpdateBatch, onDeleteBatch } = handlersRef.current;
+
                 const hasStock = row.skuStock >= row.qty;
                 const allLinesAllocated = row.order?.orderLines?.every(
                     (line: any) =>
@@ -173,7 +166,7 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             valueGetter: (params: ValueGetterParams) => params.data?.lineNotes || '',
             valueSetter: (params: ValueSetterParams) => {
                 if (params.data?.lineId) {
-                    onUpdateLineNotes(params.data.lineId, params.newValue || '');
+                    handlersRef.current.onUpdateLineNotes(params.data.lineId, params.newValue || '');
                 }
                 return true;
             },
@@ -204,6 +197,10 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row || row.lineStatus === 'cancelled') return null;
+
+                // Access dynamic values via ref for latest state
+                const { allocatingLines, onPick, onUnpick } = handlersRef.current;
+
                 const isToggling = allocatingLines.has(row.lineId);
                 const canPick = row.lineStatus === 'allocated';
                 // Include shipped in picked state (it must have been picked)
@@ -257,6 +254,10 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row || row.lineStatus === 'cancelled') return null;
+
+                // Access dynamic values via ref for latest state
+                const { allocatingLines, onPack, onUnpack } = handlersRef.current;
+
                 const isToggling = allocatingLines.has(row.lineId);
                 const canPack = row.lineStatus === 'picked';
                 // Include shipped in packed state (it must have been packed)
@@ -312,6 +313,9 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row || row.lineStatus === 'cancelled') return null;
+
+                // Access dynamic values via ref for latest state
+                const { allocatingLines, onMarkShippedLine, isAdmin, onForceShipOrder } = handlersRef.current;
 
                 const isPacked = row.lineStatus === 'packed';
                 const isShipped = row.lineStatus === 'shipped';
@@ -397,6 +401,9 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const row = params.data;
                 if (!row || !row.lineId) return null;
+
+                // Access dynamic values via ref for latest state
+                const { allocatingLines, onCancelLine, onUncancelLine } = handlersRef.current;
 
                 const isCancelled = row.lineStatus === 'cancelled';
                 const isToggling = allocatingLines.has(row.lineId);

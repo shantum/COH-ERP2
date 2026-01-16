@@ -8,15 +8,16 @@
  * SSE is for updates made by OTHER users or external systems (Shopify webhooks).
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { trpc } from '../services/trpc';
 
 // Event types from server
 interface SSEEvent {
-    type: 'connected' | 'line_status' | 'order_created' | 'order_updated' | 'order_deleted';
+    type: 'connected' | 'line_status' | 'order_created' | 'order_updated' | 'order_deleted' | 'inventory_updated';
     view?: string;
     orderId?: string;
     lineId?: string;
+    skuId?: string;
     changes?: Record<string, unknown>;
     userId?: string;
 }
@@ -33,6 +34,7 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const reconnectAttempts = useRef(0);
+    const [isConnected, setIsConnected] = useState(false);
 
     const handleEvent = useCallback((event: MessageEvent) => {
         try {
@@ -99,6 +101,62 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
                 );
             }
 
+            // Handle inventory updates (after inward/outward transactions)
+            if (data.type === 'inventory_updated' && data.skuId && data.changes) {
+                const { availableBalance } = data.changes as { availableBalance?: number };
+                if (availableBalance !== undefined) {
+                    trpcUtils.orders.list.setData(
+                        { view: currentView, limit: 2000 },
+                        (old) => {
+                            if (!old) return old;
+                            return {
+                                ...old,
+                                rows: old.rows.map((row: any) =>
+                                    row.skuId === data.skuId
+                                        ? { ...row, skuStock: availableBalance }
+                                        : row
+                                ),
+                            };
+                        }
+                    );
+                    console.log(`SSE: Updated skuStock for SKU ${data.skuId} to ${availableBalance}`);
+                }
+            }
+
+            // Handle order updates (cancel/uncancel)
+            if (data.type === 'order_updated' && data.orderId && data.changes) {
+                trpcUtils.orders.list.setData(
+                    { view: currentView, limit: 2000 },
+                    (old) => {
+                        if (!old) return old;
+
+                        const newRows = old.rows.map((row: any) => {
+                            if (row.orderId !== data.orderId) return row;
+                            // Apply changes to matching rows
+                            const updates: any = {};
+                            if (data.changes?.status) updates.orderStatus = data.changes.status;
+                            if (data.changes?.lineStatus) updates.lineStatus = data.changes.lineStatus;
+                            return { ...row, ...updates };
+                        });
+
+                        const newOrders = old.orders.map((order: any) => {
+                            if (order.id !== data.orderId) return order;
+                            const updates: any = {};
+                            if (data.changes?.status) updates.status = data.changes.status;
+                            if (data.changes?.lineStatus) {
+                                updates.orderLines = order.orderLines?.map((line: any) => ({
+                                    ...line,
+                                    lineStatus: data.changes!.lineStatus,
+                                }));
+                            }
+                            return { ...order, ...updates };
+                        });
+
+                        return { ...old, rows: newRows, orders: newOrders };
+                    }
+                );
+            }
+
         } catch (err) {
             console.error('SSE: Failed to parse event', err);
         }
@@ -129,6 +187,7 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
 
         es.onerror = () => {
             console.log('SSE: Connection error, will reconnect...');
+            setIsConnected(false);
             es.close();
 
             // Exponential backoff for reconnection
@@ -142,6 +201,7 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
 
         es.onopen = () => {
             console.log('SSE: Connection opened');
+            setIsConnected(true);
         };
 
         eventSourceRef.current = es;
@@ -167,7 +227,7 @@ export function useOrderSSE({ currentView, enabled = true }: UseOrderSSEOptions)
     }, [currentView]);
 
     return {
-        isConnected: eventSourceRef.current?.readyState === EventSource.OPEN,
+        isConnected,
     };
 }
 

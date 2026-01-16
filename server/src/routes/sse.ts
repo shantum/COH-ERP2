@@ -14,10 +14,11 @@ const router: Router = Router();
 
 // Type for SSE event data
 export interface OrderUpdateEvent {
-    type: 'line_status' | 'order_created' | 'order_updated' | 'order_deleted';
+    type: 'line_status' | 'order_created' | 'order_updated' | 'order_deleted' | 'inventory_updated';
     view?: string;
     orderId?: string;
     lineId?: string;
+    skuId?: string;
     changes?: Record<string, unknown>;
 }
 

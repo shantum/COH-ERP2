@@ -21,7 +21,7 @@ import { COURIER_OPTIONS } from '../constants';
  * Build tracking column definitions
  */
 export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
-    const { getHeaderName, onUpdateLineTracking } = ctx;
+    const { getHeaderName, handlersRef } = ctx;
 
     return [
         // Shopify Status
@@ -73,10 +73,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                 if (!shopifyStatus || !['fulfilled', 'partial'].includes(shopifyStatus)) {
                     return '';
                 }
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                return line?.awbNumber || '';
+                // Use pre-flattened field (O(1)) instead of orderLines.find() (O(n))
+                return params.data?.lineAwbNumber || '';
             },
             cellRenderer: (params: ICellRendererParams) => {
                 const awb = params.value;
@@ -101,10 +99,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                 if (!shopifyStatus || !['fulfilled', 'partial'].includes(shopifyStatus)) {
                     return '';
                 }
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                return line?.courier || '';
+                // Use pre-flattened field (O(1)) instead of orderLines.find() (O(n))
+                return params.data?.lineCourier || '';
             },
             cellRenderer: (params: ICellRendererParams) => {
                 const courier = params.value;
@@ -124,11 +120,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                 return ['packed', 'shipped'].includes(status);
             },
             valueGetter: (params: ValueGetterParams) => {
-                // Get line-level AWB from the order line
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                return line?.awbNumber || '';
+                // Use pre-flattened field (O(1)) instead of orderLines.find() (O(n))
+                return params.data?.lineAwbNumber || '';
             },
             valueSetter: (params: ValueSetterParams) => {
                 // Double-check status before calling API to prevent stale data issues
@@ -138,14 +131,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                     return false;
                 }
                 if (params.data?.lineId) {
-                    // Directly update the row data so AG-Grid shows the value immediately
-                    const orderLines = params.data?.order?.orderLines || [];
-                    const line = orderLines.find((l: any) => l.id === params.data.lineId);
-                    if (line) {
-                        line.awbNumber = params.newValue || '';
-                    }
-                    // Call API to persist
-                    onUpdateLineTracking(params.data.lineId, { awbNumber: params.newValue || '' });
+                    // Call API to persist - cache will be updated via SSE/refetch
+                    handlersRef.current.onUpdateLineTracking(params.data.lineId, { awbNumber: params.newValue || '' });
                 }
                 return true;
             },
@@ -153,11 +140,9 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                 const row = params.data;
                 if (!row?.lineId) return null;
 
-                const lineId = row.lineId;
-                const orderLines = row.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                const lineAwb = line?.awbNumber || '';
-                const expectedAwb = row.order?.shopifyCache?.trackingNumber || '';
+                // Use pre-flattened fields (O(1)) instead of orderLines.find() (O(n))
+                const lineAwb = row.lineAwbNumber || '';
+                const expectedAwb = row.shopifyAwb || '';
 
                 // Check if cell is editable
                 const isEditable = ['packed', 'shipped'].includes(row.lineStatus);
@@ -218,10 +203,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                 values: COURIER_OPTIONS,
             },
             valueGetter: (params: ValueGetterParams) => {
-                const lineId = params.data?.lineId;
-                const orderLines = params.data?.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                return line?.courier || '';
+                // Use pre-flattened field (O(1)) instead of orderLines.find() (O(n))
+                return params.data?.lineCourier || '';
             },
             valueSetter: (params: ValueSetterParams) => {
                 // Double-check status before calling API to prevent stale data issues
@@ -231,14 +214,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                     return false;
                 }
                 if (params.data?.lineId) {
-                    // Directly update the row data so AG-Grid shows the value immediately
-                    const orderLines = params.data?.order?.orderLines || [];
-                    const line = orderLines.find((l: any) => l.id === params.data.lineId);
-                    if (line) {
-                        line.courier = params.newValue || '';
-                    }
-                    // Call API to persist
-                    onUpdateLineTracking(params.data.lineId, { courier: params.newValue || '' });
+                    // Call API to persist - cache will be updated via SSE/refetch
+                    handlersRef.current.onUpdateLineTracking(params.data.lineId, { courier: params.newValue || '' });
                 }
                 return true;
             },
@@ -246,10 +223,8 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                 const row = params.data;
                 if (!row?.lineId) return null;
 
-                const lineId = row.lineId;
-                const orderLines = row.order?.orderLines || [];
-                const line = orderLines.find((l: any) => l.id === lineId);
-                const courier = line?.courier || '';
+                // Use pre-flattened field (O(1)) instead of orderLines.find() (O(n))
+                const courier = row.lineCourier || '';
                 const isEditable = ['packed', 'shipped'].includes(row.lineStatus);
 
                 if (!courier) {

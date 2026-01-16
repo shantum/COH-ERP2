@@ -17,12 +17,14 @@ import { fabricsApi, productionApi, adminApi, customersApi } from '../services/a
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 
-// Poll intervals - active view refreshes more frequently
-// Reduced for faster multi-user sync (optimistic updates handle own actions instantly)
-const POLL_INTERVAL_ACTIVE = 5000;    // 5 seconds for 'open' view
-const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views
+// Poll intervals - SSE connection determines frequency
+// When SSE connected: longer intervals (fallback only)
+// When SSE disconnected: frequent polling to stay in sync
+const POLL_INTERVAL_ACTIVE = 5000;    // 5 seconds for 'open' view (no SSE)
+const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views (no SSE)
+const POLL_INTERVAL_SSE_FALLBACK = 60000;  // 60 seconds as fallback when SSE connected
 // Stale time prevents double-fetches when data is still fresh
-const STALE_TIME = 25000;
+const STALE_TIME = 60000;  // 1 minute (increased since SSE handles updates)
 // Cache retention time (5 minutes) - keeps stale data for instant display
 const GC_TIME = 5 * 60 * 1000;
 // Orders per page
@@ -39,6 +41,8 @@ interface UseUnifiedOrdersDataOptions {
     page: number;
     selectedCustomerId?: string | null;
     shippedFilter?: 'shipped' | 'not_shipped';
+    /** Whether SSE is connected - reduces polling when true */
+    isSSEConnected?: boolean;
 }
 
 export function useUnifiedOrdersData({
@@ -46,8 +50,18 @@ export function useUnifiedOrdersData({
     page,
     selectedCustomerId,
     shippedFilter,
+    isSSEConnected = false,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
+
+    // Determine poll interval based on SSE connection status
+    // When SSE is connected, we only poll as a fallback (60s)
+    // When disconnected, poll frequently to stay in sync
+    const pollInterval = isSSEConnected
+        ? POLL_INTERVAL_SSE_FALLBACK  // SSE handles updates, poll as fallback
+        : currentView === 'open'
+            ? POLL_INTERVAL_ACTIVE    // No SSE: poll frequently for active view
+            : POLL_INTERVAL_PASSIVE;  // No SSE: poll less for passive views
 
     // ==========================================
     // MAIN ORDER QUERY - Fetches current view with pagination
@@ -64,7 +78,7 @@ export function useUnifiedOrdersData({
             staleTime: STALE_TIME,
             gcTime: GC_TIME,  // Keep cached data for 5 min for instant display
             refetchOnWindowFocus: false,
-            refetchInterval: currentView === 'open' ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_PASSIVE,
+            refetchInterval: pollInterval,
             refetchIntervalInBackground: false,
             placeholderData: (prev) => prev,  // Show stale data immediately while fetching
         }

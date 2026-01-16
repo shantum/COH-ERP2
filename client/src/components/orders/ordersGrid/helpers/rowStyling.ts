@@ -1,10 +1,68 @@
 /**
  * Row styling utilities for OrdersGrid
  * Provides getRowStyle and getRowClass callbacks for AG-Grid
+ *
+ * PERFORMANCE: All style objects are pre-defined constants to avoid
+ * creating new objects on every render. AG-Grid can cache these references.
  */
 
 import type { RowStyle } from 'ag-grid-community';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
+
+/**
+ * Pre-defined style objects for each line status
+ * Using constants prevents AG-Grid from seeing "new" objects on every render
+ */
+const STYLES = {
+    cancelled: {
+        backgroundColor: '#f3f4f6',
+        color: '#9ca3af',
+        textDecoration: 'line-through',
+        opacity: 0.6,
+    } as RowStyle,
+
+    shipped: {
+        backgroundColor: '#bbf7d0',  // Green-200 - strong green
+        textDecoration: 'line-through',
+        borderLeft: '4px solid #10b981',  // Emerald-500
+    } as RowStyle,
+
+    packed: {
+        backgroundColor: '#dbeafe',  // Blue-100
+        borderLeft: '4px solid #3b82f6',  // Blue-500
+    } as RowStyle,
+
+    picked: {
+        backgroundColor: '#ccfbf1',  // Teal-100
+        borderLeft: '4px solid #14b8a6',  // Teal-500
+    } as RowStyle,
+
+    allocated: {
+        backgroundColor: '#f3e8ff',  // Purple-100
+        borderLeft: '4px solid #a855f7',  // Purple-500
+    } as RowStyle,
+
+    customizedPending: {
+        backgroundColor: '#fff7ed',  // Orange-50
+        borderLeft: '4px solid #f97316',  // Orange-500
+    } as RowStyle,
+
+    pendingWithStock: {
+        backgroundColor: '#f0fdf4',  // Green-50
+        borderLeft: '4px solid #86efac',  // Green-300 (soft)
+    } as RowStyle,
+
+    pendingInProduction: {
+        backgroundColor: '#fef3c7',  // Amber-100
+        borderLeft: '4px solid #f59e0b',  // Amber-500
+    } as RowStyle,
+
+    pendingBlocked: {
+        backgroundColor: '#f9fafb',  // Gray-50
+        color: '#6b7280',  // Gray-500
+        borderLeft: '4px solid #d1d5db',  // Gray-300
+    } as RowStyle,
+} as const;
 
 /**
  * Get row style based on line status
@@ -15,6 +73,8 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
  * - Purple: Allocated
  * - Teal: Picked
  * - Blue: Packed
+ *
+ * PERFORMANCE: Returns pre-defined constant objects, not new objects.
  */
 export function getRowStyle(params: { data?: FlattenedOrderRow }): RowStyle | undefined {
     const row = params.data;
@@ -22,53 +82,32 @@ export function getRowStyle(params: { data?: FlattenedOrderRow }): RowStyle | un
 
     // Cancelled - clearly struck through and grayed
     if (row.lineStatus === 'cancelled') {
-        return {
-            backgroundColor: '#f3f4f6',
-            color: '#9ca3af',
-            textDecoration: 'line-through',
-            opacity: 0.6,
-        };
+        return STYLES.cancelled;
     }
 
     // Shipped - DONE state, very distinct green with strikethrough
     if (row.lineStatus === 'shipped') {
-        return {
-            backgroundColor: '#bbf7d0',  // Green-200 - strong green
-            textDecoration: 'line-through',
-            borderLeft: '4px solid #10b981',  // Emerald-500
-        };
+        return STYLES.shipped;
     }
 
     // Packed - READY TO SHIP, bright distinct blue
     if (row.lineStatus === 'packed') {
-        return {
-            backgroundColor: '#dbeafe',  // Blue-100
-            borderLeft: '4px solid #3b82f6',  // Blue-500
-        };
+        return STYLES.packed;
     }
 
     // Picked - Ready to pack, teal tint
     if (row.lineStatus === 'picked') {
-        return {
-            backgroundColor: '#ccfbf1',  // Teal-100
-            borderLeft: '4px solid #14b8a6',  // Teal-500
-        };
+        return STYLES.picked;
     }
 
     // Allocated - Ready to pick, light purple
     if (row.lineStatus === 'allocated') {
-        return {
-            backgroundColor: '#f3e8ff',  // Purple-100
-            borderLeft: '4px solid #a855f7',  // Purple-500
-        };
+        return STYLES.allocated;
     }
 
     // Customized lines in pending - special orange styling
     if (row.isCustomized && row.lineStatus === 'pending') {
-        return {
-            backgroundColor: '#fff7ed',  // Orange-50
-            borderLeft: '4px solid #f97316',  // Orange-500
-        };
+        return STYLES.customizedPending;
     }
 
     // Pending with stock - actionable, subtle green tint
@@ -77,27 +116,17 @@ export function getRowStyle(params: { data?: FlattenedOrderRow }): RowStyle | un
     const hasProductionDate = !!row.productionBatchId;
 
     if (hasStock && isPending) {
-        return {
-            backgroundColor: '#f0fdf4',  // Green-50
-            borderLeft: '4px solid #86efac',  // Green-300 (soft)
-        };
+        return STYLES.pendingWithStock;
     }
 
     // Pending without stock but has production date - amber
     if (hasProductionDate && isPending) {
-        return {
-            backgroundColor: '#fef3c7',  // Amber-100
-            borderLeft: '4px solid #f59e0b',  // Amber-500
-        };
+        return STYLES.pendingInProduction;
     }
 
     // Pending without stock - blocked, dim/gray
     if (isPending && !hasStock) {
-        return {
-            backgroundColor: '#f9fafb',  // Gray-50
-            color: '#6b7280',  // Gray-500
-            borderLeft: '4px solid #d1d5db',  // Gray-300
-        };
+        return STYLES.pendingBlocked;
     }
 
     return undefined;

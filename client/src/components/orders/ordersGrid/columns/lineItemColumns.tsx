@@ -16,12 +16,7 @@ import { Wrench, Pencil, Trash2, Settings } from 'lucide-react';
  * Build line item column definitions
  */
 export function buildLineItemColumns(ctx: ColumnBuilderContext): ColDef[] {
-    const {
-        getHeaderName,
-        onCustomize,
-        onEditCustomization,
-        onRemoveCustomization,
-    } = ctx;
+    const { getHeaderName, handlersRef } = ctx;
 
     return [
         // SKU Code
@@ -113,6 +108,7 @@ export function buildLineItemColumns(ctx: ColumnBuilderContext): ColDef[] {
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
+                                    const { onEditCustomization } = handlersRef.current;
                                     if (onEditCustomization) {
                                         onEditCustomization(row.lineId, {
                                             lineId: row.lineId,
@@ -136,6 +132,7 @@ export function buildLineItemColumns(ctx: ColumnBuilderContext): ColDef[] {
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
+                                    const { onRemoveCustomization } = handlersRef.current;
                                     if (onRemoveCustomization) {
                                         onRemoveCustomization(row.lineId, row.customSkuCode);
                                     }
@@ -155,6 +152,7 @@ export function buildLineItemColumns(ctx: ColumnBuilderContext): ColDef[] {
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
+                                const { onCustomize } = handlersRef.current;
                                 if (onCustomize) {
                                     onCustomize(row.lineId, {
                                         lineId: row.lineId,

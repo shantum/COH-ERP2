@@ -16,6 +16,8 @@ import type { ColumnBuilderContext } from '../types';
  * Build payment and customer column definitions
  */
 export function buildPaymentColumns(ctx: ColumnBuilderContext): ColDef[] {
+    // Static values only - no dynamic handlers used in this file
+    // If handlers needed in future, access via: ctx.handlersRef.current.handlerName
     const { getHeaderName } = ctx;
 
     return [

@@ -61,7 +61,7 @@
  * return <>{gridComponent}</>;
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect, type MutableRefObject } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
@@ -335,31 +335,14 @@ export function OrdersGrid({
         [lockedDates]
     );
 
-    // Build column context with all handlers and state
-    const columnContext = useMemo<ColumnBuilderContext>(() => ({
-        // Header customization
-        getHeaderName,
-        setCustomHeader,
-
-        // Current view
-        currentView,
-
-        // UI State
+    // Ref for dynamic handlers - updated every render for latest values
+    // This prevents columnContext from rebuilding on every handler/state change
+    const handlersRef = useRef<import('./ordersGrid/types').DynamicColumnHandlers>({
         allocatingLines,
         isCancellingLine,
         isUncancellingLine,
         isCancellingOrder,
         isDeletingOrder,
-
-        // Utilities
-        isDateLocked,
-
-        // Order Info handlers
-        onViewOrder,
-        onSelectCustomer,
-        onUpdateShipByDate,
-
-        // Fulfillment handlers
         onAllocate,
         onUnallocate,
         onPick,
@@ -368,43 +351,32 @@ export function OrdersGrid({
         onUnpack,
         onMarkShippedLine,
         onUnmarkShippedLine: _onUnmarkShippedLine,
-
-        // Admin actions
         isAdmin,
         onForceShipOrder,
-
-        // Production handlers
         onCreateBatch,
         onUpdateBatch,
         onDeleteBatch,
-
-        // Line handlers
         onUpdateLineNotes,
         onCancelLine,
         onUncancelLine,
         onUpdateLineTracking,
-
-        // Customization handlers
         onCustomize,
         onEditCustomization,
         onRemoveCustomization,
-
-        // Post-ship handlers
         onMarkCodRemitted,
         onTrack: _onTrack,
-    }), [
-        getHeaderName,
-        setCustomHeader,
-        currentView,
+        onViewOrder,
+        onSelectCustomer,
+        onUpdateShipByDate,
+    });
+
+    // Update ref every render (direct assignment, no useEffect needed)
+    handlersRef.current = {
         allocatingLines,
         isCancellingLine,
         isUncancellingLine,
         isCancellingOrder,
         isDeletingOrder,
-        isDateLocked,
-        onViewOrder,
-        onSelectCustomer,
-        onUpdateShipByDate,
         onAllocate,
         onUnallocate,
         onPick,
@@ -412,7 +384,7 @@ export function OrdersGrid({
         onPack,
         onUnpack,
         onMarkShippedLine,
-        _onUnmarkShippedLine,
+        onUnmarkShippedLine: _onUnmarkShippedLine,
         isAdmin,
         onForceShipOrder,
         onCreateBatch,
@@ -426,8 +398,23 @@ export function OrdersGrid({
         onEditCustomization,
         onRemoveCustomization,
         onMarkCodRemitted,
-        _onTrack,
-    ]);
+        onTrack: _onTrack,
+        onViewOrder,
+        onSelectCustomer,
+        onUpdateShipByDate,
+    };
+
+    // Build column context with STABLE references only
+    // Dynamic values accessed via handlersRef.current in cellRenderers
+    const columnContext = useMemo<ColumnBuilderContext>(() => ({
+        // Static values (rarely change)
+        getHeaderName,
+        setCustomHeader,
+        currentView,
+        isDateLocked,
+        // Dynamic handlers via ref (always up-to-date, but ref is stable)
+        handlersRef,
+    }), [getHeaderName, setCustomHeader, currentView, isDateLocked]);
 
     // Build column definitions from context
     const columnDefs = useMemo<ColDef[]>(() => {
