@@ -146,12 +146,16 @@ export default function Orders() {
         openUnifiedModal(order, 'ship');
     }, [openUnifiedModal]);
 
-    // Mutations hook
+    // Mutations hook with optimistic update support
+    // Pass currentView and page so mutations can target the correct cache
     const mutations = useOrdersMutations({
         onShipSuccess: () => setUnifiedModalOrder(null),
         onCreateSuccess: () => setShowCreateOrder(false),
         onDeleteSuccess: () => setUnifiedModalOrder(null),
         onEditSuccess: () => setUnifiedModalOrder(null),
+        currentView: view,
+        page,
+        shippedFilter: archivedShipFilter || undefined,
     });
 
     // Enrich server-flattened rows with client-side inventory data

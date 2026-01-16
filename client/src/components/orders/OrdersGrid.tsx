@@ -486,6 +486,10 @@ export function OrdersGrid({
                             onColumnMoved={onColumnMoved}
                             onColumnResized={onColumnResized}
                             maintainColumnOrder={true}
+                            // Performance optimizations for large datasets
+                            rowBuffer={25}                    // Render 25 rows beyond viewport (smoother scroll)
+                            debounceVerticalScrollbar={true}  // Debounce scroll events
+                            suppressAnimationFrame={false}    // Keep animation frame for smooth updates
                         />
                     </div>
                 </div>

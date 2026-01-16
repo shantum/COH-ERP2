@@ -8,14 +8,17 @@ import { useMemo } from 'react';
 import { orderTabInvalidationMap } from '../../constants/queryKeys';
 import { trpc } from '../../services/trpc';
 
+// Page size for orders pagination (must match useUnifiedOrdersData)
+export const PAGE_SIZE = 500;
+
 // Map view names to tRPC query input
 export const viewToTrpcInput: Record<string, { view: string; limit?: number }> = {
-    open: { view: 'open', limit: 2000 },
-    shipped: { view: 'shipped' },
-    rto: { view: 'rto' },
-    cod_pending: { view: 'cod_pending' },
-    cancelled: { view: 'cancelled' },
-    archived: { view: 'archived' },
+    open: { view: 'open', limit: PAGE_SIZE },
+    shipped: { view: 'shipped', limit: PAGE_SIZE },
+    rto: { view: 'rto', limit: PAGE_SIZE },
+    cod_pending: { view: 'cod_pending', limit: PAGE_SIZE },
+    cancelled: { view: 'cancelled', limit: PAGE_SIZE },
+    archived: { view: 'archived', limit: PAGE_SIZE },
 };
 
 // Type for mutation options (onSettled, onSuccess, onError callbacks)

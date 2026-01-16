@@ -5,11 +5,11 @@
  * This facade maintains backward compatibility while allowing consumers to
  * optionally import individual hooks for better tree-shaking.
  *
- * SIMPLIFIED: No optimistic updates.
- * - Mutations complete in 100-300ms (fast enough)
- * - SSE broadcasts changes to other users in <1s
- * - No race conditions, no cache sync issues
- * - Loading states in UI provide feedback
+ * OPTIMISTIC UPDATES:
+ * - Workflow mutations (allocate/pick/pack) use optimistic updates for instant UI
+ * - Status mutations (cancel/uncancel line) use optimistic updates
+ * - Background revalidation ensures data consistency
+ * - Rollback on error restores previous state
  *
  * Individual hooks available in ./orders/:
  * - useOrderWorkflowMutations: allocate/pick/pack
@@ -35,16 +35,34 @@ import {
 } from './orders';
 
 interface UseOrdersMutationsOptions {
+    /** Callback fired after successful ship */
     onShipSuccess?: () => void;
+    /** Callback fired after successful order creation */
     onCreateSuccess?: () => void;
+    /** Callback fired after successful order deletion */
     onDeleteSuccess?: () => void;
+    /** Callback fired after successful order edit */
     onEditSuccess?: () => void;
+    /** Callback fired after successful notes update */
     onNotesSuccess?: () => void;
+    /** Current view for optimistic update cache targeting */
+    currentView?: string;
+    /** Current page for optimistic update cache targeting */
+    page?: number;
+    /** Shipped filter for archived view (for cache targeting) */
+    shippedFilter?: 'shipped' | 'not_shipped';
 }
 
 export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
-    // Compose all sub-hooks
-    const workflow = useOrderWorkflowMutations();
+    // Extract optimistic update options
+    const optimisticOptions = {
+        currentView: options.currentView,
+        page: options.page,
+        shippedFilter: options.shippedFilter,
+    };
+
+    // Compose all sub-hooks with optimistic update options
+    const workflow = useOrderWorkflowMutations(optimisticOptions);
     const ship = useOrderShipMutations({ onShipSuccess: options.onShipSuccess });
     const crud = useOrderCrudMutations({
         onCreateSuccess: options.onCreateSuccess,
@@ -52,7 +70,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         onEditSuccess: options.onEditSuccess,
         onNotesSuccess: options.onNotesSuccess,
     });
-    const status = useOrderStatusMutations();
+    const status = useOrderStatusMutations(optimisticOptions);
     const delivery = useOrderDeliveryMutations();
     const line = useOrderLineMutations({ onEditSuccess: options.onEditSuccess });
     const release = useOrderReleaseMutations();

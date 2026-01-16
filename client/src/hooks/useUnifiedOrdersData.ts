@@ -78,10 +78,17 @@ export function useUnifiedOrdersData({
         {
             staleTime: STALE_TIME,
             gcTime: GC_TIME,  // Keep cached data for 5 min for instant display
-            refetchOnWindowFocus: false,
-            refetchInterval: pollInterval,
-            refetchIntervalInBackground: false,
+            refetchOnWindowFocus: true,   // Refetch when user returns to tab
+            refetchIntervalInBackground: false,  // No polling when tab hidden
             placeholderData: (prev) => prev,  // Show stale data immediately while fetching
+            // Smart polling: only poll if document has focus
+            refetchInterval: () => {
+                // Don't poll if document not focused (saves network when tab is hidden)
+                if (typeof document !== 'undefined' && !document.hasFocus()) {
+                    return false;
+                }
+                return pollInterval;
+            },
         }
     );
 

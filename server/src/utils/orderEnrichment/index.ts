@@ -3,6 +3,11 @@
  *
  * Modular enrichment system for orders.
  * Each enrichment is declarative - views specify which enrichments they need.
+ *
+ * PERFORMANCE OPTIMIZATION:
+ * - CPU-only enrichments combined into single map pass
+ * - DB queries (customerStats) run in parallel while preparing CPU enrichments
+ * - Reduces N map iterations to 1 for better cache locality
  */
 
 import type { PrismaClient } from '@prisma/client';
@@ -36,6 +41,7 @@ export { calculateRtoStatus } from './rtoStatus.js';
 
 /**
  * Apply enrichments to orders based on view configuration
+ * Optimized to run CPU enrichments in a single pass and DB queries in parallel
  */
 export async function enrichOrdersForView<T extends OrderWithRelations>(
     prisma: PrismaClient,
@@ -43,6 +49,9 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
     enrichments: EnrichmentType[] = []
 ): Promise<EnrichedOrder[]> {
     if (!orders || orders.length === 0) return [];
+
+    // Convert enrichment array to Set for O(1) lookup
+    const enrichmentSet = new Set(enrichments);
 
     // Always calculate totalAmount from orderLines if null (fallback for unmigrated data)
     let enriched: EnrichedOrder[] = orders.map((order) => {
@@ -66,57 +75,66 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
         return { ...order, totalAmount: linesTotal > 0 ? linesTotal : null } as EnrichedOrder;
     });
 
-    // Customer stats (common to most views)
-    if (enrichments.includes('customerStats')) {
-        const options = {
-            includeFulfillmentStage: enrichments.includes('fulfillmentStage'),
-            includeLineStatusCounts: enrichments.includes('lineStatusCounts'),
-        };
-        // Cast to expected type - enriched orders have customerId from DB query
-        const ordersForStats = enriched.map((o) => ({
+    // Determine which enrichments to run
+    const needsCustomerStats = enrichmentSet.has('customerStats');
+    const needsFulfillmentStage = enrichmentSet.has('fulfillmentStage') && !needsCustomerStats;
+    const needsLineStatusCounts = enrichmentSet.has('lineStatusCounts') && !needsCustomerStats;
+    const needsDaysInTransit = enrichmentSet.has('daysInTransit');
+    const needsTrackingStatus = enrichmentSet.has('trackingStatus');
+    const needsShopifyTracking = enrichmentSet.has('shopifyTracking');
+    const needsDaysSinceDelivery = enrichmentSet.has('daysSinceDelivery');
+    const needsRtoStatus = enrichmentSet.has('rtoStatus');
+    const needsAddressResolution = enrichmentSet.has('addressResolution');
+
+    // Check if any CPU enrichments are needed (excluding customerStats which is DB-based)
+    const needsCpuEnrichments = needsFulfillmentStage || needsLineStatusCounts ||
+        needsDaysInTransit || needsTrackingStatus || needsShopifyTracking ||
+        needsDaysSinceDelivery || needsRtoStatus || needsAddressResolution;
+
+    // Start customer stats query in parallel (it's the only DB query)
+    const customerStatsPromise = needsCustomerStats
+        ? enrichOrdersWithCustomerStats(prisma, enriched.map((o) => ({
             ...o,
             customerId: o.customerId ?? null,
             orderLines: o.orderLines?.map((line) => ({
                 ...line,
                 lineStatus: (line.lineStatus ?? 'pending') as string,
             })),
-        }));
-        enriched = (await enrichOrdersWithCustomerStats(prisma, ordersForStats, options)) as EnrichedOrder[];
-    }
+        })), {
+            includeFulfillmentStage: enrichmentSet.has('fulfillmentStage'),
+            includeLineStatusCounts: enrichmentSet.has('lineStatusCounts'),
+        })
+        : Promise.resolve(enriched);
 
-    // Fulfillment stage (for open orders) - handled in customerStats if both present
-    if (enrichments.includes('fulfillmentStage') && !enrichments.includes('customerStats')) {
-        enriched = enriched.map((order) => ({
-            ...order,
-            fulfillmentStage: calculateFulfillmentStage(
-                (order.orderLines || []) as { lineStatus: string }[]
-            ),
-        }));
-    }
-
-    // Line status counts (for open orders) - handled in customerStats if both present
-    if (enrichments.includes('lineStatusCounts') && !enrichments.includes('customerStats')) {
-        enriched = enriched.map((order) => ({
-            ...order,
-            ...calculateLineStatusCounts((order.orderLines || []) as { lineStatus: string }[]),
-        }));
-    }
-
-    // Days in transit (for shipped/rto)
-    if (enrichments.includes('daysInTransit')) {
-        enriched = enriched.map((order) => ({
-            ...order,
-            daysInTransit: calculateDaysSince(order.shippedAt),
-        }));
-    }
-
-    // Tracking status (for shipped)
-    if (enrichments.includes('trackingStatus')) {
+    // If we need CPU enrichments, run them in a single pass for better cache locality
+    // This is much faster than running 7 separate .map() operations
+    if (needsCpuEnrichments) {
         enriched = enriched.map((order) => {
-            const daysInTransit = order.daysInTransit ?? calculateDaysSince(order.shippedAt);
-            return {
-                ...order,
-                trackingStatus: determineTrackingStatus(
+            const result = { ...order };
+
+            // Fulfillment stage (for open orders) - only if customerStats not handling it
+            if (needsFulfillmentStage) {
+                result.fulfillmentStage = calculateFulfillmentStage(
+                    (order.orderLines || []) as { lineStatus: string }[]
+                );
+            }
+
+            // Line status counts (for open orders) - only if customerStats not handling it
+            if (needsLineStatusCounts) {
+                Object.assign(result, calculateLineStatusCounts(
+                    (order.orderLines || []) as { lineStatus: string }[]
+                ));
+            }
+
+            // Days in transit (for shipped/rto)
+            if (needsDaysInTransit) {
+                result.daysInTransit = calculateDaysSince(order.shippedAt);
+            }
+
+            // Tracking status (for shipped)
+            if (needsTrackingStatus) {
+                const daysInTransit = result.daysInTransit ?? calculateDaysSince(order.shippedAt);
+                result.trackingStatus = determineTrackingStatus(
                     {
                         trackingStatus: order.trackingStatus as string | null | undefined,
                         rtoReceivedAt: order.rtoReceivedAt as Date | null | undefined,
@@ -125,48 +143,71 @@ export async function enrichOrdersForView<T extends OrderWithRelations>(
                         deliveredAt: order.deliveredAt as Date | null | undefined,
                     },
                     daysInTransit
-                ),
-            };
+                );
+            }
+
+            // Shopify tracking extraction (for shipped)
+            if (needsShopifyTracking) {
+                result.shopifyCache = extractShopifyTrackingFields(
+                    order.shopifyCache as ShopifyCache | null | undefined
+                );
+            }
+
+            // Days since delivery (for COD pending)
+            if (needsDaysSinceDelivery) {
+                result.daysSinceDelivery = calculateDaysSince(order.deliveredAt);
+            }
+
+            // RTO status (for RTO view)
+            if (needsRtoStatus) {
+                const rtoResult = calculateRtoStatus(
+                    order.trackingStatus,
+                    order.rtoInitiatedAt,
+                    order.rtoReceivedAt
+                );
+                result.rtoStatus = rtoResult.rtoStatus;
+                result.daysInRto = rtoResult.daysInRto;
+            }
+
+            // Address resolution (fallback to shopifyCache for old orders)
+            if (needsAddressResolution) {
+                return enrichOrderLinesWithAddresses(result) as EnrichedOrder;
+            }
+
+            return result as EnrichedOrder;
         });
     }
 
-    // Shopify tracking extraction (for shipped)
-    if (enrichments.includes('shopifyTracking')) {
-        enriched = enriched.map((order) => ({
-            ...order,
-            shopifyCache: extractShopifyTrackingFields(order.shopifyCache as ShopifyCache | null | undefined),
-        }));
-    }
-
-    // Days since delivery (for COD pending)
-    if (enrichments.includes('daysSinceDelivery')) {
-        enriched = enriched.map((order) => ({
-            ...order,
-            daysSinceDelivery: calculateDaysSince(order.deliveredAt),
-        }));
-    }
-
-    // RTO status (for RTO view)
-    if (enrichments.includes('rtoStatus')) {
-        enriched = enriched.map((order) => {
-            const rtoResult = calculateRtoStatus(
-                order.trackingStatus,
-                order.rtoInitiatedAt,
-                order.rtoReceivedAt
-            );
-            return {
-                ...order,
-                rtoStatus: rtoResult.rtoStatus,
-                daysInRto: rtoResult.daysInRto,
-            };
-        });
-    }
-
-    // Address resolution (fallback to shopifyCache for old orders)
-    if (enrichments.includes('addressResolution')) {
-        enriched = enriched.map((order) =>
-            enrichOrderLinesWithAddresses(order) as EnrichedOrder
-        );
+    // Wait for customer stats if it was running
+    if (needsCustomerStats) {
+        const statsEnriched = await customerStatsPromise;
+        // If we didn't do CPU enrichments, use stats result directly
+        // Otherwise, we need to merge stats into our CPU-enriched result
+        if (!needsCpuEnrichments) {
+            enriched = statsEnriched as EnrichedOrder[];
+        } else {
+            // Merge customer stats into CPU-enriched orders
+            const statsMap = new Map(statsEnriched.map((o: any) => [o.id, o]));
+            enriched = enriched.map((order) => {
+                const statsOrder = statsMap.get(order.id);
+                if (statsOrder) {
+                    return {
+                        ...order,
+                        customerLtv: (statsOrder as any).customerLtv,
+                        customerOrderCount: (statsOrder as any).customerOrderCount,
+                        customerTier: (statsOrder as any).customerTier,
+                        fulfillmentStage: (statsOrder as any).fulfillmentStage ?? order.fulfillmentStage,
+                        pendingCount: (statsOrder as any).pendingCount ?? order.pendingCount,
+                        allocatedCount: (statsOrder as any).allocatedCount ?? order.allocatedCount,
+                        pickedCount: (statsOrder as any).pickedCount ?? order.pickedCount,
+                        packedCount: (statsOrder as any).packedCount ?? order.packedCount,
+                        shippedCount: (statsOrder as any).shippedCount ?? order.shippedCount,
+                        cancelledCount: (statsOrder as any).cancelledCount ?? order.cancelledCount,
+                    };
+                }
+                return order;
+            });
+        }
     }
 
     return enriched;

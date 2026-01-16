@@ -29,4 +29,21 @@ export { useOrderInvalidation } from './orderMutationUtils';
 export type { UseOrderCrudMutationsOptions } from './useOrderCrudMutations';
 export type { UseOrderLineMutationsOptions } from './useOrderLineMutations';
 export type { UseOrderShipMutationsOptions } from './useOrderShipMutations';
-export type { MutationOptions } from './orderMutationUtils';
+export type { UseOrderWorkflowMutationsOptions } from './useOrderWorkflowMutations';
+export type { UseOrderStatusMutationsOptions } from './useOrderStatusMutations';
+export type { MutationOptions, PAGE_SIZE } from './orderMutationUtils';
+
+// Re-export optimistic update helpers for direct use
+export {
+    getOrdersQueryInput,
+    calculateInventoryDelta,
+    optimisticLineStatusUpdate,
+    optimisticBatchLineStatusUpdate,
+    optimisticCancelLine,
+    optimisticUncancelLine,
+} from './optimisticUpdateHelpers';
+export type {
+    OrdersQueryInput,
+    OrdersListData,
+    OptimisticUpdateContext,
+} from './optimisticUpdateHelpers';

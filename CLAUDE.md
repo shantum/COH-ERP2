@@ -298,6 +298,35 @@ const { allocate, pickLine, packLine } = useOrderWorkflowMutations();
 | `useProductionBatchMutations` | createBatch, updateBatch, deleteBatch |
 | `useOrderInvalidation` | invalidateOpenOrders, invalidateShippedOrders, invalidateAll, etc. |
 
+### Optimistic Updates
+
+High-frequency mutations use optimistic updates for instant UI feedback:
+
+**Pattern:**
+```typescript
+// Pass currentView and page to mutations for cache targeting
+const mutations = useOrdersMutations({
+    currentView: view,
+    page,
+    shippedFilter: archivedShipFilter || undefined,
+});
+```
+
+**How it works:**
+1. `onMutate`: Cancel inflight queries, snapshot previous data, update cache optimistically
+2. `onError`: Rollback to previous data
+3. `onSettled`: Background revalidation ensures consistency
+
+**Hooks with optimistic updates:**
+- `useOrderWorkflowMutations` - allocate/pick/pack (instant checkbox toggle)
+- `useOrderStatusMutations` - cancelLine/uncancelLine (instant status change)
+
+**Helper functions** (`optimisticUpdateHelpers.ts`):
+- `getOrdersQueryInput()` - Build tRPC query input for cache targeting
+- `calculateInventoryDelta()` - Determine stock change for status transition
+- `optimisticLineStatusUpdate()` - Update single row in cache
+- `optimisticBatchLineStatusUpdate()` - Update multiple rows in cache
+
 ## Gotchas
 
 1. Router: specific routes before parameterized (`:id`)
@@ -325,13 +354,15 @@ client/src/
     ordersGrid/types.ts               # ColumnBuilderContext
   hooks/
     useOrdersMutations.ts             # Facade composing all mutation hooks
+    useUnifiedOrdersData.ts           # Main data hook with smart polling
     orders/                           # Focused mutation hooks (decomposed)
       index.ts                        # Barrel export
-      orderMutationUtils.ts           # Shared invalidation helpers
-      useOrderWorkflowMutations.ts    # allocate/pick/pack workflow
+      orderMutationUtils.ts           # Shared invalidation helpers + PAGE_SIZE
+      optimisticUpdateHelpers.ts      # Optimistic update utilities
+      useOrderWorkflowMutations.ts    # allocate/pick/pack with optimistic updates
       useOrderShipMutations.ts        # ship operations
       useOrderCrudMutations.ts        # create/update/delete
-      useOrderStatusMutations.ts      # cancel/uncancel
+      useOrderStatusMutations.ts      # cancel/uncancel with optimistic updates
       useOrderDeliveryMutations.ts    # delivery tracking
       useOrderLineMutations.ts        # line ops + customization
       useOrderReleaseMutations.ts     # release workflows
