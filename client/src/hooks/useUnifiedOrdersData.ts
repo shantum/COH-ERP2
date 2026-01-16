@@ -9,7 +9,7 @@
  *
  * Views: open, shipped, cancelled (3 views)
  * Shipped view has sub-filters: all, rto, cod_pending (server-side filtering)
- * Pagination: 500 orders per page
+ * Pagination: 500/page for Open, 100/page for Shipped/Cancelled
  */
 
 import { useMemo, useEffect } from 'react';
@@ -27,11 +27,25 @@ const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views (no SSE)
 const STALE_TIME = 60000;  // 1 minute (increased since SSE handles updates)
 // Cache retention time (5 minutes) - keeps stale data for instant display
 const GC_TIME = 5 * 60 * 1000;
-// Orders per page
-const PAGE_SIZE = 500;
+// Orders per page (view-specific)
+const PAGE_SIZE_OPEN = 500;
+const PAGE_SIZE_SHIPPED = 100;
+const PAGE_SIZE_CANCELLED = 100;
 
 // All available views (3 views - RTO and COD Pending are now filter chips in Shipped)
 export type OrderView = 'open' | 'shipped' | 'cancelled';
+
+// Helper to get page size for a view
+export const getPageSize = (view: OrderView): number => {
+    switch (view) {
+        case 'shipped':
+            return PAGE_SIZE_SHIPPED;
+        case 'cancelled':
+            return PAGE_SIZE_CANCELLED;
+        default:
+            return PAGE_SIZE_OPEN;
+    }
+};
 
 // Shipped view sub-filters (server-side filtering)
 export type ShippedFilter = 'rto' | 'cod_pending';
@@ -79,7 +93,7 @@ export function useUnifiedOrdersData({
         {
             view: currentView,
             page,
-            limit: PAGE_SIZE,
+            limit: getPageSize(currentView),
             // Pass shipped filter for server-side filtering (rto, cod_pending)
             ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
         },
@@ -108,7 +122,7 @@ export function useUnifiedOrdersData({
         if (currentView === 'open' && page === 1 && ordersQuery.isSuccess) {
             // Prefetch shipped view page 1 in background
             queryClient.prefetchQuery({
-                queryKey: [['orders', 'list'], { input: { view: 'shipped', page: 1, limit: PAGE_SIZE }, type: 'query' }],
+                queryKey: [['orders', 'list'], { input: { view: 'shipped', page: 1, limit: getPageSize('shipped') }, type: 'query' }],
                 staleTime: STALE_TIME,
             });
         }
@@ -123,7 +137,7 @@ export function useUnifiedOrdersData({
         // Build base query input
         const baseInput = {
             view: currentView,
-            limit: PAGE_SIZE,
+            limit: getPageSize(currentView),
             ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
         };
 
