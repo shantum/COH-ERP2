@@ -34,7 +34,8 @@ Single page `/orders` with dropdown selector. Views: Open, Shipped, RTO, COD Pen
 - `Orders.tsx` - Page orchestrator (~755 lines)
 - `OrdersGrid.tsx` - Grid component (~538 lines)
 - `ordersGrid/columns/` - 6 modular column files
-- `orderViews.ts` - View configs (~1150 lines)
+- `orderViews.ts` - View configs (~940 lines)
+- `orderEnrichment/` - Enrichment pipeline (9 modular files)
 
 ### Data Model
 - Each row = one order line (server-flattened)
@@ -210,13 +211,23 @@ server/src/
       summaries.ts                    # RTO, shipped, archived summaries
       analytics.ts                    # /analytics, /dashboard-stats
   utils/
-    orderViews.ts                     # VIEW_CONFIGS with where/orderBy/enrichments
+    orderViews.ts                     # VIEW_CONFIGS with where/orderBy/flattening
+    orderEnrichment/                  # Order enrichment pipeline (modular)
+      index.ts                        # Pipeline orchestrator + exports
+      types.ts                        # EnrichmentType, EnrichedOrder
+      fulfillmentStage.ts             # calculateFulfillmentStage()
+      lineStatusCounts.ts             # calculateLineStatusCounts()
+      customerStats.ts                # enrichOrdersWithCustomerStats()
+      trackingStatus.ts               # determineTrackingStatus(), calculateDaysSince()
+      shopifyTracking.ts              # extractShopifyTrackingFields()
+      addressResolution.ts            # enrichOrderLinesWithAddresses()
+      rtoStatus.ts                    # calculateRtoStatus()
     queryPatterns.ts                  # Re-export barrel for patterns/
     patterns/                         # Query patterns (decomposed)
       index.ts                        # Barrel export
       types.ts                        # Types + constants (TXN_TYPE, TXN_REASON)
       orderSelects.ts                 # ORDER_LIST_SELECT, ORDER_LINES_INCLUDE
-      orderHelpers.ts                 # enrichOrdersWithCustomerStats, Shopify accessors
+      orderHelpers.ts                 # Re-exports from orderEnrichment, Shopify accessors
       inventory.ts                    # calculateInventoryBalance, fabric balance
       transactions.ts                 # allocation, sale, RTO transactions
       customization.ts                # createCustomSku, removeCustomization

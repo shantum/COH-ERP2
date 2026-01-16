@@ -608,11 +608,26 @@ Line Status:    pending → allocated → picked → packed → shipped → deli
 | File | Description |
 |------|-------------|
 | `server/src/utils/orderStatus.ts` | **Order status computation engine.** Computes order status from line states, validates transitions, calculates processing times |
-| `server/src/utils/orderViews.ts` | **View configuration system.** Defines all 12 order views (open, shipped, rto, etc.) with filtering, enrichment, and sorting rules |
+| `server/src/utils/orderViews.ts` | **View configuration system.** Defines all 12 order views (open, shipped, rto, etc.) with filtering and sorting rules |
+| `server/src/utils/orderEnrichment/` | **Order enrichment pipeline.** Modular enrichment system (see table below) |
 | `server/src/utils/orderLock.js` | Distributed locking utility to prevent race conditions during order processing |
 | `server/src/utils/queryPatterns.ts` | Shared query patterns for enriching orders with customer stats, tracking status, fulfillment stage |
 | `server/src/utils/customerUtils.ts` | Customer find-or-create logic, used when processing orders |
 | `server/src/utils/tierUtils.ts` | Customer tier calculations and LTV updates triggered by order changes |
+
+#### Order Enrichment Module (`server/src/utils/orderEnrichment/`)
+
+| File | Description |
+|------|-------------|
+| `index.ts` | **Pipeline orchestrator.** Main `enrichOrdersForView()` function that applies enrichments based on view config |
+| `types.ts` | Type definitions: `EnrichmentType`, `EnrichedOrder`, `OrderWithRelations` |
+| `fulfillmentStage.ts` | Calculates fulfillment stage (`pending`, `allocated`, `in_progress`, `ready_to_ship`) from line statuses |
+| `lineStatusCounts.ts` | Counts lines by status (totalLines, pendingLines, allocatedLines, pickedLines, packedLines) |
+| `customerStats.ts` | Enriches orders with customer LTV, order count, RTO count, and tier |
+| `trackingStatus.ts` | Calculates `daysInTransit` and determines tracking status with fallback logic |
+| `shopifyTracking.ts` | Extracts tracking fields from Shopify cache (excluding rawData for performance) |
+| `addressResolution.ts` | Resolves shipping address with fallback chain: line → order → shopifyCache |
+| `rtoStatus.ts` | Calculates RTO status (`received` or `in_transit`) and `daysInRto` |
 
 ---
 
