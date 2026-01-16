@@ -220,7 +220,7 @@ async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
             INNER JOIN "Order" o ON ol."orderId" = o.id
             WHERE ol."awbNumber" IS NOT NULL
                 AND o."isArchived" = false
-                AND (ol."trackingStatus" IS NULL OR ol."trackingStatus" IN ('in_transit', 'out_for_delivery', 'delivery_delayed', 'rto_initiated', 'rto_in_transit', 'rto_delivered', 'manifested', 'picked_up', 'reached_destination', 'undelivered', 'not_picked', 'delivered'))
+                AND (ol."trackingStatus" IS NULL OR ol."trackingStatus" IN ('in_transit', 'out_for_delivery', 'delivery_delayed', 'rto_initiated', 'rto_in_transit', 'manifested', 'picked_up', 'reached_destination', 'undelivered', 'not_picked'))
             ORDER BY ol."awbNumber", o."orderDate" DESC
         ) sub
         ORDER BY "orderDate" DESC
