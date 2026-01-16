@@ -4,8 +4,11 @@
  *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
- * 2. onError: Rollback to previous data
- * 3. onSettled: Invalidate to ensure consistency (background revalidation)
+ * 2. onError: Rollback to previous data + invalidate for consistency
+ * 3. onSettled: Only invalidate non-SSE-synced data (e.g., inventory balance for RTO)
+ *
+ * Note: Order list invalidation removed from onSettled to prevent UI flicker.
+ * SSE handles cross-user synchronization; error rollback ensures consistency.
  */
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -49,11 +52,13 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateShippedOrders();
+            invalidateCodPendingOrders();
             alert(err.message || 'Failed to mark as delivered');
         },
         onSettled: () => {
-            invalidateShippedOrders();
-            invalidateCodPendingOrders();
+            // No invalidation needed - SSE handles cross-user sync
         }
     });
 
@@ -84,11 +89,13 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateShippedOrders();
+            invalidateRtoOrders();
             alert(err.message || 'Failed to mark as RTO');
         },
         onSettled: () => {
-            invalidateShippedOrders();
-            invalidateRtoOrders();
+            // No invalidation needed - SSE handles cross-user sync
         }
     });
 
@@ -119,11 +126,13 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateRtoOrders();
+            invalidateOpenOrders();
             alert(err.message || 'Failed to receive RTO');
         },
         onSettled: () => {
-            invalidateRtoOrders();
-            invalidateOpenOrders();
+            // Only invalidate non-SSE-synced data (inventory balance for RTO restore)
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });

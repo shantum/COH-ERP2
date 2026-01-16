@@ -4,8 +4,11 @@
  *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
- * 2. onError: Rollback to previous data
- * 3. onSettled: Invalidate to ensure consistency (background revalidation)
+ * 2. onError: Rollback to previous data + invalidate for consistency
+ * 3. onSettled: Only trigger callbacks (e.g., onShipSuccess)
+ *
+ * Note: Order list invalidation removed from onSettled to prevent UI flicker.
+ * SSE handles cross-user synchronization; error rollback ensures consistency.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -71,6 +74,10 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+
             const errorData = err.response?.data;
             if (errorData?.details && Array.isArray(errorData.details)) {
                 const messages = errorData.details.map((d: any) => d.message).join('\n');
@@ -80,8 +87,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             }
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // Only trigger callbacks - SSE handles cross-user sync
             onShipSuccess?.();
         }
     });
@@ -109,6 +115,10 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
+
             const errorMsg = err.message || '';
             if (errorMsg.includes('not packed')) {
                 alert(`Cannot ship: Some lines are not packed yet`);
@@ -119,8 +129,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             }
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // Only trigger callbacks - SSE handles cross-user sync
             onShipSuccess?.();
         }
     });
@@ -149,11 +158,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
             alert(err.response?.data?.error || 'Failed to force ship order');
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // Only trigger callbacks - SSE handles cross-user sync
             onShipSuccess?.();
         }
     });
@@ -178,11 +189,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
             alert(err.response?.data?.error || 'Failed to unship order');
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // No invalidation needed - SSE handles cross-user sync
         }
     });
 
@@ -236,11 +249,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
             alert(err.response?.data?.error || 'Failed to ship line');
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // No invalidation needed - SSE handles cross-user sync
         }
     });
 
@@ -262,11 +277,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
             alert(err.response?.data?.error || 'Failed to unship line');
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // No invalidation needed - SSE handles cross-user sync
         }
     });
 
@@ -289,11 +306,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateShippedOrders();
             console.error('Tracking update failed:', err.response?.data?.error || err.message);
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateShippedOrders();
+            // Only invalidate non-SSE-synced data
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });

@@ -4,8 +4,11 @@
  *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
- * 2. onError: Rollback to previous data
- * 3. onSettled: Invalidate to ensure consistency (background revalidation)
+ * 2. onError: Rollback to previous data + invalidate for consistency
+ * 3. onSettled: Only invalidate non-SSE-synced data (e.g., inventory balance)
+ *
+ * Note: Order list invalidation removed from onSettled to prevent UI flicker.
+ * SSE handles cross-user synchronization; error rollback ensures consistency.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -62,11 +65,13 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateCancelledOrders();
             alert(err.message || 'Failed to cancel order');
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateCancelledOrders();
+            // Only invalidate non-SSE-synced data (inventory balance)
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });
@@ -101,11 +106,13 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
+            invalidateCancelledOrders();
             alert(err.message || 'Failed to restore order');
         },
         onSettled: () => {
-            invalidateOpenOrders();
-            invalidateCancelledOrders();
+            // No invalidation needed - SSE handles cross-user sync
         }
     });
 
@@ -141,10 +148,12 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
             alert(err.response?.data?.error || 'Failed to cancel line');
         },
         onSettled: () => {
-            invalidateOpenOrders();
+            // Only invalidate non-SSE-synced data (inventory balance)
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
     });
@@ -169,10 +178,12 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
             alert(err.response?.data?.error || 'Failed to restore line');
         },
         onSettled: () => {
-            invalidateOpenOrders();
+            // No invalidation needed - SSE handles cross-user sync
         },
     });
 

@@ -4,8 +4,11 @@
  *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
- * 2. onError: Rollback to previous data
- * 3. onSettled: Invalidate to ensure consistency (background revalidation)
+ * 2. onError: Rollback to previous data + invalidate for consistency
+ * 3. onSettled: Only invalidate non-SSE-synced data (e.g., inventory balance)
+ *
+ * Note: Order list invalidation removed from onSettled to prevent UI flicker.
+ * SSE handles cross-user synchronization; error rollback ensures consistency.
  */
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -90,6 +93,8 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
 
             // Show error alert for insufficient stock
             const errorMsg = err.message || '';
@@ -100,8 +105,8 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
         },
         onSettled: () => {
-            // Always refetch to ensure consistency
-            invalidateOpenOrders();
+            // Only invalidate non-SSE-synced data (inventory balance)
+            // Order list updates are handled by optimistic updates + SSE
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
     });
@@ -131,6 +136,8 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
+            // Invalidate after rollback to ensure consistency
+            invalidateOpenOrders();
 
             const msg = err.message || 'Failed to update line status';
             if (!msg.includes('Cannot transition')) {
@@ -138,7 +145,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
         },
         onSettled: () => {
-            invalidateOpenOrders();
+            // Only invalidate non-SSE-synced data (inventory balance)
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
     });
