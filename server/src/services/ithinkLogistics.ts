@@ -1,19 +1,28 @@
 /**
  * iThink Logistics API Integration
  * Provides real-time shipment tracking from logistics provider
+ *
+ * NOTE: Tracking status mapping rules are centralized in config/mappings/trackingStatus.ts
  */
 
 import axios, { AxiosRequestConfig, AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
 import { shippingLogger } from '../utils/logger.js';
+import {
+    resolveTrackingStatus as resolveTrackingStatusFromConfig,
+    type TrackingStatus,
+    ITHINK_API_TIMEOUT_MS,
+    ITHINK_API_RETRIES,
+    ITHINK_RETRY_DELAY_MS,
+} from '../config/index.js';
 
 // ============================================================================
-// Constants
+// Constants (from config)
 // ============================================================================
 
-const API_TIMEOUT_MS = 30000;
-const MAX_RETRIES = 2;
-const INITIAL_RETRY_DELAY_MS = 1000;
+const API_TIMEOUT_MS = ITHINK_API_TIMEOUT_MS;
+const MAX_RETRIES = ITHINK_API_RETRIES;
+const INITIAL_RETRY_DELAY_MS = ITHINK_RETRY_DELAY_MS;
 
 // ============================================================================
 // Retry Helper
@@ -274,24 +283,9 @@ export interface ConfigStatus {
 // Internal Status Mapping
 // ============================================================================
 
-/**
- * Internal tracking status types
- */
-export type TrackingStatus =
-    | 'manifested'
-    | 'not_picked'
-    | 'picked_up'
-    | 'in_transit'
-    | 'reached_destination'
-    | 'out_for_delivery'
-    | 'undelivered'
-    | 'delivered'
-    | 'cancelled'
-    | 'rto_in_transit'
-    | 'rto_delivered'
-    | 'reverse_pickup'
-    | 'reverse_in_transit'
-    | 'reverse_delivered';
+// TrackingStatus type is imported from config/types.ts
+// Re-export for backwards compatibility
+export type { TrackingStatus };
 
 // ============================================================================
 // Main Client Class
@@ -1022,150 +1016,16 @@ class IThinkLogisticsClient {
 
     /**
      * Map iThink status to our internal tracking status
-     * Uses both statusCode and statusText because iThink API can be inconsistent
-     * (e.g., returning UD code but "In Transit" text)
      *
-     * Status codes documentation:
-     * - M: Manifested (order created)
-     * - NP: Not Picked (pickup failed)
-     * - PP: Picked Up
-     * - IT: In Transit
-     * - OT: Out for Transit (alternative in-transit code)
-     * - RAD: Reached At Destination
-     * - OFD: Out For Delivery
-     * - UD: Undelivered (delivery attempt failed)
-     * - NDR: Non-Delivery Report (same as UD)
-     * - DL: Delivered
-     * - CA: Cancelled
-     * - RTO: Return to Origin (initiated)
-     * - RTP: RTO Pending/Processing
-     * - RTI: RTO In Transit
-     * - RTD: RTO Delivered (returned to seller)
-     * - RTOUD: RTO Undelivered
-     * - RTOOFD: RTO Out for Delivery
+     * Rules are defined in: config/mappings/trackingStatus.ts
+     *
+     * @param statusCode - Status code from iThink API
+     * @param statusText - Status text from iThink API
+     * @returns Internal tracking status
      */
     mapToInternalStatus(statusCode: string, statusText: string = ''): TrackingStatus {
-        const textLower = (statusText || '').toLowerCase();
-        const codeUpper = (statusCode || '').toUpperCase();
-
-        // First, check the status TEXT which is more reliable
-        // IMPORTANT: Check RTO states BEFORE regular delivered check!
-        // "RTO Delivered" should map to rto_delivered, not delivered
-
-        // RTO status detection - comprehensive check
-        const isRtoText = textLower.includes('rto') ||
-            textLower.includes('return to origin') ||
-            textLower.includes('returned to origin') ||
-            textLower.includes('return to shipper') ||
-            textLower.includes('rtod') ||
-            textLower.includes('rts');  // Return to Shipper
-
-        const isRtoCode = ['RTO', 'RTP', 'RTI', 'RTD', 'RTOUD', 'RTOOFD', 'RTS'].includes(codeUpper);
-
-        if (isRtoText || isRtoCode) {
-            // RTO Delivered states
-            if (textLower.includes('delivered') || textLower.includes('received') ||
-                textLower.includes('rtod') || codeUpper === 'RTD') {
-                return 'rto_delivered';
-            }
-            // RTO Out for Delivery
-            if (textLower.includes('out for delivery') || textLower.includes('ofd') ||
-                codeUpper === 'RTOOFD') {
-                return 'rto_in_transit';  // Still in transit until delivered
-            }
-            // RTO Undelivered
-            if (textLower.includes('undelivered') || codeUpper === 'RTOUD') {
-                return 'rto_in_transit';  // RTO still in progress
-            }
-            // All other RTO states map to rto_in_transit
-            return 'rto_in_transit';
-        }
-
-        // Delivered states (only regular delivery, not RTO)
-        if ((textLower.includes('delivered') || codeUpper === 'DL') &&
-            !textLower.includes('undelivered') &&
-            !textLower.includes('not delivered')) {
-            return 'delivered';
-        }
-
-        // Undelivered/NDR - delivery attempt failed
-        if (textLower.includes('undelivered') ||
-            textLower.includes('not delivered') ||
-            textLower.includes('delivery failed') ||
-            textLower.includes('ndr') ||
-            codeUpper === 'UD' ||
-            codeUpper === 'NDR') {
-            return 'undelivered';
-        }
-
-        // Out for delivery
-        if (textLower.includes('out for delivery') ||
-            textLower.includes('ofd') ||
-            codeUpper === 'OFD') {
-            return 'out_for_delivery';
-        }
-
-        // In transit variations
-        if (textLower.includes('transit') ||
-            textLower.includes('in-transit') ||
-            codeUpper === 'IT' ||
-            codeUpper === 'OT') {
-            return 'in_transit';
-        }
-
-        // Picked up
-        if (textLower.includes('picked') ||
-            textLower.includes('pickup') ||
-            codeUpper === 'PP') {
-            return 'picked_up';
-        }
-
-        // At destination hub
-        if (textLower.includes('reached') ||
-            textLower.includes('destination') ||
-            textLower.includes('hub') ||
-            codeUpper === 'RAD') {
-            return 'reached_destination';
-        }
-
-        // Manifested
-        if (textLower.includes('manifest') || codeUpper === 'M') {
-            return 'manifested';
-        }
-
-        // Not picked
-        if (textLower.includes('not picked') ||
-            textLower.includes('pickup failed') ||
-            codeUpper === 'NP') {
-            return 'not_picked';
-        }
-
-        // Cancelled
-        if (textLower.includes('cancel') || codeUpper === 'CA') {
-            return 'cancelled';
-        }
-
-        // Reverse logistics (customer returning item, not RTO)
-        if (codeUpper === 'REVP') return 'reverse_pickup';
-        if (codeUpper === 'REVI') return 'reverse_in_transit';
-        if (codeUpper === 'REVD') return 'reverse_delivered';
-
-        // Fall back to status code map for any remaining codes
-        const statusMap: Record<string, TrackingStatus> = {
-            'M': 'manifested',
-            'NP': 'not_picked',
-            'PP': 'picked_up',
-            'IT': 'in_transit',
-            'OT': 'in_transit',
-            'RAD': 'reached_destination',
-            'OFD': 'out_for_delivery',
-            'UD': 'undelivered',
-            'NDR': 'undelivered',
-            'DL': 'delivered',
-            'CA': 'cancelled',
-        };
-
-        return statusMap[codeUpper] || 'in_transit';
+        // Delegate to centralized config
+        return resolveTrackingStatusFromConfig(statusCode, statusText);
     }
 }
 

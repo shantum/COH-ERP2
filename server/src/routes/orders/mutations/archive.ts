@@ -12,6 +12,11 @@ import { NotFoundError, ValidationError } from '../../../utils/errors.js';
 import { recalculateAllCustomerLtvs } from '../../../utils/tierUtils.js';
 import { orderLogger } from '../../../utils/logger.js';
 import { enforceRulesInExpress } from '../../../rules/index.js';
+import {
+    ARCHIVE_TERMINAL_DAYS,
+    ARCHIVE_CANCELLED_DAYS,
+    AUTO_ARCHIVE_DAYS,
+} from '../../../config/index.js';
 
 const router: Router = Router();
 
@@ -107,35 +112,37 @@ router.post(
 );
 
 /**
- * Auto-archive orders based on terminal status (Zen Philosophy)
+ * Auto-archive orders based on terminal status
+ *
+ * Thresholds defined in: config/thresholds/orderTiming.ts
  *
  * Rules:
- * - Prepaid delivered: Archive after 15 days from terminalAt
- * - COD delivered: Archive after 15 days from terminalAt (only if remitted)
- * - RTO received: Archive after 15 days from terminalAt
- * - Cancelled: Archive after 1 day from terminalAt
- * - Legacy: Also archive shipped orders >90 days (backward compat)
+ * - Prepaid delivered: Archive after ARCHIVE_TERMINAL_DAYS from terminalAt
+ * - COD delivered: Archive after ARCHIVE_TERMINAL_DAYS from terminalAt (only if remitted)
+ * - RTO received: Archive after ARCHIVE_TERMINAL_DAYS from terminalAt
+ * - Cancelled: Archive after ARCHIVE_CANCELLED_DAYS from terminalAt
+ * - Legacy: Archive shipped orders after AUTO_ARCHIVE_DAYS (backward compat)
  */
 export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number> {
     try {
-        const fifteenDaysAgo = new Date();
-        fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+        const terminalCutoff = new Date();
+        terminalCutoff.setDate(terminalCutoff.getDate() - ARCHIVE_TERMINAL_DAYS);
 
-        const oneDayAgo = new Date();
-        oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+        const cancelledCutoff = new Date();
+        cancelledCutoff.setDate(cancelledCutoff.getDate() - ARCHIVE_CANCELLED_DAYS);
 
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const legacyCutoff = new Date();
+        legacyCutoff.setDate(legacyCutoff.getDate() - AUTO_ARCHIVE_DAYS);
 
         const now = new Date();
         let totalArchived = 0;
 
-        // 1. Archive delivered prepaid orders (15 days)
+        // 1. Archive delivered prepaid orders
         const prepaidResult = await prisma.order.updateMany({
             where: {
                 terminalStatus: 'delivered',
                 paymentMethod: { not: 'COD' },
-                terminalAt: { lt: fifteenDaysAgo },
+                terminalAt: { lt: terminalCutoff },
                 isArchived: false,
             },
             data: {
@@ -145,13 +152,13 @@ export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number
         });
         totalArchived += prepaidResult.count;
 
-        // 2. Archive delivered COD orders (15 days, only if remitted)
+        // 2. Archive delivered COD orders (only if remitted)
         const codResult = await prisma.order.updateMany({
             where: {
                 terminalStatus: 'delivered',
                 paymentMethod: 'COD',
                 codRemittedAt: { not: null },
-                terminalAt: { lt: fifteenDaysAgo },
+                terminalAt: { lt: terminalCutoff },
                 isArchived: false,
             },
             data: {
@@ -161,11 +168,11 @@ export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number
         });
         totalArchived += codResult.count;
 
-        // 3. Archive RTO received orders (15 days)
+        // 3. Archive RTO received orders
         const rtoResult = await prisma.order.updateMany({
             where: {
                 terminalStatus: 'rto_received',
-                terminalAt: { lt: fifteenDaysAgo },
+                terminalAt: { lt: terminalCutoff },
                 isArchived: false,
             },
             data: {
@@ -175,11 +182,11 @@ export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number
         });
         totalArchived += rtoResult.count;
 
-        // 4. Archive cancelled orders (1 day grace)
+        // 4. Archive cancelled orders
         const cancelledResult = await prisma.order.updateMany({
             where: {
                 terminalStatus: 'cancelled',
-                terminalAt: { lt: oneDayAgo },
+                terminalAt: { lt: cancelledCutoff },
                 isArchived: false,
             },
             data: {
@@ -189,13 +196,13 @@ export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number
         });
         totalArchived += cancelledResult.count;
 
-        // 5. Legacy: Archive shipped orders >90 days (backward compat for orders without terminalStatus)
+        // 5. Legacy: Archive shipped orders without terminalStatus (backward compat)
         const legacyResult = await prisma.order.updateMany({
             where: {
                 status: 'shipped',
                 terminalStatus: null,
                 isArchived: false,
-                shippedAt: { lt: ninetyDaysAgo },
+                shippedAt: { lt: legacyCutoff },
             },
             data: {
                 isArchived: true,

@@ -7,7 +7,7 @@
  * - Tier calculation: platinum/gold/silver based on configurable LTV thresholds
  * - Address lookup from past orders (ERP + Shopify cache for autofill)
  * - Product/color/fabric affinity analysis
- * - Analytics: overview (repeat rate, AOV), high-value customers, at-risk (90+ days no order)
+ * - Analytics: overview (repeat rate, AOV), high-value customers, at-risk (AT_RISK_INACTIVE_DAYS no order)
  *
  * Tier Logic: calculateTier(LTV, thresholds) where thresholds from SystemSetting or DEFAULT_TIER_THRESHOLDS
  * LTV Calculation: SUM(order.totalAmount) for non-cancelled orders
@@ -23,6 +23,7 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 import { NotFoundError } from '../utils/errors.js';
 import { getTierThresholds, calculateTier, calculateLTV } from '../utils/tierUtils.js';
 import type { TierThresholds, CustomerTier, OrderForLTV } from '../utils/tierUtils.js';
+import { AT_RISK_INACTIVE_DAYS } from '../config/index.js';
 
 const router: Router = Router();
 
@@ -771,7 +772,7 @@ router.get('/analytics/at-risk', asyncHandler(async (req: Request, res: Response
                 daysSinceLastOrder,
             };
         })
-        .filter((c) => c.lifetimeValue >= thresholds.silver && c.daysSinceLastOrder !== null && c.daysSinceLastOrder > 90) // Silver+ inactive 90+ days
+        .filter((c) => c.lifetimeValue >= thresholds.silver && c.daysSinceLastOrder !== null && c.daysSinceLastOrder > AT_RISK_INACTIVE_DAYS)
         .sort((a, b) => (b.daysSinceLastOrder ?? 0) - (a.daysSinceLastOrder ?? 0));
 
     res.json(atRisk);
