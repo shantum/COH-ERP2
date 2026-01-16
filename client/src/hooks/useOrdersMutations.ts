@@ -74,7 +74,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     const delivery = useOrderDeliveryMutations();
     const line = useOrderLineMutations({ onEditSuccess: options.onEditSuccess });
     const release = useOrderReleaseMutations();
-    const production = useProductionBatchMutations();
+    const production = useProductionBatchMutations(optimisticOptions);
     const { invalidateAll } = useOrderInvalidation();
 
     return {

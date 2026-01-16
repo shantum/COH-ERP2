@@ -39,6 +39,10 @@ interface SSEEvent {
         | 'order_uncancelled'
         // Batch update
         | 'lines_batch_update'
+        // Production batch events
+        | 'production_batch_created'
+        | 'production_batch_updated'
+        | 'production_batch_deleted'
         // Buffer overflow (client should refetch)
         | 'buffer_overflow';
     view?: string;
@@ -365,6 +369,42 @@ export function useOrderSSE({
             if (data.type === 'order_uncancelled' && data.orderId) {
                 trpcUtils.orders.list.invalidate({ view: 'open' });
                 trpcUtils.orders.list.invalidate({ view: 'cancelled' });
+            }
+
+            // Handle production batch created/updated/deleted
+            if (
+                (data.type === 'production_batch_created' ||
+                 data.type === 'production_batch_updated' ||
+                 data.type === 'production_batch_deleted') &&
+                data.lineId &&
+                data.changes
+            ) {
+                // Try AG-Grid transaction first for instant update
+                const usedTransaction = updateWithTransaction(data.lineId, data.changes);
+
+                if (!usedTransaction) {
+                    // Fallback to cache update
+                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                        if (!old) return old;
+
+                        const newRows = old.rows.map((row: any) =>
+                            row.lineId === data.lineId
+                                ? { ...row, ...data.changes }
+                                : row
+                        );
+
+                        const newOrders = old.orders.map((order: any) => ({
+                            ...order,
+                            orderLines: order.orderLines?.map((line: any) =>
+                                line.id === data.lineId
+                                    ? { ...line, ...data.changes }
+                                    : line
+                            ),
+                        }));
+
+                        return { ...old, rows: newRows, orders: newOrders };
+                    });
+                }
             }
 
         } catch (err) {

@@ -684,3 +684,105 @@ export function optimisticUncancelOrder(
         }),
     };
 }
+
+// ============================================================================
+// PRODUCTION BATCH OPTIMISTIC UPDATES
+// ============================================================================
+
+/**
+ * Optimistically create a production batch for a line
+ * Updates productionBatchId and productionDate on the row
+ */
+export function optimisticCreateBatch(
+    data: OrdersListData | undefined,
+    sourceOrderLineId: string,
+    batchId: string,
+    batchDate: string
+): OrdersListData | undefined {
+    if (!data) return data;
+
+    return {
+        ...data,
+        rows: data.rows.map((row) => {
+            if (row.lineId !== sourceOrderLineId) return row;
+            return {
+                ...row,
+                productionBatchId: batchId,
+                productionDate: batchDate,
+            };
+        }),
+        orders: data.orders.map((order) => ({
+            ...order,
+            orderLines: order.orderLines?.map((line: any) =>
+                line.id === sourceOrderLineId
+                    ? { ...line, productionBatchId: batchId }
+                    : line
+            ),
+        })),
+    };
+}
+
+/**
+ * Optimistically update a production batch date
+ * Updates productionDate on the row with the matching productionBatchId
+ */
+export function optimisticUpdateBatch(
+    data: OrdersListData | undefined,
+    batchId: string,
+    newDate: string
+): OrdersListData | undefined {
+    if (!data) return data;
+
+    return {
+        ...data,
+        rows: data.rows.map((row) => {
+            if (row.productionBatchId !== batchId) return row;
+            return {
+                ...row,
+                productionDate: newDate,
+            };
+        }),
+        // orders array doesn't need update since productionBatchId stays the same
+    };
+}
+
+/**
+ * Optimistically delete a production batch
+ * Clears productionBatchId and productionDate on the row
+ */
+export function optimisticDeleteBatch(
+    data: OrdersListData | undefined,
+    batchId: string
+): OrdersListData | undefined {
+    if (!data) return data;
+
+    return {
+        ...data,
+        rows: data.rows.map((row) => {
+            if (row.productionBatchId !== batchId) return row;
+            return {
+                ...row,
+                productionBatchId: null,
+                productionDate: null,
+            };
+        }),
+        orders: data.orders.map((order) => ({
+            ...order,
+            orderLines: order.orderLines?.map((line: any) =>
+                line.productionBatchId === batchId
+                    ? { ...line, productionBatchId: null }
+                    : line
+            ),
+        })),
+    };
+}
+
+/**
+ * Get row data by productionBatchId from cached data
+ */
+export function getRowByBatchId(
+    data: OrdersListData | undefined,
+    batchId: string
+): FlattenedOrderRow | undefined {
+    return data?.rows.find((row) => row.productionBatchId === batchId);
+}

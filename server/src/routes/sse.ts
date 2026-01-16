@@ -43,6 +43,10 @@ export interface OrderUpdateEvent {
         | 'order_uncancelled'
         // Batch update
         | 'lines_batch_update'
+        // Production batch events
+        | 'production_batch_created'
+        | 'production_batch_updated'
+        | 'production_batch_deleted'
         // Buffer overflow (client should refetch)
         | 'buffer_overflow';
     view?: string;

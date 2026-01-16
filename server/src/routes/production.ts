@@ -35,6 +35,8 @@ import {
 } from '../utils/errors.js';
 import { calculateAllInventoryBalances, calculateFabricBalance, getEffectiveFabricConsumption, TXN_TYPE, TXN_REASON } from '../utils/queryPatterns.js';
 import { getLockedDates, saveLockedDates } from '../utils/productionUtils.js';
+import { broadcastOrderUpdate } from './sse.js';
+import { deferredExecutor } from '../services/deferredExecutor.js';
 
 const router: Router = Router();
 
@@ -441,7 +443,25 @@ router.post('/batches', authenticateToken, requirePermission('production:create'
         await req.prisma.orderLine.update({ where: { id: sourceOrderLineId }, data: { productionBatchId: batch.id } });
     }
 
+    // Send response immediately, broadcast SSE in background
     res.status(201).json(batch);
+
+    // Defer SSE broadcast for real-time sync
+    if (sourceOrderLineId) {
+        const batchId = batch.id;
+        const userId = req.user?.id || null;
+        deferredExecutor.enqueue(async () => {
+            broadcastOrderUpdate({
+                type: 'production_batch_created',
+                view: 'open',
+                lineId: sourceOrderLineId,
+                changes: {
+                    productionBatchId: batchId,
+                    productionDate: dateStr,
+                },
+            }, userId);
+        });
+    }
 }));
 
 // Start batch
@@ -507,9 +527,29 @@ router.put('/batches/:id', authenticateToken, asyncHandler(async (req: Request, 
             tailorId: true,
             priority: true,
             notes: true,
+            sourceOrderLineId: true,
         },
     });
     res.json(batch);
+
+    // Defer SSE broadcast for real-time sync (only if date changed and linked to order)
+    if (batchDate && batch.sourceOrderLineId) {
+        const batchId = batch.id;
+        const lineId = batch.sourceOrderLineId;
+        const newDate = new Date(batchDate).toISOString().split('T')[0];
+        const userId = req.user?.id || null;
+        deferredExecutor.enqueue(async () => {
+            broadcastOrderUpdate({
+                type: 'production_batch_updated',
+                view: 'open',
+                lineId,
+                changes: {
+                    productionBatchId: batchId,
+                    productionDate: newDate,
+                },
+            }, userId);
+        });
+    }
 }));
 
 // Delete batch
@@ -552,12 +592,30 @@ router.delete('/batches/:id', authenticateToken, requirePermission('production:d
     }
 
     // Unlink from order line if connected
-    if (batch.sourceOrderLineId) {
-        await req.prisma.orderLine.update({ where: { id: batch.sourceOrderLineId }, data: { productionBatchId: null } });
+    const linkedLineId = batch.sourceOrderLineId;
+    if (linkedLineId) {
+        await req.prisma.orderLine.update({ where: { id: linkedLineId }, data: { productionBatchId: null } });
     }
 
     await req.prisma.productionBatch.delete({ where: { id } });
     res.json({ success: true });
+
+    // Defer SSE broadcast for real-time sync
+    if (linkedLineId) {
+        const batchId = id;
+        const userId = req.user?.id || null;
+        deferredExecutor.enqueue(async () => {
+            broadcastOrderUpdate({
+                type: 'production_batch_deleted',
+                view: 'open',
+                lineId: linkedLineId,
+                changes: {
+                    productionBatchId: null,
+                    productionDate: null,
+                },
+            }, userId);
+        });
+    }
 }));
 
 // NOTE: getEffectiveFabricConsumption is now imported from queryPatterns.ts
