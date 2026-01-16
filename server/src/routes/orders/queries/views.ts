@@ -14,6 +14,7 @@ import {
 } from '../../../utils/orderViews.js';
 import { filterConfidentialFields } from '../../../middleware/permissions.js';
 import { orderLogger } from '../../../utils/logger.js';
+import { deprecated } from '../../../middleware/deprecation.js';
 
 const router: Router = Router();
 
@@ -51,7 +52,11 @@ interface OrderWithLines {
  * - days: Date range filter (for views with dateFilter)
  * - search: Search across orderNumber, customerName, awbNumber, email, phone
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', deprecated({
+    endpoint: 'GET /orders',
+    trpcAlternative: 'orders.list',
+    deprecatedSince: '2026-01-16',
+}), async (req: Request, res: Response) => {
     try {
         const {
             view = 'open',
@@ -151,7 +156,11 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // Get single order
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', deprecated({
+    endpoint: 'GET /orders/:id',
+    trpcAlternative: 'orders.get',
+    deprecatedSince: '2026-01-16',
+}), async (req: Request, res: Response) => {
     try {
         const orderId = req.params.id as string;
         const order = await req.prisma.order.findUnique({

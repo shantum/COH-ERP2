@@ -8,6 +8,7 @@ import type { Request, Response } from 'express';
 import { authenticateToken } from '../../../middleware/auth.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 import { requirePermission } from '../../../middleware/permissions.js';
+import { deprecated } from '../../../middleware/deprecation.js';
 import { releaseReservedInventory } from '../../../utils/queryPatterns.js';
 import { recomputeOrderStatus } from '../../../utils/orderStatus.js';
 import {
@@ -58,6 +59,11 @@ router.post(
     '/:id/cancel',
     authenticateToken,
     requirePermission('orders:cancel'),
+    deprecated({
+        endpoint: 'POST /orders/:id/cancel',
+        trpcAlternative: 'orders.cancelOrder',
+        deprecatedSince: '2026-01-16',
+    }),
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const orderId = getParamString(req.params.id);
         const { reason } = req.body as CancelOrderBody;
@@ -149,6 +155,11 @@ router.post(
 router.post(
     '/:id/uncancel',
     authenticateToken,
+    deprecated({
+        endpoint: 'POST /orders/:id/uncancel',
+        trpcAlternative: 'orders.uncancelOrder',
+        deprecatedSince: '2026-01-16',
+    }),
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const orderId = getParamString(req.params.id);
         const order = await req.prisma.order.findUnique({

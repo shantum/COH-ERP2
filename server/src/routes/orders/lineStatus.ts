@@ -20,6 +20,7 @@ import type { Request, Response } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { requirePermission } from '../../middleware/permissions.js';
+import { deprecated } from '../../middleware/deprecation.js';
 import {
     NotFoundError,
     ValidationError,
@@ -76,7 +77,11 @@ const router: Router = Router();
  * POST /orders/lines/abc123/status
  * Body: { status: 'cancelled' }
  */
-router.post('/lines/:lineId/status', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/lines/:lineId/status', authenticateToken, deprecated({
+    endpoint: 'POST /orders/lines/:lineId/status',
+    trpcAlternative: 'orders.setLineStatus',
+    deprecatedSince: '2026-01-16',
+}), asyncHandler(async (req: Request, res: Response) => {
     const lineId = req.params.lineId as string;
     const { status, shipData } = req.body as {
         status: string;

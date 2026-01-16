@@ -8,6 +8,7 @@ import type { Request, Response, RequestHandler } from 'express';
 import type { Prisma } from '@prisma/client';
 import { authenticateToken } from '../../../middleware/auth.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
+import { deprecated } from '../../../middleware/deprecation.js';
 import { releaseReservedInventory } from '../../../utils/queryPatterns.js';
 import { findOrCreateCustomerByContact } from '../../../utils/customerUtils.js';
 import { validate } from '../../../utils/validation.js';
@@ -72,6 +73,11 @@ function getParamString(param: string | string[] | undefined): string {
 router.post(
     '/',
     authenticateToken,
+    deprecated({
+        endpoint: 'POST /orders',
+        trpcAlternative: 'orders.create',
+        deprecatedSince: '2026-01-16',
+    }),
     validateMiddleware(CreateOrderSchema),
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const {

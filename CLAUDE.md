@@ -177,7 +177,42 @@ cd client && npm run build && cd ../server && npx tsc --noEmit
 
 ## tRPC Orders Router
 
-The orders tRPC router (`server/src/trpc/routers/orders.ts`) provides type-safe procedures:
+The orders tRPC router (`server/src/trpc/routers/orders.ts`) provides type-safe procedures.
+
+**Client exclusively uses tRPC** - all client code calls tRPC, not REST endpoints.
+
+### Deprecated REST Routes (use tRPC instead)
+
+REST routes with tRPC equivalents are deprecated and log warnings. They will be removed after monitoring confirms zero usage.
+
+| REST Route | tRPC Alternative | Deprecated Since |
+|------------|------------------|------------------|
+| `GET /orders` | `orders.list` | 2026-01-16 |
+| `GET /orders/:id` | `orders.get` | 2026-01-16 |
+| `POST /orders` | `orders.create` | 2026-01-16 |
+| `POST /orders/:id/ship` | `orders.ship` | 2026-01-16 |
+| `POST /orders/:id/ship-lines` | `orders.ship` | 2026-01-16 |
+| `POST /orders/lines/:lineId/status` | `orders.setLineStatus` | 2026-01-16 |
+| `POST /orders/:id/cancel` | `orders.cancelOrder` | 2026-01-16 |
+| `POST /orders/:id/uncancel` | `orders.uncancelOrder` | 2026-01-16 |
+| `POST /orders/:id/mark-delivered` | `orders.markDelivered` | 2026-01-16 |
+| `POST /orders/:id/mark-rto` | `orders.markRto` | 2026-01-16 |
+| `POST /orders/:id/receive-rto` | `orders.receiveRto` | 2026-01-16 |
+
+### REST-Only Routes (no tRPC equivalent)
+
+These routes remain REST-only and are NOT deprecated:
+- Search: `GET /orders/search-all`
+- Summaries: `/rto/summary`, `/shipped/summary`, `/archived/analytics`, `/dashboard-stats`
+- Hold/Release: `/:id/hold`, `/:id/release`
+- Archive: `/auto-archive`, `/archive-before-date`, `/:id/archive`
+- Line ops: `PUT /lines/:id`, `POST /:id/lines`
+- Customization: `POST/DELETE /lines/:id/customize`
+- Migration: `/migrate-shopify-fulfilled`, `/migration-ship`
+- Release workflow: `/release-to-shipped`, `/release-to-cancelled`
+- Unship: `/:id/unship`
+
+### tRPC Procedures
 
 | Procedure | Type | Purpose |
 |-----------|------|---------|
@@ -297,6 +332,8 @@ server/src/
       transactions.ts                 # allocation, sale, RTO transactions
       customization.ts                # createCustomSku, removeCustomization
     dateHelpers.ts                    # Safe Date-to-string conversions
+  middleware/
+    deprecation.ts                    # Deprecation middleware for REST routes
   services/
     inventoryBalanceCache.ts          # Inventory cache singleton
     customerStatsCache.ts             # Customer stats cache singleton

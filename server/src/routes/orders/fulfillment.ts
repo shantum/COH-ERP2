@@ -13,6 +13,7 @@ import type { Request, Response, RequestHandler } from 'express';
 import { authenticateToken } from '../../middleware/auth.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 import { requirePermission } from '../../middleware/permissions.js';
+import { deprecated } from '../../middleware/deprecation.js';
 import {
     NotFoundError,
     ValidationError,
@@ -91,7 +92,11 @@ interface EligibleOrder {
  * POST /fulfillment/123/ship
  * Body: { awbNumber: "DL12345", courier: "Delhivery" }
  */
-router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), validate(ShipOrderSchema) as RequestHandler, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), deprecated({
+    endpoint: 'POST /orders/:id/ship',
+    trpcAlternative: 'orders.ship',
+    deprecatedSince: '2026-01-16',
+}), validate(ShipOrderSchema) as RequestHandler, asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
     const { awbNumber, courier } = req.validatedBody as { awbNumber: string; courier: string };
 
@@ -175,7 +180,11 @@ router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), va
  * POST /orders/:id/ship-lines
  * Body: { lineIds: string[], awbNumber: string, courier: string }
  */
-router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship'), deprecated({
+    endpoint: 'POST /orders/:id/ship-lines',
+    trpcAlternative: 'orders.ship',
+    deprecatedSince: '2026-01-16',
+}), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
     const { lineIds, awbNumber, courier } = req.body as { lineIds?: string[]; awbNumber?: string; courier?: string };
 
@@ -512,7 +521,11 @@ router.post('/:id/migration-ship',
 );
 
 // Mark order as delivered (with validation)
-router.post('/:id/mark-delivered', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/mark-delivered', authenticateToken, deprecated({
+    endpoint: 'POST /orders/:id/mark-delivered',
+    trpcAlternative: 'orders.markDelivered',
+    deprecatedSince: '2026-01-16',
+}), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
 
     const order = await req.prisma.order.findUnique({
@@ -542,7 +555,11 @@ router.post('/:id/mark-delivered', authenticateToken, asyncHandler(async (req: R
 }));
 
 // Initiate RTO for order
-router.post('/:id/mark-rto', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/mark-rto', authenticateToken, deprecated({
+    endpoint: 'POST /orders/:id/mark-rto',
+    trpcAlternative: 'orders.markRto',
+    deprecatedSince: '2026-01-16',
+}), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
 
     const order = await req.prisma.order.findUnique({
@@ -584,7 +601,11 @@ router.post('/:id/mark-rto', authenticateToken, asyncHandler(async (req: Request
 }));
 
 // Receive RTO package (creates inventory inward)
-router.post('/:id/receive-rto', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/receive-rto', authenticateToken, deprecated({
+    endpoint: 'POST /orders/:id/receive-rto',
+    trpcAlternative: 'orders.receiveRto',
+    deprecatedSince: '2026-01-16',
+}), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
 
     const order = await req.prisma.order.findUnique({
