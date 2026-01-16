@@ -14,6 +14,7 @@ import { inventoryBalanceCache } from '../../../services/inventoryBalanceCache.j
 import { NotFoundError, BusinessLogicError } from '../../../utils/errors.js';
 import { adjustCustomerLtv } from '../../../utils/tierUtils.js';
 import { broadcastOrderUpdate } from '../../sse.js';
+import { enforceRulesInExpress } from '../../../rules/index.js';
 
 const router: Router = Router();
 
@@ -62,13 +63,18 @@ router.post(
         if (!line) {
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
-        if (line.lineStatus === 'shipped') {
-            throw new BusinessLogicError('Cannot cancel shipped line', 'CANNOT_CANCEL_SHIPPED');
-        }
+
+        // Soft return for already cancelled (preserve existing behavior)
         if (line.lineStatus === 'cancelled') {
-            res.json({ id: lineId, lineStatus: 'cancelled' }); // Already cancelled, just return
+            res.json({ id: lineId, lineStatus: 'cancelled' });
             return;
         }
+
+        // Enforce cancel line rules using rules engine (checks shipped status)
+        await enforceRulesInExpress('cancelLine', req, {
+            data: { line },
+            phase: 'pre',
+        });
 
         // If allocated, reverse inventory (important for stock accuracy)
         if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
@@ -122,10 +128,18 @@ router.post(
         if (!line) {
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
+
+        // Soft return for not cancelled (preserve existing behavior)
         if (line.lineStatus !== 'cancelled') {
-            res.json({ id: lineId, lineStatus: line.lineStatus }); // Not cancelled, just return current status
+            res.json({ id: lineId, lineStatus: line.lineStatus });
             return;
         }
+
+        // Enforce uncancel line rules using rules engine
+        await enforceRulesInExpress('uncancelLine', req, {
+            data: { line },
+            phase: 'pre',
+        });
 
         // Update line status
         await req.prisma.orderLine.update({

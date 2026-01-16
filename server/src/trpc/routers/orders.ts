@@ -43,6 +43,7 @@ import { shipOrderLines } from '../../services/shipOrderService.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
 import { deferredExecutor } from '../../services/deferredExecutor.js';
+import { enforceRulesInTrpc } from '../../rules/index.js';
 
 // ============================================
 // LIST ORDERS PROCEDURE
@@ -827,19 +828,11 @@ const cancelOrder = protectedProcedure
             });
         }
 
-        if (order.status === 'cancelled') {
-            throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: 'Order is already cancelled',
-            });
-        }
-
-        if (order.status === 'shipped' || order.status === 'delivered') {
-            throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: 'Cannot cancel shipped or delivered orders',
-            });
-        }
+        // Enforce cancellation rules using rules engine
+        await enforceRulesInTrpc('cancelOrder', ctx, {
+            data: { order },
+            phase: 'pre',
+        });
 
         // Collect SKU IDs that may need cache invalidation
         const affectedSkuIds = order.orderLines
@@ -847,25 +840,25 @@ const cancelOrder = protectedProcedure
             .map(l => l.skuId);
 
         await ctx.prisma.$transaction(async (tx) => {
-            // Re-check status inside transaction
+            // Re-check status inside transaction using rules engine
             const currentOrder = await tx.order.findUnique({
                 where: { id: orderId },
-                select: { status: true },
+                select: { status: true, isArchived: true },
             });
 
-            if (currentOrder?.status === 'shipped' || currentOrder?.status === 'delivered') {
+            if (!currentOrder) {
                 throw new TRPCError({
-                    code: 'CONFLICT',
-                    message: 'Order was shipped by another request',
+                    code: 'NOT_FOUND',
+                    message: 'Order not found',
                 });
             }
 
-            if (currentOrder?.status === 'cancelled') {
-                throw new TRPCError({
-                    code: 'CONFLICT',
-                    message: 'Order was already cancelled',
-                });
-            }
+            // Enforce rules again within transaction (race condition prevention)
+            await enforceRulesInTrpc('cancelOrder', ctx, {
+                prisma: tx,
+                data: { order: { id: orderId, status: currentOrder.status, isArchived: currentOrder.isArchived } },
+                phase: 'transaction',
+            });
 
             // Release inventory for allocated lines
             for (const line of order.orderLines) {
@@ -949,12 +942,11 @@ const uncancelOrder = protectedProcedure
             });
         }
 
-        if (order.status !== 'cancelled') {
-            throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: 'Order is not cancelled',
-            });
-        }
+        // Enforce uncancel rules using rules engine
+        await enforceRulesInTrpc('uncancelOrder', ctx, {
+            data: { order },
+            phase: 'pre',
+        });
 
         await ctx.prisma.$transaction(async (tx) => {
             // Restore order to open status
@@ -1022,12 +1014,11 @@ const markDelivered = protectedProcedure
             });
         }
 
-        if (order.status !== 'shipped') {
-            throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: `Order must be shipped to mark as delivered (current: ${order.status})`,
-            });
-        }
+        // Enforce delivery rules using rules engine
+        await enforceRulesInTrpc('markDelivered', ctx, {
+            data: { order },
+            phase: 'pre',
+        });
 
         await ctx.prisma.order.update({
             where: { id: orderId },
@@ -1072,12 +1063,11 @@ const markRto = protectedProcedure
             });
         }
 
-        if (order.status !== 'shipped') {
-            throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: `Order must be shipped to initiate RTO (current: ${order.status})`,
-            });
-        }
+        // Enforce RTO initiation rules using rules engine
+        await enforceRulesInTrpc('initiateRto', ctx, {
+            data: { order },
+            phase: 'pre',
+        });
 
         const updated = await ctx.prisma.$transaction(async (tx) => {
             const updatedOrder = await tx.order.update({
@@ -1131,19 +1121,11 @@ const receiveRto = protectedProcedure
             });
         }
 
-        if (!order.rtoInitiatedAt) {
-            throw new TRPCError({
-                code: 'BAD_REQUEST',
-                message: 'RTO must be initiated first',
-            });
-        }
-
-        if (order.rtoReceivedAt) {
-            throw new TRPCError({
-                code: 'CONFLICT',
-                message: 'RTO already received',
-            });
-        }
+        // Enforce RTO receive rules using rules engine
+        await enforceRulesInTrpc('receiveRto', ctx, {
+            data: { order },
+            phase: 'pre',
+        });
 
         // Collect SKU IDs for cache invalidation
         const affectedSkuIds = order.orderLines.map(l => l.skuId);

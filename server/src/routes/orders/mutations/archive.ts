@@ -8,9 +8,10 @@ import type { Request, Response } from 'express';
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { authenticateToken } from '../../../middleware/auth.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
-import { NotFoundError, ValidationError, BusinessLogicError } from '../../../utils/errors.js';
+import { NotFoundError, ValidationError } from '../../../utils/errors.js';
 import { recalculateAllCustomerLtvs } from '../../../utils/tierUtils.js';
 import { orderLogger } from '../../../utils/logger.js';
+import { enforceRulesInExpress } from '../../../rules/index.js';
 
 const router: Router = Router();
 
@@ -51,18 +52,11 @@ router.post(
             throw new NotFoundError('Order not found', 'Order', orderId);
         }
 
-        if (order.isArchived) {
-            throw new BusinessLogicError('Order is already archived', 'ALREADY_ARCHIVED');
-        }
-
-        // Only terminal states can be archived
-        const terminalStatuses = ['shipped', 'delivered', 'cancelled'];
-        if (!terminalStatuses.includes(order.status)) {
-            throw new BusinessLogicError(
-                `Order must be in a terminal state to archive (current: ${order.status})`,
-                'INVALID_STATUS_FOR_ARCHIVE'
-            );
-        }
+        // Enforce archive rules using rules engine
+        await enforceRulesInExpress('archiveOrder', req, {
+            data: { order },
+            phase: 'pre',
+        });
 
         const updated = await req.prisma.order.update({
             where: { id: orderId },
@@ -93,9 +87,11 @@ router.post(
             throw new NotFoundError('Order not found', 'Order', orderId);
         }
 
-        if (!order.isArchived) {
-            throw new BusinessLogicError('Order is not archived', 'NOT_ARCHIVED');
-        }
+        // Enforce unarchive rules using rules engine
+        await enforceRulesInExpress('unarchiveOrder', req, {
+            data: { order },
+            phase: 'pre',
+        });
 
         const updated = await req.prisma.order.update({
             where: { id: orderId },

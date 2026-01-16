@@ -13,13 +13,13 @@ import { releaseReservedInventory } from '../../../utils/queryPatterns.js';
 import { recomputeOrderStatus } from '../../../utils/orderStatus.js';
 import {
     NotFoundError,
-    ValidationError,
     ConflictError,
     BusinessLogicError,
 } from '../../../utils/errors.js';
 import { updateCustomerTier } from '../../../utils/tierUtils.js';
 import { orderLogger } from '../../../utils/logger.js';
 import { broadcastOrderUpdate } from '../../sse.js';
+import { enforceRulesInExpress } from '../../../rules/index.js';
 
 const router: Router = Router();
 
@@ -228,15 +228,6 @@ router.put(
         const orderId = getParamString(req.params.id);
         const { reason, notes } = req.body as HoldOrderBody;
 
-        if (!reason) {
-            throw new ValidationError('Hold reason is required');
-        }
-
-        const validReasons = ['fraud_review', 'address_issue', 'payment_issue', 'customer_request', 'other'];
-        if (!validReasons.includes(reason)) {
-            throw new ValidationError(`Invalid hold reason. Valid options: ${validReasons.join(', ')}`);
-        }
-
         const order = await req.prisma.order.findUnique({
             where: { id: orderId },
             include: { orderLines: true },
@@ -246,20 +237,11 @@ router.put(
             throw new NotFoundError('Order not found', 'Order', orderId);
         }
 
-        if (order.isOnHold) {
-            throw new BusinessLogicError('Order is already on hold', 'ALREADY_ON_HOLD');
-        }
-
-        if (order.isArchived) {
-            throw new BusinessLogicError('Cannot hold archived orders', 'CANNOT_HOLD_ARCHIVED');
-        }
-
-        if (['shipped', 'delivered', 'cancelled'].includes(order.status)) {
-            throw new BusinessLogicError(
-                `Cannot hold order in ${order.status} status`,
-                'INVALID_STATUS_FOR_HOLD'
-            );
-        }
+        // Enforce hold rules using rules engine
+        await enforceRulesInExpress('holdOrder', req, {
+            data: { order, reason },
+            phase: 'pre',
+        });
 
         const updated = await req.prisma.$transaction(async (tx) => {
             await tx.order.update({
@@ -302,9 +284,11 @@ router.put(
             throw new NotFoundError('Order not found', 'Order', orderId);
         }
 
-        if (!order.isOnHold) {
-            throw new BusinessLogicError('Order is not on hold', 'NOT_ON_HOLD');
-        }
+        // Enforce release rules using rules engine
+        await enforceRulesInExpress('releaseOrderHold', req, {
+            data: { order },
+            phase: 'pre',
+        });
 
         const updated = await req.prisma.$transaction(async (tx) => {
             await tx.order.update({
@@ -339,15 +323,6 @@ router.put(
         const lineId = getParamString(req.params.lineId);
         const { reason, notes } = req.body as HoldLineBody;
 
-        if (!reason) {
-            throw new ValidationError('Hold reason is required');
-        }
-
-        const validReasons = ['size_confirmation', 'stock_issue', 'customization', 'customer_request', 'other'];
-        if (!validReasons.includes(reason)) {
-            throw new ValidationError(`Invalid hold reason. Valid options: ${validReasons.join(', ')}`);
-        }
-
         const line = await req.prisma.orderLine.findUnique({
             where: { id: lineId },
             include: { order: true },
@@ -357,20 +332,11 @@ router.put(
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
 
-        if (line.isOnHold) {
-            throw new BusinessLogicError('Line is already on hold', 'ALREADY_ON_HOLD');
-        }
-
-        if (['shipped', 'cancelled'].includes(line.lineStatus)) {
-            throw new BusinessLogicError(
-                `Cannot hold line in ${line.lineStatus} status`,
-                'INVALID_STATUS_FOR_HOLD'
-            );
-        }
-
-        if (line.order.isArchived) {
-            throw new BusinessLogicError('Cannot hold lines in archived orders', 'CANNOT_HOLD_ARCHIVED');
-        }
+        // Enforce hold line rules using rules engine
+        await enforceRulesInExpress('holdLine', req, {
+            data: { line, order: line.order, reason },
+            phase: 'pre',
+        });
 
         const updated = await req.prisma.$transaction(async (tx) => {
             await tx.orderLine.update({
@@ -412,9 +378,11 @@ router.put(
             throw new NotFoundError('Order line not found', 'OrderLine', lineId);
         }
 
-        if (!line.isOnHold) {
-            throw new BusinessLogicError('Line is not on hold', 'NOT_ON_HOLD');
-        }
+        // Enforce release line rules using rules engine
+        await enforceRulesInExpress('releaseLineHold', req, {
+            data: { line },
+            phase: 'pre',
+        });
 
         const updated = await req.prisma.$transaction(async (tx) => {
             await tx.orderLine.update({
