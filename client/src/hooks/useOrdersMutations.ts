@@ -149,48 +149,82 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         }
     });
 
-    const unallocate = useMutation({
-        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'pending'),
+    // Line status mutations - all use unified setLineStatus tRPC procedure
+    const setLineStatusMutation = trpc.orders.setLineStatus.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to unallocate');
+        onError: (err) => {
+            const msg = err.message || 'Failed to update line status';
+            if (!msg.includes('Cannot transition')) {
+                alert(msg);
+            }
         }
     });
 
-    const pickLine = useMutation({
-        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'picked'),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to pick line');
-        }
-    });
+    // Type for mutation options (onSettled, onSuccess, onError callbacks)
+    type MutationOptions = {
+        onSettled?: () => void;
+        onSuccess?: () => void;
+        onError?: (err: unknown) => void;
+    };
 
-    const unpickLine = useMutation({
-        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'allocated'),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to unpick line');
-        }
-    });
+    // Wrapper mutations that use setLineStatus with specific statuses
+    const unallocate = {
+        mutate: (lineId: string, opts?: MutationOptions) => setLineStatusMutation.mutate(
+            { lineId, status: 'pending' },
+            opts
+        ),
+        mutateAsync: (lineId: string) => setLineStatusMutation.mutateAsync({ lineId, status: 'pending' }),
+        isPending: setLineStatusMutation.isPending,
+        isError: setLineStatusMutation.isError,
+        error: setLineStatusMutation.error,
+    };
 
-    const packLine = useMutation({
-        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'packed'),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to pack line');
-        }
-    });
+    const pickLine = {
+        mutate: (lineId: string, opts?: MutationOptions) => setLineStatusMutation.mutate(
+            { lineId, status: 'picked' },
+            opts
+        ),
+        mutateAsync: (lineId: string) => setLineStatusMutation.mutateAsync({ lineId, status: 'picked' }),
+        isPending: setLineStatusMutation.isPending,
+        isError: setLineStatusMutation.isError,
+        error: setLineStatusMutation.error,
+    };
 
-    const unpackLine = useMutation({
-        mutationFn: (lineId: string) => ordersApi.setLineStatus(lineId, 'picked'),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to unpack line');
-        }
-    });
+    const unpickLine = {
+        mutate: (lineId: string, opts?: MutationOptions) => setLineStatusMutation.mutate(
+            { lineId, status: 'allocated' },
+            opts
+        ),
+        mutateAsync: (lineId: string) => setLineStatusMutation.mutateAsync({ lineId, status: 'allocated' }),
+        isPending: setLineStatusMutation.isPending,
+        isError: setLineStatusMutation.isError,
+        error: setLineStatusMutation.error,
+    };
+
+    const packLine = {
+        mutate: (lineId: string, opts?: MutationOptions) => setLineStatusMutation.mutate(
+            { lineId, status: 'packed' },
+            opts
+        ),
+        mutateAsync: (lineId: string) => setLineStatusMutation.mutateAsync({ lineId, status: 'packed' }),
+        isPending: setLineStatusMutation.isPending,
+        isError: setLineStatusMutation.isError,
+        error: setLineStatusMutation.error,
+    };
+
+    const unpackLine = {
+        mutate: (lineId: string, opts?: MutationOptions) => setLineStatusMutation.mutate(
+            { lineId, status: 'picked' },
+            opts
+        ),
+        mutateAsync: (lineId: string) => setLineStatusMutation.mutateAsync({ lineId, status: 'picked' }),
+        isPending: setLineStatusMutation.isPending,
+        isError: setLineStatusMutation.isError,
+        error: setLineStatusMutation.error,
+    };
 
     const markShippedLine = useMutation({
         mutationFn: ({ lineId, data }: { lineId: string; data?: { awbNumber?: string; courier?: string } }) =>
@@ -344,56 +378,95 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
     // DELIVERY TRACKING MUTATIONS
     // ============================================
 
-    const markDelivered = useMutation({
-        mutationFn: (id: string) => ordersApi.markDelivered(id),
+    // Delivery tracking using tRPC
+    const markDeliveredMutation = trpc.orders.markDelivered.useMutation({
         onSuccess: () => {
             invalidateShippedOrders();
             invalidateCodPendingOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to mark as delivered')
+        onError: (err) => alert(err.message || 'Failed to mark as delivered')
     });
 
-    const markRto = useMutation({
-        mutationFn: (id: string) => ordersApi.markRto(id),
+    const markDelivered = {
+        mutate: (id: string) => markDeliveredMutation.mutate({ orderId: id }),
+        mutateAsync: (id: string) => markDeliveredMutation.mutateAsync({ orderId: id }),
+        isPending: markDeliveredMutation.isPending,
+        isError: markDeliveredMutation.isError,
+        error: markDeliveredMutation.error,
+    };
+
+    const markRtoMutation = trpc.orders.markRto.useMutation({
         onSuccess: () => {
             invalidateShippedOrders();
             invalidateRtoOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to mark as RTO')
+        onError: (err) => alert(err.message || 'Failed to mark as RTO')
     });
 
-    const receiveRto = useMutation({
-        mutationFn: (id: string) => ordersApi.receiveRto(id),
+    const markRto = {
+        mutate: (id: string) => markRtoMutation.mutate({ orderId: id }),
+        mutateAsync: (id: string) => markRtoMutation.mutateAsync({ orderId: id }),
+        isPending: markRtoMutation.isPending,
+        isError: markRtoMutation.isError,
+        error: markRtoMutation.error,
+    };
+
+    const receiveRtoMutation = trpc.orders.receiveRto.useMutation({
         onSuccess: () => {
             invalidateRtoOrders();
             invalidateOpenOrders();
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to receive RTO')
+        onError: (err) => alert(err.message || 'Failed to receive RTO')
     });
+
+    const receiveRto = {
+        mutate: (id: string) => receiveRtoMutation.mutate({ orderId: id }),
+        mutateAsync: (id: string) => receiveRtoMutation.mutateAsync({ orderId: id }),
+        isPending: receiveRtoMutation.isPending,
+        isError: receiveRtoMutation.isError,
+        error: receiveRtoMutation.error,
+    };
 
     // ============================================
     // ORDER STATUS MUTATIONS
     // ============================================
 
-    const cancelOrder = useMutation({
-        mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-            ordersApi.cancel(id, reason),
+    // Cancel/uncancel using tRPC
+    const cancelOrderMutation = trpc.orders.cancelOrder.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to cancel order')
+        onError: (err) => alert(err.message || 'Failed to cancel order')
     });
 
-    const uncancelOrder = useMutation({
-        mutationFn: (id: string) => ordersApi.uncancel(id),
+    // Wrapper to match existing API (id instead of orderId)
+    const cancelOrder = {
+        mutate: ({ id, reason }: { id: string; reason?: string }) =>
+            cancelOrderMutation.mutate({ orderId: id, reason }),
+        mutateAsync: ({ id, reason }: { id: string; reason?: string }) =>
+            cancelOrderMutation.mutateAsync({ orderId: id, reason }),
+        isPending: cancelOrderMutation.isPending,
+        isError: cancelOrderMutation.isError,
+        error: cancelOrderMutation.error,
+    };
+
+    const uncancelOrderMutation = trpc.orders.uncancelOrder.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to restore order')
+        onError: (err) => alert(err.message || 'Failed to restore order')
     });
+
+    const uncancelOrder = {
+        mutate: (id: string) => uncancelOrderMutation.mutate({ orderId: id }),
+        mutateAsync: (id: string) => uncancelOrderMutation.mutateAsync({ orderId: id }),
+        isPending: uncancelOrderMutation.isPending,
+        isError: uncancelOrderMutation.isError,
+        error: uncancelOrderMutation.error,
+    };
 
     const cancelLine = useMutation({
         mutationFn: (lineId: string) => ordersApi.cancelLine(lineId),
