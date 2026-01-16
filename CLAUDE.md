@@ -157,15 +157,29 @@ The orders tRPC router (`server/src/trpc/routers/orders.ts`) provides type-safe 
 | `markRto` | Mutation | Initiate RTO for shipped order |
 | `receiveRto` | Mutation | Receive RTO, restore inventory |
 
-**Client usage** (`useOrdersMutations.ts`):
+**Client usage** - Mutations split into focused hooks (`hooks/orders/`):
 ```typescript
-// tRPC mutations with wrapper for API compatibility
-const pickLine = trpc.orders.setLineStatus.useMutation({...});
-pickLine.mutate({ lineId, status: 'picked' });
+// Facade hook (backward compatible) - composes all sub-hooks
+const mutations = useOrdersMutations();
+mutations.pickLine.mutate(lineId);
 
-const cancelOrder = trpc.orders.cancelOrder.useMutation({...});
-cancelOrder.mutate({ orderId: id, reason: 'Customer request' });
+// Or import focused hooks directly for better tree-shaking
+import { useOrderWorkflowMutations } from './hooks/orders';
+const { allocate, pickLine, packLine } = useOrderWorkflowMutations();
 ```
+
+### Client Mutation Hooks (`hooks/orders/`)
+| Hook | Mutations |
+|------|-----------|
+| `useOrderWorkflowMutations` | allocate, unallocate, pickLine, unpickLine, packLine, unpackLine |
+| `useOrderShipMutations` | ship, shipLines, forceShip, unship, markShippedLine, unmarkShippedLine, updateLineTracking |
+| `useOrderCrudMutations` | createOrder, updateOrder, deleteOrder, updateOrderNotes, updateLineNotes, updateShipByDate |
+| `useOrderStatusMutations` | cancelOrder, uncancelOrder, cancelLine, uncancelLine |
+| `useOrderDeliveryMutations` | markDelivered, markRto, receiveRto |
+| `useOrderLineMutations` | updateLine, addLine, customizeLine, removeCustomization |
+| `useOrderReleaseMutations` | releaseToShipped, releaseToCancelled, migrateShopifyFulfilled |
+| `useProductionBatchMutations` | createBatch, updateBatch, deleteBatch |
+| `useOrderInvalidation` | invalidateOpenOrders, invalidateShippedOrders, invalidateAll, etc. |
 
 ## Gotchas
 
@@ -192,6 +206,19 @@ client/src/
     OrdersGrid.tsx                    # Grid component
     ordersGrid/columns/index.tsx      # Column builder
     ordersGrid/types.ts               # ColumnBuilderContext
+  hooks/
+    useOrdersMutations.ts             # Facade composing all mutation hooks
+    orders/                           # Focused mutation hooks (decomposed)
+      index.ts                        # Barrel export
+      orderMutationUtils.ts           # Shared invalidation helpers
+      useOrderWorkflowMutations.ts    # allocate/pick/pack workflow
+      useOrderShipMutations.ts        # ship operations
+      useOrderCrudMutations.ts        # create/update/delete
+      useOrderStatusMutations.ts      # cancel/uncancel
+      useOrderDeliveryMutations.ts    # delivery tracking
+      useOrderLineMutations.ts        # line ops + customization
+      useOrderReleaseMutations.ts     # release workflows
+      useProductionBatchMutations.ts  # production batches
   utils/orderHelpers.ts               # flattenOrders, enrichRowsWithInventory
   tests/orders-production.spec.ts     # E2E tests
 

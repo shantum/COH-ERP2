@@ -704,8 +704,24 @@ Line Status:    pending → allocated → picked → packed → shipped → deli
 |------|-------------|
 | `client/src/hooks/useOrdersData.ts` | **Data fetching hook.** Queries for open/cancelled views, SKUs, inventory, fabrics. Uses tRPC |
 | `client/src/hooks/useUnifiedOrdersData.ts` | Data hook for shipped-related views (shipped, RTO, COD pending, archived) |
-| `client/src/hooks/useOrdersMutations.ts` | **Mutation hook.** All order mutations: allocate, pick, pack, ship, cancel, edit, hold, archive |
+| `client/src/hooks/useOrdersMutations.ts` | **Facade hook.** Composes all mutation sub-hooks for backward compatibility |
 | `client/src/hooks/useOrderSSE.ts` | Server-Sent Events hook for real-time order updates across browser tabs |
+
+#### Order Mutation Hooks (`client/src/hooks/orders/`)
+
+Focused mutation hooks split by domain for better tree-shaking and maintainability:
+
+| Hook | Mutations |
+|------|-----------|
+| `useOrderWorkflowMutations` | allocate, unallocate, pickLine, unpickLine, packLine, unpackLine |
+| `useOrderShipMutations` | ship, shipLines, forceShip, unship, markShippedLine, unmarkShippedLine, updateLineTracking |
+| `useOrderCrudMutations` | createOrder, updateOrder, deleteOrder, updateOrderNotes, updateLineNotes, updateShipByDate |
+| `useOrderStatusMutations` | cancelOrder, uncancelOrder, cancelLine, uncancelLine |
+| `useOrderDeliveryMutations` | markDelivered, markRto, receiveRto |
+| `useOrderLineMutations` | updateLine, addLine, customizeLine, removeCustomization |
+| `useOrderReleaseMutations` | releaseToShipped, releaseToCancelled, migrateShopifyFulfilled |
+| `useProductionBatchMutations` | createBatch, updateBatch, deleteBatch |
+| `orderMutationUtils.ts` | Shared invalidation helpers: `useOrderInvalidation()` |
 
 ---
 
