@@ -37,7 +37,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 8. **Prisma dates**: returns Date objects—use `toDateString()` from `utils/dateHelpers.ts`
 9. **Dev URLs**: use `127.0.0.1` not `localhost`—IPv6 causes silent failures
 10. **tRPC params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
-11. **SSE updates**: prefer `invalidate()` over `setData()` for resilient key matching
+11. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
 
 ## Orders Architecture
 
@@ -48,27 +48,17 @@ Login: `admin@coh.com` / `XOFiya@34`
 
 ### Line Status State Machine
 
-Source of truth: `server/src/utils/orderStateMachine.ts`
+Source: `server/src/utils/orderStateMachine.ts` (use `executeTransition` in transaction)
 
 ```
 pending → allocated → picked → packed → shipped
    ↓         ↓          ↓        ↓
-cancelled cancelled  cancelled cancelled
-   ↓
-pending (uncancel)
+cancelled cancelled  cancelled cancelled → pending (uncancel)
+
+Reverse: shipped → packed → picked → allocated → pending (via un* mutations)
 ```
 
-```typescript
-// Always use executeTransition inside a transaction
-await prisma.$transaction(tx =>
-    executeTransition(tx, currentStatus, newStatus, { lineId, skuId, qty, userId, shipData })
-);
-```
-
-**Inventory effects** (automatic):
-- `pending → allocated`: Create OUTWARD transaction
-- `allocated → pending`: Delete OUTWARD transaction
-- `allocated/picked/packed → cancelled`: Delete OUTWARD transaction
+**Inventory:** `pending→allocated` creates OUTWARD; cancellation/unallocation deletes it
 
 ### Views & Release Workflow
 
@@ -112,9 +102,13 @@ inventoryBalanceCache.invalidateAll(); // bulk ops
 - **Allocate**: Creates OUTWARD immediately (no RESERVED type)
 - Balance can be negative (data integrity) - use `allowNegative` option
 
+### Real-Time (SSE)
+- Server: `routes/sse.ts` | Client: `hooks/useOrderSSE.ts`
+- Auto-reconnect with 100-event replay buffer; prefer `invalidate()` over `setData()`
+
 ## tRPC & API
 
-**Client exclusively uses tRPC** - all client code calls tRPC, not REST.
+**Client uses tRPC.** Express handles webhooks & batch operations.
 
 ### tRPC Procedures (`server/src/trpc/routers/orders.ts`)
 - **Queries**: `list`, `get`
@@ -122,31 +116,11 @@ inventoryBalanceCache.invalidateAll(); // bulk ops
 
 ### Client Mutation Hooks (`hooks/orders/`)
 ```typescript
-// Facade (backward compatible)
-const mutations = useOrdersMutations();
+const mutations = useOrdersMutations(); // Facade with optimistic updates
 mutations.pickLine.mutate(lineId);
-
-// Or focused hooks for tree-shaking
-import { useOrderWorkflowMutations } from './hooks/orders';
 ```
 
-| Hook | Purpose |
-|------|---------|
-| `useOrderWorkflowMutations` | allocate/pick/pack (has optimistic updates) |
-| `useOrderShipMutations` | ship/unship/tracking |
-| `useOrderCrudMutations` | create/update/delete/notes |
-| `useOrderStatusMutations` | cancel/uncancel (has optimistic updates) |
-| `useOrderDeliveryMutations` | delivered/RTO |
-| `useOrderLineMutations` | line ops + customization |
-| `useOrderReleaseMutations` | release workflows |
-
-### Optimistic Updates
-```typescript
-const mutations = useOrdersMutations({ currentView: view, page, shippedFilter });
-// onMutate → snapshot + optimistic update
-// onError → rollback
-// onSettled → background revalidation
-```
+Focused hooks: `useOrderWorkflowMutations` (allocate/pick/pack), `useOrderShipMutations`, `useOrderCrudMutations`, `useOrderStatusMutations`, `useOrderDeliveryMutations`, `useOrderLineMutations`, `useOrderReleaseMutations`
 
 ## Shopify Order Processor
 
@@ -184,14 +158,11 @@ services/customerStatsCache.ts        # Customer stats cache
 trpc/routers/orders.ts                # tRPC procedures
 ```
 
-## Scripts
+## Dev & Deploy
 
-Located at `server/src/scripts/`. Run with: `npx ts-node src/scripts/scriptName.ts`
-
-## Environment
-
-`.env`: `DATABASE_URL`, `JWT_SECRET`
-**Deployment**: Railway (`railway` CLI)
+- **Scripts**: `server/src/scripts/` — run with `npx ts-node src/scripts/scriptName.ts`
+- **Env**: `DATABASE_URL`, `JWT_SECRET` in `.env`
+- **Deploy**: Railway (`railway` CLI)
 
 ## When to Use Agents
 
