@@ -167,6 +167,59 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Production health check with performance metrics
+app.get('/api/health/production', async (req, res) => {
+  const startTime = Date.now();
+  const metrics = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    checks: {},
+    performance: {},
+  };
+
+  try {
+    // Database connectivity check
+    const dbStart = Date.now();
+    await prisma.$queryRaw`SELECT 1`;
+    metrics.checks.database = { status: 'ok', latencyMs: Date.now() - dbStart };
+
+    // Orders query performance (count only for speed)
+    const ordersStart = Date.now();
+    const orderCount = await prisma.order.count({
+      where: { isCancelled: false, isArchived: false },
+    });
+    metrics.checks.ordersQuery = {
+      status: 'ok',
+      latencyMs: Date.now() - ordersStart,
+      openOrderCount: orderCount,
+    };
+
+    // Check most recent order update (data freshness)
+    const freshnessStart = Date.now();
+    const latestOrder = await prisma.order.findFirst({
+      orderBy: { updatedAt: 'desc' },
+      select: { updatedAt: true },
+    });
+    const dataAgeMs = latestOrder ? Date.now() - latestOrder.updatedAt.getTime() : null;
+    metrics.checks.dataFreshness = {
+      status: dataAgeMs !== null && dataAgeMs < 3600000 ? 'ok' : 'stale',
+      latencyMs: Date.now() - freshnessStart,
+      lastUpdateAgeMs: dataAgeMs,
+      lastUpdateAt: latestOrder?.updatedAt?.toISOString() || null,
+    };
+
+    // Total response time
+    metrics.performance.totalLatencyMs = Date.now() - startTime;
+    metrics.status = 'ok';
+  } catch (error) {
+    metrics.status = 'error';
+    metrics.error = error.message;
+    metrics.performance.totalLatencyMs = Date.now() - startTime;
+  }
+
+  res.json(metrics);
+});
+
 // Serve static files from client build in production
 if (process.env.NODE_ENV === 'production') {
   const clientBuildPath = path.join(__dirname, '../../client/dist');

@@ -625,14 +625,18 @@ export default function Orders() {
                             </button>
                         )}
 
-                        {/* Refresh */}
+                        {/* Refresh - non-blocking with visual feedback */}
                         <button
                             onClick={() => refetch()}
                             disabled={isFetching}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                isFetching
+                                    ? 'text-blue-600 bg-blue-50 border border-blue-200'
+                                    : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50'
+                            }`}
                         >
                             <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-                            Refresh
+                            {isFetching ? 'Refreshing...' : 'Refresh'}
                         </button>
 
                         <div className="w-px h-4 bg-gray-200" />
@@ -651,15 +655,15 @@ export default function Orders() {
                     </div>
                 </div>
 
-                {/* Loading */}
-                {isLoading && (
+                {/* Loading - only show blocking spinner for initial load (no cached data) */}
+                {isLoading && filteredRows.length === 0 && (
                     <div className="flex justify-center p-12">
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div>
                     </div>
                 )}
 
-                {/* Grid */}
-                {!isLoading && filteredRows.length > 0 && (
+                {/* Grid - show even with stale data while refreshing in background */}
+                {filteredRows.length > 0 && (
                     <div>{gridComponent}</div>
                 )}
                 {!isLoading && filteredRows.length === 0 && (

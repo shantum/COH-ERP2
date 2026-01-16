@@ -8,7 +8,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:production": "playwright test tests/orders-production.spec.ts",
+    "test:production:har": "RECORD_HAR=true playwright test tests/orders-production.spec.ts",
+    "test:network": "playwright test tests/orders-production.spec.ts --grep 'Network'",
+    "test:report": "playwright show-report playwright-report"
   },
   "dependencies": {
     "@coh/shared": "file:../shared",
@@ -31,6 +38,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.57.0",
     "@tailwindcss/forms": "^0.5.11",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",

@@ -17,10 +17,13 @@ import { fabricsApi, productionApi, adminApi, customersApi } from '../services/a
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 
-// Poll interval for data refresh (30 seconds)
-const POLL_INTERVAL = 30000;
+// Poll intervals - active view refreshes more frequently
+const POLL_INTERVAL_ACTIVE = 15000;   // 15 seconds for 'open' view
+const POLL_INTERVAL_PASSIVE = 60000;  // 60 seconds for other views
 // Stale time prevents double-fetches when data is still fresh
 const STALE_TIME = 25000;
+// Cache retention time (5 minutes) - keeps stale data for instant display
+const GC_TIME = 5 * 60 * 1000;
 // Orders per page
 const PAGE_SIZE = 500;
 
@@ -58,9 +61,11 @@ export function useUnifiedOrdersData({
         },
         {
             staleTime: STALE_TIME,
+            gcTime: GC_TIME,  // Keep cached data for 5 min for instant display
             refetchOnWindowFocus: false,
-            refetchInterval: POLL_INTERVAL,
+            refetchInterval: currentView === 'open' ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_PASSIVE,
             refetchIntervalInBackground: false,
+            placeholderData: (prev) => prev,  // Show stale data immediately while fetching
         }
     );
 
@@ -105,8 +110,13 @@ export function useUnifiedOrdersData({
         }
     );
 
+    // Check if server already included inventory in the response
+    const hasInventoryFromServer = ordersQuery.data?.hasInventory ?? false;
+
     // Extract unique SKU IDs from orders for targeted inventory balance fetch
+    // Only needed if server didn't include inventory
     const orderSkuIds = useMemo(() => {
+        if (hasInventoryFromServer) return [];  // Skip if server included inventory
         const orders = ordersQuery.data?.orders;
         if (!orders) return [];
         const skuSet = new Set<string>();
@@ -116,15 +126,16 @@ export function useUnifiedOrdersData({
             });
         });
         return Array.from(skuSet);
-    }, [ordersQuery.data]);
+    }, [ordersQuery.data, hasInventoryFromServer]);
 
     // Inventory balance for SKUs in current orders
+    // Skip this query if server already included inventory (saves round-trip)
     const inventoryBalanceQuery = trpc.inventory.getBalances.useQuery(
         { skuIds: orderSkuIds },
         {
             staleTime: 60000,
             refetchOnWindowFocus: false,
-            enabled: orderSkuIds.length > 0,
+            enabled: orderSkuIds.length > 0 && !hasInventoryFromServer,
         }
     );
 

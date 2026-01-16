@@ -30,6 +30,7 @@ import {
     TXN_REASON,
 } from '../../utils/queryPatterns.js';
 import { shipOrderLines } from '../../services/shipOrderService.js';
+import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 
 // ============================================
 // LIST ORDERS PROCEDURE
@@ -107,12 +108,32 @@ const list = protectedProcedure
         // This eliminates client-side O(n) transformation on every fetch
         const rows = flattenOrdersToRows(enriched);
 
+        // Batch fetch inventory balances for all SKUs in the response
+        // This eliminates client-side round-trip for inventory data
+        const skuIds = [...new Set(rows.map(r => r.skuId).filter((id): id is string => Boolean(id)))];
+        let inventoryMap = new Map<string, { availableBalance: number }>();
+
+        if (skuIds.length > 0) {
+            const balances = await inventoryBalanceCache.get(ctx.prisma, skuIds);
+            inventoryMap = new Map(
+                Array.from(balances.entries()).map(([id, bal]) => [id, { availableBalance: bal.availableBalance }])
+            );
+        }
+
+        // Enrich rows with inventory stock (server-side)
+        const rowsWithInventory = rows.map(row => ({
+            ...row,
+            skuStock: row.skuId ? (inventoryMap.get(row.skuId)?.availableBalance ?? 0) : 0,
+        }));
+
         return {
-            rows,
+            rows: rowsWithInventory,
             // Keep orders for backwards compatibility during transition
             orders: enriched,
             view,
             viewName: viewConfig.name,
+            // Flag to tell client inventory is included (skip separate fetch)
+            hasInventory: true,
             pagination: {
                 total: totalCount,
                 limit,

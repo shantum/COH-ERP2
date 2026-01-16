@@ -9,6 +9,7 @@
  */
 
 import type { PrismaClient } from '@prisma/client';
+import { customerStatsCache } from '../services/customerStatsCache.js';
 
 // ============================================
 // TYPES
@@ -299,6 +300,7 @@ export function calculateLTV(orders: OrderForLTV[]): number {
 
 /**
  * Get stats for multiple customers (used by order list enrichment)
+ * Uses in-memory cache (2 min TTL) to avoid repeated DB queries
  */
 export async function getCustomerStatsMap(
     prisma: PrismaClient,
@@ -306,34 +308,20 @@ export async function getCustomerStatsMap(
 ): Promise<Record<string, CustomerStats>> {
     if (!customerIds || customerIds.length === 0) return {};
 
-    // Just read stored LTV from customers
-    const customers = await prisma.customer.findMany({
-        where: { id: { in: customerIds } },
-        select: { id: true, ltv: true, rtoCount: true }
-    });
+    // Use cache - handles batch fetch for uncached IDs internally
+    const cachedStats = await customerStatsCache.get(prisma, customerIds);
 
-    // Get order counts
-    const orderCounts = await prisma.order.groupBy({
-        by: ['customerId'],
-        where: { customerId: { in: customerIds }, status: { not: 'cancelled' } },
-        _count: { id: true }
-    });
-
-    const countMap = new Map<string, number>();
-    for (const stat of orderCounts) {
-        if (stat.customerId) countMap.set(stat.customerId, stat._count.id);
-    }
-
+    // Convert to CustomerStats format (without cachedAt)
     const statsMap: Record<string, CustomerStats> = {};
-    for (const c of customers) {
-        statsMap[c.id] = {
-            ltv: c.ltv || 0,
-            orderCount: countMap.get(c.id) || 0,
-            rtoCount: c.rtoCount || 0
+    for (const [id, stats] of Object.entries(cachedStats)) {
+        statsMap[id] = {
+            ltv: stats.ltv,
+            orderCount: stats.orderCount,
+            rtoCount: stats.rtoCount,
         };
     }
 
-    // Fill missing with defaults
+    // Fill missing with defaults (cache already handles this, but be safe)
     for (const id of customerIds) {
         if (!statsMap[id]) {
             statsMap[id] = { ltv: 0, orderCount: 0, rtoCount: 0 };
