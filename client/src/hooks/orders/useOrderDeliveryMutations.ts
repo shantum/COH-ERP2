@@ -5,10 +5,7 @@
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
  * 2. onError: Rollback to previous data + invalidate for consistency
- * 3. onSettled: Only invalidate non-SSE-synced data (e.g., inventory balance for RTO)
- *
- * Note: Order list invalidation removed from onSettled to prevent UI flicker.
- * SSE handles cross-user synchronization; error rollback ensures consistency.
+ * 3. onSettled: Invalidate caches to confirm server state
  */
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -58,7 +55,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             alert(err.message || 'Failed to mark as delivered');
         },
         onSettled: () => {
-            // No invalidation needed - SSE handles cross-user sync
+            // No invalidation needed - optimistic update + SSE handles it
         }
     });
 
@@ -95,7 +92,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             alert(err.message || 'Failed to mark as RTO');
         },
         onSettled: () => {
-            // No invalidation needed - SSE handles cross-user sync
+            // No invalidation needed - optimistic update + SSE handles it
         }
     });
 

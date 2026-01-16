@@ -22,7 +22,6 @@ import { trpc } from '../services/trpc';
 // When SSE disconnected: frequent polling to stay in sync
 const POLL_INTERVAL_ACTIVE = 5000;    // 5 seconds for 'open' view (no SSE)
 const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views (no SSE)
-const POLL_INTERVAL_SSE_FALLBACK = 60000;  // 60 seconds as fallback when SSE connected
 // Stale time prevents double-fetches when data is still fresh
 const STALE_TIME = 60000;  // 1 minute (increased since SSE handles updates)
 // Cache retention time (5 minutes) - keeps stale data for instant display
@@ -41,7 +40,7 @@ interface UseUnifiedOrdersDataOptions {
     page: number;
     selectedCustomerId?: string | null;
     shippedFilter?: 'shipped' | 'not_shipped';
-    /** Whether SSE is connected - reduces polling when true */
+    /** Whether SSE is connected - disables polling when true */
     isSSEConnected?: boolean;
 }
 
@@ -55,13 +54,17 @@ export function useUnifiedOrdersData({
     const queryClient = useQueryClient();
 
     // Determine poll interval based on SSE connection status
-    // When SSE is connected, we only poll as a fallback (60s)
-    // When disconnected, poll frequently to stay in sync
-    const pollInterval = isSSEConnected
-        ? POLL_INTERVAL_SSE_FALLBACK  // SSE handles updates, poll as fallback
-        : currentView === 'open'
-            ? POLL_INTERVAL_ACTIVE    // No SSE: poll frequently for active view
-            : POLL_INTERVAL_PASSIVE;  // No SSE: poll less for passive views
+    // SSE connected: disable polling entirely
+    // Trust SSE for real-time updates; lastEventId replay handles reconnects
+    // SSE disconnected: poll frequently until reconnected
+    const pollInterval = useMemo(() => {
+        // SSE connected: disable polling entirely (rely 100% on SSE)
+        if (isSSEConnected) {
+            return false as const;
+        }
+        // SSE disconnected: poll frequently to stay in sync
+        return currentView === 'open' ? POLL_INTERVAL_ACTIVE : POLL_INTERVAL_PASSIVE;
+    }, [isSSEConnected, currentView]);
 
     // ==========================================
     // MAIN ORDER QUERY - Fetches current view with pagination

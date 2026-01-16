@@ -511,7 +511,7 @@ export function OrdersGrid({
                             onRowDataUpdated={onRowDataUpdated}
                             maintainColumnOrder={true}
                             // Performance optimizations for large datasets
-                            rowBuffer={50}                    // Render 50 rows beyond viewport (smoother scroll)
+                            rowBuffer={100}                   // Render 100 rows beyond viewport (smoother scroll)
                             debounceVerticalScrollbar={true}  // Debounce scroll events
                             suppressAnimationFrame={false}    // Keep animation frame for smooth updates
                         />

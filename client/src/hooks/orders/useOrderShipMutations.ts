@@ -5,10 +5,7 @@
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
  * 2. onError: Rollback to previous data + invalidate for consistency
- * 3. onSettled: Only trigger callbacks (e.g., onShipSuccess)
- *
- * Note: Order list invalidation removed from onSettled to prevent UI flicker.
- * SSE handles cross-user synchronization; error rollback ensures consistency.
+ * 3. onSettled: Invalidate caches to confirm server state + trigger callbacks
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -87,7 +84,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             }
         },
         onSettled: () => {
-            // Only trigger callbacks - SSE handles cross-user sync
+            // Only invalidate non-SSE-synced data (inventory balance)
+            // Order list updates handled by optimistic updates + SSE
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
             onShipSuccess?.();
         }
     });
@@ -129,7 +128,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             }
         },
         onSettled: () => {
-            // Only trigger callbacks - SSE handles cross-user sync
+            // Only invalidate non-SSE-synced data (inventory balance)
+            // Order list updates handled by optimistic updates + SSE
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
             onShipSuccess?.();
         }
     });
@@ -164,7 +165,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             alert(err.response?.data?.error || 'Failed to force ship order');
         },
         onSettled: () => {
-            // Only trigger callbacks - SSE handles cross-user sync
+            // Only invalidate non-SSE-synced data (inventory balance)
+            // Order list updates handled by optimistic updates + SSE
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
             onShipSuccess?.();
         }
     });
@@ -195,7 +198,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             alert(err.response?.data?.error || 'Failed to unship order');
         },
         onSettled: () => {
-            // No invalidation needed - SSE handles cross-user sync
+            // No invalidation needed - optimistic update + SSE handles it
         }
     });
 
@@ -255,7 +258,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             alert(err.response?.data?.error || 'Failed to ship line');
         },
         onSettled: () => {
-            // No invalidation needed - SSE handles cross-user sync
+            // Only invalidate non-SSE-synced data (inventory balance)
+            // Order list updates handled by optimistic updates + SSE
+            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });
 
@@ -283,7 +288,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             alert(err.response?.data?.error || 'Failed to unship line');
         },
         onSettled: () => {
-            // No invalidation needed - SSE handles cross-user sync
+            // No invalidation needed - optimistic update + SSE handles it
         }
     });
 
@@ -312,7 +317,8 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             console.error('Tracking update failed:', err.response?.data?.error || err.message);
         },
         onSettled: () => {
-            // Only invalidate non-SSE-synced data
+            // Only invalidate non-SSE-synced data (inventory balance)
+            // Order list updates handled by optimistic updates + SSE
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         }
     });
