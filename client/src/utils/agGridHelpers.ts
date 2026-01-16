@@ -121,37 +121,6 @@ export function getTrackingUrl(awb: string, courier?: string): string | null {
 }
 
 /**
- * Tracking status configurations for badges
- */
-export const TRACKING_STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
-    in_transit: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'In Transit' },
-    manifested: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Manifested' },
-    picked_up: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Picked Up' },
-    reached_destination: { bg: 'bg-indigo-100', text: 'text-indigo-700', label: 'At Hub' },
-    out_for_delivery: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Out for Delivery' },
-    undelivered: { bg: 'bg-red-100', text: 'text-red-700', label: 'NDR' },
-    delivered: { bg: 'bg-green-100', text: 'text-green-700', label: 'Delivered' },
-    delivery_delayed: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Delayed' },
-    rto_pending: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO Pending' },
-    rto_initiated: { bg: 'bg-red-100', text: 'text-red-700', label: 'RTO' },
-    rto_in_transit: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'RTO In Transit' },
-    rto_delivered: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' },
-    rto_received: { bg: 'bg-purple-100', text: 'text-purple-700', label: 'RTO Received' },
-    cancelled: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Cancelled' },
-};
-
-/**
- * Stock status configurations
- */
-export const STOCK_STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
-    'OK': { bg: 'bg-green-100', text: 'text-green-700', label: 'OK' },
-    'ORDER SOON': { bg: 'bg-yellow-100', text: 'text-yellow-700', label: 'Soon' },
-    'ORDER NOW': { bg: 'bg-red-100', text: 'text-red-700', label: 'Order Now' },
-    'ok': { bg: 'bg-green-100', text: 'text-green-700', label: 'OK' },
-    'below_target': { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Low' },
-};
-
-/**
  * Default column definition for all grids
  */
 export const defaultColDef = {

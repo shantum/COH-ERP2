@@ -11,6 +11,7 @@ import type {
     ValueGetterParams,
 } from 'ag-grid-community';
 import type { ColumnBuilderContext } from '../types';
+import { PAYMENT_STYLES, TIER_STYLES } from '../formatting';
 
 /**
  * Build payment and customer column definitions
@@ -89,10 +90,9 @@ export function buildPaymentColumns(ctx: ColumnBuilderContext): ColDef[] {
                     || params.data.order?.paymentMethod || '';
                 if (!method) return null;
                 const isCod = method.toLowerCase().includes('cod');
+                const style = isCod ? PAYMENT_STYLES.cod : PAYMENT_STYLES.prepaid;
                 return (
-                    <span
-                        className={`text-xs px-1.5 py-0.5 rounded ${isCod ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}
-                    >
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
                         {isCod ? 'COD' : 'Prepaid'}
                     </span>
                 );
@@ -204,9 +204,10 @@ export function buildPaymentColumns(ctx: ColumnBuilderContext): ColDef[] {
 
                 // First order customer - show NEW badge
                 if (orderCount <= 1) {
+                    const newStyle = TIER_STYLES.NEW;
                     return (
                         <span
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200"
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold ${newStyle.bg} ${newStyle.text} border border-emerald-200`}
                             title={`First order customer`}
                         >
                             NEW
@@ -215,20 +216,13 @@ export function buildPaymentColumns(ctx: ColumnBuilderContext): ColDef[] {
                 }
 
                 // Returning customer - show order count with tier color
-                const tierStyles: Record<string, { bg: string; border: string; icon: string }> = {
-                    platinum: { bg: 'bg-purple-100 text-purple-700', border: 'border-purple-300', icon: '' },
-                    gold: { bg: 'bg-amber-100 text-amber-700', border: 'border-amber-300', icon: '' },
-                    silver: { bg: 'bg-slate-100 text-slate-600', border: 'border-slate-300', icon: '' },
-                    bronze: { bg: 'bg-orange-100 text-orange-700', border: 'border-orange-300', icon: '' },
-                };
-                const style = tierStyles[tier] || tierStyles.bronze;
+                const tierStyle = TIER_STYLES[tier as keyof typeof TIER_STYLES] || TIER_STYLES.bronze;
 
                 return (
                     <span
-                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${style.bg} border ${style.border}`}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${tierStyle.bg} ${tierStyle.text} border border-current/20`}
                         title={`${tier.charAt(0).toUpperCase() + tier.slice(1)} tier - ${orderCount} orders - LTV ${ltv.toLocaleString()}`}
                     >
-                        {style.icon && <span>{style.icon}</span>}
                         {orderCount} orders
                     </span>
                 );

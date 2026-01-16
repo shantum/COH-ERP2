@@ -10,12 +10,12 @@ import type {
     ValueGetterParams,
     ValueSetterParams,
     EditableCallbackParams,
-    CellClassParams,
 } from 'ag-grid-community';
 import type { ColumnBuilderContext } from '../types';
 import { CheckCircle, AlertCircle, ChevronDown } from 'lucide-react';
 import { TrackingStatusBadge } from '../../../common/grid';
 import { COURIER_OPTIONS } from '../constants';
+import { editableCellClass } from '../formatting';
 
 /**
  * Build tracking column definitions
@@ -182,11 +182,7 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                     </div>
                 );
             },
-            cellClass: (params: CellClassParams) => {
-                const status = params.data?.lineStatus;
-                const editable = ['packed', 'shipped'].includes(status);
-                return editable ? 'text-xs cursor-text' : 'text-xs';
-            },
+            cellClass: editableCellClass('lineStatus', ['packed', 'shipped'], 'text-xs'),
         },
 
         // Courier (editable dropdown)
@@ -242,11 +238,7 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
 
                 return <span className="text-xs font-medium text-blue-700">{courier}</span>;
             },
-            cellClass: (params: CellClassParams) => {
-                const status = params.data?.lineStatus;
-                const editable = ['packed', 'shipped'].includes(status);
-                return editable ? 'text-xs cursor-pointer' : 'text-xs';
-            },
+            cellClass: editableCellClass('lineStatus', ['packed', 'shipped'], 'text-xs'),
         },
 
         // Tracking Status

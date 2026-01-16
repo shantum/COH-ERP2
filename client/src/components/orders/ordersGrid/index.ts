@@ -5,8 +5,20 @@
  * to improve maintainability and reduce file size.
  */
 
-// Constants
-export { ALL_COLUMN_IDS, COURIER_OPTIONS, TIER_STYLES, ROW_STATUS_COLORS, STATUS_LEGEND_ITEMS } from './constants';
+// Constants (non-styling)
+export { ALL_COLUMN_IDS, COURIER_OPTIONS } from './constants';
+
+// Formatting (styles, colors, status configs)
+export {
+    TIER_STYLES,
+    STATUS_LEGEND_ITEMS,
+    GRID_COLORS,
+    TRACKING_STATUS_STYLES,
+    PAYMENT_STYLES,
+    getRowStyle,
+    getRowClass,
+    gridRowStyles,
+} from './formatting';
 
 // Types
 export type { OrdersGridProps, CustomizeLineData, EditCustomizationData, ColumnBuilderContext } from './types';
@@ -15,4 +27,4 @@ export type { OrdersGridProps, CustomizeLineData, EditCustomizationData, ColumnB
 export { ProductionDatePopover } from './cellRenderers';
 
 // Helpers
-export { StatusLegend, getRowStyle, getRowClass, gridRowStyles } from './helpers';
+export { StatusLegend } from './helpers';

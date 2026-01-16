@@ -4,7 +4,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { STATUS_LEGEND_ITEMS } from '../constants';
+import { STATUS_LEGEND_ITEMS } from '../formatting';
 
 export function StatusLegend() {
     const [isOpen, setIsOpen] = useState(false);

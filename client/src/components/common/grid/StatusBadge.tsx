@@ -3,7 +3,7 @@
  */
 
 import { CheckCircle, AlertCircle } from 'lucide-react';
-import { STOCK_STATUS_CONFIG } from '../../../utils/agGridHelpers';
+import { STOCK_STATUS_STYLES } from '../../orders/ordersGrid/formatting';
 
 interface StatusBadgeProps {
     status: string;
@@ -11,7 +11,7 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, showIcon = false }: StatusBadgeProps) {
-    const config = STOCK_STATUS_CONFIG[status] || {
+    const config = STOCK_STATUS_STYLES[status] || {
         bg: 'bg-gray-100',
         text: 'text-gray-700',
         label: status,

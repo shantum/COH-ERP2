@@ -3,7 +3,7 @@
  */
 
 import { Package, CheckCircle, AlertTriangle } from 'lucide-react';
-import { TRACKING_STATUS_CONFIG } from '../../../utils/agGridHelpers';
+import { TRACKING_STATUS_STYLES } from '../../orders/ordersGrid/formatting';
 
 interface TrackingStatusBadgeProps {
     status: string;
@@ -29,7 +29,7 @@ const STATUS_ICONS: Record<string, any> = {
 };
 
 export function TrackingStatusBadge({ status, daysInTransit, ofdCount }: TrackingStatusBadgeProps) {
-    const config = TRACKING_STATUS_CONFIG[status] || TRACKING_STATUS_CONFIG.in_transit;
+    const config = TRACKING_STATUS_STYLES[status] || TRACKING_STATUS_STYLES.in_transit;
     const Icon = STATUS_ICONS[status] || Package;
 
     // Show OFD count for NDR/undelivered

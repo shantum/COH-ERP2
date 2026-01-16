@@ -15,6 +15,7 @@ import type {
 import type { ColumnBuilderContext } from '../types';
 import { formatDateTime } from '../../../../utils/orderHelpers';
 import { calculateOrderTotal } from '../../../../utils/orderPricing';
+import { getThresholdTextClass } from '../formatting';
 
 /**
  * Build order info column definitions
@@ -51,9 +52,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (params.value === null) return null;
                 const days = params.value as number;
-                let colorClass = 'text-gray-500';
-                if (days > 5) colorClass = 'text-red-600 font-semibold';
-                else if (days >= 3) colorClass = 'text-amber-600 font-medium';
+                const colorClass = getThresholdTextClass(days, 'orderAge');
                 return <span className={`text-xs ${colorClass}`}>{days}d</span>;
             },
             sortable: true,

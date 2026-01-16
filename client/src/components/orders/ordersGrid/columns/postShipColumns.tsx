@@ -13,6 +13,11 @@ import type {
 } from 'ag-grid-community';
 import type { ColumnBuilderContext } from '../types';
 import { formatDateTime } from '../../../../utils/orderHelpers';
+import {
+    getThresholdTextClass,
+    getFinalStatusClasses,
+    getTrackingStatusLabel,
+} from '../formatting';
 
 /**
  * Build post-ship column definitions
@@ -73,9 +78,7 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (params.value === null) return null;
                 const days = params.value as number;
-                let colorClass = 'text-green-600';
-                if (days > 7) colorClass = 'text-red-600';
-                else if (days > 5) colorClass = 'text-amber-600';
+                const colorClass = getThresholdTextClass(days, 'deliveryDays');
                 return <span className={`text-xs ${colorClass}`}>{days}d</span>;
             },
             sortable: true,
@@ -97,9 +100,7 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (params.value === null) return null;
                 const days = params.value as number;
-                let colorClass = 'text-gray-600';
-                if (days > 10) colorClass = 'text-red-600 font-semibold';
-                else if (days > 7) colorClass = 'text-amber-600';
+                const colorClass = getThresholdTextClass(days, 'daysInTransit');
                 return <span className={`text-xs ${colorClass}`}>{days}d</span>;
             },
             sortable: true,
@@ -133,9 +134,7 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (params.value === null) return null;
                 const days = params.value as number;
-                let colorClass = 'text-gray-600';
-                if (days > 14) colorClass = 'text-red-600 font-semibold';
-                else if (days > 7) colorClass = 'text-amber-600';
+                const colorClass = getThresholdTextClass(days, 'daysInRto');
                 return <span className={`text-xs ${colorClass}`}>{days}d RTO</span>;
             },
             sortable: true,
@@ -156,16 +155,8 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (params.value === null) return null;
                 const days = params.value as number;
-                let colorClass = 'text-green-600';
-                let bgClass = 'bg-green-50';
-                if (days > 14) {
-                    colorClass = 'text-red-600 font-semibold';
-                    bgClass = 'bg-red-50';
-                } else if (days > 7) {
-                    colorClass = 'text-amber-600';
-                    bgClass = 'bg-amber-50';
-                }
-                return <span className={`text-xs ${colorClass} ${bgClass} px-1.5 py-0.5 rounded`}>{days}d</span>;
+                const classes = getThresholdTextClass(days, 'daysSinceDelivery');
+                return <span className={`text-xs ${classes} px-1.5 py-0.5 rounded`}>{days}d</span>;
             },
             sortable: true,
         },
@@ -233,18 +224,9 @@ export function buildPostShipColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 if (!params.value) return null;
                 const status = params.value as string;
-                const statusStyles: Record<string, string> = {
-                    delivered: 'bg-green-100 text-green-700',
-                    rto_received: 'bg-purple-100 text-purple-700',
-                    cancelled: 'bg-red-100 text-red-700',
-                    returned: 'bg-orange-100 text-orange-700',
-                    shipped: 'bg-blue-100 text-blue-700',
-                    in_transit: 'bg-sky-100 text-sky-700',
-                    out_for_delivery: 'bg-indigo-100 text-indigo-700',
-                    rto_initiated: 'bg-orange-100 text-orange-700',
-                };
-                const style = statusStyles[status] || 'bg-gray-100 text-gray-700';
-                const label = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                const style = getFinalStatusClasses(status);
+                const label = getTrackingStatusLabel(status) ||
+                    status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
                 return <span className={`text-xs px-1.5 py-0.5 rounded ${style}`}>{label}</span>;
             },
         },
