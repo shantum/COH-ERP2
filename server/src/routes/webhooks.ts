@@ -23,7 +23,8 @@ const logWebhookReceived = _logWebhookReceived as (
     webhookId: string | undefined,
     topic: string,
     resourceId: string | number,
-    isRetry?: boolean
+    isRetry?: boolean,
+    payload?: unknown
 ) => Promise<unknown>;
 
 const updateWebhookLog = _updateWebhookLog as (
@@ -31,7 +32,8 @@ const updateWebhookLog = _updateWebhookLog as (
     webhookId: string | undefined,
     status: string,
     error?: string | null,
-    processingTime?: number | null
+    processingTime?: number | null,
+    resultData?: unknown
 ) => Promise<void>;
 import { upsertCustomerFromWebhook } from '../utils/customerUtils.js';
 import { webhookLogger as log } from '../utils/logger.js';
@@ -226,13 +228,13 @@ router.post('/shopify/orders', verifyWebhook, async (req: WebhookRequest, res: R
         const orderName = shopifyOrder.name || shopifyOrder.order_number || shopifyOrder.id;
         log.info({ orderName, topic: webhookTopic, isRetry: dedupeResult.isRetry }, 'Processing order webhook');
 
-        // Log webhook receipt (updates existing log if retry, creates new if not)
-        await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyOrder.id), dedupeResult.isRetry);
+        // Log webhook receipt with payload (updates existing log if retry, creates new if not)
+        await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyOrder.id), dedupeResult.isRetry, shopifyOrder);
 
         const result = await processShopifyOrderWebhook(req.prisma, shopifyOrder, webhookTopic);
 
-        // Log success
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
+        // Log success with result data
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
 
         res.status(200).json({ received: true, ...result });
     } catch (error) {
@@ -280,9 +282,9 @@ router.post('/shopify/products', verifyWebhook, async (req: WebhookRequest, res:
         // Handle deletion separately (minimal payload)
         if (webhookTopic === 'products/delete') {
             log.info({ shopifyProductId, topic: webhookTopic }, 'Processing product delete webhook');
-            await logWebhookReceived(req.prisma, webhookId, webhookTopic, shopifyProductId, dedupeResult.isRetry);
+            await logWebhookReceived(req.prisma, webhookId, webhookTopic, shopifyProductId, dedupeResult.isRetry, req.body);
             const result = await handleProductDeletion(req.prisma, shopifyProductId);
-            await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
+            await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
             res.status(200).json({ received: true, ...result });
             return;
         }
@@ -298,9 +300,9 @@ router.post('/shopify/products', verifyWebhook, async (req: WebhookRequest, res:
         const shopifyProduct = validation.data!;
         log.info({ productTitle: shopifyProduct.title, topic: webhookTopic, isRetry: dedupeResult.isRetry }, 'Processing product webhook');
 
-        await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyProduct.id), dedupeResult.isRetry);
+        await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyProduct.id), dedupeResult.isRetry, shopifyProduct);
         const result = await cacheAndProcessProduct(req.prisma, shopifyProduct as unknown as Parameters<typeof cacheAndProcessProduct>[1], webhookTopic);
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
 
         res.status(200).json({ received: true, ...result });
     } catch (error) {
@@ -350,9 +352,9 @@ router.post('/shopify/customers', verifyWebhook, async (req: WebhookRequest, res
         const shopifyCustomer = validation.data!;
         log.info({ customerEmail: shopifyCustomer.email, topic: webhookTopic, isRetry: dedupeResult.isRetry }, 'Processing customer webhook');
 
-        await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyCustomer.id), dedupeResult.isRetry);
+        await logWebhookReceived(req.prisma, webhookId, webhookTopic, String(shopifyCustomer.id), dedupeResult.isRetry, shopifyCustomer);
         const result = await processShopifyCustomer(req.prisma, shopifyCustomer, webhookTopic);
-        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
+        await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
 
         res.status(200).json({ received: true, ...result });
     } catch (error) {
@@ -387,7 +389,7 @@ router.post('/shopify/inventory_levels/update', verifyWebhook, async (req: Webho
         const available = inventoryUpdate.available;
 
         log.info({ inventoryItemId, available }, 'inventory_levels/update webhook received');
-        await logWebhookReceived(req.prisma, webhookId, 'inventory_levels/update', inventoryItemId, dedupeResult.isRetry);
+        await logWebhookReceived(req.prisma, webhookId, 'inventory_levels/update', inventoryItemId, dedupeResult.isRetry, inventoryUpdate);
 
         // Find SKU by shopifyInventoryItemId
         const sku = await req.prisma.sku.findFirst({
@@ -409,11 +411,13 @@ router.post('/shopify/inventory_levels/update', verifyWebhook, async (req: Webho
                 }
             });
 
-            await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime);
+            const result = { action: 'updated', skuId: sku.id, skuCode: sku.skuCode, available };
+            await updateWebhookLog(req.prisma, webhookId, 'processed', null, Date.now() - startTime, result);
             log.debug({ skuCode: sku.skuCode, available }, 'Updated Shopify inventory cache');
             res.status(200).json({ received: true, updated: true, skuCode: sku.skuCode });
         } else {
-            await updateWebhookLog(req.prisma, webhookId, 'processed', 'SKU not found', Date.now() - startTime);
+            const result = { action: 'skipped', reason: 'SKU not found', inventoryItemId };
+            await updateWebhookLog(req.prisma, webhookId, 'processed', 'SKU not found', Date.now() - startTime, result);
             log.debug({ inventoryItemId }, 'No SKU found for inventory item');
             res.status(200).json({ received: true, updated: false, reason: 'SKU not found' });
         }

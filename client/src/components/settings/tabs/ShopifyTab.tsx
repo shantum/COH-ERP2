@@ -10,7 +10,7 @@ import JsonViewer from '../../JsonViewer';
 import {
     CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
     AlertCircle, Package, Webhook, Copy, ExternalLink, Database, Download,
-    Activity, Clock, Zap, Pause
+    Activity, Clock, Zap, Pause, ChevronDown, ChevronRight, FileJson, ArrowRight
 } from 'lucide-react';
 
 export function ShopifyTab() {
@@ -27,6 +27,11 @@ export function ShopifyTab() {
 
     // Full dump state
     const [dumpDays, setDumpDays] = useState(30);
+
+    // Webhook Inspector state
+    const [expandedWebhookId, setExpandedWebhookId] = useState<string | null>(null);
+    const [webhookDetail, setWebhookDetail] = useState<any>(null);
+    const [loadingWebhookDetail, setLoadingWebhookDetail] = useState(false);
 
     // Fetch current config
     const { data: config, isLoading: configLoading } = useQuery({
@@ -161,6 +166,29 @@ export function ShopifyTab() {
             action === 'start' ? shopifyApi.startScheduler() : shopifyApi.stopScheduler(),
         onSuccess: () => refetchScheduler(),
     });
+
+    // Toggle webhook detail expansion
+    const toggleWebhookDetail = async (webhookId: string) => {
+        if (expandedWebhookId === webhookId) {
+            // Collapse
+            setExpandedWebhookId(null);
+            setWebhookDetail(null);
+            return;
+        }
+
+        // Expand and fetch detail
+        setExpandedWebhookId(webhookId);
+        setLoadingWebhookDetail(true);
+        try {
+            const res = await shopifyApi.getWebhookDetail(webhookId);
+            setWebhookDetail(res.data);
+        } catch (e) {
+            console.error('Failed to fetch webhook detail:', e);
+            setWebhookDetail({ error: 'Failed to load webhook detail' });
+        } finally {
+            setLoadingWebhookDetail(false);
+        }
+    };
 
     if (configLoading) {
         return (
@@ -1093,6 +1121,243 @@ export function ShopifyTab() {
                             <strong>Legend:</strong> Progress shows (processed/total) with (+created / ~updated / !errors)
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Webhook Inspector - Detailed view with payload and result */}
+            {config?.hasAccessToken && webhookActivity?.recentLogs && webhookActivity.recentLogs.length > 0 && (
+                <div className="card">
+                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <FileJson size={20} /> Webhook Inspector
+                    </h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Click on a webhook to see the raw payload and DB update result. Shows payload sent by Shopify and what was created/updated in the database.
+                    </p>
+
+                    <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600 w-8"></th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Time</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Topic</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Resource</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Status</th>
+                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {webhookActivity.recentLogs.slice(0, 20).map((log: any) => (
+                                    <>
+                                        <tr
+                                            key={log.id}
+                                            className={`hover:bg-gray-50 cursor-pointer ${expandedWebhookId === log.id ? 'bg-blue-50' : ''}`}
+                                            onClick={() => toggleWebhookDetail(log.id)}
+                                        >
+                                            <td className="px-3 py-2 text-gray-400">
+                                                {expandedWebhookId === log.id ? (
+                                                    <ChevronDown size={16} />
+                                                ) : (
+                                                    <ChevronRight size={16} />
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2 text-xs text-gray-500">
+                                                {new Date(log.receivedAt).toLocaleString()}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                <code className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
+                                                    {log.topic}
+                                                </code>
+                                            </td>
+                                            <td className="px-3 py-2 text-xs text-gray-600 font-mono">
+                                                {log.resourceId || '-'}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                                    log.status === 'processed'
+                                                        ? 'bg-green-100 text-green-700'
+                                                        : log.status === 'failed'
+                                                        ? 'bg-red-100 text-red-700'
+                                                        : 'bg-yellow-100 text-yellow-700'
+                                                }`}>
+                                                    {log.status}
+                                                </span>
+                                                {log.error && (
+                                                    <span className="ml-1 text-red-500" title={log.error}>⚠</span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2 text-xs text-gray-500">
+                                                {log.processingTimeMs ? `${log.processingTimeMs}ms` : '-'}
+                                            </td>
+                                        </tr>
+                                        {expandedWebhookId === log.id && (
+                                            <tr key={`${log.id}-detail`}>
+                                                <td colSpan={6} className="p-0">
+                                                    <div className="bg-gray-50 p-4 border-t border-b">
+                                                        {loadingWebhookDetail ? (
+                                                            <div className="flex items-center gap-2 text-gray-500">
+                                                                <RefreshCw size={16} className="animate-spin" />
+                                                                Loading webhook details...
+                                                            </div>
+                                                        ) : webhookDetail?.error ? (
+                                                            <div className="text-red-600">
+                                                                Error: {typeof webhookDetail.error === 'string' ? webhookDetail.error : 'Failed to load'}
+                                                            </div>
+                                                        ) : webhookDetail ? (
+                                                            <div className="grid md:grid-cols-2 gap-4">
+                                                                {/* Left: Payload from Shopify */}
+                                                                <div>
+                                                                    <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
+                                                                        <Webhook size={14} /> Webhook Payload
+                                                                        <span className="text-xs font-normal text-gray-400">
+                                                                            (from Shopify)
+                                                                        </span>
+                                                                    </h4>
+                                                                    {webhookDetail.payload ? (
+                                                                        <div className="border rounded bg-white max-h-80 overflow-auto">
+                                                                            <JsonViewer
+                                                                                data={webhookDetail.payload}
+                                                                                rootName="payload"
+                                                                            />
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="text-gray-400 text-sm p-3 bg-white rounded border">
+                                                                            No payload stored (older webhook)
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Right: Result + Related DB Data */}
+                                                                <div className="space-y-4">
+                                                                    {/* Processing Result */}
+                                                                    <div>
+                                                                        <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
+                                                                            <ArrowRight size={14} /> Processing Result
+                                                                        </h4>
+                                                                        {webhookDetail.resultData ? (
+                                                                            <div className="border rounded bg-white max-h-40 overflow-auto">
+                                                                                <JsonViewer
+                                                                                    data={webhookDetail.resultData}
+                                                                                    rootName="result"
+                                                                                />
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="text-gray-400 text-sm p-3 bg-white rounded border">
+                                                                                No result stored (older webhook)
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+
+                                                                    {/* Related DB Data */}
+                                                                    {(webhookDetail.relatedData?.order || webhookDetail.relatedData?.product || webhookDetail.relatedData?.customer) && (
+                                                                        <div>
+                                                                            <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
+                                                                                <Database size={14} /> Related DB Record
+                                                                            </h4>
+                                                                            {webhookDetail.relatedData.order && (
+                                                                                <div className="border rounded bg-white p-3 text-xs space-y-1">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Order:</span>
+                                                                                        <span className="font-medium">{webhookDetail.relatedData.order.orderNumber}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Status:</span>
+                                                                                        <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                                                                            webhookDetail.relatedData.order.status === 'shipped' ? 'bg-green-100 text-green-700' :
+                                                                                            webhookDetail.relatedData.order.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                                                                                            'bg-blue-100 text-blue-700'
+                                                                                        }`}>
+                                                                                            {webhookDetail.relatedData.order.status}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Payment:</span>
+                                                                                        <span>{webhookDetail.relatedData.order.paymentMethod} ({webhookDetail.relatedData.order.paymentStatus})</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Lines:</span>
+                                                                                        <span>{webhookDetail.relatedData.order.orderLines?.length || 0}</span>
+                                                                                    </div>
+                                                                                    {webhookDetail.relatedData.order.orderLines?.length > 0 && (
+                                                                                        <div className="mt-2 pt-2 border-t space-y-1">
+                                                                                            {webhookDetail.relatedData.order.orderLines.map((line: any) => (
+                                                                                                <div key={line.id} className="flex justify-between text-xs">
+                                                                                                    <span className="text-gray-500">
+                                                                                                        #{line.lineNumber}: {line.sku?.skuCode || 'No SKU'}
+                                                                                                    </span>
+                                                                                                    <span className={`px-1 rounded ${
+                                                                                                        line.status === 'shipped' ? 'bg-green-100 text-green-700' :
+                                                                                                        line.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                                                                                                        'bg-gray-100'
+                                                                                                    }`}>
+                                                                                                        {line.status}
+                                                                                                        {line.awbNumber && ` (${line.awbNumber})`}
+                                                                                                    </span>
+                                                                                                </div>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                            {webhookDetail.relatedData.product && (
+                                                                                <div className="border rounded bg-white p-3 text-xs space-y-1">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Product:</span>
+                                                                                        <span className="font-medium">{webhookDetail.relatedData.product.name}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Variations:</span>
+                                                                                        <span>{webhookDetail.relatedData.product.variations?.length || 0}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Updated:</span>
+                                                                                        <span>{new Date(webhookDetail.relatedData.product.updatedAt).toLocaleString()}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
+                                                                            {webhookDetail.relatedData.customer && (
+                                                                                <div className="border rounded bg-white p-3 text-xs space-y-1">
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Customer:</span>
+                                                                                        <span className="font-medium">{webhookDetail.relatedData.customer.name}</span>
+                                                                                    </div>
+                                                                                    <div className="flex justify-between">
+                                                                                        <span className="text-gray-500">Email:</span>
+                                                                                        <span>{webhookDetail.relatedData.customer.email}</span>
+                                                                                    </div>
+                                                                                    {webhookDetail.relatedData.customer.phone && (
+                                                                                        <div className="flex justify-between">
+                                                                                            <span className="text-gray-500">Phone:</span>
+                                                                                            <span>{webhookDetail.relatedData.customer.phone}</span>
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Error if present */}
+                                                                    {webhookDetail.error && (
+                                                                        <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                                                                            <strong>Error:</strong> {webhookDetail.error}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <p className="text-xs text-gray-500 mt-3">
+                        Showing up to 20 recent webhooks. Click a row to see detailed payload and result data.
+                    </p>
                 </div>
             )}
 

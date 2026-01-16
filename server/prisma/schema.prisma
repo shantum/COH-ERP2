@@ -950,6 +950,8 @@ model WebhookLog {
   responseCode   Int?
   processingTime Int?
   error          String?
+  payload        String?   // Raw webhook JSON payload (truncated for large payloads)
+  resultData     String?   // JSON of DB changes: {action, orderId, orderNumber, linesCreated, etc.}
   receivedAt     DateTime  @default(now())
   processedAt    DateTime?
 

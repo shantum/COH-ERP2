@@ -163,4 +163,151 @@ router.get('/activity', authenticateToken, asyncHandler(async (req: Request, res
   });
 }));
 
+// ============================================
+// WEBHOOK DETAIL (with payload and result)
+// ============================================
+
+router.get('/webhook/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+
+  const webhookLog = await req.prisma.webhookLog.findUnique({
+    where: { id }
+  });
+
+  if (!webhookLog) {
+    res.status(404).json({ error: 'Webhook log not found' });
+    return;
+  }
+
+  // Parse stored JSON fields
+  let payload = null;
+  let resultData = null;
+
+  try {
+    if (webhookLog.payload) {
+      payload = JSON.parse(webhookLog.payload);
+    }
+  } catch (e) {
+    payload = { _parseError: true, raw: webhookLog.payload };
+  }
+
+  try {
+    if (webhookLog.resultData) {
+      resultData = JSON.parse(webhookLog.resultData);
+    }
+  } catch (e) {
+    resultData = { _parseError: true, raw: webhookLog.resultData };
+  }
+
+  // If this is an order webhook, also fetch the related order from DB
+  let relatedOrder = null;
+  if (webhookLog.topic?.startsWith('orders/') && webhookLog.resourceId) {
+    const order = await req.prisma.order.findFirst({
+      where: { shopifyOrderId: webhookLog.resourceId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        paymentStatus: true,
+        paymentMethod: true,
+        createdAt: true,
+        orderLines: {
+          select: {
+            id: true,
+            lineStatus: true,
+            awbNumber: true,
+            sku: { select: { skuCode: true } }
+          }
+        }
+      }
+    });
+    if (order) {
+      // Map lineStatus to status for client compatibility
+      relatedOrder = {
+        ...order,
+        orderLines: order.orderLines.map((line: { id: string; lineStatus: string; awbNumber: string | null; sku: { skuCode: string } }, index: number) => ({
+          ...line,
+          lineNumber: index + 1,
+          status: line.lineStatus
+        }))
+      };
+    }
+  }
+
+  // If this is a product webhook, fetch related product
+  let relatedProduct = null;
+  if (webhookLog.topic?.startsWith('products/') && webhookLog.resourceId) {
+    const product = await req.prisma.product.findFirst({
+      where: { shopifyProductId: webhookLog.resourceId },
+      select: {
+        id: true,
+        name: true,
+        shopifyProductId: true,
+        createdAt: true,
+        updatedAt: true,
+        variations: {
+          select: {
+            id: true,
+            colorName: true,
+            skus: { select: { id: true, skuCode: true } }
+          }
+        }
+      }
+    });
+    if (product) {
+      // Map colorName to name for client compatibility
+      relatedProduct = {
+        ...product,
+        variations: product.variations.map((v: { id: string; colorName: string; skus: { id: string; skuCode: string }[] }) => ({
+          ...v,
+          name: v.colorName
+        }))
+      };
+    }
+  }
+
+  // If this is a customer webhook, fetch related customer
+  let relatedCustomer = null;
+  if (webhookLog.topic?.startsWith('customers/') && webhookLog.resourceId) {
+    const customer = await req.prisma.customer.findFirst({
+      where: { shopifyCustomerId: webhookLog.resourceId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+    if (customer) {
+      // Combine firstName and lastName for client
+      relatedCustomer = {
+        ...customer,
+        name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email
+      };
+    }
+  }
+
+  res.json({
+    id: webhookLog.id,
+    webhookId: webhookLog.webhookId,
+    topic: webhookLog.topic,
+    resourceId: webhookLog.resourceId,
+    status: webhookLog.status,
+    error: webhookLog.error,
+    processingTimeMs: webhookLog.processingTime,
+    receivedAt: webhookLog.receivedAt,
+    processedAt: webhookLog.processedAt,
+    payload,
+    resultData,
+    relatedData: {
+      order: relatedOrder,
+      product: relatedProduct,
+      customer: relatedCustomer
+    }
+  });
+}));
+
 export default router;

@@ -478,6 +478,9 @@ export const shopifyApi = {
     // Webhook activity
     getWebhookActivity: (params?: { hours?: number; limit?: number }) =>
         api.get('/shopify/webhooks/activity', { params }),
+    // Webhook detail with payload and result
+    getWebhookDetail: (id: string) =>
+        api.get(`/shopify/webhooks/webhook/${id}`),
 };
 
 // Import/Export

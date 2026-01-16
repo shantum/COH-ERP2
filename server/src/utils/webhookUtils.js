@@ -172,6 +172,44 @@ export async function checkWebhookDuplicate(prisma, webhookId) {
 }
 
 /**
+ * Truncate and stringify payload for storage
+ * Keeps key fields but removes large nested data if too big
+ */
+function preparePayloadForStorage(payload, maxLength = 50000) {
+    if (!payload) return null;
+
+    try {
+        let payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+
+        // If small enough, store as-is
+        if (payloadStr.length <= maxLength) {
+            return payloadStr;
+        }
+
+        // For large payloads, create a summary with key fields
+        const summary = {
+            _truncated: true,
+            _originalSize: payloadStr.length,
+            id: payload.id,
+            name: payload.name,
+            order_number: payload.order_number,
+            email: payload.email,
+            title: payload.title, // for products
+            financial_status: payload.financial_status,
+            fulfillment_status: payload.fulfillment_status,
+            created_at: payload.created_at,
+            updated_at: payload.updated_at,
+            line_items_count: payload.line_items?.length,
+            fulfillments_count: payload.fulfillments?.length,
+        };
+
+        return JSON.stringify(summary);
+    } catch (e) {
+        return JSON.stringify({ _error: 'Failed to serialize payload', message: e.message });
+    }
+}
+
+/**
  * Log webhook receipt for deduplication
  * If isRetry=true, updates existing log instead of creating duplicate
  *
@@ -180,9 +218,12 @@ export async function checkWebhookDuplicate(prisma, webhookId) {
  * @param {string} topic - Webhook topic (e.g., 'orders/updated')
  * @param {string} resourceId - Shopify resource ID
  * @param {boolean} isRetry - Whether this is a retry of a failed webhook
+ * @param {object} payload - Raw webhook payload (optional, stored for debugging)
  */
-export async function logWebhookReceived(prisma, webhookId, topic, resourceId, isRetry = false) {
+export async function logWebhookReceived(prisma, webhookId, topic, resourceId, isRetry = false, payload = null) {
     if (!webhookId) return null;
+
+    const payloadStr = preparePayloadForStorage(payload);
 
     try {
         if (isRetry) {
@@ -193,6 +234,8 @@ export async function logWebhookReceived(prisma, webhookId, topic, resourceId, i
                     status: 'processing',
                     error: null, // Clear previous error
                     receivedAt: new Date(), // Update received time for retry
+                    payload: payloadStr,
+                    resultData: null, // Clear previous result
                 }
             });
         }
@@ -203,6 +246,7 @@ export async function logWebhookReceived(prisma, webhookId, topic, resourceId, i
                 topic,
                 resourceId: resourceId ? String(resourceId) : null,
                 status: 'processing',
+                payload: payloadStr,
             }
         });
     } catch (e) {
@@ -218,11 +262,38 @@ export async function logWebhookReceived(prisma, webhookId, topic, resourceId, i
 
 /**
  * Update webhook log with result
+ * @param {PrismaClient} prisma
+ * @param {string} webhookId
+ * @param {string} status - 'processed' or 'failed'
+ * @param {string|null} error - Error message if failed
+ * @param {number|null} processingTime - Processing time in ms
+ * @param {object|null} resultData - Result of DB operations (optional)
  */
-export async function updateWebhookLog(prisma, webhookId, status, error = null, processingTime = null) {
+export async function updateWebhookLog(prisma, webhookId, status, error = null, processingTime = null, resultData = null) {
     if (!webhookId) return;
 
     try {
+        // Serialize resultData if provided
+        let resultDataStr = null;
+        if (resultData) {
+            try {
+                resultDataStr = JSON.stringify(resultData);
+                // Truncate if too large
+                if (resultDataStr.length > 10000) {
+                    resultDataStr = JSON.stringify({
+                        _truncated: true,
+                        action: resultData.action,
+                        orderId: resultData.orderId,
+                        orderNumber: resultData.orderNumber,
+                        linesCreated: resultData.linesCreated,
+                        linesUpdated: resultData.linesUpdated,
+                    });
+                }
+            } catch (e) {
+                resultDataStr = JSON.stringify({ _error: 'Failed to serialize result' });
+            }
+        }
+
         await prisma.webhookLog.update({
             where: { webhookId },
             data: {
@@ -230,6 +301,7 @@ export async function updateWebhookLog(prisma, webhookId, status, error = null, 
                 error: error?.substring(0, 1000), // Truncate long errors
                 processingTime,
                 processedAt: new Date(),
+                resultData: resultDataStr,
             }
         });
     } catch (e) {
