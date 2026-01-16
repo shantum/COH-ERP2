@@ -21,9 +21,11 @@ import {
     getValidViewNames,
     getViewConfig,
     flattenOrdersToRows,
+    LINE_SSE_SELECT,
+    flattenLineForSSE,
 } from '../../utils/orderViews.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
-import { updateCustomerTier } from '../../utils/tierUtils.js';
+import { updateCustomerTier, incrementCustomerOrderCount, decrementCustomerOrderCount } from '../../utils/tierUtils.js';
 import {
     calculateInventoryBalance,
     TXN_TYPE,
@@ -40,6 +42,7 @@ import {
 import { shipOrderLines } from '../../services/shipOrderService.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
+import { deferredExecutor } from '../../services/deferredExecutor.js';
 
 // ============================================
 // LIST ORDERS PROCEDURE
@@ -327,9 +330,12 @@ const create = protectedProcedure
             });
         });
 
-        // Update customer tier based on new order
-        if (order.customerId && totalAmount && totalAmount > 0) {
-            await updateCustomerTier(ctx.prisma, order.customerId);
+        // Update customer stats: increment orderCount and update tier
+        if (order.customerId) {
+            await incrementCustomerOrderCount(ctx.prisma, order.customerId);
+            if (totalAmount && totalAmount > 0) {
+                await updateCustomerTier(ctx.prisma, order.customerId);
+            }
         }
 
         return order;
@@ -446,21 +452,49 @@ const allocate = protectedProcedure
             return { allocated, failed };
         });
 
-        // Broadcast SSE update for each allocated line (excludes the user who made the change)
-        for (const lineId of result.allocated) {
-            broadcastOrderUpdate({
-                type: 'line_status',
-                view: 'open',
-                lineId,
-                changes: { lineStatus: 'allocated' },
-            }, ctx.user.id);
-        }
-
-        // Invalidate inventory balance cache for affected SKUs
+        // Defer non-critical work: SSE broadcast and cache invalidation
+        // Response returns immediately, deferred work runs after
         const affectedSkuIds = Array.from(skuRequirements.keys());
-        if (affectedSkuIds.length > 0) {
-            inventoryBalanceCache.invalidate(affectedSkuIds);
-        }
+        const allocatedLineIds = result.allocated;
+        const userId = ctx.user.id;
+        const prisma = ctx.prisma;
+
+        deferredExecutor.enqueue(async () => {
+            // Fetch full row data for updated lines and broadcast with complete data
+            // This eliminates the need for clients to refetch
+            for (const lineId of allocatedLineIds) {
+                try {
+                    const line = await prisma.orderLine.findUnique({
+                        where: { id: lineId },
+                        select: LINE_SSE_SELECT,
+                    });
+
+                    if (line) {
+                        const rowData = flattenLineForSSE(line);
+                        broadcastOrderUpdate({
+                            type: 'line_status',
+                            view: 'open',
+                            lineId,
+                            changes: { lineStatus: 'allocated' },
+                            rowData: rowData as unknown as Record<string, unknown> | undefined,
+                        }, userId);
+                    }
+                } catch (err) {
+                    // Fallback to minimal broadcast if fetch fails
+                    broadcastOrderUpdate({
+                        type: 'line_status',
+                        view: 'open',
+                        lineId,
+                        changes: { lineStatus: 'allocated' },
+                    }, userId);
+                }
+            }
+
+            // Invalidate inventory balance cache
+            if (affectedSkuIds.length > 0) {
+                inventoryBalanceCache.invalidate(affectedSkuIds);
+            }
+        });
 
         return {
             allocated: result.allocated.length,
@@ -545,20 +579,26 @@ const ship = protectedProcedure
             }
         }
 
-        // Broadcast SSE update for shipped lines
+        // Defer SSE broadcast
         if (result.shipped.length > 0) {
-            broadcastOrderUpdate({
-                type: 'order_shipped',
-                orderId: result.orderId ?? undefined,
-                lineIds: result.shipped.map(l => l.lineId),
-                affectedViews: ['open', 'shipped'],
-                changes: {
-                    lineStatus: 'shipped',
-                    awbNumber,
-                    courier,
-                    shippedAt: new Date().toISOString(),
-                },
-            }, ctx.user.id);
+            const shippedLineIds = result.shipped.map(l => l.lineId);
+            const orderId = result.orderId;
+            const userId = ctx.user.id;
+
+            deferredExecutor.enqueue(async () => {
+                broadcastOrderUpdate({
+                    type: 'order_shipped',
+                    orderId: orderId ?? undefined,
+                    lineIds: shippedLineIds,
+                    affectedViews: ['open', 'shipped'],
+                    changes: {
+                        lineStatus: 'shipped',
+                        awbNumber,
+                        courier,
+                        shippedAt: new Date().toISOString(),
+                    },
+                }, userId);
+            });
         }
 
         return {
@@ -714,14 +754,41 @@ const setLineStatus = protectedProcedure
             });
         }
 
-        // Broadcast SSE update
-        broadcastOrderUpdate({
-            type: 'line_status',
-            view: 'open',
-            lineId,
-            orderId: line.orderId,
-            changes: { lineStatus: status },
-        }, ctx.user.id);
+        // Defer SSE broadcast with full row data
+        const orderIdForBroadcast = line.orderId;
+        const userId = ctx.user.id;
+        const prisma = ctx.prisma;
+
+        deferredExecutor.enqueue(async () => {
+            try {
+                // Fetch full row data for SSE broadcast
+                const updatedLine = await prisma.orderLine.findUnique({
+                    where: { id: lineId },
+                    select: LINE_SSE_SELECT,
+                });
+
+                if (updatedLine) {
+                    const rowData = flattenLineForSSE(updatedLine);
+                    broadcastOrderUpdate({
+                        type: 'line_status',
+                        view: 'open',
+                        lineId,
+                        orderId: orderIdForBroadcast,
+                        changes: { lineStatus: status },
+                        rowData: rowData as unknown as Record<string, unknown> | undefined,
+                    }, userId);
+                }
+            } catch (err) {
+                // Fallback to minimal broadcast
+                broadcastOrderUpdate({
+                    type: 'line_status',
+                    view: 'open',
+                    lineId,
+                    orderId: orderIdForBroadcast,
+                    changes: { lineStatus: status },
+                }, userId);
+            }
+        });
 
         return {
             lineId,
@@ -829,23 +896,31 @@ const cancelOrder = protectedProcedure
             });
         });
 
-        // Invalidate inventory cache for affected SKUs
-        if (affectedSkuIds.length > 0) {
-            inventoryBalanceCache.invalidate(affectedSkuIds);
-        }
+        // Defer non-critical work
+        const customerId = order.customerId;
+        const userId = ctx.user.id;
+        const prisma = ctx.prisma;
 
-        // Update customer tier
-        if (order.customerId) {
-            await updateCustomerTier(ctx.prisma, order.customerId);
-        }
+        deferredExecutor.enqueue(async () => {
+            // Invalidate inventory cache for affected SKUs
+            if (affectedSkuIds.length > 0) {
+                inventoryBalanceCache.invalidate(affectedSkuIds);
+            }
 
-        // Broadcast SSE update with new event type
-        broadcastOrderUpdate({
-            type: 'order_cancelled',
-            orderId,
-            affectedViews: ['open', 'cancelled'],
-            changes: { status: 'cancelled', lineStatus: 'cancelled' },
-        }, ctx.user.id);
+            // Update customer stats: decrement orderCount and update tier
+            if (customerId) {
+                await decrementCustomerOrderCount(prisma, customerId);
+                await updateCustomerTier(prisma, customerId);
+            }
+
+            // Broadcast SSE update
+            broadcastOrderUpdate({
+                type: 'order_cancelled',
+                orderId,
+                affectedViews: ['open', 'cancelled'],
+                changes: { status: 'cancelled', lineStatus: 'cancelled' },
+            }, userId);
+        });
 
         return { orderId, status: 'cancelled' };
     });
@@ -899,18 +974,26 @@ const uncancelOrder = protectedProcedure
             });
         });
 
-        // Update customer tier
-        if (order.customerId) {
-            await updateCustomerTier(ctx.prisma, order.customerId);
-        }
+        // Defer non-critical work
+        const customerId = order.customerId;
+        const userId = ctx.user.id;
+        const prisma = ctx.prisma;
 
-        // Broadcast SSE update with new event type
-        broadcastOrderUpdate({
-            type: 'order_uncancelled',
-            orderId,
-            affectedViews: ['open', 'cancelled'],
-            changes: { status: 'open', lineStatus: 'pending' },
-        }, ctx.user.id);
+        deferredExecutor.enqueue(async () => {
+            // Update customer stats: increment orderCount (restoring from cancelled) and update tier
+            if (customerId) {
+                await incrementCustomerOrderCount(prisma, customerId);
+                await updateCustomerTier(prisma, customerId);
+            }
+
+            // Broadcast SSE update
+            broadcastOrderUpdate({
+                type: 'order_uncancelled',
+                orderId,
+                affectedViews: ['open', 'cancelled'],
+                changes: { status: 'open', lineStatus: 'pending' },
+            }, userId);
+        });
 
         return { orderId, status: 'open' };
     });

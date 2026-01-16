@@ -629,6 +629,18 @@ export interface FlattenedOrderRow {
     channel: string | null;
     internalNotes: string | null;
 
+    // Order status fields (needed for SSE updates)
+    orderStatus: string;
+    isArchived: boolean;
+    releasedToShipped: boolean;
+    releasedToCancelled: boolean;
+    isExchange: boolean;
+    isOnHold: boolean;
+    orderAwbNumber: string | null;
+    orderCourier: string | null;
+    orderShippedAt: string | null;
+    orderTrackingStatus: string | null;
+
     // Line-level fields
     productName: string;
     colorName: string;
@@ -639,6 +651,7 @@ export interface FlattenedOrderRow {
     lineId: string | null;
     lineStatus: string | null;
     lineNotes: string;
+    unitPrice: number;
 
     // Inventory (filled client-side for now)
     skuStock: number;
@@ -814,6 +827,16 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 paymentMethod: (order.paymentMethod as string) || null,
                 channel: (order.channel as string) || null,
                 internalNotes: (order.internalNotes as string) || null,
+                orderStatus: (order.status as string) || 'pending',
+                isArchived: (order.isArchived as boolean) || false,
+                releasedToShipped: (order.releasedToShipped as boolean) || false,
+                releasedToCancelled: (order.releasedToCancelled as boolean) || false,
+                isExchange: (order.isExchange as boolean) || false,
+                isOnHold: (order.isOnHold as boolean) || false,
+                orderAwbNumber: (order.awbNumber as string) || null,
+                orderCourier: (order.courier as string) || null,
+                orderShippedAt: (order.shippedAt as string) || null,
+                orderTrackingStatus: (order.trackingStatus as string) || null,
                 productName: '(no items)',
                 colorName: '-',
                 size: '-',
@@ -823,6 +846,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 lineId: null,
                 lineStatus: null,
                 lineNotes: '',
+                unitPrice: 0,
                 skuStock: 0,
                 fabricBalance: 0,
                 shopifyStatus,
@@ -888,6 +912,16 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 paymentMethod: (order.paymentMethod as string) || null,
                 channel: (order.channel as string) || null,
                 internalNotes: (order.internalNotes as string) || null,
+                orderStatus: (order.status as string) || 'pending',
+                isArchived: (order.isArchived as boolean) || false,
+                releasedToShipped: (order.releasedToShipped as boolean) || false,
+                releasedToCancelled: (order.releasedToCancelled as boolean) || false,
+                isExchange: (order.isExchange as boolean) || false,
+                isOnHold: (order.isOnHold as boolean) || false,
+                orderAwbNumber: (order.awbNumber as string) || null,
+                orderCourier: (order.courier as string) || null,
+                orderShippedAt: (order.shippedAt as string) || null,
+                orderTrackingStatus: (order.trackingStatus as string) || null,
                 productName: sku?.variation?.product?.name || '-',
                 colorName: sku?.variation?.colorName || '-',
                 size: sku?.size || '-',
@@ -897,6 +931,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 lineId: line.id,
                 lineStatus: line.lineStatus,
                 lineNotes: line.notes || '',
+                unitPrice: line.unitPrice || 0,
                 skuStock: 0, // Filled client-side
                 fabricBalance: 0, // Filled client-side
                 shopifyStatus,
@@ -939,4 +974,248 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
     }
 
     return rows;
+}
+
+// ============================================
+// SSE HELPER: Fetch and flatten single line for broadcast
+// ============================================
+
+/**
+ * Lightweight SELECT for fetching a single line for SSE broadcast
+ * Includes just enough data to update client cache
+ */
+export const LINE_SSE_SELECT = {
+    id: true,
+    lineStatus: true,
+    qty: true,
+    unitPrice: true,
+    skuId: true,
+    notes: true,
+    awbNumber: true,
+    courier: true,
+    shippedAt: true,
+    deliveredAt: true,
+    isCustomized: true,
+    trackingStatus: true,
+    productionBatchId: true,
+    orderId: true,
+    sku: {
+        select: {
+            id: true,
+            skuCode: true,
+            size: true,
+            isCustomSku: true,
+            customizationType: true,
+            customizationValue: true,
+            customizationNotes: true,
+            variation: {
+                select: {
+                    id: true,
+                    colorName: true,
+                    product: {
+                        select: {
+                            id: true,
+                            name: true,
+                        },
+                    },
+                },
+            },
+        },
+    },
+    productionBatch: {
+        select: {
+            id: true,
+            batchCode: true,
+            batchDate: true,
+            status: true,
+        },
+    },
+    order: {
+        select: {
+            id: true,
+            orderNumber: true,
+            orderDate: true,
+            shipByDate: true,
+            customerName: true,
+            customerEmail: true,
+            customerPhone: true,
+            customerId: true,
+            shippingAddress: true,
+            totalAmount: true,
+            paymentMethod: true,
+            channel: true,
+            status: true,
+            isArchived: true,
+            releasedToShipped: true,
+            releasedToCancelled: true,
+            internalNotes: true,
+            isExchange: true,
+            isOnHold: true,
+            awbNumber: true,
+            courier: true,
+            shippedAt: true,
+            trackingStatus: true,
+            customer: {
+                select: {
+                    tags: true,
+                },
+            },
+            shopifyCache: {
+                select: {
+                    discountCodes: true,
+                    customerNotes: true,
+                    tags: true,
+                    trackingNumber: true,
+                    trackingCompany: true,
+                    fulfillmentStatus: true,
+                },
+            },
+            // Include _count to get total lines for this order
+            _count: {
+                select: {
+                    orderLines: true,
+                },
+            },
+        },
+    },
+} as const;
+
+/**
+ * Flatten a single fetched line into row format for SSE broadcast
+ * @param line - Line fetched with LINE_SSE_SELECT
+ * @param customerStats - Customer stats (ltv, orderCount, rtoCount)
+ * @returns Flattened row or null if data incomplete
+ */
+export function flattenLineForSSE(
+    line: any,
+    customerStats?: { ltv: number; orderCount: number; rtoCount: number; tier?: string }
+): FlattenedOrderRow | null {
+    if (!line || !line.order) return null;
+
+    const order = line.order;
+    const sku = line.sku;
+    const productionBatch = line.productionBatch;
+    const shopifyCache = order.shopifyCache;
+    const customer = order.customer;
+
+    // Parse city from shipping address
+    let city = '-';
+    if (order.shippingAddress) {
+        try {
+            const addr = JSON.parse(order.shippingAddress);
+            city = addr.city || '-';
+        } catch { /* ignore */ }
+    }
+
+    // Build SKU display strings
+    const productName = sku?.variation?.product?.name || '-';
+    const colorName = sku?.variation?.colorName || '-';
+    const skuCode = sku?.skuCode || '-';
+    const size = sku?.size || '-';
+
+    // Handle customization
+    const isCustomized = line.isCustomized || sku?.isCustomSku || false;
+    const customSkuCode = sku?.isCustomSku ? skuCode : null;
+
+    return {
+        // IDs
+        orderId: order.id,
+        lineId: line.id,
+        skuId: line.skuId,
+
+        // Order-level fields
+        orderNumber: order.orderNumber,
+        orderDate: order.orderDate,
+        shipByDate: order.shipByDate || null,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail || null,
+        customerPhone: order.customerPhone || null,
+        customerId: order.customerId || null,
+        city,
+        customerOrderCount: customerStats?.orderCount || 0,
+        customerLtv: customerStats?.ltv || 0,
+        customerTier: customerStats?.tier || null,
+        customerRtoCount: customerStats?.rtoCount || 0,
+        totalAmount: order.totalAmount,
+        paymentMethod: order.paymentMethod || null,
+        channel: order.channel || null,
+        orderStatus: order.status,
+        isArchived: order.isArchived,
+        releasedToShipped: order.releasedToShipped || false,
+        releasedToCancelled: order.releasedToCancelled || false,
+        internalNotes: order.internalNotes || null,
+        isExchange: order.isExchange || false,
+        isOnHold: order.isOnHold || false,
+        orderAwbNumber: order.awbNumber || null,
+        orderCourier: order.courier || null,
+        orderShippedAt: order.shippedAt || null,
+        orderTrackingStatus: order.trackingStatus || null,
+
+        // Line-level fields
+        lineStatus: line.lineStatus,
+        qty: line.qty,
+        unitPrice: line.unitPrice || 0,
+        lineNotes: line.notes || '',
+        productName,
+        colorName,
+        skuCode,
+        size,
+
+        // Inventory (filled by client or set to 0)
+        skuStock: 0,
+        fabricBalance: 0,
+
+        // Shopify
+        shopifyStatus: shopifyCache?.fulfillmentStatus || '-',
+
+        // Production
+        productionBatch: productionBatch ? {
+            id: productionBatch.id,
+            batchCode: productionBatch.batchCode,
+            batchDate: productionBatch.batchDate,
+            status: productionBatch.status,
+        } : null,
+        productionBatchId: productionBatch?.id || null,
+        productionDate: productionBatch?.batchDate ? new Date(productionBatch.batchDate).toISOString().split('T')[0] : null,
+
+        // Row metadata
+        isFirstLine: false, // Will be corrected client-side if needed
+        totalLines: order._count?.orderLines || 1,
+        fulfillmentStage: null, // Would need full order context
+
+        // Full order reference (minimal for SSE)
+        order: order,
+
+        // Customization
+        isCustomized,
+        isNonReturnable: false,
+        customSkuCode,
+        customizationType: sku?.customizationType || null,
+        customizationValue: sku?.customizationValue || null,
+        customizationNotes: sku?.customizationNotes || null,
+        originalSkuCode: null,
+
+        // Line-level tracking
+        lineShippedAt: line.shippedAt || null,
+        lineDeliveredAt: line.deliveredAt || null,
+        lineTrackingStatus: line.trackingStatus || null,
+        lineAwbNumber: line.awbNumber || null,
+        lineCourier: line.courier || null,
+
+        // Enriched fields (not computed for SSE - would need full context)
+        daysInTransit: null,
+        daysSinceDelivery: null,
+        daysInRto: null,
+        rtoStatus: null,
+
+        // Shopify cache fields
+        discountCodes: shopifyCache?.discountCodes || null,
+        customerNotes: shopifyCache?.customerNotes || null,
+        shopifyTags: shopifyCache?.tags || null,
+        shopifyAwb: shopifyCache?.trackingNumber || null,
+        shopifyCourier: shopifyCache?.trackingCompany || null,
+
+        // Customer tags
+        customerTags: customer?.tags || null,
+    };
 }
