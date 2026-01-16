@@ -225,8 +225,6 @@ export const ordersApi = {
     // Ship (with inventory release)
     ship: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/ship`, data),
     shipLines: (id: string, data: ShipLinesData) => api.post(`/orders/${id}/ship-lines`, data),
-    // Force ship (admin only - no inventory, bypasses workflow)
-    forceShip: (id: string, data: ShipOrderData) => api.post(`/orders/${id}/migration-ship`, data),
     unship: (id: string) => api.post(`/orders/${id}/unship`),
     // Summary and analytics endpoints
     getShippedSummary: (params?: { days?: number }) => api.get('/orders/shipped/summary', { params }),

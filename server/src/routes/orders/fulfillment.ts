@@ -28,6 +28,7 @@ import {
 import { validate } from '../../utils/validation.js';
 import { ShipOrderSchema } from '@coh/shared';
 import { shipOrderLines, shipOrder } from '../../services/shipOrderService.js';
+import { adminShipOrderLines } from '../../services/adminShipService.js';
 
 const router: Router = Router();
 
@@ -446,44 +447,27 @@ router.post('/:id/unship', authenticateToken, asyncHandler(async (req: Request, 
 
 /**
  * POST /:id/migration-ship
- * Migration endpoint: Mark order as shipped WITHOUT inventory transactions
+ * @deprecated Use tRPC orders.adminShip instead
  *
- * USE CASE:
- * When migrating from an old system where orders were already physically shipped,
- * this endpoint updates the ERP status without affecting inventory (since items
- * were already shipped in the old system).
- *
- * RESTRICTIONS:
- * - Admin only (sensitive operation that bypasses inventory controls)
- * - Skips status validation (can ship from any status)
- * - Skips inventory transactions (no RESERVED release, no OUTWARD creation)
- *
- * WHAT IT DOES:
- * - Updates all order lines to 'shipped' status
- * - Sets AWB, courier, shippedAt, trackingStatus
- * - Updates order status to 'shipped' when all lines processed
- * - NO inventory changes
+ * Migration endpoint: Mark order as shipped bypassing status validation.
+ * Admin only - uses adminShipService for authorization and feature flag check.
  *
  * @param {string} req.params.id - Order ID
  * @param {string} req.body.awbNumber - AWB/tracking number (required)
  * @param {string} req.body.courier - Courier name (required)
- * @returns {Object} Shipping result from shipOrderLines service
- *
- * @example
- * POST /fulfillment/123/migration-ship
- * Body: { awbNumber: "OLD123", courier: "Manual" }
+ * @returns {Object} Shipping result from adminShipOrderLines service
  */
 router.post('/:id/migration-ship',
     authenticateToken,
     requirePermission('orders:ship'),
+    deprecated({
+        endpoint: 'POST /orders/:id/migration-ship',
+        trpcAlternative: 'orders.adminShip',
+        deprecatedSince: '2026-01-16',
+    }),
     asyncHandler(async (req: Request, res: Response) => {
         const orderId = req.params.id as string;
         const { awbNumber, courier } = req.body as { awbNumber?: string; courier?: string };
-
-        // Admin only for migration operations
-        if (req.user!.role !== 'admin') {
-            throw new ForbiddenError('Migration ship requires admin role');
-        }
 
         // Validate required fields
         if (!awbNumber?.trim()) {
@@ -503,16 +487,15 @@ router.post('/:id/migration-ship',
             throw new NotFoundError('Order not found', 'Order', orderId);
         }
 
-        // Use shipOrderLines service with migration flags
+        // Use adminShipOrderLines service (handles auth + feature flag)
         const result = await req.prisma.$transaction(async (tx) => {
             const lineIds = order.orderLines.map((l: { id: string }) => l.id);
-            return await shipOrderLines(tx, {
+            return await adminShipOrderLines(tx, {
                 orderLineIds: lineIds,
                 awbNumber: awbNumber.trim(),
                 courier: courier.trim(),
                 userId: req.user!.id,
-                skipStatusValidation: true,  // Allow shipping from any status
-                skipInventory: true,         // Skip inventory transactions
+                userRole: req.user!.role,
             });
         });
 

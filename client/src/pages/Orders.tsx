@@ -514,7 +514,7 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onForceShipLine: (lineId, data) => mutations.shipLines.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier, force: true }),
+        onForceShipLine: (lineId, data) => mutations.adminShip.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }),
         allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,

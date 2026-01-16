@@ -40,6 +40,7 @@ import {
     type LineStatus,
 } from '../../utils/orderStateMachine.js';
 import { shipOrderLines } from '../../services/shipOrderService.js';
+import { adminShipOrderLines, isAdminShipEnabled } from '../../services/adminShipService.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
 import { deferredExecutor } from '../../services/deferredExecutor.js';
@@ -524,19 +525,10 @@ const ship = protectedProcedure
                 .trim()
                 .transform((val) => val.toUpperCase()),
             courier: z.string().min(1, 'Courier is required').trim(),
-            force: z.boolean().optional(), // Admin only: skip status validation
         })
     )
     .mutation(async ({ input, ctx }) => {
-        const { lineIds, awbNumber, courier, force } = input;
-
-        // Force ship requires admin role
-        if (force && ctx.user.role !== 'admin') {
-            throw new TRPCError({
-                code: 'FORBIDDEN',
-                message: 'Force ship requires admin role',
-            });
-        }
+        const { lineIds, awbNumber, courier } = input;
         const uniqueLineIds = Array.from(new Set(lineIds));
 
         // Validate lines exist
@@ -566,7 +558,124 @@ const ship = protectedProcedure
                 awbNumber,
                 courier,
                 userId: ctx.user.id,
-                skipStatusValidation: force,
+            });
+        });
+
+        // Check for errors in the result
+        if (result.errors && result.errors.length > 0) {
+            const firstError = result.errors[0];
+
+            if (firstError.code === 'INVALID_STATUS') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: firstError.error,
+                });
+            } else if (firstError.code === 'DUPLICATE_AWB') {
+                throw new TRPCError({
+                    code: 'CONFLICT',
+                    message: firstError.error,
+                });
+            } else {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: firstError.error,
+                });
+            }
+        }
+
+        // Defer SSE broadcast
+        if (result.shipped.length > 0) {
+            const shippedLineIds = result.shipped.map(l => l.lineId);
+            const orderId = result.orderId;
+            const userId = ctx.user.id;
+
+            deferredExecutor.enqueue(async () => {
+                broadcastOrderUpdate({
+                    type: 'order_shipped',
+                    orderId: orderId ?? undefined,
+                    lineIds: shippedLineIds,
+                    affectedViews: ['open', 'shipped'],
+                    changes: {
+                        lineStatus: 'shipped',
+                        awbNumber,
+                        courier,
+                        shippedAt: new Date().toISOString(),
+                    },
+                }, userId);
+            });
+        }
+
+        return {
+            shipped: result.shipped.length,
+            lineIds: result.shipped.map((l) => l.lineId),
+            skipped: result.skipped.length > 0 ? result.skipped : undefined,
+            orderId: result.orderId,
+            orderUpdated: result.orderUpdated,
+        };
+    });
+
+// ============================================
+// ADMIN SHIP PROCEDURE
+// ============================================
+
+/**
+ * Admin-only ship procedure that bypasses status validation
+ * Used for data migration and correction scenarios
+ *
+ * Requires admin role. Can be disabled via ENABLE_ADMIN_SHIP=false env var.
+ */
+const adminShip = protectedProcedure
+    .input(
+        z.object({
+            lineIds: z.array(z.string().uuid()).min(1, 'At least one lineId is required'),
+            awbNumber: z
+                .string()
+                .min(1, 'AWB number is required')
+                .trim()
+                .transform((val) => val.toUpperCase()),
+            courier: z.string().min(1, 'Courier is required').trim(),
+        })
+    )
+    .mutation(async ({ input, ctx }) => {
+        const { lineIds, awbNumber, courier } = input;
+        const uniqueLineIds = Array.from(new Set(lineIds));
+
+        // Check feature flag first
+        if (!isAdminShipEnabled()) {
+            throw new TRPCError({
+                code: 'FORBIDDEN',
+                message: 'Admin ship feature is disabled',
+            });
+        }
+
+        // Validate lines exist
+        const lines = await ctx.prisma.orderLine.findMany({
+            where: { id: { in: uniqueLineIds } },
+            select: { id: true, orderId: true, lineStatus: true },
+        });
+
+        if (lines.length === 0) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'No order lines found',
+            });
+        }
+
+        if (lines.length !== uniqueLineIds.length) {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: `Some lineIds not found (found ${lines.length} of ${uniqueLineIds.length})`,
+            });
+        }
+
+        // Use admin ship service (handles auth + status validation skip)
+        const result = await ctx.prisma.$transaction(async (tx) => {
+            return await adminShipOrderLines(tx, {
+                orderLineIds: uniqueLineIds,
+                awbNumber,
+                courier,
+                userId: ctx.user.id,
+                userRole: ctx.user.role,
             });
         });
 
@@ -1632,6 +1741,7 @@ export const ordersRouter = router({
     create,
     allocate,
     ship,
+    adminShip,
     markPaid,
     setLineStatus,
     cancelOrder,

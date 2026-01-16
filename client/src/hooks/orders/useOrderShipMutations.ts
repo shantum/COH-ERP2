@@ -135,34 +135,33 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         }
     });
 
-    // Force ship with optimistic update
-    const forceShip = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: { awbNumber: string; courier: string } }) =>
-            ordersApi.forceShip(id, data),
-        onMutate: async ({ id, data }) => {
+    // Admin ship with optimistic update (uses tRPC adminShip procedure)
+    const adminShip = trpc.orders.adminShip.useMutation({
+        onMutate: async ({ lineIds, awbNumber, courier }) => {
             await trpcUtils.orders.list.cancel(queryInput);
             const previousData = getCachedData();
 
+            // Ship the specified lines
             trpcUtils.orders.list.setData(
                 queryInput,
-                (old: any) => optimisticShipOrder(old, id, {
+                (old: any) => optimisticShipLines(old, lineIds, {
                     lineStatus: 'shipped',
-                    awbNumber: data.awbNumber,
-                    courier: data.courier,
+                    awbNumber,
+                    courier,
                     shippedAt: new Date().toISOString(),
                 }) as any
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
-        onError: (err: any, _vars, context) => {
+        onError: (err, _vars, context) => {
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(err.response?.data?.error || 'Failed to force ship order');
+            alert(err.message || 'Failed to admin ship order');
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -326,7 +325,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     return {
         ship,
         shipLines,
-        forceShip,
+        adminShip,
         unship,
         markShippedLine,
         unmarkShippedLine,
