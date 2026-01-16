@@ -23,31 +23,34 @@ Login: `admin@coh.com` / `XOFiya@34`
 - **Backend**: Express + tRPC + Prisma + PostgreSQL
 - **Frontend**: React 19 + TanStack Query + AG-Grid + Tailwind
 - **Integrations**: Shopify (orders), iThink Logistics (tracking)
-- **Testing**: Playwright (E2E)
+- **Testing**: Playwright (E2E) - `cd client && npx playwright test`
+
+## Gotchas (Read First!)
+
+1. **Router order**: specific routes before parameterized (`:id`)
+2. **Async routes**: wrap with `asyncHandler()`
+3. **Cache invalidation**: mutations MUST invalidate TanStack Query + tRPC + server caches
+4. **AG-Grid cellRenderer**: return JSX, not strings
+5. **Shopify data**: lives in `shopifyCache.*`, NEVER use `rawData`
+6. **Line fields**: use pre-computed O(1) fields (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` O(n)
+7. **View filters**: shipped/cancelled orders stay in Open until Release clicked
+8. **Prisma dates**: returns Date objects—use `toDateString()` from `utils/dateHelpers.ts`
+9. **Dev URLs**: use `127.0.0.1` not `localhost`—IPv6 causes silent failures
+10. **tRPC params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
+11. **SSE updates**: prefer `invalidate()` over `setData()` for resilient key matching
 
 ## Orders Architecture
 
-### Overview
-Single page `/orders` with dropdown selector. Views: Open, Shipped, RTO, COD Pending, Archived, Cancelled.
-
-**Key files**:
-- `Orders.tsx` - Page orchestrator (~755 lines)
-- `OrdersGrid.tsx` - Grid component (~538 lines)
-- `ordersGrid/columns/` - 6 modular column files
-- `orderViews.ts` - View configs (~940 lines)
-- `orderEnrichment/` - Enrichment pipeline (9 modular files)
-
 ### Data Model
-- Each row = one order line (server-flattened)
-- `isFirstLine` marks header row for grouping
-- Line status: `pending → allocated → picked → packed → shipped`
+- Single page `/orders` with dropdown selector
+- Views: Open, Shipped, RTO, COD Pending, Archived, Cancelled
+- Each row = one order line (server-flattened), `isFirstLine` marks header for grouping
 
 ### Line Status State Machine
 
-Single source of truth: `server/src/utils/orderStateMachine.ts`
+Source of truth: `server/src/utils/orderStateMachine.ts`
 
 ```
-Status Flow:
 pending → allocated → picked → packed → shipped
    ↓         ↓          ↓        ↓
 cancelled cancelled  cancelled cancelled
@@ -55,31 +58,20 @@ cancelled cancelled  cancelled cancelled
 pending (uncancel)
 ```
 
-**Key functions:**
 ```typescript
-import {
-    isValidTransition,      // Check if transition is valid
-    executeTransition,      // Execute with all side effects
-    hasAllocatedInventory,  // Check if status has reserved inventory
-    buildTransitionError,   // Build error message
-} from '../utils/orderStateMachine.js';
-
 // Always use executeTransition inside a transaction
-const result = await prisma.$transaction(async (tx) => {
-    return executeTransition(tx, currentStatus, newStatus, {
-        lineId, skuId, qty, userId, shipData
-    });
-});
+await prisma.$transaction(tx =>
+    executeTransition(tx, currentStatus, newStatus, { lineId, skuId, qty, userId, shipData })
+);
 ```
 
-**Inventory effects (handled automatically by `executeTransition`):**
-| Transition | Effect |
-|------------|--------|
-| pending → allocated | Create OUTWARD transaction |
-| allocated → pending (unallocate) | Delete OUTWARD transaction |
-| allocated/picked/packed → cancelled | Delete OUTWARD transaction |
+**Inventory effects** (automatic):
+- `pending → allocated`: Create OUTWARD transaction
+- `allocated → pending`: Delete OUTWARD transaction
+- `allocated/picked/packed → cancelled`: Delete OUTWARD transaction
 
 ### Views & Release Workflow
+
 | View | Condition |
 |------|-----------|
 | Open | Active orders OR shipped/cancelled but not released |
@@ -89,362 +81,123 @@ const result = await prisma.$transaction(async (tx) => {
 | COD Pending | COD awaiting remittance |
 | Archived | `isArchived=true` |
 
-**Release buttons** appear in Open view when orders are fully shipped/cancelled.
-
-### Column Architecture
-Columns in `ordersGrid/columns/`:
-- `orderInfoColumns.tsx` - orderDate, orderNumber, customerName
-- `paymentColumns.tsx` - discountCode, paymentMethod, customerLtv
-- `lineItemColumns.tsx` - skuCode, productName, qty, skuStock
-- `fulfillmentColumns.tsx` - allocate, pick, pack, ship, cancelLine
-- `trackingColumns.tsx` - shopifyStatus, awb, courier, trackingStatus
-- `postShipColumns.tsx` - shippedAt, deliveredAt, daysInTransit, rtoStatus
-
 ### Data Access Patterns
 ```typescript
-// Line-level fields are PRE-COMPUTED (O(1)) - use directly
-p.data?.lineShippedAt
-p.data?.lineDeliveredAt
-p.data?.daysInTransit
+// Line-level (PRE-COMPUTED O(1)) - use directly
+p.data?.lineShippedAt, p.data?.daysInTransit, p.data?.rtoStatus
 
-// Order-level fields via nested object
-p.data?.order?.orderNumber
-p.data?.shopifyCache?.discountCodes
+// Order-level via nested object
+p.data?.order?.orderNumber, p.data?.shopifyCache?.discountCodes
 ```
 
-**Data sources**:
-- `shopifyCache.*` - Shopify fields (NEVER use rawData)
-- `order.trackingStatus` - iThink logistics (not Shopify)
-- Pre-computed: `lineShippedAt`, `lineDeliveredAt`, `lineTrackingStatus`, `daysInTransit`, `rtoStatus`
-
-## Shopify Order Processor
-
-Single source of truth: `server/src/services/shopifyOrderProcessor.ts`
-
-### Architecture
-The processor uses **shared helper functions** for order processing, with two entry points:
-- `processShopifyOrderToERP()` - Webhooks/single orders (DB-based SKU lookups)
-- `processOrderWithContext()` - Batch processing (Map-based O(1) SKU lookups)
-
-### Shared Helpers
-| Helper | Purpose |
-|--------|---------|
-| `buildCustomerData()` | Extract ShopifyCustomerData from order |
-| `determineOrderStatus()` | Calculate status with ERP precedence |
-| `extractOrderTrackingInfo()` | Get tracking from fulfillments |
-| `buildOrderData()` | Build complete order data payload |
-| `detectOrderChanges()` | Check if existing order needs update |
-| `createOrderLinesData()` | Build order lines with SKU lookup abstraction |
-| `handleExistingOrderUpdate()` | Process update for existing orders |
-| `createNewOrderWithLines()` | Create order with post-processing |
-
-### Key Pattern: SkuLookupFn Abstraction
-```typescript
-// DB lookup (webhooks) - slower but works for single orders
-const dbSkuLookup: SkuLookupFn = async (variantId, skuCode) => {
-    if (variantId) {
-        const sku = await prisma.sku.findFirst({ where: { shopifyVariantId: variantId } });
-        if (sku) return { id: sku.id };
-    }
-    // fallback to skuCode...
-};
-
-// Map lookup (batch) - O(1), uses pre-fetched data
-const mapSkuLookup: SkuLookupFn = async (variantId, skuCode) => {
-    if (variantId) return context.skuByVariantId.get(variantId) || null;
-    if (skuCode) return context.skuByCode.get(skuCode) || null;
-    return null;
-};
-```
-
-### Status Precedence
-- ERP is source of truth for `shipped`, `delivered` statuses
-- Shopify fulfillment captures tracking data but does NOT auto-ship
-- `open` status preserved over Shopify fulfillment status
-
-## Caching Architecture
+## Caching
 
 ### Server-Side Caches
-Two singleton in-memory caches for performance:
+| Cache | TTL | Location |
+|-------|-----|----------|
+| `inventoryBalanceCache` | 5 min | `services/inventoryBalanceCache.ts` |
+| `customerStatsCache` | 2 min | `services/customerStatsCache.ts` |
 
-| Cache | TTL | Location | Invalidation |
-|-------|-----|----------|--------------|
-| `inventoryBalanceCache` | 5 min | `services/inventoryBalanceCache.ts` | After inventory transactions |
-| `customerStatsCache` | 2 min | `services/customerStatsCache.ts` | After order create/cancel/RTO |
-
-**Pattern**:
 ```typescript
-import { inventoryBalanceCache } from './inventoryBalanceCache';
-import { customerStatsCache } from './customerStatsCache';
-
 // Get (batch fetch, auto-caches)
 const balances = await inventoryBalanceCache.get(prisma, skuIds);
-const stats = await customerStatsCache.get(prisma, customerIds);
 
-// Invalidate after mutations (CRITICAL)
+// CRITICAL: Invalidate after mutations
 inventoryBalanceCache.invalidate(affectedSkuIds);
-customerStatsCache.invalidate(affectedCustomerIds);
-
-// Clear all (bulk operations)
-inventoryBalanceCache.invalidateAll();
+inventoryBalanceCache.invalidateAll(); // bulk ops
 ```
 
-### Client-Side Enrichment
-```typescript
-// Inventory enrichment uses cached Maps (O(1) lookup)
-enrichRowsWithInventory(rows, inventoryBalance, fabricBalance)
-```
-
-## Inventory
-
+### Inventory
 - **Balance**: `SUM(inward) - SUM(outward)`
 - **Allocate**: Creates OUTWARD immediately (no RESERVED type)
 - Balance can be negative (data integrity) - use `allowNegative` option
 
-## Testing
+## tRPC & API
 
-### E2E Tests (Playwright)
-```bash
-cd client && npx playwright test
-```
+**Client exclusively uses tRPC** - all client code calls tRPC, not REST.
 
-Config: `client/playwright.config.ts`
-Tests: `client/tests/orders-production.spec.ts`
+### tRPC Procedures (`server/src/trpc/routers/orders.ts`)
+- **Queries**: `list`, `get`
+- **Mutations**: `create`, `allocate`, `ship`, `markPaid`, `setLineStatus`, `cancelOrder`, `uncancelOrder`, `markDelivered`, `markRto`, `receiveRto`
 
-Environment variables:
-- `TEST_URL` - Base URL (default: http://localhost:5173)
-- `RECORD_HAR=true` - Record network HAR files
-
-### Build Verification
-```bash
-cd client && npm run build && cd ../server && npx tsc --noEmit
-```
-
-## tRPC Orders Router
-
-The orders tRPC router (`server/src/trpc/routers/orders.ts`) provides type-safe procedures.
-
-**Client exclusively uses tRPC** - all client code calls tRPC, not REST endpoints.
-
-### Deprecated REST Routes (use tRPC instead)
-
-REST routes with tRPC equivalents are deprecated and log warnings. They will be removed after monitoring confirms zero usage.
-
-| REST Route | tRPC Alternative | Deprecated Since |
-|------------|------------------|------------------|
-| `GET /orders` | `orders.list` | 2026-01-16 |
-| `GET /orders/:id` | `orders.get` | 2026-01-16 |
-| `POST /orders` | `orders.create` | 2026-01-16 |
-| `POST /orders/:id/ship` | `orders.ship` | 2026-01-16 |
-| `POST /orders/:id/ship-lines` | `orders.ship` | 2026-01-16 |
-| `POST /orders/lines/:lineId/status` | `orders.setLineStatus` | 2026-01-16 |
-| `POST /orders/:id/cancel` | `orders.cancelOrder` | 2026-01-16 |
-| `POST /orders/:id/uncancel` | `orders.uncancelOrder` | 2026-01-16 |
-| `POST /orders/:id/mark-delivered` | `orders.markDelivered` | 2026-01-16 |
-| `POST /orders/:id/mark-rto` | `orders.markRto` | 2026-01-16 |
-| `POST /orders/:id/receive-rto` | `orders.receiveRto` | 2026-01-16 |
-
-### REST-Only Routes (no tRPC equivalent)
-
-These routes remain REST-only and are NOT deprecated:
-- Search: `GET /orders/search-all`
-- Summaries: `/rto/summary`, `/shipped/summary`, `/archived/analytics`, `/dashboard-stats`
-- Hold/Release: `/:id/hold`, `/:id/release`
-- Archive: `/auto-archive`, `/archive-before-date`, `/:id/archive`
-- Line ops: `PUT /lines/:id`, `POST /:id/lines`
-- Customization: `POST/DELETE /lines/:id/customize`
-- Migration: `/migrate-shopify-fulfilled`, `/migration-ship`
-- Release workflow: `/release-to-shipped`, `/release-to-cancelled`
-- Unship: `/:id/unship`
-
-### tRPC Procedures
-
-| Procedure | Type | Purpose |
-|-----------|------|---------|
-| `list` | Query | View-based order listing with server-side flattening |
-| `get` | Query | Single order by ID |
-| `create` | Mutation | Create new order |
-| `allocate` | Mutation | Batch allocate lines (reserve inventory) |
-| `ship` | Mutation | Ship lines with AWB/courier |
-| `markPaid` | Mutation | Mark order payment as paid |
-| `setLineStatus` | Mutation | Unified line status transitions |
-| `cancelOrder` | Mutation | Cancel order with inventory release |
-| `uncancelOrder` | Mutation | Restore cancelled order |
-| `markDelivered` | Mutation | Mark shipped order as delivered |
-| `markRto` | Mutation | Initiate RTO for shipped order |
-| `receiveRto` | Mutation | Receive RTO, restore inventory |
-
-**Client usage** - Mutations split into focused hooks (`hooks/orders/`):
+### Client Mutation Hooks (`hooks/orders/`)
 ```typescript
-// Facade hook (backward compatible) - composes all sub-hooks
+// Facade (backward compatible)
 const mutations = useOrdersMutations();
 mutations.pickLine.mutate(lineId);
 
-// Or import focused hooks directly for better tree-shaking
+// Or focused hooks for tree-shaking
 import { useOrderWorkflowMutations } from './hooks/orders';
-const { allocate, pickLine, packLine } = useOrderWorkflowMutations();
 ```
 
-### Client Mutation Hooks (`hooks/orders/`)
-| Hook | Mutations |
-|------|-----------|
-| `useOrderWorkflowMutations` | allocate, unallocate, pickLine, unpickLine, packLine, unpackLine |
-| `useOrderShipMutations` | ship, shipLines, forceShip, unship, markShippedLine, unmarkShippedLine, updateLineTracking |
-| `useOrderCrudMutations` | createOrder, updateOrder, deleteOrder, updateOrderNotes, updateLineNotes, updateShipByDate |
-| `useOrderStatusMutations` | cancelOrder, uncancelOrder, cancelLine, uncancelLine |
-| `useOrderDeliveryMutations` | markDelivered, markRto, receiveRto |
-| `useOrderLineMutations` | updateLine, addLine, customizeLine, removeCustomization |
-| `useOrderReleaseMutations` | releaseToShipped, releaseToCancelled, migrateShopifyFulfilled |
-| `useProductionBatchMutations` | createBatch, updateBatch, deleteBatch |
-| `useOrderInvalidation` | invalidateOpenOrders, invalidateShippedOrders, invalidateAll, etc. |
+| Hook | Purpose |
+|------|---------|
+| `useOrderWorkflowMutations` | allocate/pick/pack (has optimistic updates) |
+| `useOrderShipMutations` | ship/unship/tracking |
+| `useOrderCrudMutations` | create/update/delete/notes |
+| `useOrderStatusMutations` | cancel/uncancel (has optimistic updates) |
+| `useOrderDeliveryMutations` | delivered/RTO |
+| `useOrderLineMutations` | line ops + customization |
+| `useOrderReleaseMutations` | release workflows |
 
 ### Optimistic Updates
-
-High-frequency mutations use optimistic updates for instant UI feedback:
-
-**Pattern:**
 ```typescript
-// Pass currentView and page to mutations for cache targeting
-const mutations = useOrdersMutations({
-    currentView: view,
-    page,
-    shippedFilter: archivedShipFilter || undefined,
-});
+const mutations = useOrdersMutations({ currentView: view, page, shippedFilter });
+// onMutate → snapshot + optimistic update
+// onError → rollback
+// onSettled → background revalidation
 ```
 
-**How it works:**
-1. `onMutate`: Cancel inflight queries, snapshot previous data, update cache optimistically
-2. `onError`: Rollback to previous data
-3. `onSettled`: Background revalidation ensures consistency
+## Shopify Order Processor
 
-**Hooks with optimistic updates:**
-- `useOrderWorkflowMutations` - allocate/pick/pack (instant checkbox toggle)
-- `useOrderStatusMutations` - cancelLine/uncancelLine (instant status change)
+Source of truth: `server/src/services/shopifyOrderProcessor.ts`
 
-**Helper functions** (`optimisticUpdateHelpers.ts`):
-- `getOrdersQueryInput()` - Build tRPC query input for cache targeting
-- `calculateInventoryDelta()` - Determine stock change for status transition
-- `optimisticLineStatusUpdate()` - Update single row in cache
-- `optimisticBatchLineStatusUpdate()` - Update multiple rows in cache
+**Entry points:**
+- `processShopifyOrderToERP()` - Webhooks (DB-based SKU lookup)
+- `processOrderWithContext()` - Batch (Map-based O(1) lookup)
 
-## Gotchas
-
-1. Router: specific routes before parameterized (`:id`)
-2. Wrap async routes with `asyncHandler()`
-3. Mutations must invalidate TanStack Query + tRPC + server caches
-4. AG-Grid cellRenderer: return JSX, not strings
-5. `shopifyCache.rawData` excluded from queries—use specific fields
-6. Shopify fields live in `shopifyCache`, NOT on Order
-7. Use pre-computed line fields (O(1)) instead of `orderLines.find()` (O(n))
-8. View filters: shipped/cancelled orders stay in Open until Release clicked
-9. **ALWAYS invalidate caches after mutations** - stale reads cause bugs
-10. **Prisma returns Date objects**, not strings—use `toDateString()` from `utils/dateHelpers.ts`
-11. **Use `127.0.0.1` not `localhost`** in dev—IPv6 resolution causes silent failures
-12. **tRPC query params**: Never use `prop: undefined`, use spread `...(val ? {prop: val} : {})`
-13. **SSE cache updates**: Prefer `invalidate()` over `setData()` for resilient key matching
+**Status precedence:** ERP is source of truth for `shipped`/`delivered`. Shopify captures tracking but does NOT auto-ship.
 
 ## Key Files
 
+### Client
 ```
-client/src/
-  pages/Orders.tsx                    # Main page orchestrator
-  components/orders/
-    OrdersGrid.tsx                    # Grid component
-    ordersGrid/columns/index.tsx      # Column builder
-    ordersGrid/types.ts               # ColumnBuilderContext
-  hooks/
-    useOrdersMutations.ts             # Facade composing all mutation hooks
-    useUnifiedOrdersData.ts           # Main data hook with smart polling
-    orders/                           # Focused mutation hooks (decomposed)
-      index.ts                        # Barrel export
-      orderMutationUtils.ts           # Shared invalidation helpers + PAGE_SIZE
-      optimisticUpdateHelpers.ts      # Optimistic update utilities
-      useOrderWorkflowMutations.ts    # allocate/pick/pack with optimistic updates
-      useOrderShipMutations.ts        # ship operations
-      useOrderCrudMutations.ts        # create/update/delete
-      useOrderStatusMutations.ts      # cancel/uncancel with optimistic updates
-      useOrderDeliveryMutations.ts    # delivery tracking
-      useOrderLineMutations.ts        # line ops + customization
-      useOrderReleaseMutations.ts     # release workflows
-      useProductionBatchMutations.ts  # production batches
-  utils/orderHelpers.ts               # flattenOrders, enrichRowsWithInventory
-  tests/orders-production.spec.ts     # E2E tests
-
-server/src/
-  routes/orders/
-    mutations/                        # Order mutations (decomposed)
-      index.ts                        # Barrel export + router combiner
-      crud.ts                         # create, update, delete
-      lifecycle.ts                    # cancel, uncancel, hold, release
-      archive.ts                      # archive, unarchive, autoArchive, release workflow
-      lineOps.ts                      # line-level operations
-      customization.ts                # custom SKU workflow
-    queries/                          # Order queries (decomposed)
-      index.ts                        # Barrel export + router combiner
-      views.ts                        # GET /, GET /:id
-      search.ts                       # GET /search-all
-      summaries.ts                    # RTO, shipped, archived summaries
-      analytics.ts                    # /analytics, /dashboard-stats
-  utils/
-    orderStateMachine.ts              # Line status state machine (single source of truth)
-    orderViews.ts                     # VIEW_CONFIGS with where/orderBy/flattening
-    orderEnrichment/                  # Order enrichment pipeline (modular)
-      index.ts                        # Pipeline orchestrator + exports
-      types.ts                        # EnrichmentType, EnrichedOrder
-      fulfillmentStage.ts             # calculateFulfillmentStage()
-      lineStatusCounts.ts             # calculateLineStatusCounts()
-      customerStats.ts                # enrichOrdersWithCustomerStats()
-      trackingStatus.ts               # determineTrackingStatus(), calculateDaysSince()
-      shopifyTracking.ts              # extractShopifyTrackingFields()
-      addressResolution.ts            # enrichOrderLinesWithAddresses()
-      rtoStatus.ts                    # calculateRtoStatus()
-    queryPatterns.ts                  # Re-export barrel for patterns/
-    patterns/                         # Query patterns (decomposed)
-      index.ts                        # Barrel export
-      types.ts                        # Types + constants (TXN_TYPE, TXN_REASON)
-      orderSelects.ts                 # ORDER_LIST_SELECT, ORDER_LINES_INCLUDE
-      orderHelpers.ts                 # Re-exports from orderEnrichment, Shopify accessors
-      inventory.ts                    # calculateInventoryBalance, fabric balance
-      transactions.ts                 # allocation, sale, RTO transactions
-      customization.ts                # createCustomSku, removeCustomization
-    dateHelpers.ts                    # Safe Date-to-string conversions
-  middleware/
-    deprecation.ts                    # Deprecation middleware for REST routes
-  services/
-    inventoryBalanceCache.ts          # Inventory cache singleton
-    customerStatsCache.ts             # Customer stats cache singleton
-  trpc/routers/orders.ts              # tRPC procedures (12 total)
-    # Queries: list, get
-    # Mutations: create, allocate, ship, markPaid, setLineStatus,
-    #            cancelOrder, uncancelOrder, markDelivered, markRto, receiveRto
-  scripts/                            # One-time migration scripts
+pages/Orders.tsx                      # Page orchestrator
+components/orders/OrdersGrid.tsx      # Grid component
+components/orders/ordersGrid/columns/ # 6 modular column files
+hooks/useOrdersMutations.ts           # Facade composing all mutation hooks
+hooks/useUnifiedOrdersData.ts         # Main data hook
+hooks/orders/                         # Focused mutation hooks
+utils/orderHelpers.ts                 # flattenOrders, enrichRowsWithInventory
 ```
 
-## Scripts (One-Time Operations)
+### Server
+```
+routes/orders/mutations/              # crud, lifecycle, archive, lineOps, customization
+routes/orders/queries/                # views, search, summaries, analytics
+utils/orderStateMachine.ts            # Line status state machine
+utils/orderViews.ts                   # VIEW_CONFIGS
+utils/orderEnrichment/                # Enrichment pipeline (9 files)
+utils/patterns/                       # Query patterns (inventory, transactions, etc.)
+services/inventoryBalanceCache.ts     # Inventory cache
+services/customerStatsCache.ts        # Customer stats cache
+trpc/routers/orders.ts                # tRPC procedures
+```
 
-Located at `server/src/scripts/`:
-- `backfillLineItemsJson.ts` - Extract line items from rawData
-- `backfillCustomerTags.ts` - Bulk tag customers
-- `cancelTaggedOrders.ts` - Cancel orders by tag
-- `fixShippedAtDates.ts` - Correct shippedAt dates
-- `markOldPrepaidShipped.ts` - Mark old prepaid as shipped
-- `releaseExchangeOrders.ts` - Release exchange orders
+## Scripts
 
-Run with: `npx ts-node src/scripts/scriptName.ts`
+Located at `server/src/scripts/`. Run with: `npx ts-node src/scripts/scriptName.ts`
 
 ## Environment
 
 `.env`: `DATABASE_URL`, `JWT_SECRET`
-
-**Deployment**: Railway. Use `railway` CLI to connect/manage.
+**Deployment**: Railway (`railway` CLI)
 
 ## When to Use Agents
 
-**Use sub-agents for:**
-- Exploring codebase → `Explore` agent
-- Multi-file searches → `general-purpose` agent
-- Complex implementations → `elite-engineer` or `fullstack-erp-engineer`
-- Logic verification → `logic-auditor`
-- Documentation updates → `doc-optimizer` or `codebase-steward`
-- Planning complex features → `Plan` agent
-
+- **Exploring codebase** → `Explore` agent
+- **Multi-file searches** → `general-purpose` agent
+- **Complex implementations** → `elite-engineer` or `fullstack-erp-engineer`
+- **Logic verification** → `logic-auditor`
+- **Documentation** → `doc-optimizer` or `codebase-steward`
+- **Planning** → `Plan` agent
