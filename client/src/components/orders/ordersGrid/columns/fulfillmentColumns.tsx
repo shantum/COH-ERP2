@@ -369,31 +369,25 @@ export function buildFulfillmentColumns(ctx: ColumnBuilderContext): ColDef[] {
                 }
 
                 // Admin can force ship any line (ships only THIS line, not all lines)
+                // AWB/courier are optional - will use defaults if not provided
                 if (isAdmin && onForceShipLine) {
-                    const existingAwbForAdmin = row.lineAwbNumber || row.shopifyAwb;
-                    const existingCourierForAdmin = row.lineCourier || row.shopifyCourier;
+                    const existingAwb = row.lineAwbNumber || row.shopifyAwb || '';
+                    const existingCourier = row.lineCourier || row.shopifyCourier || '';
                     return (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                let awbNumber = existingAwbForAdmin;
-                                let courier = existingCourierForAdmin;
-                                if (!awbNumber) {
-                                    awbNumber = prompt('AWB Number (required):');
-                                    if (!awbNumber?.trim()) return;
-                                    awbNumber = awbNumber.trim();
-                                }
-                                if (!courier) {
-                                    courier = prompt('Courier (required):');
-                                    if (!courier?.trim()) return;
-                                    courier = courier.trim();
-                                }
-                                if (confirm(`Force ship this line?\n\nSKU: ${row.skuCode}\nQty: ${row.qty}\nAWB: ${awbNumber}\nCourier: ${courier}`)) {
+                                // Use existing values or prompt (optional - can cancel/leave empty)
+                                const awbNumber = existingAwb || (prompt('AWB Number (optional, leave empty for default):') ?? '').trim();
+                                const courier = existingCourier || (prompt('Courier (optional, leave empty for default):') ?? '').trim();
+                                const awbDisplay = awbNumber || 'ADMIN-MANUAL';
+                                const courierDisplay = courier || 'Manual';
+                                if (confirm(`Force ship this line?\n\nSKU: ${row.skuCode}\nQty: ${row.qty}\nAWB: ${awbDisplay}\nCourier: ${courierDisplay}`)) {
                                     onForceShipLine(row.lineId, { awbNumber, courier });
                                 }
                             }}
                             className="w-5 h-5 rounded border-2 border-amber-400 bg-amber-50 hover:bg-amber-100 hover:border-amber-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm"
-                            title={existingAwbForAdmin ? `Admin: Force ship line with AWB: ${existingAwbForAdmin}` : "Admin: Force ship line"}
+                            title={existingAwb ? `Admin: Force ship with AWB: ${existingAwb}` : "Admin: Force ship (AWB optional)"}
                         />
                     );
                 }

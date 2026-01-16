@@ -81,7 +81,7 @@ export function useOrdersMutations(options: UseOrdersMutationsOptions = {}) {
         // Ship
         ship: ship.ship,
         shipLines: ship.shipLines,
-        forceShip: ship.forceShip,
+        adminShip: ship.adminShip,
         unship: ship.unship,
 
         // Delivery tracking

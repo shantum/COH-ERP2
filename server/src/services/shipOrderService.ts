@@ -181,11 +181,14 @@ export async function shipOrderLines(
     if (!orderLineIds || orderLineIds.length === 0) {
         throw new Error('orderLineIds array is required and must not be empty');
     }
-    if (!awbNumber?.trim()) {
-        throw new Error('awbNumber is required');
-    }
-    if (!courier?.trim()) {
-        throw new Error('courier is required');
+    // AWB/courier only required for normal shipping, admin ship can bypass
+    if (!skipStatusValidation) {
+        if (!awbNumber?.trim()) {
+            throw new Error('awbNumber is required');
+        }
+        if (!courier?.trim()) {
+            throw new Error('courier is required');
+        }
     }
     if (!userId) {
         throw new Error('userId is required');

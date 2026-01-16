@@ -630,10 +630,11 @@ const adminShip = protectedProcedure
             lineIds: z.array(z.string().uuid()).min(1, 'At least one lineId is required'),
             awbNumber: z
                 .string()
-                .min(1, 'AWB number is required')
                 .trim()
-                .transform((val) => val.toUpperCase()),
-            courier: z.string().min(1, 'Courier is required').trim(),
+                .transform((val) => val.toUpperCase() || 'ADMIN-MANUAL')
+                .optional()
+                .default('ADMIN-MANUAL'),
+            courier: z.string().trim().transform((val) => val || 'Manual').optional().default('Manual'),
         })
     )
     .mutation(async ({ input, ctx }) => {
