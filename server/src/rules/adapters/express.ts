@@ -149,7 +149,7 @@ export function enforceRulesMiddleware<TData>(
     operation: RuleOperation,
     extractData: DataExtractor<TData>
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
-    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
         try {
             const data = await extractData(req);
             await enforceRulesInExpress(operation, req, {
@@ -186,7 +186,7 @@ export function checkRulesMiddleware<TData>(
     operation: RuleOperation,
     extractData: DataExtractor<TData>
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
-    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
         try {
             const data = await extractData(req);
             const result = await executeRulesInExpress(operation, req, {

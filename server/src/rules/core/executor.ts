@@ -9,7 +9,6 @@ import type {
     RuleOperation,
     RulesExecutionResult,
     SingleRuleResult,
-    RuleEvaluation,
 } from './types.js';
 import type { PrismaOrTransaction } from '../../utils/patterns/types.js';
 import { ruleRegistry } from './registry.js';

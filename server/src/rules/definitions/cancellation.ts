@@ -3,7 +3,7 @@
  * Rules for order and line cancellation/uncancellation operations
  */
 
-import { defineRule, simpleBooleanRule } from '../core/defineRule.js';
+import { simpleBooleanRule } from '../core/defineRule.js';
 
 // ============================================
 // TYPE DEFINITIONS
