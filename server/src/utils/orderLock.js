@@ -105,7 +105,7 @@ export async function withOrderLock(shopifyOrderId, source, fn) {
                 select: { id: true, processingLock: true }
             });
 
-            // If no cache entry exists yet, allow processing (will be created by cacheShopifyOrder)
+            // If no cache entry exists yet, allow processing (will be created by cacheShopifyOrders)
             if (!cache) {
                 return { acquired: true, isNew: true };
             }

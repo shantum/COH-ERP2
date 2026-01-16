@@ -2,7 +2,7 @@
  * Shopify Order Processor - Single source of truth for order processing
  *
  * CACHE-FIRST PATTERN (critical for reliability):
- * 1. Always cache raw Shopify data FIRST via cacheShopifyOrder()
+ * 1. Always cache raw Shopify data FIRST via cacheShopifyOrders()
  * 2. Then process to ERP via processShopifyOrderToERP()
  * 3. If processing fails, order is still cached for retry
  * 4. Webhook/Sync can re-process from cache later without re-fetching Shopify
@@ -311,31 +311,6 @@ export async function cacheShopifyOrders(
     }
 
     return cached;
-}
-
-/**
- * Cache a single Shopify order (convenience wrapper)
- * @deprecated Use cacheShopifyOrders() instead
- */
-export async function cacheShopifyOrder(
-    prisma: PrismaClient,
-    shopifyOrderId: string | number,
-    shopifyOrder: ExtendedShopifyOrder,
-    webhookTopic = 'api_sync'
-): Promise<void> {
-    await cacheShopifyOrders(prisma, shopifyOrder, webhookTopic);
-}
-
-/**
- * Batch cache multiple Shopify orders (convenience wrapper)
- * @deprecated Use cacheShopifyOrders() instead
- */
-export async function batchCacheShopifyOrders(
-    prisma: PrismaClient,
-    orders: ExtendedShopifyOrder[],
-    webhookTopic = 'full_dump'
-): Promise<number> {
-    return cacheShopifyOrders(prisma, orders, webhookTopic);
 }
 
 /**
