@@ -28,9 +28,15 @@ import {
     calculateInventoryBalance,
     TXN_TYPE,
     TXN_REASON,
-    deleteSaleTransactions,
     releaseReservedInventory,
 } from '../../utils/queryPatterns.js';
+import {
+    isValidTransition,
+    executeTransition,
+    buildTransitionError,
+    hasAllocatedInventory,
+    type LineStatus,
+} from '../../utils/orderStateMachine.js';
 import { shipOrderLines } from '../../services/shipOrderService.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
@@ -611,20 +617,8 @@ const markPaid = protectedProcedure
 // ============================================
 
 /**
- * Valid status transitions matrix
- * Key = current status, Value = array of valid target statuses
- */
-const VALID_TRANSITIONS: Record<string, string[]> = {
-    pending: ['allocated', 'cancelled'],
-    allocated: ['pending', 'picked', 'cancelled'],    // pending = unallocate
-    picked: ['allocated', 'packed', 'cancelled'],     // allocated = unpick
-    packed: ['picked', 'shipped', 'cancelled'],       // picked = unpack
-    shipped: [],                                      // Can't change via this endpoint
-    cancelled: ['pending'],                           // pending = uncancel
-};
-
-/**
  * Set line status with validation and inventory handling
+ * Uses orderStateMachine as single source of truth for transitions
  * Unified endpoint for all status transitions except shipping (use ship procedure)
  */
 const setLineStatus = protectedProcedure
@@ -656,19 +650,18 @@ const setLineStatus = protectedProcedure
             });
         }
 
-        const currentStatus = line.lineStatus;
+        const currentStatus = line.lineStatus as LineStatus;
 
-        // Check if transition is valid
-        const allowedTransitions = VALID_TRANSITIONS[currentStatus];
-        if (!allowedTransitions?.includes(status)) {
+        // Check if transition is valid using state machine
+        if (!isValidTransition(currentStatus, status)) {
             throw new TRPCError({
                 code: 'BAD_REQUEST',
-                message: `Cannot transition from '${currentStatus}' to '${status}'. Allowed: ${allowedTransitions?.join(', ') || 'none'}`,
+                message: buildTransitionError(currentStatus, status),
             });
         }
 
-        // Execute transition in transaction
-        const updated = await ctx.prisma.$transaction(async (tx) => {
+        // Execute transition in transaction using state machine
+        const result = await ctx.prisma.$transaction(async (tx) => {
             // Re-check status inside transaction (race condition prevention)
             const currentLine = await tx.orderLine.findUnique({
                 where: { id: lineId },
@@ -689,59 +682,21 @@ const setLineStatus = protectedProcedure
                 });
             }
 
-            // Handle inventory for allocate/unallocate
-            if (status === 'allocated') {
-                // Allocating: Create OUTWARD transaction
-                const balance = await calculateInventoryBalance(tx, currentLine.skuId);
-                if (balance.availableBalance < currentLine.qty) {
-                    throw new TRPCError({
-                        code: 'BAD_REQUEST',
-                        message: `Insufficient stock: ${balance.availableBalance} available, ${currentLine.qty} required`,
-                    });
-                }
-
-                await tx.inventoryTransaction.create({
-                    data: {
-                        skuId: currentLine.skuId,
-                        txnType: TXN_TYPE.OUTWARD,
-                        qty: currentLine.qty,
-                        reason: TXN_REASON.ORDER_ALLOCATION,
-                        referenceId: lineId,
-                        createdById: ctx.user.id,
-                    },
-                });
-                inventoryBalanceCache.invalidate([currentLine.skuId]);
-            } else if (currentStatus === 'allocated' && status === 'pending') {
-                // Unallocating: Delete OUTWARD transaction to restore stock
-                await deleteSaleTransactions(tx, lineId);
-                inventoryBalanceCache.invalidate([currentLine.skuId]);
-            }
-
-            // Handle cancelled → pending (uncancel) or any → cancelled
-            if (status === 'cancelled' && currentStatus === 'allocated') {
-                // Cancelling an allocated line: release inventory
-                await deleteSaleTransactions(tx, lineId);
-                inventoryBalanceCache.invalidate([currentLine.skuId]);
-            }
-
-            // Build update data with timestamps
-            const updateData: Record<string, unknown> = { lineStatus: status };
-
-            if (status === 'allocated') {
-                updateData.allocatedAt = new Date();
-            } else if (status === 'pending') {
-                updateData.allocatedAt = null;
-            } else if (status === 'picked') {
-                updateData.pickedAt = new Date();
-            } else if (status === 'packed') {
-                updateData.packedAt = new Date();
-            }
-
-            return await tx.orderLine.update({
-                where: { id: lineId },
-                data: updateData,
+            // Execute transition with all side effects (inventory, timestamps)
+            return executeTransition(tx, currentStatus, status, {
+                lineId,
+                skuId: currentLine.skuId,
+                qty: currentLine.qty,
+                userId: ctx.user.id,
             });
         });
+
+        if (!result.success) {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: result.error || 'Transition failed',
+            });
+        }
 
         // Broadcast SSE update
         broadcastOrderUpdate({
@@ -753,8 +708,8 @@ const setLineStatus = protectedProcedure
         }, ctx.user.id);
 
         return {
-            lineId: updated.id,
-            status: updated.lineStatus,
+            lineId,
+            status: result.newStatus,
             orderId: line.orderId,
         };
     });
@@ -805,7 +760,7 @@ const cancelOrder = protectedProcedure
 
         // Collect SKU IDs that may need cache invalidation
         const affectedSkuIds = order.orderLines
-            .filter(l => ['allocated', 'picked', 'packed'].includes(l.lineStatus))
+            .filter(l => hasAllocatedInventory(l.lineStatus as LineStatus))
             .map(l => l.skuId);
 
         await ctx.prisma.$transaction(async (tx) => {
@@ -831,7 +786,7 @@ const cancelOrder = protectedProcedure
 
             // Release inventory for allocated lines
             for (const line of order.orderLines) {
-                if (['allocated', 'picked', 'packed'].includes(line.lineStatus)) {
+                if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
                     await releaseReservedInventory(tx, line.id);
                 }
             }

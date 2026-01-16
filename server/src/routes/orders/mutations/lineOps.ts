@@ -9,6 +9,7 @@ import type { Prisma } from '@prisma/client';
 import { authenticateToken } from '../../../middleware/auth.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 import { TXN_TYPE, TXN_REASON } from '../../../utils/queryPatterns.js';
+import { hasAllocatedInventory, type LineStatus } from '../../../utils/orderStateMachine.js';
 import { inventoryBalanceCache } from '../../../services/inventoryBalanceCache.js';
 import { NotFoundError, BusinessLogicError } from '../../../utils/errors.js';
 import { adjustCustomerLtv } from '../../../utils/tierUtils.js';
@@ -70,7 +71,7 @@ router.post(
         }
 
         // If allocated, reverse inventory (important for stock accuracy)
-        if (['allocated', 'picked', 'packed'].includes(line.lineStatus || '')) {
+        if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
             const txn = await req.prisma.inventoryTransaction.findFirst({
                 where: { referenceId: lineId, txnType: TXN_TYPE.OUTWARD, reason: TXN_REASON.ORDER_ALLOCATION },
                 select: { id: true, skuId: true },

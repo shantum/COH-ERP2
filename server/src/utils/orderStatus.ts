@@ -21,6 +21,7 @@
 
 import type { PrismaClient, Prisma, Order, OrderLine as PrismaOrderLine } from '@prisma/client';
 import prisma from '../lib/prisma.js';
+import { isValidTransition } from './orderStateMachine.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -302,25 +303,14 @@ export async function batchRecomputeOrderStatus(orderIds: string[]): Promise<Bat
 /**
  * Check if a line status transition is valid
  *
+ * @deprecated Use isValidTransition from orderStateMachine.ts instead.
+ * This function is kept for backwards compatibility but now delegates to the state machine.
+ *
  * @param currentStatus - Current line status
  * @param newStatus - Proposed new status
  * @returns Whether the transition is valid
  */
-export function isValidLineStatusTransition(currentStatus: string, newStatus: string): boolean {
-    // Can always cancel
-    if (newStatus === 'cancelled') return true;
-
-    // Can always go to/from on_hold states via hold/release
-    // These are handled separately via hold/release endpoints
-
-    const currentIndex = LINE_STATUSES.indexOf(currentStatus as LineStatus);
-    const newIndex = LINE_STATUSES.indexOf(newStatus as LineStatus);
-
-    if (currentIndex === -1 || newIndex === -1) return false;
-
-    // Normal progression: can only move forward
-    return newIndex > currentIndex;
-}
+export { isValidTransition as isValidLineStatusTransition } from './orderStateMachine.js';
 
 /**
  * Get summary of order line states
@@ -466,7 +456,7 @@ export default {
     computeOrderStatus,
     recomputeOrderStatus,
     batchRecomputeOrderStatus,
-    isValidLineStatusTransition,
+    isValidLineStatusTransition: isValidTransition,
     getLineStatusSummary,
     computeOrderState,
     calculateProcessingTimes,
