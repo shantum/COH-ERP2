@@ -12,6 +12,8 @@ import { useState } from 'react';
 import { Package, FileText, DollarSign, Box, Edit, Save, X } from 'lucide-react';
 import type { ProductTreeNode } from '../types';
 import { ProductInfoTab } from './ProductInfoTab';
+import { ProductBomTab } from './ProductBomTab';
+import { ProductCostsTab } from './ProductCostsTab';
 import { ProductSkusTab } from './ProductSkusTab';
 
 interface ProductDetailProps {
@@ -109,10 +111,10 @@ export function ProductDetail({ product, onEdit, onClose }: ProductDetailProps) 
                     <ProductInfoTab product={product} isEditing={isEditing} />
                 )}
                 {activeTab === 'bom' && (
-                    <BomPlaceholder />
+                    <ProductBomTab product={product} />
                 )}
                 {activeTab === 'costs' && (
-                    <CostsPlaceholder product={product} />
+                    <ProductCostsTab product={product} />
                 )}
                 {activeTab === 'skus' && (
                     <ProductSkusTab product={product} />
@@ -122,51 +124,3 @@ export function ProductDetail({ product, onEdit, onClose }: ProductDetailProps) 
     );
 }
 
-// Placeholder for BOM tab (Phase 3)
-function BomPlaceholder() {
-    return (
-        <div className="text-center py-12">
-            <Package size={48} className="mx-auto mb-3 text-gray-300" />
-            <p className="text-sm text-gray-500">BOM editing coming in Phase 3</p>
-            <p className="text-xs text-gray-400 mt-1">
-                Configure trims, services, and fabric assignments
-            </p>
-        </div>
-    );
-}
-
-// Placeholder for Costs tab (Phase 4)
-function CostsPlaceholder({ product }: { product: ProductTreeNode }) {
-    return (
-        <div className="space-y-4">
-            <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                    Product Level Costs
-                </h4>
-                <div className="space-y-2">
-                    <CostRow label="Trims Cost" value={product.trimsCost} />
-                    <CostRow label="Lining Cost" value={product.liningCost} />
-                    <CostRow label="Packaging Cost" value={product.packagingCost} />
-                    <CostRow label="Labor Minutes" value={product.laborMinutes} unit="min" />
-                </div>
-            </div>
-            <div className="text-center py-6 border border-dashed border-gray-300 rounded-lg">
-                <p className="text-sm text-gray-500">Full cost breakdown coming in Phase 4</p>
-            </div>
-        </div>
-    );
-}
-
-function CostRow({ label, value, unit = '₹' }: { label: string; value?: number | null; unit?: string }) {
-    return (
-        <div className="flex justify-between text-sm">
-            <span className="text-gray-500">{label}</span>
-            <span className="text-gray-900 font-medium">
-                {value !== null && value !== undefined
-                    ? `${unit === '₹' ? '₹' : ''}${value}${unit !== '₹' ? ` ${unit}` : ''}`
-                    : <span className="text-gray-400">-</span>
-                }
-            </span>
-        </div>
-    );
-}

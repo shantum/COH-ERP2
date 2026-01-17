@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Palette, FileText, Package, Box, Edit, X } from 'lucide-react';
 import type { ProductTreeNode } from '../types';
 import { sortBySizeOrder } from '../types';
+import { VariationBomTab } from './VariationBomTab';
 
 interface VariationDetailProps {
     variation: ProductTreeNode;
@@ -88,7 +89,7 @@ export function VariationDetail({ variation, onEdit, onClose }: VariationDetailP
                     <VariationInfoContent variation={variation} />
                 )}
                 {activeTab === 'bom' && (
-                    <BomPlaceholder />
+                    <VariationBomTab variation={variation} />
                 )}
                 {activeTab === 'skus' && (
                     <VariationSkusContent variation={variation} />
@@ -167,18 +168,6 @@ function VariationSkusContent({ variation }: { variation: ProductTreeNode }) {
                     ))}
                 </tbody>
             </table>
-        </div>
-    );
-}
-
-function BomPlaceholder() {
-    return (
-        <div className="text-center py-12">
-            <Package size={48} className="mx-auto mb-3 text-gray-300" />
-            <p className="text-sm text-gray-500">Variation BOM editing coming in Phase 3</p>
-            <p className="text-xs text-gray-400 mt-1">
-                Configure fabric assignment for this color
-            </p>
         </div>
     );
 }
