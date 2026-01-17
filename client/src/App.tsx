@@ -10,10 +10,9 @@ import './index.css';
 // Lazy load pages for code splitting (40-50% faster initial load)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Products = lazy(() => import('./pages/Products'));
-const Catalog = lazy(() => import('./pages/Catalog'));
+// Note: Catalog and Materials pages deprecated - redirected to /products
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Fabrics = lazy(() => import('./pages/Fabrics'));
-const Materials = lazy(() => import('./pages/Materials'));
 const FabricReconciliation = lazy(() => import('./pages/FabricReconciliation'));
 const InventoryReconciliation = lazy(() => import('./pages/InventoryReconciliation'));
 const Orders = lazy(() => import('./pages/Orders'));
@@ -80,10 +79,12 @@ function App() {
                 }>
                   <Route index element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Dashboard /></ErrorBoundary></Suspense>} />
                   <Route path="products" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Products /></ErrorBoundary></Suspense>} />
-                  <Route path="catalog" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Catalog /></ErrorBoundary></Suspense>} />
+                  {/* Redirect /catalog to /products - unified view */}
+                  <Route path="catalog" element={<Navigate to="/products" replace />} />
                   <Route path="inventory" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Inventory /></ErrorBoundary></Suspense>} />
                   <Route path="fabrics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Fabrics /></ErrorBoundary></Suspense>} />
-                  <Route path="materials" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Materials /></ErrorBoundary></Suspense>} />
+                  {/* Redirect /materials to /products?tab=materials - unified view */}
+                  <Route path="materials" element={<Navigate to="/products?tab=materials" replace />} />
                   <Route path="fabric-reconciliation" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><FabricReconciliation /></ErrorBoundary></Suspense>} />
                   <Route path="inventory-count" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><InventoryReconciliation /></ErrorBoundary></Suspense>} />
                   <Route path="orders" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Orders /></ErrorBoundary></Suspense>} />

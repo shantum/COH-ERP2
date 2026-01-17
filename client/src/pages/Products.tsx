@@ -12,7 +12,7 @@
  * - Right panel: Detail view with tabs
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Package, Layers, Scissors, Wrench, Plus, Search } from 'lucide-react';
 
@@ -21,7 +21,8 @@ import { DetailPanel } from '../components/products/DetailPanel';
 import { MaterialsTreeView } from '../components/materials/MaterialsTreeView';
 import { TrimsTable } from '../components/materials/TrimsTable';
 import { ServicesTable } from '../components/materials/ServicesTable';
-import type { ProductTreeNode, ProductsTabType } from '../components/products/types';
+import { useProductsTree } from '../components/products/hooks/useProductsTree';
+import type { ProductTreeNode, ProductsTabType, ProductNodeType } from '../components/products/types';
 
 export default function Products() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -29,7 +30,11 @@ export default function Products() {
     // Active main tab from URL
     const activeTab = (searchParams.get('tab') as ProductsTabType) || 'products';
 
-    // Selected node for detail panel
+    // Selected node ID and type from URL
+    const selectedId = searchParams.get('id');
+    const selectedType = searchParams.get('type') as ProductNodeType | null;
+
+    // Selected node for detail panel (resolved from URL or user interaction)
     const [selectedNode, setSelectedNode] = useState<ProductTreeNode | null>(null);
 
     // Search query
@@ -38,6 +43,35 @@ export default function Products() {
     // Material view states (reused from Materials.tsx for now)
     const [showMaterialDetail, setShowMaterialDetail] = useState<any>(null);
     const [showMaterialInward, setShowMaterialInward] = useState<any>(null);
+
+    // Fetch products tree for URL resolution
+    const { data: productsData } = useProductsTree({ enabled: activeTab === 'products' });
+
+    // Resolve selected node from URL params when data loads
+    useEffect(() => {
+        if (!selectedId || !selectedType || activeTab !== 'products') {
+            return;
+        }
+
+        // Find the node in the tree
+        const findNode = (nodes: ProductTreeNode[]): ProductTreeNode | null => {
+            for (const node of nodes) {
+                if (node.id === selectedId && node.type === selectedType) {
+                    return node;
+                }
+                if (node.children) {
+                    const found = findNode(node.children);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        const node = findNode(productsData);
+        if (node && (!selectedNode || selectedNode.id !== node.id)) {
+            setSelectedNode(node);
+        }
+    }, [selectedId, selectedType, productsData, activeTab, selectedNode]);
 
     // Handle tab change
     const setActiveTab = useCallback((tab: ProductsTabType) => {
@@ -51,15 +85,30 @@ export default function Products() {
         setShowMaterialDetail(null);
     }, [setSearchParams]);
 
-    // Handle node selection
+    // Handle node selection - sync to URL
     const handleSelect = useCallback((node: ProductTreeNode | null) => {
         setSelectedNode(node);
-    }, []);
+        if (node) {
+            const newParams = new URLSearchParams(searchParams);
+            newParams.set('id', node.id);
+            newParams.set('type', node.type);
+            setSearchParams(newParams, { replace: true });
+        } else {
+            const newParams = new URLSearchParams(searchParams);
+            newParams.delete('id');
+            newParams.delete('type');
+            setSearchParams(newParams, { replace: true });
+        }
+    }, [searchParams, setSearchParams]);
 
     // Handle close detail panel
     const handleCloseDetail = useCallback(() => {
         setSelectedNode(null);
-    }, []);
+        const newParams = new URLSearchParams(searchParams);
+        newParams.delete('id');
+        newParams.delete('type');
+        setSearchParams(newParams, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-4rem)]">

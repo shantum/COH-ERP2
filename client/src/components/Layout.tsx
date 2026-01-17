@@ -2,7 +2,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, Scissors, ShoppingCart, Truck,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, Table2, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Layers
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useState, useEffect, useMemo } from 'react';
@@ -42,10 +42,8 @@ const navGroups: NavGroup[] = [
         label: 'Catalog',
         items: [
             { to: '/products', icon: Package, label: 'Products' },
-            { to: '/catalog', icon: Table2, label: 'Catalog Grid' },
             { to: '/inventory', icon: Package, label: 'Inventory' },
             { to: '/fabrics', icon: Scissors, label: 'Fabrics' },
-            { to: '/materials', icon: Layers, label: 'Materials' },
         ],
     },
     {
