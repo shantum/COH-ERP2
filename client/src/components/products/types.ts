@@ -27,10 +27,14 @@ export interface ProductTreeNode {
     styleCode?: string;
     category?: string;
     gender?: string;
+    productType?: string;
+    fabricTypeId?: string;
     fabricTypeName?: string;
+    imageUrl?: string;
     variationCount?: number;
     skuCount?: number;
     totalStock?: number;
+    avgMrp?: number | null;
     hasLining?: boolean;
 
     // === Variation level ===

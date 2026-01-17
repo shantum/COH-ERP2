@@ -545,6 +545,10 @@ router.get('/tree', authenticateToken, asyncHandler(async (req: Request, res: Re
 
             productStock += variationStock;
 
+            // Get variation's average MRP
+            const variationMrps = variation.skus.map((s: any) => Number(s.mrp) || 0).filter((m: number) => m > 0);
+            const variationAvgMrp = variationMrps.length > 0 ? variationMrps.reduce((a: number, b: number) => a + b, 0) / variationMrps.length : null;
+
             return {
                 id: variation.id,
                 type: 'variation' as const,
@@ -556,8 +560,10 @@ router.get('/tree', authenticateToken, asyncHandler(async (req: Request, res: Re
                 colorHex: variation.colorHex || undefined,
                 fabricId: variation.fabricId || undefined,
                 fabricName: variation.fabric?.name,
+                imageUrl: variation.imageUrl || undefined,
                 hasLining: variation.hasLining,
                 totalStock: variationStock,
+                avgMrp: variationAvgMrp,
                 trimsCost: variation.trimsCost ? Number(variation.trimsCost) : null,
                 liningCost: variation.liningCost ? Number(variation.liningCost) : null,
                 packagingCost: variation.packagingCost ? Number(variation.packagingCost) : null,
@@ -565,6 +571,10 @@ router.get('/tree', authenticateToken, asyncHandler(async (req: Request, res: Re
                 children: skuChildren,
             };
         });
+
+        // Calculate average MRP from SKUs
+        const allMrps = product.variations.flatMap((v: any) => v.skus.map((s: any) => Number(s.mrp) || 0)).filter((m: number) => m > 0);
+        const avgMrp = allMrps.length > 0 ? allMrps.reduce((a: number, b: number) => a + b, 0) / allMrps.length : null;
 
         return {
             id: product.id,
@@ -574,11 +584,15 @@ router.get('/tree', authenticateToken, asyncHandler(async (req: Request, res: Re
             styleCode: product.styleCode || undefined,
             category: product.category,
             gender: product.gender,
+            productType: product.productType || undefined,
+            fabricTypeId: product.fabricTypeId || undefined,
             fabricTypeName: product.fabricType?.name,
+            imageUrl: product.imageUrl || undefined,
             hasLining: product.variations.some((v: any) => v.hasLining),
             variationCount: productVariationCount,
             skuCount: productSkuCount,
             totalStock: productStock,
+            avgMrp: avgMrp,
             trimsCost: product.trimsCost ? Number(product.trimsCost) : null,
             liningCost: product.liningCost ? Number(product.liningCost) : null,
             packagingCost: product.packagingCost ? Number(product.packagingCost) : null,
