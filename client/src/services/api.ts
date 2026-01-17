@@ -262,6 +262,128 @@ export const catalogApi = {
     getFilters: () => api.get('/catalog/filters'),
 };
 
+// Materials (3-tier hierarchy: Material → Fabric → Colour, plus Trims & Services)
+export const materialsApi = {
+    // Hierarchy views
+    getHierarchy: (params?: { view?: string; materialId?: string; fabricId?: string }) =>
+        api.get('/materials/hierarchy', { params }),
+    getFilters: () => api.get('/materials/filters'),
+
+    // Material CRUD
+    createMaterial: (data: { name: string; description?: string }) =>
+        api.post('/materials', data),
+    updateMaterial: (id: string, data: { name?: string; description?: string; isActive?: boolean }) =>
+        api.put(`/materials/${id}`, data),
+    deleteMaterial: (id: string) => api.delete(`/materials/${id}`),
+
+    // Fabric CRUD (Level 2: textile construction)
+    createFabric: (data: {
+        materialId: string;
+        name: string;
+        constructionType?: string;
+        pattern?: string;
+        weight?: number | null;
+        weightUnit?: string;
+        composition?: string;
+        defaultCostPerUnit?: number | null;
+        defaultLeadTimeDays?: number | null;
+        defaultMinOrderQty?: number | null;
+        avgShrinkagePct?: number;
+    }) => api.post('/materials/fabrics', data),
+    updateFabric: (id: string, data: any) => api.put(`/materials/fabrics/${id}`, data),
+    deleteFabric: (id: string) => api.delete(`/materials/fabrics/${id}`),
+
+    // FabricColour CRUD (Level 3: inventory unit)
+    createColour: (data: {
+        fabricId: string;
+        colourName: string;
+        standardColour?: string | null;
+        colourHex?: string;
+        costPerUnit?: number | null;
+        supplierId?: string | null;
+        leadTimeDays?: number | null;
+        minOrderQty?: number | null;
+    }) => api.post('/materials/colours', data),
+    updateColour: (id: string, data: any) => api.put(`/materials/colours/${id}`, data),
+    deleteColour: (id: string) => api.delete(`/materials/colours/${id}`),
+    createColourTransaction: (colourId: string, data: any) =>
+        api.post(`/materials/colours/${colourId}/transactions`, data),
+    getColourTransactions: (colourId: string) =>
+        api.get(`/materials/colours/${colourId}/transactions`),
+
+    // Tree view (hierarchical data for TanStack Table)
+    getTree: (params?: { lazyLoad?: boolean }) =>
+        api.get('/materials/tree', { params: { lazyLoad: params?.lazyLoad ? 'true' : 'false' } }),
+    getTreeChildren: (parentId: string, parentType: 'material' | 'fabric') =>
+        api.get(`/materials/tree/${parentId}/children`, { params: { parentType } }),
+
+    // Trims catalog
+    getTrims: (params?: { category?: string; search?: string }) =>
+        api.get('/materials/trims', { params }),
+    createTrim: (data: {
+        code: string;
+        name: string;
+        category: string;
+        description?: string;
+        costPerUnit: number;
+        unit: string;
+        supplierId?: string | null;
+        leadTimeDays?: number | null;
+        minOrderQty?: number | null;
+    }) => api.post('/materials/trims', data),
+    updateTrim: (id: string, data: any) => api.put(`/materials/trims/${id}`, data),
+    deleteTrim: (id: string) => api.delete(`/materials/trims/${id}`),
+
+    // Services catalog
+    getServices: (params?: { category?: string; search?: string }) =>
+        api.get('/materials/services', { params }),
+    createService: (data: {
+        code: string;
+        name: string;
+        category: string;
+        description?: string;
+        costPerJob: number;
+        costUnit?: string;
+        vendorId?: string | null;
+        leadTimeDays?: number | null;
+    }) => api.post('/materials/services', data),
+    updateService: (id: string, data: any) => api.put(`/materials/services/${id}`, data),
+    deleteService: (id: string) => api.delete(`/materials/services/${id}`),
+};
+
+// BOM (Bill of Materials) - 3-level cascade: Product → Variation → SKU
+export const bomApi = {
+    // Get full BOM for a product (template + variations + SKUs)
+    getProductBom: (productId: string) => api.get(`/bom/products/${productId}`),
+
+    // Update product BOM (full save)
+    updateProductBom: (productId: string, data: any) => api.put(`/bom/products/${productId}`, data),
+
+    // Get component roles (from config)
+    getComponentRoles: () => api.get('/bom/component-roles'),
+
+    // Get available components for BOM selection
+    getAvailableComponents: () => api.get('/bom/available-components'),
+
+    // Template operations (product-level defaults)
+    getTemplate: (productId: string) => api.get(`/bom/products/${productId}/template`),
+    updateTemplate: (productId: string, data: any) => api.put(`/bom/products/${productId}/template`, data),
+
+    // Variation BOM operations
+    getVariationBom: (variationId: string) => api.get(`/bom/variations/${variationId}`),
+    updateVariationBom: (variationId: string, data: any) => api.put(`/bom/variations/${variationId}`, data),
+
+    // SKU BOM operations (size-specific overrides)
+    getSkuBom: (skuId: string) => api.get(`/bom/skus/${skuId}`),
+    updateSkuBom: (skuId: string, data: any) => api.put(`/bom/skus/${skuId}`, data),
+
+    // Calculate resolved BOM cost for a SKU
+    getSkuCost: (skuId: string) => api.get(`/bom/skus/${skuId}/cost`),
+
+    // Bulk apply template to all variations
+    applyTemplateToAll: (productId: string) => api.post(`/bom/products/${productId}/apply-to-all`),
+};
+
 // Customers
 export const customersApi = {
     getAll: (params?: Record<string, string>) => api.get('/customers', { params }),

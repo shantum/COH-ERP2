@@ -51,6 +51,8 @@ import remittanceRoutes from './routes/remittance.js';
 import catalogRoutes from './routes/catalog.js';
 import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
+import materialsRoutes from './routes/materials.js';
+import bomRoutes from './routes/bom.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
@@ -153,6 +155,8 @@ app.use('/api/remittance', remittanceRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/pincodes', pincodeRoutes);
 app.use('/api/events', sseRoutes);
+app.use('/api/materials', materialsRoutes);
+app.use('/api/bom', bomRoutes);
 
 // tRPC routes (mounted alongside Express for gradual migration)
 app.use(
