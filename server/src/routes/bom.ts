@@ -516,6 +516,71 @@ router.post('/products/:productId/apply-to-all', asyncHandler(async (req: Reques
 // ============================================
 
 /**
+ * GET /bom/variations/search
+ * Search variations by product name or color name for linking
+ * NOTE: This route MUST be defined before /variations/:variationId to avoid route conflict
+ */
+router.get('/variations/search', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const { q, fabricId, limit = '50' } = req.query;
+
+  const searchQuery = (q as string || '').trim();
+  const limitNum = Math.min(parseInt(limit as string) || 50, 100);
+
+  const variations = await prisma.variation.findMany({
+    where: {
+      isActive: true,
+      ...(searchQuery && {
+        OR: [
+          { colorName: { contains: searchQuery, mode: 'insensitive' } },
+          { product: { name: { contains: searchQuery, mode: 'insensitive' } } },
+          { product: { styleCode: { contains: searchQuery, mode: 'insensitive' } } },
+        ],
+      }),
+      // Optionally filter by fabric type (if we want to match fabric)
+      ...(fabricId && { fabricId: fabricId as string }),
+    },
+    include: {
+      product: {
+        select: { id: true, name: true, styleCode: true },
+      },
+      fabric: {
+        select: { id: true, name: true },
+      },
+      // Check if already has a main fabric BOM line
+      bomLines: {
+        where: {
+          role: { code: 'main', type: { code: 'FABRIC' } },
+        },
+        include: {
+          fabricColour: {
+            select: { id: true, colourName: true },
+          },
+        },
+      },
+    },
+    orderBy: [
+      { product: { name: 'asc' } },
+      { colorName: 'asc' },
+    ],
+    take: limitNum,
+  });
+
+  // Transform to include current fabric assignment info
+  const result = variations.map(v => ({
+    id: v.id,
+    colorName: v.colorName,
+    imageUrl: v.imageUrl,
+    product: v.product,
+    currentFabric: v.fabric ? { id: v.fabric.id, name: v.fabric.name } : null,
+    currentFabricColour: v.bomLines[0]?.fabricColour || null,
+    hasMainFabricAssignment: v.bomLines.length > 0,
+  }));
+
+  return res.json(result);
+}));
+
+/**
  * GET /bom/variations/:variationId
  * Returns BOM for a variation
  */
@@ -698,6 +763,114 @@ router.get('/skus/:skuId/cost', asyncHandler(async (req: Request, res: Response)
     }
     throw error;
   }
+}));
+
+// ============================================
+// FABRIC COLOUR LINKING ENDPOINTS
+// ============================================
+
+/**
+ * POST /bom/fabric-colours/:colourId/link-variations
+ * Bulk link product variations to a fabric colour
+ * Creates VariationBomLine records for the main fabric role
+ */
+router.post('/fabric-colours/:colourId/link-variations', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const colourId = req.params.colourId as string;
+  const { variationIds, roleId } = req.body;
+
+  if (!variationIds || !Array.isArray(variationIds) || variationIds.length === 0) {
+    return res.status(400).json({ error: 'variationIds array is required' });
+  }
+
+  // Verify the colour exists
+  const colour = await prisma.fabricColour.findUnique({
+    where: { id: colourId },
+    include: { fabric: true },
+  });
+
+  if (!colour) {
+    return res.status(404).json({ error: 'Fabric colour not found' });
+  }
+
+  // Get the main fabric role if not specified
+  let targetRoleId = roleId;
+  if (!targetRoleId) {
+    const mainFabricRole = await prisma.componentRole.findFirst({
+      where: {
+        code: 'main',
+        type: { code: 'FABRIC' },
+      },
+    });
+    if (!mainFabricRole) {
+      return res.status(500).json({ error: 'Main fabric role not configured' });
+    }
+    targetRoleId = mainFabricRole.id;
+  }
+
+  // Verify variations exist
+  const variations = await prisma.variation.findMany({
+    where: { id: { in: variationIds } },
+    select: { id: true, colorName: true, product: { select: { name: true } } },
+  });
+
+  if (variations.length !== variationIds.length) {
+    return res.status(400).json({ error: 'One or more variations not found' });
+  }
+
+  // HIERARCHICAL CONSISTENCY:
+  // When linking at colour level, we automatically link at fabric level too.
+  // This ensures: Variation → Fabric → FabricColour chain is always consistent.
+  // - BOM line (fabricColourId) links to the specific colour
+  // - Variation.fabricId links to the colour's parent fabric
+
+  // Create/update BOM lines AND update variation.fabricId in a transaction
+  // Use upsert for better performance and increase timeout for bulk operations
+  const results = await prisma.$transaction(async (tx) => {
+    const updated: string[] = [];
+
+    for (const variation of variations) {
+      // 1. Create/update the BOM line with the fabric colour
+      await tx.variationBomLine.upsert({
+        where: {
+          variationId_roleId: {
+            variationId: variation.id,
+            roleId: targetRoleId,
+          },
+        },
+        update: { fabricColourId: colourId },
+        create: {
+          variationId: variation.id,
+          roleId: targetRoleId,
+          fabricColourId: colourId,
+        },
+      });
+
+      // 2. Also update the variation's fabricId to match the colour's parent fabric
+      await tx.variation.update({
+        where: { id: variation.id },
+        data: { fabricId: colour.fabricId },
+      });
+
+      updated.push(variation.id);
+    }
+
+    return { updated };
+  }, {
+    timeout: 30000, // 30 second timeout for bulk operations
+  });
+
+  return res.json({
+    success: true,
+    fabricColour: {
+      id: colour.id,
+      name: colour.colourName,
+      fabricName: colour.fabric.name,
+    },
+    linked: {
+      total: results.updated.length,
+    },
+  });
 }));
 
 export default router;
