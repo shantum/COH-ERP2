@@ -160,15 +160,16 @@ export default function ComponentRow({
                             value={isTrim ? line.trimItemId || null : line.serviceItemId || null}
                             items={availableItems}
                             onChange={(id, item) => {
+                                const namedItem = item as { name?: string } | null;
                                 if (isTrim) {
                                     onUpdate({
                                         trimItemId: id || undefined,
-                                        trimItemName: item?.name,
+                                        trimItemName: namedItem?.name,
                                     });
                                 } else {
                                     onUpdate({
                                         serviceItemId: id || undefined,
-                                        serviceItemName: item?.name,
+                                        serviceItemName: namedItem?.name,
                                     });
                                 }
                             }}

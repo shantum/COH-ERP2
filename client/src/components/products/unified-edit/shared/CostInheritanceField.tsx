@@ -59,7 +59,6 @@ export function CostInheritanceField({
       control={control}
       render={({ field, fieldState: { error } }) => {
         const hasOverride = field.value !== null && field.value !== undefined && field.value !== '';
-        const displayValue = hasOverride ? field.value : inheritedValue;
 
         return (
           <div className="space-y-2">

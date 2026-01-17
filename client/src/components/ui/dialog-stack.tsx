@@ -44,7 +44,7 @@ const DialogStackContext = createContext<DialogStackContextType>({
   clickable: false,
 });
 
-type DialogStackChildProps = {
+type _DialogStackChildProps = {
   index?: number;
 };
 

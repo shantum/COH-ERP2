@@ -14,7 +14,7 @@ interface ProductBomTabProps {
   onOpenBomEditor?: () => void;
 }
 
-export function ProductBomTab({ productId, productName, onOpenBomEditor }: ProductBomTabProps) {
+export function ProductBomTab({ productId: _productId, productName: _productName, onOpenBomEditor }: ProductBomTabProps) {
   return (
     <div className="space-y-4">
       {/* Info */}

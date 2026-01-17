@@ -71,7 +71,6 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
         baseProductionTimeMins: data.baseProductionTimeMins,
         defaultFabricConsumption: data.defaultFabricConsumption,
         trimsCost: data.trimsCost,
-        liningCost: data.liningCost,
         packagingCost: data.packagingCost,
         isActive: data.isActive,
       });

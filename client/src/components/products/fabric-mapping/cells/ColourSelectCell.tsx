@@ -23,7 +23,7 @@ export function ColourSelectCell({
     selection,
     colours,
     currentColourId,
-    currentColourName,
+    currentColourName: _currentColourName,
     currentColourHex,
     onChange,
     onAddNew,

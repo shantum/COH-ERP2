@@ -43,13 +43,13 @@ export function useVariationEditForm({
     mutationFn: async (data: VariationFormData) => {
       const response = await productsApi.updateVariation(variation.id, {
         colorName: data.colorName,
-        colorHex: data.colorHex,
-        fabricId: data.fabricId,
+        colorHex: data.colorHex ?? undefined,
+        fabricId: data.fabricId ?? undefined,
         hasLining: data.hasLining,
-        trimsCost: data.trimsCost,
-        liningCost: data.liningCost,
-        packagingCost: data.packagingCost,
-        laborMinutes: data.laborMinutes,
+        trimsCost: data.trimsCost ?? undefined,
+        liningCost: data.liningCost ?? undefined,
+        packagingCost: data.packagingCost ?? undefined,
+        laborMinutes: data.laborMinutes ?? undefined,
         isActive: data.isActive,
       });
       return response.data;

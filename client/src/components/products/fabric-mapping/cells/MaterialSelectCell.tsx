@@ -22,7 +22,7 @@ export function MaterialSelectCell({
     selection,
     materials,
     currentMaterialId,
-    currentMaterialName,
+    currentMaterialName: _currentMaterialName,
     onChange,
     onAddNew,
     disabled,

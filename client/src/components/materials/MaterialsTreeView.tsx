@@ -11,7 +11,7 @@
  */
 
 import { useState, useCallback, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Users, Search, LayoutGrid, Layers } from 'lucide-react';
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -55,7 +55,6 @@ export function MaterialsTreeView({
     onAddInward,
     onAddSupplier,
 }: MaterialsTreeViewProps) {
-    const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<ViewMode>('fabric'); // Default to fabric view
 
@@ -245,7 +244,6 @@ export function MaterialsTreeView({
 
     // Handle deletion
     const handleDelete = useCallback((node: MaterialNode) => {
-        const typeLabel = node.type === 'colour' ? 'colour' : node.type;
         const hasChildren = node.type === 'material'
             ? (node.fabricCount || 0) > 0
             : node.type === 'fabric'

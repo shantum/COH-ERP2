@@ -22,7 +22,7 @@ export function FabricSelectCell({
     selection,
     fabrics,
     currentFabricId,
-    currentFabricName,
+    currentFabricName: _currentFabricName,
     onChange,
     onAddNew,
     disabled,

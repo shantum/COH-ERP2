@@ -45,13 +45,13 @@ export function useSkuEditForm({
     mutationFn: async (data: SkuFormData) => {
       const response = await productsApi.updateSku(sku.id, {
         size: data.size,
-        fabricConsumption: data.fabricConsumption,
-        mrp: data.mrp,
-        targetStockQty: data.targetStockQty,
-        trimsCost: data.trimsCost,
-        liningCost: data.liningCost,
-        packagingCost: data.packagingCost,
-        laborMinutes: data.laborMinutes,
+        fabricConsumption: data.fabricConsumption ?? undefined,
+        mrp: data.mrp ?? undefined,
+        targetStockQty: data.targetStockQty ?? undefined,
+        trimsCost: data.trimsCost ?? undefined,
+        liningCost: data.liningCost ?? undefined,
+        packagingCost: data.packagingCost ?? undefined,
+        laborMinutes: data.laborMinutes ?? undefined,
         isActive: data.isActive,
       });
       return response.data;

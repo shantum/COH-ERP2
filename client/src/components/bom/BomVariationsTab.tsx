@@ -220,10 +220,11 @@ export default function BomVariationsTab({
                                                                 value={line?.fabricColourId || null}
                                                                 items={availableComponents.fabricColours}
                                                                 onChange={(id, item) => {
+                                                                    const fabricItem = item as { colourName?: string; colourHex?: string } | null;
                                                                     handleLineUpdate(variation.id, role.id, {
                                                                         fabricColourId: id || undefined,
-                                                                        fabricColourName: item?.colourName,
-                                                                        fabricColourHex: item?.colourHex,
+                                                                        fabricColourName: fabricItem?.colourName,
+                                                                        fabricColourHex: fabricItem?.colourHex,
                                                                     });
                                                                 }}
                                                                 placeholder="Select fabric colour..."

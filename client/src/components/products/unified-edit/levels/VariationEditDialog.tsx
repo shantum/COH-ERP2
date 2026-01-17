@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { Palette, Loader2, AlertCircle, X } from 'lucide-react';
+import { Palette, AlertCircle, X } from 'lucide-react';
 import { useVariationEditForm } from '../hooks/useVariationEditForm';
 import { VariationInfoTab } from '../tabs/VariationInfoTab';
 import { VariationSkusTab } from '../tabs/VariationSkusTab';

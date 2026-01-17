@@ -18,7 +18,6 @@ import { ProductSkusTab } from './ProductSkusTab';
 
 interface ProductDetailProps {
     product: ProductTreeNode;
-    onEdit?: (product: ProductTreeNode) => void;
     onClose?: () => void;
 }
 
@@ -31,7 +30,7 @@ const TABS: { id: TabType; label: string; icon: typeof Package }[] = [
     { id: 'skus', label: 'SKUs', icon: Box },
 ];
 
-export function ProductDetail({ product, onEdit, onClose }: ProductDetailProps) {
+export function ProductDetail({ product, onClose }: ProductDetailProps) {
     const [activeTab, setActiveTab] = useState<TabType>('info');
     const [isEditing, setIsEditing] = useState(false);
 

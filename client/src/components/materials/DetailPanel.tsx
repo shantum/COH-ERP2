@@ -2,7 +2,7 @@
  * Materials Detail Panel - Slide-out panel for viewing all properties of a material record
  */
 
-import { X, Package, TrendingUp, TrendingDown, Calendar, MapPin, Clock, Info, DollarSign } from 'lucide-react';
+import { X, Package, TrendingUp, TrendingDown, Clock, Info, DollarSign } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { materialsApi } from '../../services/api';
 

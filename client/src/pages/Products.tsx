@@ -190,8 +190,8 @@ export default function Products() {
                 {activeTab === 'materials' && (
                     <div className="flex-1 overflow-hidden">
                         <MaterialsTreeView
-                            onViewDetails={setShowMaterialDetail}
-                            onAddInward={setShowMaterialInward}
+                            onViewDetails={() => {}}
+                            onAddInward={() => {}}
                             onAddSupplier={() => {}}
                         />
                     </div>
