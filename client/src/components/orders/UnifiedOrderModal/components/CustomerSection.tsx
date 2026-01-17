@@ -3,7 +3,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, Check, Clock, CreditCard } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, Check, Clock, CreditCard, ExternalLink } from 'lucide-react';
 import { customersApi } from '../../../../services/api';
 import { CustomerSearch } from '../../../common/CustomerSearch';
 import type { Order } from '../../../../types';
@@ -34,6 +34,7 @@ interface CustomerSectionProps {
   onSelectPastAddress: (address: AddressData) => void;
   onToggleAddressPicker: () => void;
   onSetSearchingCustomer: (value: boolean) => void;
+  onViewCustomerProfile?: () => void;
 }
 
 export function CustomerSection({
@@ -50,6 +51,7 @@ export function CustomerSection({
   onSelectPastAddress,
   onToggleAddressPicker,
   onSetSearchingCustomer,
+  onViewCustomerProfile,
 }: CustomerSectionProps) {
   const isEditing = mode === 'edit';
 
@@ -184,7 +186,18 @@ export function CustomerSection({
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-sm font-medium text-slate-800">{order.customerName || 'Unknown'}</p>
+            {/* Customer name - clickable if customer exists */}
+            {order.customerId && onViewCustomerProfile ? (
+              <button
+                onClick={onViewCustomerProfile}
+                className="text-sm font-medium text-slate-800 hover:text-sky-600 transition-colors flex items-center gap-1 group"
+              >
+                {order.customerName || 'Unknown'}
+                <ExternalLink size={12} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            ) : (
+              <p className="text-sm font-medium text-slate-800">{order.customerName || 'Unknown'}</p>
+            )}
             {/* Email - check order field, customer object, then shopifyDetails */}
             {(() => {
               const email = order.customerEmail || order.customer?.email || orderWithDetails.shopifyDetails?.customerEmail;
@@ -261,6 +274,17 @@ export function CustomerSection({
                     )}
                   </div>
                 ) : null}
+
+                {/* View Full Profile button */}
+                {onViewCustomerProfile && (
+                  <button
+                    onClick={onViewCustomerProfile}
+                    className="mt-2 flex items-center gap-1.5 text-xs text-sky-600 hover:text-sky-700 font-medium transition-colors"
+                  >
+                    <User size={12} />
+                    View Full Profile
+                  </button>
+                )}
               </div>
             )}
           </div>

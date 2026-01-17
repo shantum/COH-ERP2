@@ -425,6 +425,7 @@ export function UnifiedOrderModal({
                     onSelectPastAddress={handleSelectPastAddress}
                     onToggleAddressPicker={toggleAddressPicker}
                     onSetSearchingCustomer={setIsSearchingCustomer}
+                    onViewCustomerProfile={order.customerId ? () => handleModeChange('customer') : undefined}
                   />
 
                   {/* Line Items */}

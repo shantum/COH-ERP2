@@ -117,7 +117,7 @@ interface OrdersGridProps {
     onDeleteOrder: (id: string) => void;
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
-    onSelectCustomer: (customerId: string) => void;
+    onViewCustomer: (order: any) => void;
     onCustomize?: (lineId: string, lineData: {
         lineId: string;
         skuCode: string;
@@ -186,7 +186,7 @@ export function OrdersGrid({
     onDeleteOrder: _onDeleteOrder,
     onCancelLine,
     onUncancelLine,
-    onSelectCustomer,
+    onViewCustomer,
     onCustomize,
     onEditCustomization,
     onRemoveCustomization,
@@ -379,7 +379,7 @@ export function OrdersGrid({
         onMarkCodRemitted,
         onTrack: _onTrack,
         onViewOrder,
-        onSelectCustomer,
+        onViewCustomer,
         onUpdateShipByDate,
     });
 
@@ -413,7 +413,7 @@ export function OrdersGrid({
         onMarkCodRemitted,
         onTrack: _onTrack,
         onViewOrder,
-        onSelectCustomer,
+        onViewCustomer,
         onUpdateShipByDate,
     };
 

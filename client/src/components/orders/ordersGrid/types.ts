@@ -42,7 +42,7 @@ export interface OrdersGridProps {
     onCancelLine: (lineId: string) => void;
     onUncancelLine: (lineId: string) => void;
     // Customer actions
-    onSelectCustomer: (customerId: string) => void;
+    onViewCustomer: (order: any) => void;
     // Customization actions
     onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
     onEditCustomization?: (lineId: string, lineData: EditCustomizationData) => void;
@@ -122,7 +122,7 @@ export interface DynamicColumnHandlers {
 
     // Order Info handlers
     onViewOrder: (orderId: string) => void;
-    onSelectCustomer: (customerId: string) => void;
+    onViewCustomer: (order: any) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
 }
 

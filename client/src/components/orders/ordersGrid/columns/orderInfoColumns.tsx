@@ -170,7 +170,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellClass: 'text-xs',
         },
 
-        // Customer Name (clickable to filter)
+        // Customer Name (clickable to view customer profile)
         {
             colId: 'customerName',
             headerName: getHeaderName('customerName'),
@@ -178,7 +178,7 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
             width: 150,
             cellRenderer: (params: ICellRendererParams) => {
                 if (!params.data?.isFirstLine) return null;
-                const { onSelectCustomer } = handlersRef.current;
+                const { onViewCustomer } = handlersRef.current;
                 const order = params.data.order;
                 const customerId = order?.customerId;
                 const fullName = params.value || '';
@@ -186,13 +186,13 @@ export function buildOrderInfoColumns(ctx: ColumnBuilderContext): ColDef[] {
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            if (customerId) onSelectCustomer(customerId);
+                            if (order && customerId) onViewCustomer(order);
                         }}
                         className={`text-left truncate max-w-full block ${customerId
                             ? 'text-blue-600 hover:text-blue-800 hover:underline'
                             : 'text-gray-700'
                             }`}
-                        title={fullName}
+                        title={customerId ? `View ${fullName}'s profile` : fullName}
                         disabled={!customerId}
                     >
                         {fullName}

@@ -27,7 +27,6 @@ import {
     OrdersGrid,
     OrdersGridSkeleton,
     CreateOrderModal,
-    CustomerDetailModal,
     CustomizationModal,
     UnifiedOrderModal,
     GlobalOrderSearch,
@@ -87,9 +86,8 @@ export default function Orders() {
 
     // Modal state
     const [showCreateOrder, setShowCreateOrder] = useState(false);
-    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
     const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
-    const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship'>('view');
+    const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship' | 'customer'>('view');
 
     // Track which lines are currently being processed (for loading spinners)
     const [processingLines, setProcessingLines] = useState<Set<string>>(new Set());
@@ -125,25 +123,27 @@ export default function Orders() {
         fabricStock,
         channels,
         lockedDates,
-        customerDetail,
-        customerLoading,
         isLoading,
         isFetching,
         refetch,
     } = useUnifiedOrdersData({
         currentView: view,
         page,
-        selectedCustomerId,
         isSSEConnected,
         // Pass shipped filter for server-side filtering (rto, cod_pending)
         shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
     });
 
     // Modal handlers
-    const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' = 'view') => {
+    const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' | 'customer' = 'view') => {
         setUnifiedModalOrder(order);
         setUnifiedModalMode(mode);
     }, []);
+
+    // Handler for viewing customer profile from grid
+    const handleViewCustomer = useCallback((order: Order) => {
+        openUnifiedModal(order, 'customer');
+    }, [openUnifiedModal]);
 
     const handleViewOrderById = useCallback((orderId: string) => {
         const order = orders?.find((o: any) => o.id === orderId);
@@ -509,7 +509,7 @@ export default function Orders() {
             startProcessing(lineId);
             mutations.uncancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
         },
-        onSelectCustomer: setSelectedCustomerId,
+        onViewCustomer: handleViewCustomer,
         onCustomize: handleCustomize,
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
@@ -809,14 +809,6 @@ export default function Orders() {
                     onCreate={(data) => mutations.createOrder.mutate(data)}
                     onClose={() => setShowCreateOrder(false)}
                     isCreating={mutations.createOrder.isPending}
-                />
-            )}
-
-            {selectedCustomerId && (
-                <CustomerDetailModal
-                    customer={customerDetail}
-                    isLoading={customerLoading}
-                    onClose={() => setSelectedCustomerId(null)}
                 />
             )}
 
