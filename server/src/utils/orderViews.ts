@@ -575,6 +575,7 @@ export const ORDER_UNIFIED_SELECT = {
             tags: true,
             trackingNumber: true,
             trackingCompany: true,
+            trackingUrl: true,
             shippedAt: true,
             fulfillmentStatus: true,
             financialStatus: true,
@@ -706,6 +707,7 @@ export interface FlattenedOrderRow {
     shopifyTags: string | null;
     shopifyAwb: string | null;
     shopifyCourier: string | null;
+    shopifyTrackingUrl: string | null;
 
     // Customer tags
     customerTags: string[] | null;
@@ -786,6 +788,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
             tags: string | null;
             trackingNumber: string | null;
             trackingCompany: string | null;
+            trackingUrl: string | null;
             fulfillmentStatus: string | null;
         } | null;
 
@@ -805,6 +808,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
         const shopifyTags = shopifyCache?.tags || null;
         const shopifyAwb = shopifyCache?.trackingNumber || null;
         const shopifyCourier = shopifyCache?.trackingCompany || null;
+        const shopifyTrackingUrl = shopifyCache?.trackingUrl || null;
         const customerTags = customer?.tags || null;
 
         // Handle orders with no lines
@@ -878,6 +882,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 shopifyTags,
                 shopifyAwb,
                 shopifyCourier,
+                shopifyTrackingUrl,
                 customerTags,
             });
             continue;
@@ -968,6 +973,7 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 shopifyTags,
                 shopifyAwb,
                 shopifyCourier,
+                shopifyTrackingUrl,
                 customerTags,
             });
         }
@@ -1067,6 +1073,7 @@ export const LINE_SSE_SELECT = {
                     tags: true,
                     trackingNumber: true,
                     trackingCompany: true,
+                    trackingUrl: true,
                     fulfillmentStatus: true,
                 },
             },
@@ -1214,6 +1221,7 @@ export function flattenLineForSSE(
         shopifyTags: shopifyCache?.tags || null,
         shopifyAwb: shopifyCache?.trackingNumber || null,
         shopifyCourier: shopifyCache?.trackingCompany || null,
+        shopifyTrackingUrl: shopifyCache?.trackingUrl || null,
 
         // Customer tags
         customerTags: customer?.tags || null,

@@ -12,7 +12,7 @@ import type {
     EditableCallbackParams,
 } from 'ag-grid-community';
 import type { ColumnBuilderContext } from '../types';
-import { CheckCircle, AlertCircle, ChevronDown } from 'lucide-react';
+import { CheckCircle, AlertCircle, ChevronDown, ExternalLink } from 'lucide-react';
 import { TrackingStatusBadge } from '../../../common/grid';
 import { COURIER_OPTIONS } from '../constants';
 import { editableCellClass } from '../formatting';
@@ -79,11 +79,34 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellRenderer: (params: ICellRendererParams) => {
                 const awb = params.value;
                 if (!awb) return null;
-                return (
-                    <span className="font-mono text-xs text-gray-600" title={awb}>
+
+                // Get Shopify tracking URL from row data
+                const trackingUrl = params.data?.shopifyTrackingUrl;
+
+                const awbDisplay = (
+                    <span className="font-mono text-xs" title={awb}>
                         {awb.length > 14 ? awb.substring(0, 14) + '...' : awb}
                     </span>
                 );
+
+                // If we have a tracking URL, make it clickable
+                if (trackingUrl) {
+                    return (
+                        <a
+                            href={trackingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline"
+                            title={`Track: ${awb}`}
+                        >
+                            {awbDisplay}
+                            <ExternalLink size={10} className="text-blue-400" />
+                        </a>
+                    );
+                }
+
+                return <span className="text-gray-600">{awbDisplay}</span>;
             },
             cellClass: 'text-xs',
         },
@@ -241,20 +264,22 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
             cellClass: editableCellClass('lineStatus', ['packed', 'shipped'], 'text-xs'),
         },
 
-        // Tracking Status
+        // Tracking Status (clickable link to courier/iThink tracking)
         {
             colId: 'trackingStatus',
             headerName: getHeaderName('trackingStatus'),
             width: 110,
             cellRenderer: (params: ICellRendererParams) => {
                 const order = params.data?.order;
+                const row = params.data;
 
                 // Get tracking status from iThink sync (order level)
                 let trackingStatus = order?.trackingStatus;
+                const deliveryAttempts = order?.deliveryAttempts || 0;
 
                 // Use pre-computed line fields (O(1)) with order-level fallback
-                const shippedAt = params.data?.lineShippedAt || order?.shippedAt;
-                const deliveredAt = params.data?.lineDeliveredAt || order?.deliveredAt;
+                const shippedAt = row?.lineShippedAt || order?.shippedAt;
+                const deliveredAt = row?.lineDeliveredAt || order?.deliveredAt;
 
                 // If no tracking status from iThink, derive from dates
                 if (!trackingStatus) {
@@ -267,14 +292,37 @@ export function buildTrackingColumns(ctx: ColumnBuilderContext): ColDef[] {
                     }
                 }
 
+                // "undelivered" with 0 delivery attempts means it's still in transit
+                // NDR (Non-Delivery Report) requires at least 1 failed delivery attempt
+                if (trackingStatus === 'undelivered' && deliveryAttempts === 0) {
+                    trackingStatus = 'in_transit';
+                }
+
                 if (!trackingStatus) return null;
 
+                // Get AWB for raw API link
+                const awb = row?.lineAwbNumber || order?.awbNumber;
+
+                // Click handler to open raw API data in new tab
+                const handleClick = (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    if (awb) {
+                        window.open(`/api/tracking/raw/${awb}`, '_blank');
+                    }
+                };
+
                 return (
-                    <TrackingStatusBadge
-                        status={trackingStatus}
-                        daysInTransit={order?.daysInTransit}
-                        ofdCount={order?.deliveryAttempts}
-                    />
+                    <span
+                        onClick={handleClick}
+                        className={awb ? 'cursor-pointer hover:opacity-80' : ''}
+                        title={awb ? `Click to view raw iThink data for ${awb}` : undefined}
+                    >
+                        <TrackingStatusBadge
+                            status={trackingStatus}
+                            daysInTransit={order?.daysInTransit}
+                            ofdCount={order?.deliveryAttempts}
+                        />
+                    </span>
                 );
             },
         },

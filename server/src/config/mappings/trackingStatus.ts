@@ -49,11 +49,25 @@ export interface StatusMappingRule extends BaseMappingRule {
  * Tracking status mapping rules
  *
  * Rules are checked in priority order (highest first).
- * A rule matches if ANY code matches OR ANY text pattern matches,
- * AND no exclude patterns match.
+ * A rule matches if text patterns match (preferred) OR code matches (fallback).
+ * Exclude patterns prevent matching.
+ *
+ * IMPORTANT: Text matching is prioritized over code matching because
+ * status codes like "UD" are used by couriers for many different states
+ * (Reached At Destination, Cancelled, In Transit, etc.)
  */
 export const TRACKING_STATUS_RULES: StatusMappingRule[] = [
-    // ========== RTO STATES (priority 100) - CHECK FIRST ==========
+    // ========== CANCELLED (priority 110) - HIGHEST PRIORITY ==========
+    // Check cancelled FIRST - cancel_status is checked separately in trackingSync
+    {
+        codes: ['CA', 'CANCELLED'],
+        textPatterns: ['cancelled', 'shipment cancelled', 'order cancelled', 'cancel'],
+        status: 'cancelled',
+        priority: 110,
+        description: 'Shipment cancelled',
+    },
+
+    // ========== RTO STATES (priority 100-99) ==========
     // RTO Delivered - package returned to seller
     {
         codes: ['RTD', 'RTOD'],
@@ -64,8 +78,8 @@ export const TRACKING_STATUS_RULES: StatusMappingRule[] = [
     },
     // RTO In Transit - all other RTO states
     {
-        codes: ['RTO', 'RTI', 'RTP', 'RTOOFD', 'RTOUD', 'RTS'],
-        textPatterns: ['rto', 'return to origin', 'return to shipper', 'rts'],
+        codes: ['RTO', 'RTI', 'RTP', 'RTOOFD', 'RTOUD', 'RTS', 'RT'],
+        textPatterns: ['rto', 'return to origin', 'return to shipper', 'rts', 'rto processing', 'rto in transit', 'in rto', 'return process'],
         excludePatterns: ['delivered', 'received'], // Exclude if already delivered
         status: 'rto_in_transit',
         priority: 99,
@@ -83,9 +97,10 @@ export const TRACKING_STATUS_RULES: StatusMappingRule[] = [
     },
 
     // ========== UNDELIVERED/NDR (priority 85) ==========
+    // NOTE: 'UD' code removed - it's unreliable. Text patterns are authoritative.
     {
-        codes: ['UD', 'NDR'],
-        textPatterns: ['undelivered', 'not delivered', 'delivery failed', 'ndr'],
+        codes: ['NDR'],
+        textPatterns: ['undelivered', 'not delivered', 'delivery failed', 'ndr', 'delivery attempt failed'],
         status: 'undelivered',
         priority: 85,
         description: 'Delivery attempt failed - NDR',
@@ -101,19 +116,22 @@ export const TRACKING_STATUS_RULES: StatusMappingRule[] = [
         description: 'Package out for delivery',
     },
 
-    // ========== REACHED DESTINATION (priority 75) ==========
+    // ========== REACHED DESTINATION (priority 76) ==========
+    // Higher than in_transit to catch "Reached At Destination" with UD code
     {
         codes: ['RAD'],
-        textPatterns: ['reached', 'destination', 'hub'],
+        textPatterns: ['reached at destination', 'reached destination', 'at destination hub', 'received at facility', 'reached at', 'destination hub'],
+        excludePatterns: ['rto'],
         status: 'reached_destination',
-        priority: 75,
-        description: 'Package reached destination hub',
+        priority: 76,
+        description: 'Package at destination hub',
     },
 
     // ========== IN TRANSIT (priority 70) ==========
     {
         codes: ['IT', 'OT'],
-        textPatterns: ['transit', 'in-transit', 'in transit'],
+        textPatterns: ['in transit', 'in-transit', 'transit'],
+        excludePatterns: ['rto', 'reverse'],
         status: 'in_transit',
         priority: 70,
         description: 'Package in transit',
@@ -147,16 +165,7 @@ export const TRACKING_STATUS_RULES: StatusMappingRule[] = [
         description: 'Order manifested - AWB created',
     },
 
-    // ========== CANCELLED (priority 50) ==========
-    {
-        codes: ['CA', 'CANCELLED'],
-        textPatterns: ['cancel', 'cancelled'],
-        status: 'cancelled',
-        priority: 50,
-        description: 'Shipment cancelled',
-    },
-
-    // ========== REVERSE LOGISTICS (priority 45) ==========
+    // ========== REVERSE LOGISTICS (priority 45-43) ==========
     // Reverse Delivered
     {
         codes: ['REVD'],
@@ -193,7 +202,23 @@ export const DEFAULT_TRACKING_STATUS: TrackingStatus = 'in_transit';
 // ============================================
 
 /**
+ * Unreliable status codes that should NOT be trusted for mapping.
+ * These codes are used by couriers for many different states.
+ *
+ * Example: "UD" is used for "Reached At Destination", "Cancelled", "In Transit", etc.
+ */
+const UNRELIABLE_STATUS_CODES = new Set(['UD']);
+
+/**
  * Resolve tracking status from courier status code and text
+ *
+ * IMPORTANT: Text patterns are prioritized over status codes because
+ * codes like "UD" are used by couriers for many different states.
+ *
+ * Priority order:
+ * 1. Text pattern match (most reliable - from current_status text)
+ * 2. Status code match (only for reliable codes, not "UD")
+ * 3. Default to in_transit
  *
  * @param statusCode - Status code from courier API (e.g., 'DL', 'IT')
  * @param statusText - Status text from courier API (e.g., 'Delivered to customer')
@@ -202,7 +227,8 @@ export const DEFAULT_TRACKING_STATUS: TrackingStatus = 'in_transit';
  * @example
  * resolveTrackingStatus('DL', 'Delivered') // => 'delivered'
  * resolveTrackingStatus('RTD', 'RTO Delivered') // => 'rto_delivered'
- * resolveTrackingStatus('IT', 'In Transit to Hub') // => 'in_transit'
+ * resolveTrackingStatus('UD', 'Reached At Destination') // => 'reached_destination' (text wins over UD code)
+ * resolveTrackingStatus('UD', 'In Transit') // => 'in_transit' (text wins over UD code)
  */
 export function resolveTrackingStatus(
     statusCode: string,
@@ -210,24 +236,50 @@ export function resolveTrackingStatus(
 ): TrackingStatus {
     const codeUpper = (statusCode || '').toUpperCase().trim();
     const textLower = (statusText || '').toLowerCase().trim();
+    const isUnreliableCode = UNRELIABLE_STATUS_CODES.has(codeUpper);
 
     // Sort rules by priority (highest first)
     const sortedRules = [...TRACKING_STATUS_RULES].sort((a, b) => b.priority - a.priority);
 
+    // PASS 1: Check TEXT patterns first (most reliable)
     for (const rule of sortedRules) {
         // Check exclude patterns first
         if (rule.excludePatterns?.some(p => textLower.includes(p.toLowerCase()))) {
             continue;
         }
 
-        // Check for code match (exact)
-        const codeMatch = rule.codes.some(c => codeUpper === c.toUpperCase());
-
         // Check for text pattern match (contains)
         const textMatch = rule.textPatterns.some(p => textLower.includes(p.toLowerCase()));
-
-        if (codeMatch || textMatch) {
+        if (textMatch) {
             return rule.status;
+        }
+    }
+
+    // PASS 2: Check CODE matches (only for reliable codes)
+    if (!isUnreliableCode) {
+        for (const rule of sortedRules) {
+            // Check exclude patterns first
+            if (rule.excludePatterns?.some(p => textLower.includes(p.toLowerCase()))) {
+                continue;
+            }
+
+            // Check for code match (exact)
+            const codeMatch = rule.codes.some(c => codeUpper === c.toUpperCase());
+            if (codeMatch) {
+                return rule.status;
+            }
+        }
+    }
+
+    // FALLBACK: For unreliable codes like "UD" with no text match,
+    // only map to undelivered if text explicitly suggests NDR
+    if (isUnreliableCode) {
+        const isNdrText = textLower.includes('undeliver') ||
+            textLower.includes('ndr') ||
+            textLower.includes('delivery failed') ||
+            textLower.includes('delivery attempt');
+        if (isNdrText) {
+            return 'undelivered';
         }
     }
 

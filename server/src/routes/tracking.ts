@@ -49,6 +49,8 @@ interface RawTrackingData {
     expected_delivery_date: string;
     ofd_count: string;
     return_tracking_no?: string;
+    /** iThink cancel_status field - "Approved" means shipment is cancelled */
+    cancel_status?: string | null;
     last_scan_details?: {
         status: string;
         status_code: string;
@@ -309,6 +311,42 @@ router.get('/awb/:awbNumber', authenticateToken, asyncHandler(async (req: Reques
 }));
 
 /**
+ * Get RAW iThink API response for an AWB (for debugging)
+ * NOTE: No auth required - debug endpoint only
+ * @route GET /api/tracking/raw/:awbNumber
+ * @param {string} awbNumber - AWB to track
+ * @returns {Object} Raw iThink API response without transformation
+ * @example GET /api/tracking/raw/21025852704255
+ */
+router.get('/raw/:awbNumber', asyncHandler(async (req: Request, res: Response) => {
+    await ithinkLogistics.loadFromDatabase();
+
+    const awbNumber = getStringParam(req.params.awbNumber);
+
+    try {
+        const rawData = await ithinkLogistics.trackShipments(awbNumber);
+
+        if (!rawData[awbNumber]) {
+            throw new NotFoundError('AWB not found', 'AWB', awbNumber);
+        }
+
+        res.json({
+            awbNumber,
+            raw: rawData[awbNumber],
+        });
+    } catch (error) {
+        if (error instanceof NotFoundError) {
+            throw error;
+        }
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new ExternalServiceError(
+            `Failed to fetch raw tracking for AWB ${awbNumber}: ${errorMessage}`,
+            'iThink Logistics'
+        );
+    }
+}));
+
+/**
  * Batch track multiple AWBs (max 10 per request, rate-limited by iThink)
  * @route POST /api/tracking/batch
  * @param {string[]} body.awbNumbers - Array of AWB numbers (max 10)
@@ -426,6 +464,11 @@ router.post('/orders', authenticateToken, asyncHandler(async (req: Request, res:
                 const data = trackingData[awb];
 
                 if (data && data.message === 'success') {
+                    // Determine internal status: check cancel_status first, then use text-based mapping
+                    const internalStatus = data.cancel_status?.toLowerCase() === 'approved'
+                        ? 'cancelled'
+                        : ithinkLogistics.mapToInternalStatus(data.current_status_code, data.current_status);
+
                     results[order.id] = {
                         orderId: order.id,
                         orderNumber: order.orderNumber,
@@ -433,7 +476,7 @@ router.post('/orders', authenticateToken, asyncHandler(async (req: Request, res:
                         courier: data.logistic,
                         currentStatus: data.current_status,
                         statusCode: data.current_status_code,
-                        internalStatus: ithinkLogistics.mapToInternalStatus(data.current_status_code, data.current_status),
+                        internalStatus,
                         expectedDeliveryDate: data.expected_delivery_date,
                         ofdCount: parseInt(data.ofd_count) || 0,
                         isRto: !!data.return_tracking_no,
@@ -596,9 +639,13 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
                 if (!rawData || rawData.message !== 'success') continue;
 
                 try {
-                    // Pass both status code AND status text for smarter mapping
+                    // Determine internal status: check cancel_status first, then use text-based mapping
+                    const internalStatus = rawData.cancel_status?.toLowerCase() === 'approved'
+                        ? 'cancelled'
+                        : ithinkLogistics.mapToInternalStatus(rawData.current_status_code, rawData.current_status);
+
                     const updateData: TrackingUpdateData = {
-                        trackingStatus: ithinkLogistics.mapToInternalStatus(rawData.current_status_code, rawData.current_status),
+                        trackingStatus: internalStatus,
                         courierStatusCode: rawData.current_status_code || null,
                         courier: rawData.logistic || null,
                         deliveryAttempts: parseInt(rawData.ofd_count) || 0,

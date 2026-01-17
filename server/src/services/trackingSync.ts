@@ -132,6 +132,8 @@ interface RawTrackingData {
     expected_delivery_date: string | null;
     ofd_count: string | number;
     return_tracking_no: string | null;
+    /** iThink cancel_status field - "Approved" means shipment is cancelled */
+    cancel_status?: string | null;
     last_scan_details?: {
         status: string;
         scan_location: string;
@@ -442,14 +444,30 @@ async function runTrackingSync(): Promise<SyncResult | null> {
                         // Transform iThink API response
                         const lastScanStatus = rawData.last_scan_details?.status || '';
                         const currentStatus = rawData.current_status || '';
-                        const statusForMapping = lastScanStatus.toLowerCase().includes('rto')
-                            ? lastScanStatus
-                            : currentStatus;
+
+                        // Determine internal status with improved logic:
+                        // Priority 1: Check cancel_status field (most authoritative for cancellations)
+                        // Priority 2: Use current_status text (more reliable than codes)
+                        // Priority 3: Fall back to status code
+                        let internalStatus: TrackingStatus;
+
+                        if (rawData.cancel_status?.toLowerCase() === 'approved') {
+                            // iThink cancel_status: "Approved" means shipment is definitely cancelled
+                            internalStatus = 'cancelled';
+                            trackingLogger.debug({ awb, cancelStatus: rawData.cancel_status }, 'Detected cancelled shipment via cancel_status field');
+                        } else {
+                            // Use current_status text as PRIMARY source (most reliable)
+                            // For RTO detection, also check last_scan_details status
+                            const statusForMapping = lastScanStatus.toLowerCase().includes('rto')
+                                ? lastScanStatus
+                                : currentStatus;
+                            internalStatus = ithinkClient.mapToInternalStatus(rawData.current_status_code, statusForMapping) as TrackingStatus;
+                        }
 
                         const trackingData: TrackingData = {
                             courier: rawData.logistic,
                             statusCode: rawData.current_status_code,
-                            internalStatus: ithinkClient.mapToInternalStatus(rawData.current_status_code, statusForMapping) as TrackingStatus,
+                            internalStatus,
                             expectedDeliveryDate: rawData.expected_delivery_date,
                             ofdCount: parseInt(String(rawData.ofd_count)) || 0,
                             isRto: !!rawData.return_tracking_no || lastScanStatus.toLowerCase().includes('rto'),
