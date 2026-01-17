@@ -11,6 +11,7 @@ import type { Order } from '../../../../types';
 import type { ModalMode, ShipFormState, CategorizedLines } from '../types';
 import { COURIER_OPTIONS } from '../types';
 import { BookShipmentSection } from '../../shared/BookShipmentSection';
+import { TrackingDetails } from './TrackingDetails';
 
 interface AddressData {
   address1?: string;
@@ -96,36 +97,52 @@ export function ShippingSection({
 
         {isExpanded && (
           <div className="p-4 space-y-4">
-            {Object.entries(shippedByAwb).map(([awb, lines]) => (
-              <div key={awb} className="p-3 bg-emerald-50/50 rounded-lg border border-emerald-100">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Package size={14} className="text-emerald-600" />
-                    <span className="text-sm font-mono font-medium text-slate-700">{awb}</span>
-                    {courier && (
-                      <span className="text-xs text-slate-500">via {courier}</span>
+            {Object.entries(shippedByAwb).map(([awb, lines]) => {
+              // Get Shopify tracking URL if available
+              const shopifyTrackingUrl = order.shopifyCache?.trackingUrl;
+
+              return (
+                <div key={awb} className="p-3 bg-emerald-50/50 rounded-lg border border-emerald-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Package size={14} className="text-emerald-600" />
+                      <span className="text-sm font-mono font-medium text-slate-700">{awb}</span>
+                      {courier && (
+                        <span className="text-xs text-slate-500">via {courier}</span>
+                      )}
+                    </div>
+                    {/* Use Shopify tracking URL if available */}
+                    {shopifyTrackingUrl && (
+                      <a
+                        href={shopifyTrackingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-sky-600 hover:text-sky-700 flex items-center gap-1"
+                      >
+                        Track <ExternalLink size={12} />
+                      </a>
                     )}
                   </div>
-                  <a
-                    href={`https://www.trackingmore.com/track/en/${awb}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-sky-600 hover:text-sky-700 flex items-center gap-1"
-                  >
-                    Track <ExternalLink size={12} />
-                  </a>
+                  <div className="space-y-1">
+                    {lines.map((line: any) => (
+                      <div key={line.id} className="flex items-center gap-2 text-xs text-slate-600">
+                        <CheckCircle size={12} className="text-emerald-500" />
+                        <span>{line.sku?.skuCode || line.skuId}</span>
+                        <span className="text-slate-400">×{line.qty}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* iThink tracking details - lazy loaded when section is expanded */}
+                  {awb !== 'Unknown' && (
+                    <TrackingDetails
+                      awbNumber={awb}
+                      enabled={isExpanded}
+                    />
+                  )}
                 </div>
-                <div className="space-y-1">
-                  {lines.map((line: any) => (
-                    <div key={line.id} className="flex items-center gap-2 text-xs text-slate-600">
-                      <CheckCircle size={12} className="text-emerald-500" />
-                      <span>{line.sku?.skuCode || line.skuId}</span>
-                      <span className="text-slate-400">×{line.qty}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             {/* If there are still packed lines, show ship form */}
             {hasPackedLines && isShipMode && (

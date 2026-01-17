@@ -4,22 +4,60 @@
 
 import { useState } from 'react';
 import {
-    Package, MapPin, Clock, ChevronDown, ChevronUp, RefreshCw,
-    AlertCircle, Truck, CalendarClock
+    MapPin, Clock, ChevronDown, ChevronUp, RefreshCw,
+    AlertCircle, CalendarClock
 } from 'lucide-react';
 import { useIThinkTracking, type IThinkTrackingData, type IThinkScanHistoryItem } from '../../../../hooks/useIThinkTracking';
 import {
     getTrackingStatusClasses,
     getTrackingStatusLabel,
-    TRACKING_STATUS_STYLES,
 } from '../../ordersGrid/formatting/statusStyles';
-import { resolveTrackingStatus } from '../../ordersGrid/formatting/trackingResolver';
 
 interface TrackingDetailsProps {
     /** AWB number to track */
     awbNumber: string;
     /** Whether to fetch data (lazy loading) */
     enabled?: boolean;
+}
+
+/**
+ * Map iThink status code/text to internal tracking status
+ * Simple client-side mapping for display purposes
+ */
+function mapToInternalStatus(statusCode: string, statusText: string): string {
+    const text = statusText.toLowerCase();
+    const code = statusCode.toUpperCase();
+
+    // Check cancel status first
+    if (text.includes('cancel') || code === 'CA') return 'cancelled';
+
+    // RTO states - check before delivered
+    if (text.includes('rto delivered') || text.includes('rto received') || code === 'RTD') return 'rto_delivered';
+    if (text.includes('rto') || code.startsWith('RT')) return 'rto_in_transit';
+
+    // Delivered
+    if ((text.includes('delivered') && !text.includes('undelivered')) || code === 'DL') return 'delivered';
+
+    // Undelivered/NDR
+    if (text.includes('undelivered') || text.includes('not delivered') || text.includes('ndr') || code === 'NDR') return 'undelivered';
+
+    // Out for delivery
+    if (text.includes('out for delivery') || code === 'OFD') return 'out_for_delivery';
+
+    // Reached destination
+    if (text.includes('reached') || text.includes('destination hub') || code === 'RAD') return 'reached_destination';
+
+    // In transit
+    if (text.includes('transit') || code === 'IT' || code === 'OT') return 'in_transit';
+
+    // Picked up
+    if ((text.includes('picked') && !text.includes('not picked')) || code === 'PP') return 'picked_up';
+
+    // Manifested
+    if (text.includes('manifest') || code === 'M') return 'manifested';
+
+    // Default to in_transit
+    return 'in_transit';
 }
 
 /**
@@ -65,7 +103,7 @@ function formatDate(dateStr: string | null | undefined): string {
  * Get badge classes for internal tracking status
  */
 function getStatusBadge(data: IThinkTrackingData): { classes: string; label: string } {
-    const internalStatus = resolveTrackingStatus(data.statusCode, data.currentStatus);
+    const internalStatus = mapToInternalStatus(data.statusCode, data.currentStatus);
     const classes = getTrackingStatusClasses(internalStatus);
     const label = getTrackingStatusLabel(internalStatus);
     return { classes, label };

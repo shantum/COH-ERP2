@@ -11,6 +11,7 @@
 7. **Separate config from code.** Magic numbers, thresholds, mappings → `/config/`. Code should read config, not contain it.
 8. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
 9. **Build for the long term.** Write code your future self will thank you for. Maintainability over cleverness.
+10. **Type-safe by default.** Strict TypeScript, proper tRPC typing, Zod validation. No `any`, no shortcuts.
 
 ## Quick Start
 
