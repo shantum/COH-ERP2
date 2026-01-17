@@ -1,10 +1,10 @@
 /**
- * ModalHeader - Order header with status badges and mode tabs
+ * ModalHeader - Order header with status badges, mode tabs, and navigation
  */
 
-import { X, ShoppingBag, RefreshCw, ExternalLink, Calendar, Hash, Tag } from 'lucide-react';
+import { X, ShoppingBag, RefreshCw, ExternalLink, Calendar, Hash, Tag, ArrowLeft, ChevronRight, User } from 'lucide-react';
 import type { Order } from '../../../../types';
-import type { ModalMode } from '../types';
+import type { ModalMode, NavigationEntry } from '../types';
 
 interface ModalHeaderProps {
   order: Order;
@@ -12,8 +12,13 @@ interface ModalHeaderProps {
   onModeChange: (mode: ModalMode) => void;
   canEdit: boolean;
   canShip: boolean;
+  canCustomer: boolean;
   hasUnsavedChanges: boolean;
   onClose: () => void;
+  // Navigation props
+  navigationHistory?: NavigationEntry[];
+  canGoBack?: boolean;
+  onGoBack?: () => void;
 }
 
 // Format date for display
@@ -51,13 +56,20 @@ export function ModalHeader({
   onModeChange,
   canEdit,
   canShip,
+  canCustomer,
   hasUnsavedChanges,
   onClose,
+  navigationHistory = [],
+  canGoBack = false,
+  onGoBack,
 }: ModalHeaderProps) {
   const statusConfig = STATUS_BADGES[order.status] || { bg: 'bg-slate-500', text: 'text-white' };
   const paymentMethod = order.shopifyCache?.paymentMethod || (order.totalAmount > 0 ? 'Prepaid' : 'COD');
   const paymentConfig = PAYMENT_BADGES[paymentMethod] || PAYMENT_BADGES.Prepaid;
   const discountCodes = order.shopifyCache?.discountCodes || order.discountCode;
+
+  // Build breadcrumb from navigation history
+  const showBreadcrumb = navigationHistory.length > 1;
 
   return (
     <div className="relative">
@@ -68,6 +80,37 @@ export function ModalHeader({
       }} />
 
       <div className="relative px-6 py-5 border-b border-slate-200/80">
+        {/* Breadcrumb Navigation */}
+        {showBreadcrumb && (
+          <div className="flex items-center gap-2 mb-3 text-sm">
+            <button
+              onClick={onGoBack}
+              disabled={!canGoBack}
+              className="flex items-center gap-1.5 px-2 py-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <ArrowLeft size={14} />
+              <span>Back</span>
+            </button>
+            <div className="flex items-center gap-1 text-slate-400 overflow-x-auto">
+              {navigationHistory.map((entry, index) => (
+                <div key={`${entry.orderId}-${index}`} className="flex items-center gap-1">
+                  {index > 0 && <ChevronRight size={12} className="text-slate-300 flex-shrink-0" />}
+                  <span className={`whitespace-nowrap ${index === navigationHistory.length - 1 ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
+                    {entry.mode === 'customer' ? (
+                      <span className="flex items-center gap-1">
+                        <User size={12} />
+                        Customer
+                      </span>
+                    ) : (
+                      `#${entry.orderNumber}`
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-start justify-between gap-4">
           {/* Left: Order info */}
           <div className="flex items-start gap-4">
@@ -182,6 +225,21 @@ export function ModalHeader({
                 }`}
               >
                 Ship
+              </button>
+              <button
+                onClick={() => onModeChange('customer')}
+                disabled={!canCustomer}
+                title={!canCustomer ? 'No customer linked to this order' : undefined}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 flex items-center gap-1.5 ${
+                  mode === 'customer'
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : canCustomer
+                      ? 'text-slate-500 hover:text-slate-700'
+                      : 'text-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <User size={14} />
+                Customer
               </button>
             </div>
 

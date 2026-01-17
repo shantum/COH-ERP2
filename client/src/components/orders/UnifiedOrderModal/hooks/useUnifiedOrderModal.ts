@@ -15,6 +15,7 @@ import type {
   AddressData,
   ExpandedSections,
   CategorizedLines,
+  NavigationState,
 } from '../types';
 
 // Parse JSON address string to AddressData object
@@ -53,9 +54,10 @@ export function formatAddressDisplay(address: AddressData): string {
 interface UseUnifiedOrderModalProps {
   order: Order;
   initialMode?: ModalMode;
+  onNavigateToOrder?: (orderId: string) => void;
 }
 
-export function useUnifiedOrderModal({ order, initialMode }: UseUnifiedOrderModalProps) {
+export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: UseUnifiedOrderModalProps) {
   // Determine available modes based on order state
   // Line-level: can edit if ANY line is not shipped/cancelled (not just order.status)
   const hasEditableLines = order.orderLines?.some(
@@ -64,17 +66,29 @@ export function useUnifiedOrderModal({ order, initialMode }: UseUnifiedOrderModa
   const canEdit = hasEditableLines ?? order.status === 'open';
   const canShip = order.fulfillmentStage === 'ready_to_ship' ||
     order.orderLines?.some(l => l.lineStatus === 'packed');
+  const canCustomer = !!order.customerId;
 
   // Initialize mode - default to view, or provided initial mode if available
   const getInitialMode = (): ModalMode => {
     if (initialMode) {
       if (initialMode === 'edit' && canEdit) return 'edit';
       if (initialMode === 'ship' && canShip) return 'ship';
+      if (initialMode === 'customer' && canCustomer) return 'customer';
     }
     return 'view';
   };
 
   const [mode, setMode] = useState<ModalMode>(getInitialMode());
+
+  // Navigation state for in-modal order navigation
+  const [navigationState, setNavigationState] = useState<NavigationState>(() => ({
+    history: [{
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      mode: getInitialMode(),
+    }],
+    currentIndex: 0,
+  }));
 
   // Edit form state
   const [editForm, setEditForm] = useState<EditFormState>({
@@ -245,8 +259,91 @@ export function useUnifiedOrderModal({ order, initialMode }: UseUnifiedOrderModa
   const handleModeChange = useCallback((newMode: ModalMode) => {
     if (newMode === 'edit' && !canEdit) return;
     if (newMode === 'ship' && !canShip) return;
+    if (newMode === 'customer' && !canCustomer) return;
+
     setMode(newMode);
-  }, [canEdit, canShip]);
+
+    // Update navigation history when switching to customer tab
+    if (newMode === 'customer') {
+      setNavigationState(prev => {
+        const lastEntry = prev.history[prev.history.length - 1];
+        // Don't add duplicate customer entries
+        if (lastEntry?.mode === 'customer' && lastEntry?.orderId === order.id) {
+          return prev;
+        }
+        return {
+          history: [...prev.history, {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            mode: 'customer',
+          }],
+          currentIndex: prev.history.length,
+        };
+      });
+    }
+  }, [canEdit, canShip, canCustomer, order.id, order.orderNumber]);
+
+  // Navigate to a different order (from Customer tab order history)
+  const navigateToOrder = useCallback((orderId: string) => {
+    if (orderId === order.id) {
+      // Same order, just switch to view mode
+      setMode('view');
+      return;
+    }
+
+    // Call parent callback to load new order
+    if (onNavigateToOrder) {
+      onNavigateToOrder(orderId);
+    }
+  }, [order.id, onNavigateToOrder]);
+
+  // Go back in navigation history
+  const goBack = useCallback(() => {
+    setNavigationState(prev => {
+      if (prev.currentIndex <= 0) return prev;
+
+      const newIndex = prev.currentIndex - 1;
+      const previousEntry = prev.history[newIndex];
+
+      // Update mode to previous entry's mode
+      setMode(previousEntry.mode);
+
+      // If previous entry is a different order, navigate to it
+      if (previousEntry.orderId !== order.id && onNavigateToOrder) {
+        onNavigateToOrder(previousEntry.orderId);
+      }
+
+      return {
+        ...prev,
+        currentIndex: newIndex,
+        history: prev.history.slice(0, newIndex + 1),
+      };
+    });
+  }, [order.id, onNavigateToOrder]);
+
+  // Update navigation state when order changes
+  const updateNavigationForNewOrder = useCallback((newOrder: Order, newMode: ModalMode = 'view') => {
+    setNavigationState(prev => {
+      // Don't add duplicate entries
+      const lastEntry = prev.history[prev.history.length - 1];
+      if (lastEntry?.orderId === newOrder.id && lastEntry?.mode === newMode) {
+        return prev;
+      }
+
+      return {
+        history: [...prev.history, {
+          orderId: newOrder.id,
+          orderNumber: newOrder.orderNumber,
+          mode: newMode,
+        }],
+        currentIndex: prev.history.length,
+      };
+    });
+  }, []);
+
+  // Computed navigation values
+  const canGoBack = navigationState.currentIndex > 0;
+  const navigationHistory = navigationState.history.slice(0, navigationState.currentIndex + 1);
 
   // Edit form field change
   const handleEditFieldChange = useCallback((field: keyof EditFormState, value: string | boolean) => {
@@ -431,6 +528,14 @@ export function useUnifiedOrderModal({ order, initialMode }: UseUnifiedOrderModa
     handleModeChange,
     canEdit,
     canShip,
+    canCustomer,
+
+    // Navigation
+    navigationHistory,
+    canGoBack,
+    navigateToOrder,
+    goBack,
+    updateNavigationForNewOrder,
 
     // Edit form
     editForm,

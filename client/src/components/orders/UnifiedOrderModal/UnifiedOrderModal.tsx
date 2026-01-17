@@ -17,7 +17,7 @@ import type { Order } from '../../../types';
 import type { ModalMode } from './types';
 import { useUnifiedOrderModal } from './hooks/useUnifiedOrderModal';
 import { useOrdersMutations } from '../../../hooks/useOrdersMutations';
-import { ordersApi } from '../../../services/api';
+import { ordersApi, customersApi } from '../../../services/api';
 import { ModalHeader } from './components/ModalHeader';
 import { CustomerSection } from './components/CustomerSection';
 import { ItemsSection } from './components/ItemsSection';
@@ -25,6 +25,7 @@ import { ItemsSection } from './components/ItemsSection';
 import { ShippingSection } from './components/ShippingSection';
 import { TimelineSection } from './components/TimelineSection';
 import { NotesSection } from './components/NotesSection';
+import { CustomerTab } from './components/CustomerTab';
 
 interface UnifiedOrderModalProps {
   order: Order;
@@ -41,22 +42,33 @@ export function UnifiedOrderModal({
 }: UnifiedOrderModalProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
+  // Track current order for navigation
+  const [currentOrderId, setCurrentOrderId] = useState(initialOrder.id);
 
   // Fetch fresh order data to ensure we have all fields
   const { data: fetchedOrder, isLoading: isLoadingOrder } = useQuery({
-    queryKey: ['order', initialOrder.id],
+    queryKey: ['order', currentOrderId],
     queryFn: async () => {
-      const response = await ordersApi.getById(initialOrder.id);
+      const response = await ordersApi.getById(currentOrderId);
       return response.data;
     },
     staleTime: 30 * 1000, // 30 seconds
   });
 
   // Use fetched order if available, otherwise fall back to initial order
-  const order = fetchedOrder || initialOrder;
+  const order = fetchedOrder || (currentOrderId === initialOrder.id ? initialOrder : null);
+
+  // Handle order navigation
+  const handleNavigateToOrder = useCallback((orderId: string) => {
+    setCurrentOrderId(orderId);
+  }, []);
 
   // Initialize modal state
-  const modalState = useUnifiedOrderModal({ order, initialMode });
+  const modalState = useUnifiedOrderModal({
+    order: order || initialOrder,
+    initialMode,
+    onNavigateToOrder: handleNavigateToOrder,
+  });
   const {
     mode,
     editForm,
@@ -69,6 +81,7 @@ export function UnifiedOrderModal({
     isSearchingCustomer,
     isAddingProduct,
     canEdit,
+    canCustomer,
     totalItems: _totalItems,
     calculatedTotal,
     categorizedLines,
@@ -88,10 +101,27 @@ export function UnifiedOrderModal({
     handleCancelLine,
     handleUncancelLine,
     handleToggleLineSelection,
+    // Navigation
+    navigationHistory,
+    canGoBack,
+    navigateToOrder,
+    goBack,
   } = modalState;
 
   // Ensure canShip is always boolean
   const canShip = modalState.canShip ?? false;
+
+  // Fetch customer data when Customer tab is active (using REST API for full affinity data)
+  const { data: customerResponse, isLoading: isLoadingCustomer } = useQuery({
+    queryKey: ['customer', order?.customerId],
+    queryFn: async () => {
+      const response = await customersApi.getById(order!.customerId!);
+      return response.data;
+    },
+    enabled: mode === 'customer' && !!order?.customerId,
+    staleTime: 2 * 60 * 1000, // 2 min (matches server cache)
+  });
+  const customerData = customerResponse || null;
 
   // Get mutations
   const mutations = useOrdersMutations({
@@ -324,13 +354,17 @@ export function UnifiedOrderModal({
       >
         {/* Header */}
         <ModalHeader
-          order={order}
+          order={order || initialOrder}
           mode={mode}
           onModeChange={handleModeChange}
           canEdit={canEdit}
           canShip={canShip}
+          canCustomer={canCustomer}
           hasUnsavedChanges={hasUnsavedChanges}
           onClose={onClose}
+          navigationHistory={navigationHistory}
+          canGoBack={canGoBack}
+          onGoBack={goBack}
         />
 
         {/* Content */}
@@ -346,67 +380,82 @@ export function UnifiedOrderModal({
           )}
 
           {/* Content sections - show after data is loaded */}
-          {(!isLoadingOrder || fetchedOrder) && (
+          {(!isLoadingOrder || fetchedOrder) && order && (
             <>
-              {/* Customer & Address */}
-              <CustomerSection
-                order={order}
-                mode={mode}
-                editForm={editForm}
-                addressForm={addressForm}
-                pastAddresses={pastAddresses}
-                isLoadingAddresses={isLoadingAddresses}
-                isAddressExpanded={isAddressExpanded}
-                isSearchingCustomer={isSearchingCustomer}
-                onEditFieldChange={handleEditFieldChange}
-                onAddressChange={handleAddressChange}
-                onSelectPastAddress={handleSelectPastAddress}
-                onToggleAddressPicker={toggleAddressPicker}
-                onSetSearchingCustomer={setIsSearchingCustomer}
-              />
+              {/* Customer Tab - Full customer intelligence view */}
+              {mode === 'customer' && (
+                <CustomerTab
+                  customer={customerData || null}
+                  currentOrderId={order.id}
+                  onSelectOrder={navigateToOrder}
+                  isLoading={isLoadingCustomer}
+                />
+              )}
 
-              {/* Line Items */}
-              <ItemsSection
-                order={order}
-                mode={mode}
-                categorizedLines={categorizedLines}
-                shipForm={shipForm}
-                isAddingProduct={isAddingProduct}
-                onSetAddingProduct={setIsAddingProduct}
-                onAddLine={handleAddLineWithMutation}
-                onUpdateLine={handleUpdateLineWithMutation}
-                onCancelLine={handleCancelLineWithMutation}
-                onUncancelLine={handleUncancelLineWithMutation}
-                onToggleLineSelection={handleToggleLineSelection}
-              />
+              {/* Other modes: View, Edit, Ship */}
+              {mode !== 'customer' && (
+                <>
+                  {/* Customer & Address */}
+                  <CustomerSection
+                    order={order}
+                    mode={mode}
+                    editForm={editForm}
+                    addressForm={addressForm}
+                    pastAddresses={pastAddresses}
+                    isLoadingAddresses={isLoadingAddresses}
+                    isAddressExpanded={isAddressExpanded}
+                    isSearchingCustomer={isSearchingCustomer}
+                    onEditFieldChange={handleEditFieldChange}
+                    onAddressChange={handleAddressChange}
+                    onSelectPastAddress={handleSelectPastAddress}
+                    onToggleAddressPicker={toggleAddressPicker}
+                    onSetSearchingCustomer={setIsSearchingCustomer}
+                  />
 
-              {/* Shipping */}
-              <ShippingSection
-                order={order}
-                mode={mode}
-                shipForm={shipForm}
-                categorizedLines={categorizedLines}
-                expectedAwb={expectedAwb}
-                awbMatches={awbMatches}
-                canShipOrder={canShipOrder}
-                isShipping={isShipping}
-                addressForm={addressForm}
-                onShipFieldChange={handleShipFieldChange}
-                onShip={handleShipOrder}
-                onShipLines={handleShipLines}
-                onShipmentBooked={onSuccess}
-              />
+                  {/* Line Items */}
+                  <ItemsSection
+                    order={order}
+                    mode={mode}
+                    categorizedLines={categorizedLines}
+                    shipForm={shipForm}
+                    isAddingProduct={isAddingProduct}
+                    onSetAddingProduct={setIsAddingProduct}
+                    onAddLine={handleAddLineWithMutation}
+                    onUpdateLine={handleUpdateLineWithMutation}
+                    onCancelLine={handleCancelLineWithMutation}
+                    onUncancelLine={handleUncancelLineWithMutation}
+                    onToggleLineSelection={handleToggleLineSelection}
+                  />
 
-              {/* Timeline */}
-              <TimelineSection order={order} />
+                  {/* Shipping */}
+                  <ShippingSection
+                    order={order}
+                    mode={mode}
+                    shipForm={shipForm}
+                    categorizedLines={categorizedLines}
+                    expectedAwb={expectedAwb}
+                    awbMatches={awbMatches}
+                    canShipOrder={canShipOrder}
+                    isShipping={isShipping}
+                    addressForm={addressForm}
+                    onShipFieldChange={handleShipFieldChange}
+                    onShip={handleShipOrder}
+                    onShipLines={handleShipLines}
+                    onShipmentBooked={onSuccess}
+                  />
 
-              {/* Notes */}
-              <NotesSection
-                order={order}
-                mode={mode}
-                internalNotes={editForm.internalNotes}
-                onNotesChange={(notes) => handleEditFieldChange('internalNotes', notes)}
-              />
+                  {/* Timeline */}
+                  <TimelineSection order={order} />
+
+                  {/* Notes */}
+                  <NotesSection
+                    order={order}
+                    mode={mode}
+                    internalNotes={editForm.internalNotes}
+                    onNotesChange={(notes) => handleEditFieldChange('internalNotes', notes)}
+                  />
+                </>
+              )}
             </>
           )}
         </div>

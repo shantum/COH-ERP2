@@ -5,7 +5,20 @@
 
 import type { Order, OrderLine, Sku } from '../../../types';
 
-export type ModalMode = 'view' | 'edit' | 'ship';
+export type ModalMode = 'view' | 'edit' | 'ship' | 'customer';
+
+// Navigation entry for order navigation within the modal
+export interface NavigationEntry {
+  orderId: string;
+  orderNumber: string;
+  mode: ModalMode;
+}
+
+// Navigation state for breadcrumb and back button
+export interface NavigationState {
+  history: NavigationEntry[];
+  currentIndex: number;
+}
 
 export interface AddressData {
   first_name?: string;
