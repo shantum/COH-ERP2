@@ -13,7 +13,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Package, Layers, Scissors, Wrench, Plus, Search, GitBranch } from 'lucide-react';
 
-import { ProductsDataTable } from '../components/products/ProductsDataTable';
+import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
 import { ProductsTree } from '../components/products/ProductsTree';
 import { DetailPanel } from '../components/products/DetailPanel';
 import { MaterialsTreeView } from '../components/materials/MaterialsTreeView';
@@ -192,10 +192,10 @@ export default function Products() {
 
             {/* Main Content */}
             <div className="flex-1 flex overflow-hidden">
-                {/* Products Tab - DataTable View */}
+                {/* Products Tab - Dual Hierarchy View */}
                 {activeTab === 'products' && (
-                    <div className="flex-1 p-4 overflow-auto">
-                        <ProductsDataTable
+                    <div className="flex-1 p-4 overflow-hidden">
+                        <ProductsViewSwitcher
                             searchQuery={searchQuery}
                             onViewProduct={handleViewProduct}
                             onEditBom={handleEditBom}

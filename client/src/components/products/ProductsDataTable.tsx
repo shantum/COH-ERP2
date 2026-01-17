@@ -23,19 +23,21 @@ interface ProductsDataTableProps {
     onViewProduct?: (product: ProductTreeNode) => void;
     onEditBom?: (product: ProductTreeNode) => void;
     searchQuery?: string;
+    /** Pre-filtered data from parent component */
+    filteredData?: ProductTreeNode[];
 }
 
-export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery }: ProductsDataTableProps) {
-    const { data: treeData, summary, isLoading } = useProductsTree();
+export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filteredData }: ProductsDataTableProps) {
+    const { data: treeData, summary, isLoading } = useProductsTree({ enabled: !filteredData });
     const [expanded, setExpanded] = useState<ExpandedState>({});
 
-    // Filter products by search
+    // Use filtered data if provided, otherwise apply search filter
     const products = useMemo(() => {
-        if (!treeData) return [];
-        if (!searchQuery) return treeData;
+        const sourceData = filteredData || treeData || [];
+        if (!searchQuery) return sourceData;
 
         const query = searchQuery.toLowerCase();
-        return treeData.filter(
+        return sourceData.filter(
             (p) =>
                 p.name.toLowerCase().includes(query) ||
                 p.styleCode?.toLowerCase().includes(query) ||
@@ -46,7 +48,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery }: Pro
                     v.fabricName?.toLowerCase().includes(query)
                 )
         );
-    }, [treeData, searchQuery]);
+    }, [treeData, filteredData, searchQuery]);
 
     // Column definitions for products
     const columns = useMemo<ColumnDef<ProductTreeNode>[]>(
