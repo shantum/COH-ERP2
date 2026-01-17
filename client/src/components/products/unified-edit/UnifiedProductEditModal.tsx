@@ -146,8 +146,7 @@ export function UnifiedProductEditModal({
     onSuccess?.();
   }, [onSuccess]);
 
-  // Current active level
-  const activeLevel = stack[stack.length - 1]?.level ?? 'product';
+  // Current active index
   const activeIndex = stack.length - 1;
 
   // Loading state

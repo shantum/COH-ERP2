@@ -199,7 +199,7 @@ export default function BomEditorPanel({
                                     template={bomData.template || []}
                                     componentRoles={componentRoles || []}
                                     availableComponents={availableComponents || { trims: [], services: [] }}
-                                    onUpdate={(updates: any) => {
+                                    onUpdate={() => {
                                         setHasUnsavedChanges(true);
                                         // Update local state
                                     }}
@@ -212,7 +212,7 @@ export default function BomEditorPanel({
                                     template={bomData.template || []}
                                     componentRoles={componentRoles || []}
                                     availableComponents={availableComponents || { fabricColours: [], trims: [], services: [] }}
-                                    onUpdate={(updates: any) => {
+                                    onUpdate={() => {
                                         setHasUnsavedChanges(true);
                                     }}
                                 />
@@ -224,7 +224,7 @@ export default function BomEditorPanel({
                                     variations={bomData.variations || []}
                                     template={bomData.template || []}
                                     componentRoles={componentRoles || []}
-                                    onUpdate={(updates: any) => {
+                                    onUpdate={() => {
                                         setHasUnsavedChanges(true);
                                     }}
                                 />

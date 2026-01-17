@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productsApi, catalogApi } from '@/services/api';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
-import type { ProductFormData, ProductDetailData, CatalogFilters, CostCascade, DEFAULT_COST_VALUES } from '../types';
+import type { ProductFormData, ProductDetailData, CatalogFilters, CostCascade } from '../types';
 
 interface UseProductEditFormOptions {
   productId: string;

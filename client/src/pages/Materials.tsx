@@ -122,7 +122,8 @@ export default function Materials() {
     });
 
     const createInward = useMutation({
-        mutationFn: (data: any) => materialsApi.createInward(data),
+        mutationFn: (data: { colourId: string; [key: string]: any }) =>
+            materialsApi.createColourTransaction(data.colourId, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
             setShowInward(null);
@@ -300,7 +301,10 @@ export default function Materials() {
             {showDetail && (
                 <DetailPanel
                     item={showDetail}
+                    type={showDetail.nodeType || 'material'}
+                    isOpen={!!showDetail}
                     onClose={() => setShowDetail(null)}
+                    onEdit={() => {}}
                 />
             )}
 

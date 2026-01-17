@@ -74,7 +74,6 @@ export function ConsumptionGridView() {
     const [pendingChanges, setPendingChanges] = useState<Map<string, PendingChange>>(new Map());
     const [editingCell, setEditingCell] = useState<{ productId: string; size: string } | null>(null);
     const [copiedRow, setCopiedRow] = useState<CopiedRowData | null>(null);
-    const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
     const [collapsedGenders, setCollapsedGenders] = useState<Set<string>>(new Set());
     const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
     const inputRef = useRef<HTMLInputElement>(null);
@@ -248,7 +247,6 @@ export function ConsumptionGridView() {
                 productName: row.productName,
                 sizes,
             });
-            setSelectedRowId(row.productId);
         },
         [pendingChanges]
     );

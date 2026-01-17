@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback, useDeferredValue } from 'react';
-import { Loader2, Save, Search, X, Filter, ChevronsUpDown } from 'lucide-react';
+import { Loader2, Save, Search, X, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FabricMappingTable } from './FabricMappingTable';
 import { useFabricMappingData } from './hooks/useFabricMappingData';

@@ -11,8 +11,7 @@ interface VariationInfoTabProps {
 }
 
 export function VariationInfoTab({ form, disabled = false }: VariationInfoTabProps) {
-  const { control, formState: { errors }, watch, setValue } = form;
-  const colorHex = watch('colorHex');
+  const { control, formState: { errors } } = form;
 
   return (
     <div className="space-y-4">

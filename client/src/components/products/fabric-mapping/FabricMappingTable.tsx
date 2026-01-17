@@ -10,7 +10,7 @@
  * - Products start collapsed for performance
  */
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react';
 import {
     ProductHeaderCell,

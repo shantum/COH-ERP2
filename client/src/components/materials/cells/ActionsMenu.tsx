@@ -12,7 +12,6 @@ import { useState, useRef, useEffect } from 'react';
 import {
     MoreHorizontal,
     Pencil,
-    Plus,
     Package,
     Eye,
     Archive,

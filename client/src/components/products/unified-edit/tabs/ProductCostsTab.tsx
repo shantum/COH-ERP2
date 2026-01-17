@@ -2,7 +2,7 @@
  * ProductCostsTab - Product-level cost defaults
  */
 
-import { Controller, type UseFormReturn } from 'react-hook-form';
+import type { UseFormReturn } from 'react-hook-form';
 import { Info } from 'lucide-react';
 import type { ProductFormData } from '../types';
 import { SimpleCostField } from '../shared/CostInheritanceField';

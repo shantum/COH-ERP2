@@ -39,10 +39,6 @@ export default function Products() {
     // Search query
     const [searchQuery, setSearchQuery] = useState('');
 
-    // Material view states (reused from Materials.tsx for now)
-    const [showMaterialDetail, setShowMaterialDetail] = useState<any>(null);
-    const [showMaterialInward, setShowMaterialInward] = useState<any>(null);
-
     // Fetch products tree for URL resolution (only for BOM tab)
     const { data: productsData } = useProductsTree({ enabled: activeTab === 'bom' });
 
@@ -81,7 +77,6 @@ export default function Products() {
         }
         // Clear selection when switching tabs
         setSelectedNode(null);
-        setShowMaterialDetail(null);
     }, [setSearchParams]);
 
     // Handle node selection in BOM tab - sync to URL

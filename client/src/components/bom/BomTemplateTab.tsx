@@ -9,9 +9,8 @@
  */
 
 import { useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import ComponentRow from './ComponentRow';
-import ComponentSelector from './ComponentSelector';
 
 interface ComponentRole {
     id: string;

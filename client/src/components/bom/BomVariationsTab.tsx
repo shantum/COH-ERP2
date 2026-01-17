@@ -141,19 +141,6 @@ export default function BomVariationsTab({
         onUpdate({ variations: updatedVariations });
     };
 
-    // Clear override (revert to inherited)
-    const handleClearOverride = (variationId: string, roleId: string) => {
-        const updatedVariations = variations.map(v => {
-            if (v.id !== variationId) return v;
-            return {
-                ...v,
-                bomLines: v.bomLines.filter(l => l.roleId !== roleId),
-            };
-        });
-
-        onUpdate({ variations: updatedVariations });
-    };
-
     // Get the display variations
     const displayVariations = selectedVariation === 'all'
         ? variations
