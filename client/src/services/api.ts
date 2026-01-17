@@ -85,6 +85,8 @@ export const productsApi = {
     updateVariation: (variationId: string, data: UpdateVariationData) => api.put(`/products/variations/${variationId}`, data),
     createSku: (variationId: string, data: CreateSkuData) => api.post(`/products/variations/${variationId}/skus`, data),
     updateSku: (skuId: string, data: UpdateSkuData) => api.put(`/products/skus/${skuId}`, data),
+    // Tree view (hierarchical data for Products page)
+    getTree: (params?: { search?: string }) => api.get('/products/tree', { params }),
 };
 
 // Fabrics

@@ -430,6 +430,174 @@ router.get('/cogs', authenticateToken, asyncHandler(async (req: Request, res: Re
     res.json(filtered);
 }));
 
+// ============================================
+// PRODUCTS TREE (for unified Products page)
+// ============================================
+
+/**
+ * Include configuration for products tree
+ */
+const productTreeInclude = {
+    fabricType: true,
+    variations: {
+        where: { isActive: true },
+        include: {
+            fabric: true,
+            skus: {
+                where: { isActive: true },
+                orderBy: { size: 'asc' as const },
+            },
+        },
+        orderBy: { colorName: 'asc' as const },
+    },
+} satisfies Prisma.ProductInclude;
+
+/**
+ * GET /tree
+ * Get hierarchical products tree for the unified Products page.
+ * Returns Product → Variation → SKU hierarchy with summary counts and stock.
+ *
+ * @param {string} [search] - Optional search query to filter by name/code
+ * @returns {Object} { items: ProductTreeNode[], summary: { products, variations, skus, totalStock } }
+ */
+router.get('/tree', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+    const { search } = req.query as { search?: string };
+
+    // Build where clause for search
+    const productWhere: Prisma.ProductWhereInput = { isActive: true };
+    if (search) {
+        productWhere.OR = [
+            { name: { contains: search, mode: 'insensitive' } },
+            { styleCode: { contains: search, mode: 'insensitive' } },
+            { category: { contains: search, mode: 'insensitive' } },
+            {
+                variations: {
+                    some: {
+                        OR: [
+                            { colorName: { contains: search, mode: 'insensitive' } },
+                            { skus: { some: { skuCode: { contains: search, mode: 'insensitive' } } } },
+                        ],
+                    },
+                },
+            },
+        ];
+    }
+
+    // Fetch products with variations and SKUs
+    const products = await req.prisma.product.findMany({
+        where: productWhere,
+        include: productTreeInclude,
+        orderBy: { name: 'asc' },
+    });
+
+    // Get inventory balances for all SKUs
+    const allSkuIds = products.flatMap((p: any) => p.variations.flatMap((v: any) => v.skus.map((s: any) => s.id)));
+    const inventoryBalances = await req.prisma.inventoryTransaction.groupBy({
+        by: ['skuId'],
+        where: { skuId: { in: allSkuIds } },
+        _sum: { qty: true },
+    });
+    const balanceMap = new Map(inventoryBalances.map(b => [b.skuId, Number(b._sum.qty) || 0]));
+
+    // Transform to tree structure
+    let totalProducts = 0;
+    let totalVariations = 0;
+    let totalSkus = 0;
+    let totalStock = 0;
+
+    const items = products.map((product: any) => {
+        totalProducts++;
+        let productStock = 0;
+        const productVariationCount = product.variations.length;
+        let productSkuCount = 0;
+
+        const variationChildren = product.variations.map((variation: any) => {
+            totalVariations++;
+            let variationStock = 0;
+
+            const skuChildren = variation.skus.map((sku: any) => {
+                totalSkus++;
+                productSkuCount++;
+                const balance = balanceMap.get(sku.id) || 0;
+                variationStock += balance;
+                totalStock += balance;
+
+                return {
+                    id: sku.id,
+                    type: 'sku' as const,
+                    name: sku.size,
+                    isActive: sku.isActive,
+                    variationId: variation.id,
+                    skuCode: sku.skuCode,
+                    barcode: sku.skuCode,
+                    size: sku.size,
+                    mrp: Number(sku.mrp),
+                    fabricConsumption: sku.fabricConsumption ? Number(sku.fabricConsumption) : undefined,
+                    currentBalance: balance,
+                    availableBalance: balance, // TODO: subtract reserved
+                    targetStockQty: sku.targetStockQty,
+                    trimsCost: sku.trimsCost ? Number(sku.trimsCost) : null,
+                    liningCost: sku.liningCost ? Number(sku.liningCost) : null,
+                    packagingCost: sku.packagingCost ? Number(sku.packagingCost) : null,
+                    laborMinutes: sku.laborMinutes ? Number(sku.laborMinutes) : null,
+                };
+            });
+
+            productStock += variationStock;
+
+            return {
+                id: variation.id,
+                type: 'variation' as const,
+                name: variation.colorName,
+                isActive: variation.isActive,
+                productId: product.id,
+                productName: product.name,
+                colorName: variation.colorName,
+                colorHex: variation.colorHex || undefined,
+                fabricId: variation.fabricId || undefined,
+                fabricName: variation.fabric?.name,
+                hasLining: variation.hasLining,
+                totalStock: variationStock,
+                trimsCost: variation.trimsCost ? Number(variation.trimsCost) : null,
+                liningCost: variation.liningCost ? Number(variation.liningCost) : null,
+                packagingCost: variation.packagingCost ? Number(variation.packagingCost) : null,
+                laborMinutes: variation.laborMinutes ? Number(variation.laborMinutes) : null,
+                children: skuChildren,
+            };
+        });
+
+        return {
+            id: product.id,
+            type: 'product' as const,
+            name: product.name,
+            isActive: product.isActive,
+            styleCode: product.styleCode || undefined,
+            category: product.category,
+            gender: product.gender,
+            fabricTypeName: product.fabricType?.name,
+            hasLining: product.variations.some((v: any) => v.hasLining),
+            variationCount: productVariationCount,
+            skuCount: productSkuCount,
+            totalStock: productStock,
+            trimsCost: product.trimsCost ? Number(product.trimsCost) : null,
+            liningCost: product.liningCost ? Number(product.liningCost) : null,
+            packagingCost: product.packagingCost ? Number(product.packagingCost) : null,
+            laborMinutes: product.baseProductionTimeMins ? Number(product.baseProductionTimeMins) : null,
+            children: variationChildren,
+        };
+    });
+
+    res.json({
+        items,
+        summary: {
+            products: totalProducts,
+            variations: totalVariations,
+            skus: totalSkus,
+            totalStock,
+        },
+    });
+}));
+
 // Get single product with full details
 router.get('/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;

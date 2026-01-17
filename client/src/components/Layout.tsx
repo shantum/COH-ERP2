@@ -41,7 +41,8 @@ const navGroups: NavGroup[] = [
     {
         label: 'Catalog',
         items: [
-            { to: '/catalog', icon: Table2, label: 'Catalog' },
+            { to: '/products', icon: Package, label: 'Products' },
+            { to: '/catalog', icon: Table2, label: 'Catalog Grid' },
             { to: '/inventory', icon: Package, label: 'Inventory' },
             { to: '/fabrics', icon: Scissors, label: 'Fabrics' },
             { to: '/materials', icon: Layers, label: 'Materials' },

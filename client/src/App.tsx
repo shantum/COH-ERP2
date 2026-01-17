@@ -9,6 +9,7 @@ import './index.css';
 
 // Lazy load pages for code splitting (40-50% faster initial load)
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Products = lazy(() => import('./pages/Products'));
 const Catalog = lazy(() => import('./pages/Catalog'));
 const Inventory = lazy(() => import('./pages/Inventory'));
 const Fabrics = lazy(() => import('./pages/Fabrics'));
@@ -78,10 +79,9 @@ function App() {
                   </ProtectedRoute>
                 }>
                   <Route index element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Dashboard /></ErrorBoundary></Suspense>} />
+                  <Route path="products" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Products /></ErrorBoundary></Suspense>} />
                   <Route path="catalog" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Catalog /></ErrorBoundary></Suspense>} />
                   <Route path="inventory" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Inventory /></ErrorBoundary></Suspense>} />
-                  {/* Redirects for old routes (bookmark compatibility) */}
-                  <Route path="products" element={<Navigate to="/catalog" replace />} />
                   <Route path="fabrics" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Fabrics /></ErrorBoundary></Suspense>} />
                   <Route path="materials" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><Materials /></ErrorBoundary></Suspense>} />
                   <Route path="fabric-reconciliation" element={<Suspense fallback={<PageLoader />}><ErrorBoundary><FabricReconciliation /></ErrorBoundary></Suspense>} />
