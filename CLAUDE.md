@@ -7,6 +7,7 @@
 3. **Living memory.** Update this file with learnings/mistakes as you work.
 4. **Document as you go.** Comment undocumented code when you encounter it.
 5. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
+6. **Commit early, commit often.** Always commit your changes. Small, frequent commits.
 
 ## Quick Start
 
