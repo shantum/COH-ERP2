@@ -152,3 +152,49 @@ export {
     shouldSyncStatus,
     isTerminalTrackingStatus,
 } from './sync/index.js';
+
+// ============================================
+// FABRIC CONFIGURATION (Material Hierarchy)
+// ============================================
+
+export {
+    CONSTRUCTION_TYPES,
+    CONSTRUCTION_TYPE_LABELS,
+    FABRIC_PATTERNS,
+    WEIGHT_UNITS,
+    STANDARD_COLORS,
+    getAllPatterns,
+    getPatternsByType,
+    getPatternByCode,
+    isValidPattern,
+    getWeightUnit,
+    isValidWeightUnit,
+    normalizeColor,
+    type ConstructionType,
+    type FabricPattern,
+    type WeightUnit,
+    type StandardColor,
+} from './fabric/index.js';
+
+// ============================================
+// BOM CONFIGURATION (3-Level BOM System)
+// ============================================
+
+export {
+    COMPONENT_TYPES,
+    COMPONENT_ROLES,
+    TRIM_CATEGORIES,
+    SERVICE_CATEGORIES,
+    QUANTITY_UNITS,
+    getComponentType,
+    getRolesByType,
+    getRole,
+    getAllRoles,
+    isValidRole,
+    type ComponentTypeConfig,
+    type ComponentTypeCode,
+    type ComponentRoleConfig,
+    type TrimCategory,
+    type ServiceCategory,
+    type QuantityUnit,
+} from './bom/index.js';

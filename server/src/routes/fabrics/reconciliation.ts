@@ -12,7 +12,7 @@ import { chunkProcess } from '../../utils/asyncUtils.js';
 import { NotFoundError, ValidationError, BusinessLogicError } from '../../utils/errors.js';
 import type {
     FabricBalance,
-    FabricWithRelations,
+    FabricWithFabricType,
     Reconciliation,
     ReconciliationBasic,
     ReconciliationItemUpdate,
@@ -64,10 +64,10 @@ router.post('/reconciliation/start', authenticateToken, asyncHandler(async (req:
         where: { isActive: true },
         include: { fabricType: true },
         orderBy: { name: 'asc' },
-    }) as FabricWithRelations[];
+    }) as FabricWithFabricType[];
 
     // Calculate current balances (batched to prevent connection pool exhaustion)
-    const fabricsWithBalance = await chunkProcess(fabrics, async (fabric: FabricWithRelations) => {
+    const fabricsWithBalance = await chunkProcess(fabrics, async (fabric: FabricWithFabricType) => {
         const balance = await calculateFabricBalance(req.prisma, fabric.id) as FabricBalance;
         return {
             fabricId: fabric.id,

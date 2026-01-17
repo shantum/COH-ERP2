@@ -54,13 +54,52 @@ export interface FabricWithRelations {
     supplierId: string | null;
     fabricType: FabricType;
     supplier: Supplier | null;
+    // NEW: Material hierarchy fields (optional for migration)
+    materialId?: string | null;
+    constructionType?: string | null;
+    pattern?: string | null;
+    weight?: number | null;
+    weightUnit?: string | null;
+    composition?: string | null;
+    avgShrinkagePct?: number | null;
+    defaultLeadTimeDays?: number | null;
+    defaultMinOrderQty?: number | null;
+    unit?: string | null;
+}
+
+/**
+ * Fabric without relations (for nested queries)
+ */
+export interface FabricBasic {
+    id: string;
+    name: string;
+    colorName: string;
+    colorHex: string | null;
+    standardColor: string | null;
+    costPerUnit: number | null;
+    leadTimeDays: number | null;
+    minOrderQty: number | null;
+    isActive: boolean;
+    fabricTypeId: string;
+    supplierId: string | null;
+    // NEW: Material hierarchy fields (optional)
+    materialId?: string | null;
+    constructionType?: string | null;
+    pattern?: string | null;
+    weight?: number | null;
+    weightUnit?: string | null;
+    composition?: string | null;
+    avgShrinkagePct?: number | null;
+    defaultLeadTimeDays?: number | null;
+    defaultMinOrderQty?: number | null;
+    unit?: string | null;
 }
 
 /**
  * Fabric type with fabrics relation
  */
 export interface FabricTypeWithFabrics extends FabricType {
-    fabrics: FabricWithRelations[];
+    fabrics: FabricBasic[];
 }
 
 /**
@@ -149,6 +188,17 @@ export interface FabricWithFabricType {
     fabricTypeId: string;
     supplierId: string | null;
     fabricType: FabricType;
+    // NEW: Material hierarchy fields (optional)
+    materialId?: string | null;
+    constructionType?: string | null;
+    pattern?: string | null;
+    weight?: number | null;
+    weightUnit?: string | null;
+    composition?: string | null;
+    avgShrinkagePct?: number | null;
+    defaultLeadTimeDays?: number | null;
+    defaultMinOrderQty?: number | null;
+    unit?: string | null;
 }
 
 /**

@@ -101,6 +101,7 @@ model Product {
   shopifyProductIds        String[]    @default([])
   fabricType               FabricType? @relation(fields: [fabricTypeId], references: [id])
   variations               Variation[]
+  bomTemplates             ProductBomTemplate[] // NEW: BOM structure for this product
 
   @@index([fabricTypeId])
   @@index([category])
@@ -127,6 +128,7 @@ model Variation {
   skus                   Sku[]
   fabric                 Fabric  @relation(fields: [fabricId], references: [id])
   product                Product @relation(fields: [productId], references: [id])
+  bomLines               VariationBomLine[] // NEW: BOM overrides for this variation
 
   @@unique([productId, colorName])
   @@index([productId])
@@ -175,6 +177,7 @@ model Sku {
   variation              Variation                     @relation(fields: [variationId], references: [id])
   skuCosting             SkuCosting?
   writeOffLogs           WriteOffLog[]
+  bomLines               SkuBomLine[]                  // NEW: BOM overrides for this SKU
 
   @@index([variationId])
   @@index([parentSkuId])
@@ -217,6 +220,52 @@ model FabricType {
   products            Product[]
 }
 
+// ============================================
+// MATERIAL HIERARCHY (NEW - 3-tier system)
+// ============================================
+
+// Level 1: Base fiber/material (replaces FabricType conceptually)
+model Material {
+  id          String   @id @default(uuid())
+  name        String   @unique // "Linen", "Pima Cotton", "Cotton", "Utility"
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fabrics     Fabric[] @relation("MaterialFabrics")
+}
+
+// Level 3: Color variant (the actual inventory item)
+model FabricColour {
+  id             String   @id @default(uuid())
+  fabricId       String
+  colourName     String   // "Navy Blue", "Rust", "Natural"
+  standardColour String?  // Normalized: "blue", "red", "beige"
+  colourHex      String?
+
+  // Cost/supply overrides (null = inherit from Fabric)
+  costPerUnit    Float?
+  supplierId     String?
+  leadTimeDays   Int?
+  minOrderQty    Float?
+
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  fabric         Fabric   @relation("FabricColours", fields: [fabricId], references: [id])
+  supplier       Supplier? @relation("FabricColourSupplier", fields: [supplierId], references: [id])
+
+  // BOM usages
+  variationBomLines VariationBomLine[]
+  skuBomLines       SkuBomLine[]
+
+  @@unique([fabricId, colourName])
+  @@index([fabricId])
+  @@index([supplierId])
+}
+
 model Fabric {
   id                  String                     @id @default(uuid())
   fabricTypeId        String
@@ -229,15 +278,33 @@ model Fabric {
   leadTimeDays        Int?
   minOrderQty         Float?
   isActive            Boolean                    @default(true)
+
+  // NEW: Material hierarchy fields (optional for migration)
+  materialId          String?                    // Link to new Material model
+  constructionType    String?                    // "knit", "woven"
+  pattern             String?                    // "single_jersey", "french_terry", "twill", "plain"
+  weight              Float?                     // 180 (for gsm), 40 (for lea)
+  weightUnit          String?                    // "gsm", "lea", "oz"
+  composition         String?                    // "100% Cotton", "55% Linen 45% Cotton"
+  avgShrinkagePct     Float?                     // Shrinkage percentage
+  defaultLeadTimeDays Int?                       // Default lead time for colours
+  defaultMinOrderQty  Float?                     // Default min order for colours
+  unit                String?                    // "meters", "yards"
+
   fabricType          FabricType                 @relation(fields: [fabricTypeId], references: [id])
   supplier            Supplier?                  @relation(fields: [supplierId], references: [id])
+  material            Material?                  @relation("MaterialFabrics", fields: [materialId], references: [id])
   fabricOrders        FabricOrder[]
   reconciliationItems FabricReconciliationItem[]
   transactions        FabricTransaction[]
   variations          Variation[]
+  colours             FabricColour[]             @relation("FabricColours")
 
   @@index([fabricTypeId])
   @@index([supplierId])
+  @@index([materialId])
+  @@index([constructionType])
+  @@index([pattern])
 }
 
 model Supplier {
@@ -252,6 +319,8 @@ model Supplier {
   fabrics            Fabric[]
   fabricOrders       FabricOrder[]
   fabricTransactions FabricTransaction[]
+  fabricColours      FabricColour[]      @relation("FabricColourSupplier")
+  trimItems          TrimItem[]          @relation("TrimSupplier")
 }
 
 model FabricTransaction {
@@ -1054,4 +1123,219 @@ model Pincode {
 
   @@index([state])
   @@index([district])
+}
+
+// ============================================
+// VENDOR MODEL (for services)
+// ============================================
+
+model Vendor {
+  id           String        @id @default(uuid())
+  name         String
+  contactName  String?
+  email        String?
+  phone        String?
+  address      String?
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  serviceItems ServiceItem[]
+}
+
+// ============================================
+// CATALOG MODELS (TrimItem, ServiceItem)
+// ============================================
+
+model TrimItem {
+  id            String   @id @default(uuid())
+  code          String   @unique // "BTN-SHELL-18L"
+  name          String            // "Shell Button 18L"
+  category      String            // "button", "zipper", "elastic", "label", "thread"
+  description   String?
+
+  costPerUnit   Float
+  unit          String   @default("piece") // "piece", "meter", "spool"
+
+  supplierId    String?
+  minOrderQty   Float?
+  leadTimeDays  Int?
+
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  supplier      Supplier? @relation("TrimSupplier", fields: [supplierId], references: [id])
+
+  // BOM usages
+  productBomTemplates ProductBomTemplate[]
+  variationBomLines   VariationBomLine[]
+  skuBomLines         SkuBomLine[]
+
+  @@index([category])
+  @@index([supplierId])
+}
+
+model ServiceItem {
+  id           String   @id @default(uuid())
+  code         String   @unique // "PRINT-BLOCK-INDIGO"
+  name         String            // "Block Print - Indigo Floral"
+  category     String            // "printing", "embroidery", "washing", "dyeing"
+  description  String?
+
+  costPerJob   Float             // Base cost per unit processed
+  costUnit     String   @default("per_piece") // "per_piece", "per_meter"
+
+  vendorId     String?
+  leadTimeDays Int?
+
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  vendor       Vendor?  @relation(fields: [vendorId], references: [id])
+
+  // BOM usages
+  productBomTemplates ProductBomTemplate[]
+  variationBomLines   VariationBomLine[]
+  skuBomLines         SkuBomLine[]
+
+  @@index([category])
+  @@index([vendorId])
+}
+
+// ============================================
+// BOM COMPONENT TYPE DEFINITIONS
+// ============================================
+
+model ComponentType {
+  id             String          @id @default(uuid())
+  code           String          @unique // "FABRIC", "TRIM", "SERVICE"
+  name           String                   // "Fabric", "Trim", "Service"
+  trackInventory Boolean         @default(true) // false for SERVICE
+  sortOrder      Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  roles          ComponentRole[]
+}
+
+model ComponentRole {
+  id              String        @id @default(uuid())
+  typeId          String
+  code            String        // "main", "accent", "lining", "button", "print"
+  name            String        // "Main Fabric", "Button", "Block Print"
+  isRequired      Boolean       @default(false) // true for "main"
+  allowMultiple   Boolean       @default(false) // true for some trims
+  defaultQuantity Float?        // e.g., 7 for buttons
+  defaultUnit     String?       // "meter", "piece", "job"
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  type            ComponentType @relation(fields: [typeId], references: [id])
+
+  // BOM usages
+  productBomTemplates ProductBomTemplate[]
+  variationBomLines   VariationBomLine[]
+  skuBomLines         SkuBomLine[]
+
+  @@unique([typeId, code])
+  @@index([typeId])
+}
+
+// ============================================
+// 3-LEVEL BOM SYSTEM
+// ============================================
+
+// Level 1: Product BOM Template (structure + defaults)
+model ProductBomTemplate {
+  id              String   @id @default(uuid())
+  productId       String
+  roleId          String   // ComponentRole.id
+
+  // Component (optional at product level - fabric colors set at variation)
+  trimItemId      String?  // Trims CAN be set here (same buttons for all colors)
+  serviceItemId   String?  // Services CAN be set here (same print for all colors)
+  // Note: fabricColourId NOT here - fabrics are color-specific, set at variation
+
+  // Default quantity (inherited by variations and SKUs)
+  defaultQuantity Float    @default(1)
+  quantityUnit    String   @default("unit") // "meter", "piece", "job"
+  wastagePercent  Float    @default(0)
+  notes           String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  role            ComponentRole @relation(fields: [roleId], references: [id])
+  trimItem        TrimItem?     @relation(fields: [trimItemId], references: [id])
+  serviceItem     ServiceItem?  @relation(fields: [serviceItemId], references: [id])
+
+  @@unique([productId, roleId]) // One template per role per product
+  @@index([productId])
+  @@index([roleId])
+}
+
+// Level 2: Variation BOM Override (fabric colors + overrides)
+model VariationBomLine {
+  id             String   @id @default(uuid())
+  variationId    String
+  roleId         String   // ComponentRole.id
+
+  // Component overrides (null = inherit from product template)
+  fabricColourId String?  // REQUIRED for fabric roles (color-specific)
+  trimItemId     String?  // Override trim if this variant uses different one
+  serviceItemId  String?  // Override service if this variant uses different one
+
+  // Quantity override (null = inherit from product template)
+  quantity       Float?
+  wastagePercent Float?
+  notes          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  variation      Variation     @relation(fields: [variationId], references: [id], onDelete: Cascade)
+  role           ComponentRole @relation(fields: [roleId], references: [id])
+  fabricColour   FabricColour? @relation(fields: [fabricColourId], references: [id])
+  trimItem       TrimItem?     @relation(fields: [trimItemId], references: [id])
+  serviceItem    ServiceItem?  @relation(fields: [serviceItemId], references: [id])
+
+  @@unique([variationId, roleId]) // One line per role per variation
+  @@index([variationId])
+  @@index([roleId])
+  @@index([fabricColourId])
+}
+
+// Level 3: SKU BOM Line (size-specific overrides)
+model SkuBomLine {
+  id             String   @id @default(uuid())
+  skuId          String
+  roleId         String   // ComponentRole.id
+
+  // Component override (null = inherit from variation → product)
+  fabricColourId String?  // Rare: specific SKU uses different fabric
+  trimItemId     String?
+  serviceItemId  String?
+
+  // Quantity override (null = inherit from variation → product)
+  quantity       Float?   // Common: XL uses more fabric
+  wastagePercent Float?
+  overrideCost   Float?   // Override catalog cost if needed
+  notes          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  sku            Sku           @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  role           ComponentRole @relation(fields: [roleId], references: [id])
+  fabricColour   FabricColour? @relation(fields: [fabricColourId], references: [id])
+  trimItem       TrimItem?     @relation(fields: [trimItemId], references: [id])
+  serviceItem    ServiceItem?  @relation(fields: [serviceItemId], references: [id])
+
+  @@unique([skuId, roleId]) // One line per role per SKU
+  @@index([skuId])
+  @@index([roleId])
 }
