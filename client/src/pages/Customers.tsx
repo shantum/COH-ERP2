@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { customersApi } from '../services/api';
+import { customersApi, ordersApi } from '../services/api';
 import { trpc } from '../services/trpc';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
-import CustomerDetailModal from '../components/orders/CustomerDetailModal';
+import { UnifiedOrderModal } from '../components/orders';
+import type { Order } from '../types';
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -60,11 +61,45 @@ const TIME_PERIOD_OPTIONS = [
 export default function Customers() {
     const [tab, setTab] = useState<'all' | 'highValue' | 'atRisk' | 'returners'>('all');
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+    const [modalOrder, setModalOrder] = useState<Order | null>(null);
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(0);
     const [topN, setTopN] = useState(100);
     const [timePeriod, setTimePeriod] = useState<number | 'all'>('all');
     const debouncedSearch = useDebounce(search, 300);
+
+    // Fetch customer's most recent order when selected
+    const { data: customerOrderData, isLoading: isLoadingCustomerOrder } = trpc.customers.get.useQuery(
+        { id: selectedCustomerId! },
+        { enabled: !!selectedCustomerId && !modalOrder }
+    );
+
+    // Fetch full order when customer data is available
+    useEffect(() => {
+        if (customerOrderData?.recentOrders?.length && !modalOrder) {
+            const fetchOrder = async () => {
+                try {
+                    const response = await ordersApi.getById(customerOrderData.recentOrders[0].id);
+                    setModalOrder(response.data as Order);
+                } catch (error) {
+                    console.error('Failed to fetch order:', error);
+                }
+            };
+            fetchOrder();
+        }
+    }, [customerOrderData, modalOrder]);
+
+    // Handle customer row click
+    const handleCustomerClick = useCallback((customerId: string) => {
+        setSelectedCustomerId(customerId);
+        setModalOrder(null); // Reset modal order to trigger fetch
+    }, []);
+
+    // Close modal
+    const handleCloseModal = useCallback(() => {
+        setSelectedCustomerId(null);
+        setModalOrder(null);
+    }, []);
 
     // Reset page when search changes
     useMemo(() => { setPage(0); }, [debouncedSearch]);
@@ -378,7 +413,7 @@ export default function Customers() {
                     </tr></thead>
                     <tbody>
                         {displayData?.map((c: any) => (
-                            <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedCustomerId(c.id)}>
+                            <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50 cursor-pointer" onClick={() => handleCustomerClick(c.id)}>
                                 <td className="table-cell"><div className="flex items-center gap-2">{getTierIcon(c.customerTier)}<span className="font-medium">{c.firstName} {c.lastName}</span></div></td>
                                 <td className="table-cell text-gray-500">{c.email}</td>
                                 <td className="table-cell text-right">{c.totalOrders}</td>
@@ -429,11 +464,42 @@ export default function Customers() {
                 )}
             </div>
 
-            {/* Customer Detail Modal */}
-            <CustomerDetailModal
-                customerId={selectedCustomerId}
-                onClose={() => setSelectedCustomerId(null)}
-            />
+            {/* Loading state while fetching customer order */}
+            {selectedCustomerId && !modalOrder && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={handleCloseModal} />
+                    <div className="relative bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
+                        {isLoadingCustomerOrder ? (
+                            <>
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+                                <p className="text-sm text-gray-600">Loading customer profile...</p>
+                            </>
+                        ) : customerOrderData && customerOrderData.recentOrders?.length === 0 ? (
+                            <>
+                                <div className="p-3 bg-gray-100 rounded-full">
+                                    <ShoppingBag size={24} className="text-gray-400" />
+                                </div>
+                                <p className="text-sm text-gray-600">This customer has no orders yet.</p>
+                                <button
+                                    onClick={handleCloseModal}
+                                    className="mt-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </>
+                        ) : null}
+                    </div>
+                </div>
+            )}
+
+            {/* Unified Order Modal - Customer Tab */}
+            {modalOrder && (
+                <UnifiedOrderModal
+                    order={modalOrder}
+                    initialMode="customer"
+                    onClose={handleCloseModal}
+                />
+            )}
         </div>
     );
 }
