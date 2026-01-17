@@ -1,18 +1,18 @@
 /**
- * ProductsViewSwitcher - Dual-hierarchy view for Products
+ * ProductsViewSwitcher - Dual-view for Products
  *
  * Two viewing modes:
  * 1. By Product - Product → Variation → SKU hierarchy (default)
- * 2. By Category - Gender → Material Type → Fabric grouping
+ * 2. By SKU - Flat table of all SKUs with sorting/filtering
  *
  * Features:
  * - Smooth view transitions
- * - Filter persistence
+ * - Filter persistence (gender, category, fabric type)
  * - World-class UI with shadcn components
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { LayoutGrid, Layers, Filter, X, ChevronDown, Users, Shirt, Scissors } from 'lucide-react';
+import { LayoutGrid, Grid2x2, Filter, X, Users, Shirt, Scissors } from 'lucide-react';
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -25,11 +25,11 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { ProductsDataTable } from './ProductsDataTable';
-import { CategoryGroupedView } from './CategoryGroupedView';
+import { SkuFlatView } from './SkuFlatView';
 import { useProductsTree } from './hooks/useProductsTree';
 import type { ProductTreeNode } from './types';
 
-type ViewMode = 'product' | 'category';
+type ViewMode = 'product' | 'sku';
 
 interface ProductsViewSwitcherProps {
     searchQuery?: string;
@@ -113,9 +113,9 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                             <LayoutGrid size={16} />
                             <span className="hidden sm:inline">By Product</span>
                         </TabsTrigger>
-                        <TabsTrigger value="category" className="gap-2 data-[state=active]:bg-white">
-                            <Layers size={16} />
-                            <span className="hidden sm:inline">By Category</span>
+                        <TabsTrigger value="sku" className="gap-2 data-[state=active]:bg-white">
+                            <Grid2x2 size={16} />
+                            <span className="hidden sm:inline">By SKU</span>
                         </TabsTrigger>
                     </TabsList>
                 </Tabs>
@@ -293,12 +293,11 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                         filteredData={filteredProducts}
                     />
                 ) : (
-                    <CategoryGroupedView
+                    <SkuFlatView
                         products={filteredProducts}
                         searchQuery={searchQuery}
                         onViewProduct={onViewProduct}
                         onEditBom={onEditBom}
-                        groupBy="gender"
                     />
                 )}
             </div>
