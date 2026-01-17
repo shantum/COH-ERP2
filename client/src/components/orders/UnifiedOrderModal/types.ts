@@ -3,7 +3,7 @@
  * Consolidates all order modal functionality into one interface
  */
 
-import type { Order, OrderLine, Sku } from '../../../types';
+import type { Order, OrderLine } from '../../../types';
 
 export type ModalMode = 'view' | 'edit' | 'ship' | 'customer';
 
@@ -68,23 +68,31 @@ export interface UnifiedOrderModalState {
 
 export interface UnifiedOrderModalProps {
   order: Order;
-  allSkus?: Sku[];
-  inventoryBalance?: any[];
-  onClose: () => void;
-  // Mutations passed from parent
-  onUpdateOrder?: (data: any) => void;
-  onUpdateLine?: (lineId: string, data: any) => void;
-  onAddLine?: (orderId: string, data: any) => void;
-  onCancelLine?: (lineId: string) => void;
-  onUncancelLine?: (lineId: string) => void;
-  onShip?: (data: { awbNumber: string; courier: string }) => void;
-  onShipLines?: (data: { lineIds: string[]; awbNumber: string; courier: string }) => void;
-  // Loading states
-  isUpdating?: boolean;
-  isShipping?: boolean;
-  isAddingLine?: boolean;
-  // Initial mode
   initialMode?: ModalMode;
+  onClose: () => void;
+  onSuccess?: () => void;
+}
+
+// Extended order type with Shopify details (used by CustomerSection, ItemsSection)
+export interface OrderWithShopifyDetails extends Order {
+  shopifyDetails?: {
+    shippingAddress?: AddressData;
+    billingAddress?: AddressData;
+    customerEmail?: string;
+    customerPhone?: string;
+  };
+}
+
+// Shopify line item structure from raw order data
+export interface ShopifyLineItem {
+  sku?: string;
+  variant_id?: number;
+  title?: string;
+  quantity?: number;
+  price?: string;
+  name?: string;
+  product_id?: number;
+  variant_title?: string;
 }
 
 // Timeline event for order history

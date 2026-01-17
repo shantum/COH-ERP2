@@ -7,13 +7,22 @@
 
 import { useMemo } from 'react';
 import {
-  Crown, Medal, Award,
   Mail, Phone, MessageCircle,
   Palette, Package, Layers,
   RotateCcw, Truck, ShoppingBag,
   AlertTriangle, AlertCircle, CheckCircle2
 } from 'lucide-react';
 import { OrderHistoryCard } from './OrderHistoryCard';
+import {
+  getTierConfig,
+  calculateHealthScore,
+  getHealthScoreColor,
+  getHealthScoreLabel,
+  calculateTierProgress,
+  getColorHex,
+  getInitials,
+  type CustomerData as BaseCustomerData,
+} from '../../../../utils/customerIntelligence';
 
 // ============================================================================
 // TYPES
@@ -41,26 +50,12 @@ interface OrderSummary {
   orderLines?: OrderLine[];
 }
 
-interface CustomerData {
-  id: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  customerTier?: string | null;
-  lifetimeValue?: number | null;
-  totalOrders?: number | null;
-  returnRate?: number | null;
-  rtoCount?: number | null;
-  exchangeCount?: number | null;
-  firstOrderDate?: string | null;
-  lastOrderDate?: string | null;
-  acceptsMarketing?: boolean | null;
+// Extended CustomerData with affinities and orders
+interface CustomerData extends BaseCustomerData {
   colorAffinity?: Array<{ color: string; qty: number; hex?: string }> | null;
   productAffinity?: Array<{ productName: string; qty: number }> | null;
   fabricAffinity?: Array<{ fabricType: string; qty: number }> | null;
   orders?: OrderSummary[] | null;
-  avgOrderValue?: number | null;
 }
 
 interface CustomerTabProps {
@@ -71,175 +66,11 @@ interface CustomerTabProps {
 }
 
 // ============================================================================
-// CONSTANTS
-// ============================================================================
-
-// Must match backend tierUtils.js DEFAULT_TIER_THRESHOLDS
-const TIER_THRESHOLDS = {
-  bronze: 0,
-  silver: 10000,
-  gold: 25000,
-  platinum: 50000
-};
-
-const TIER_CONFIG = {
-  platinum: {
-    bg: 'bg-slate-700',
-    text: 'text-white',
-    icon: Crown,
-    label: 'PLATINUM',
-    border: 'border-slate-500',
-  },
-  gold: {
-    bg: 'bg-amber-500',
-    text: 'text-white',
-    icon: Medal,
-    label: 'GOLD',
-    border: 'border-amber-400',
-  },
-  silver: {
-    bg: 'bg-slate-400',
-    text: 'text-white',
-    icon: Medal,
-    label: 'SILVER',
-    border: 'border-slate-300',
-  },
-  bronze: {
-    bg: 'bg-amber-700',
-    text: 'text-amber-100',
-    icon: Award,
-    label: 'BRONZE',
-    border: 'border-amber-600',
-  }
-};
-
-// Color name to hex mapping for visual swatches
-const COLOR_MAP: Record<string, string> = {
-  'black': '#1a1a1a',
-  'carbon black': '#2d2d2d',
-  'white': '#ffffff',
-  'off white': '#faf9f6',
-  'cream': '#fffdd0',
-  'navy': '#000080',
-  'navy blue': '#000080',
-  'blue': '#0066cc',
-  'green': '#228b22',
-  'red': '#dc143c',
-  'maroon': '#800000',
-  'wine': '#722f37',
-  'pink': '#ffc0cb',
-  'purple': '#800080',
-  'lavender': '#e6e6fa',
-  'orange': '#ff8c00',
-  'yellow': '#ffd700',
-  'gray': '#808080',
-  'grey': '#808080',
-  'beige': '#f5f5dc',
-  'brown': '#8b4513',
-};
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-function calculateHealthScore(customer: CustomerData): number {
-  if (!customer) return 0;
-
-  const daysSinceLastOrder = customer.lastOrderDate
-    ? Math.floor((Date.now() - new Date(customer.lastOrderDate).getTime()) / (1000 * 60 * 60 * 24))
-    : 365;
-
-  const totalOrders = customer.totalOrders || 0;
-  const ltv = customer.lifetimeValue || 0;
-  const returnRate = customer.returnRate || 0;
-
-  const monthsSinceFirst = customer.firstOrderDate
-    ? Math.max(1, Math.floor((Date.now() - new Date(customer.firstOrderDate).getTime()) / (1000 * 60 * 60 * 24 * 30)))
-    : 1;
-
-  const ordersPerMonth = totalOrders / monthsSinceFirst;
-
-  const recencyScore = Math.max(0, (60 - daysSinceLastOrder) / 60) * 25;
-  const frequencyScore = Math.min(ordersPerMonth * 15, 25);
-  const monetaryScore = Math.min((ltv / 30000) * 25, 25);
-  const returnPenalty = Math.min(returnRate * 0.5, 25);
-
-  return Math.round(Math.max(0, Math.min(100,
-    recencyScore + frequencyScore + monetaryScore + (25 - returnPenalty)
-  )));
-}
-
-function getHealthScoreColor(score: number): string {
-  if (score >= 70) return '#10b981';
-  if (score >= 40) return '#f59e0b';
-  return '#ef4444';
-}
-
-function getHealthScoreLabel(score: number): string {
-  if (score >= 70) return 'Excellent';
-  if (score >= 40) return 'Moderate';
-  return 'At Risk';
-}
-
-function calculateTierProgress(ltv: number, currentTier: string): { progress: number; nextTier: string | null; amountToNext: number; shouldUpgrade: boolean } {
-  const tiers = ['bronze', 'silver', 'gold', 'platinum'];
-  const tierIndex = tiers.indexOf(currentTier?.toLowerCase() || 'bronze');
-
-  if (tierIndex === -1 || tierIndex === tiers.length - 1) {
-    return { progress: 100, nextTier: null, amountToNext: 0, shouldUpgrade: false };
-  }
-
-  const currentThreshold = TIER_THRESHOLDS[currentTier?.toLowerCase() as keyof typeof TIER_THRESHOLDS] || 0;
-  const nextTierName = tiers[tierIndex + 1] as keyof typeof TIER_THRESHOLDS;
-  const nextThreshold = TIER_THRESHOLDS[nextTierName];
-  const amountToNext = Math.max(0, nextThreshold - ltv);
-
-  if (ltv >= nextThreshold) {
-    return {
-      progress: 100,
-      nextTier: nextTierName.charAt(0).toUpperCase() + nextTierName.slice(1),
-      amountToNext: 0,
-      shouldUpgrade: true
-    };
-  }
-
-  const progress = Math.min(100, Math.max(0,
-    ((ltv - currentThreshold) / (nextThreshold - currentThreshold)) * 100
-  ));
-
-  return {
-    progress,
-    nextTier: nextTierName.charAt(0).toUpperCase() + nextTierName.slice(1),
-    amountToNext,
-    shouldUpgrade: false
-  };
-}
-
-function getColorHex(colorName: string): string {
-  const normalized = colorName.toLowerCase().trim();
-  if (COLOR_MAP[normalized]) return COLOR_MAP[normalized];
-
-  const sortedKeys = Object.keys(COLOR_MAP).sort((a, b) => b.length - a.length);
-  for (const key of sortedKeys) {
-    if (normalized.includes(key) || key.includes(normalized)) {
-      return COLOR_MAP[key];
-    }
-  }
-  return '#9ca3af';
-}
-
-function getInitials(firstName: string | null | undefined, lastName: string | null | undefined): string {
-  const first = firstName?.charAt(0)?.toUpperCase() || '';
-  const last = lastName?.charAt(0)?.toUpperCase() || '';
-  return first + last || '?';
-}
-
-// ============================================================================
 // SUB-COMPONENTS
 // ============================================================================
 
 function TierBadge({ tier }: { tier: string }) {
-  const config = TIER_CONFIG[tier?.toLowerCase() as keyof typeof TIER_CONFIG] || TIER_CONFIG.bronze;
+  const config = getTierConfig(tier);
   const Icon = config.icon;
 
   return (

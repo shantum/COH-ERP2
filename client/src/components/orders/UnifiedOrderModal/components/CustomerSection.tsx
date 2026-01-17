@@ -7,18 +7,8 @@ import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, Check, Clock
 import { customersApi } from '../../../../services/api';
 import { CustomerSearch } from '../../../common/CustomerSearch';
 import type { Order } from '../../../../types';
-import type { ModalMode, AddressData, EditFormState } from '../types';
+import type { ModalMode, AddressData, EditFormState, OrderWithShopifyDetails } from '../types';
 import { formatAddressDisplay } from '../hooks/useUnifiedOrderModal';
-
-// Extended order type with shopifyDetails
-interface OrderWithShopifyDetails extends Order {
-  shopifyDetails?: {
-    shippingAddress?: AddressData;
-    billingAddress?: AddressData;
-    customerEmail?: string;
-    customerPhone?: string;
-  };
-}
 
 interface CustomerSectionProps {
   order: Order;

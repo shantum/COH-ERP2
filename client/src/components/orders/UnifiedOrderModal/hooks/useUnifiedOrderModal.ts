@@ -552,7 +552,6 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   return {
     // Mode
     mode,
-    setMode,
     handleModeChange,
     canEdit,
     canShip,
@@ -563,7 +562,6 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     canGoBack,
     navigateToOrder,
     goBack,
-    updateNavigationForNewOrder,
 
     // Edit form
     editForm,
@@ -582,18 +580,13 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     shipForm,
     handleShipFieldChange,
     handleToggleLineSelection,
-    handleSelectAllLines,
-    handleDeselectAllLines,
     expectedAwb,
     awbMatches,
     canShipOrder,
 
     // Lines
     categorizedLines,
-    activeLines,
-    orderTotal,
     calculatedTotal,
-    totalItems,
     handleAddLine,
     handleUpdateLine,
     handleCancelLine,
@@ -601,18 +594,9 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
 
     // UI state
     hasUnsavedChanges,
-    setHasUnsavedChanges,
-    expandedSections,
-    toggleSection,
     isSearchingCustomer,
     setIsSearchingCustomer,
     isAddingProduct,
     setIsAddingProduct,
-
-    // Actions
-    getSaveData,
-    getShipData,
-    getShipLinesData,
-    resetForm,
   };
 }

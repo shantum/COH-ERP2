@@ -95,7 +95,6 @@ export function UnifiedOrderModal({
     isAddingProduct,
     canEdit,
     canCustomer,
-    totalItems: _totalItems,
     calculatedTotal,
     categorizedLines,
     expectedAwb,
