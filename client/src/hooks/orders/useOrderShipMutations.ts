@@ -141,13 +141,13 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             await trpcUtils.orders.list.cancel(queryInput);
             const previousData = getCachedData();
 
-            // Ship the specified lines
+            // Ship the specified lines (provide defaults for optional fields)
             trpcUtils.orders.list.setData(
                 queryInput,
                 (old: any) => optimisticShipLines(old, lineIds, {
                     lineStatus: 'shipped',
-                    awbNumber,
-                    courier,
+                    awbNumber: awbNumber || 'ADMIN-MANUAL',
+                    courier: courier || 'Manual',
                     shippedAt: new Date().toISOString(),
                 }) as any
             );

@@ -139,7 +139,7 @@ interface OrdersGridProps {
     }) => void;
     onRemoveCustomization?: (lineId: string, skuCode: string) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
-    onForceShipLine?: (lineId: string, data: { awbNumber: string; courier: string }) => void;
+    onForceShipLine?: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
     // Post-ship action handlers (for shipped/rto/cod-pending/archived views)
     onUnship?: (orderId: string) => void;
     onMarkDelivered?: (orderId: string) => void;
