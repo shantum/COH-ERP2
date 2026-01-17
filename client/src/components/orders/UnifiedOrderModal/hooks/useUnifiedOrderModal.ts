@@ -239,11 +239,6 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     return { shipped, packed, other };
   }, [order.orderLines]);
 
-  // Active (non-cancelled) lines
-  const activeLines = useMemo(() => {
-    return order.orderLines?.filter(l => l.lineStatus !== 'cancelled') || [];
-  }, [order.orderLines]);
-
   // Calculate order total using shared pricing utility
   // Handles exchange orders correctly (always calculates from lines)
   const orderTotal = useMemo(() => {
