@@ -300,6 +300,7 @@ model Fabric {
   variations          Variation[]
   colours             FabricColour[]             @relation("FabricColours")
 
+  @@unique([materialId, name]) // Prevent duplicate fabric names under the same material
   @@index([fabricTypeId])
   @@index([supplierId])
   @@index([materialId])
@@ -309,7 +310,7 @@ model Fabric {
 
 model Supplier {
   id                 String              @id @default(uuid())
-  name               String
+  name               String              @unique // Prevent duplicate supplier names
   contactName        String?
   email              String?
   phone              String?
@@ -779,7 +780,7 @@ model FeedbackTag {
 
 model Tailor {
   id                String            @id @default(uuid())
-  name              String
+  name              String            @unique // Prevent duplicate tailor names
   specializations   String?
   dailyCapacityMins Int               @default(480)
   isActive          Boolean           @default(true)
@@ -1131,7 +1132,7 @@ model Pincode {
 
 model Vendor {
   id           String        @id @default(uuid())
-  name         String
+  name         String        @unique // Prevent duplicate vendor names
   contactName  String?
   email        String?
   phone        String?

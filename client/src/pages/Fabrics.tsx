@@ -364,7 +364,9 @@ export default function Fabrics() {
         const fabricType = filterOptions?.fabricTypes?.find((t: any) => t.id === showAddColor);
         createFabric.mutate({
             fabricTypeId: showAddColor,
-            name: `${fabricType?.name || 'Fabric'} - ${colorForm.colorName}`,
+            // Use clean fabric type name (not concatenated with color)
+            // Color information is stored separately in colorName field
+            name: fabricType?.name || 'Fabric',
             colorName: colorForm.colorName,
             standardColor: colorForm.standardColor || null,
             colorHex: colorForm.colorHex,

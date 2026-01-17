@@ -43,6 +43,7 @@ import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Layers, Package, AlertTriangle, XCircle, ArrowLeft, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { catalogApi, productsApi } from '../services/api';
+import BomEditorPanel from '../components/bom/BomEditorPanel';
 import { ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
@@ -122,6 +123,22 @@ export default function Catalog() {
         level: EditLevel;
         data: any;
     }>({ isOpen: false, level: 'sku', data: null });
+
+    // BOM editor panel state
+    const [bomEditor, setBomEditor] = useState<{
+        isOpen: boolean;
+        productId: string;
+        productName: string;
+    }>({ isOpen: false, productId: '', productName: '' });
+
+    // Open BOM editor for a product
+    const openBomEditor = useCallback((row: any) => {
+        setBomEditor({
+            isOpen: true,
+            productId: row.productId,
+            productName: row.productName,
+        });
+    }, []);
 
     // Apply quick filter when search input changes (client-side, instant)
     useEffect(() => {
@@ -447,10 +464,11 @@ export default function Catalog() {
         handleUpdateFabric,
         promptLiningChange,
         openEditModal,
+        openBomEditor,
         setFilter,
         setViewLevel,
         FabricEditPopover,
-    }), [viewLevel, filterOptions, catalogData, uniqueFabricTypes, handleUpdateFabricType, handleUpdateFabric, promptLiningChange, openEditModal]);
+    }), [viewLevel, filterOptions, catalogData, uniqueFabricTypes, handleUpdateFabricType, handleUpdateFabric, promptLiningChange, openEditModal, openBomEditor]);
 
     // Mutation for updating fabric consumption by SKU IDs
     const updateConsumption = useMutation({
@@ -946,6 +964,14 @@ export default function Catalog() {
                 fabricTypes={uniqueFabricTypes}
                 fabrics={filterOptions?.fabrics || []}
                 isLoading={updateSkuMutation.isPending || updateVariationFullMutation.isPending || updateProductFullMutation.isPending}
+            />
+
+            {/* BOM Editor Slide-out Panel */}
+            <BomEditorPanel
+                productId={bomEditor.productId}
+                productName={bomEditor.productName}
+                isOpen={bomEditor.isOpen}
+                onClose={() => setBomEditor({ isOpen: false, productId: '', productName: '' })}
             />
         </div>
     );

@@ -80,6 +80,7 @@ export interface CreateColumnDefsParams {
     handleUpdateFabric: (variationId: string, fabricId: string, affectedCount: number) => void;
     promptLiningChange: (row: any) => void;
     openEditModal: (row: any, level: 'sku' | 'variation' | 'product') => void;
+    openBomEditor?: (row: any) => void;
     setFilter: React.Dispatch<React.SetStateAction<any>>;
     setViewLevel: (level: ViewLevel) => void;
     FabricEditPopover: React.ComponentType<any>;
@@ -97,6 +98,7 @@ export function createColumnDefs({
     handleUpdateFabric,
     promptLiningChange,
     openEditModal,
+    openBomEditor,
     setFilter,
     setViewLevel,
     FabricEditPopover,
@@ -540,7 +542,7 @@ export function createColumnDefs({
         {
             colId: 'actions',
             headerName: '',
-            width: 80,
+            width: 110,
             pinned: 'right' as const,
             sortable: false,
             cellRenderer: (params: ICellRendererParams) => {
@@ -560,6 +562,20 @@ export function createColumnDefs({
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                         </button>
+                        {openBomEditor && (viewLevel === 'product' || viewLevel === 'variation') && (
+                            <button
+                                onClick={() => openBomEditor(row)}
+                                className="p-1 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
+                                title="Edit BOM"
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                                    <rect x="14" y="14" width="7" height="7" rx="1" />
+                                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                                </svg>
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 // TODO: Open quick inward modal
