@@ -205,6 +205,7 @@ export interface ShopifyOrderCache {
   tags: string | null; // Shopify order tags (e.g., "wholesale", "repeat_customer")
   trackingNumber: string | null; // Shopify's tracked tracking number from fulfillment
   trackingCompany: string | null; // Courier name from Shopify fulfillment
+  trackingUrl: string | null; // Shopify tracking URL for the shipment
   shippedAt: string | null; // When Shopify marked as fulfilled
   // Generated columns (auto-extracted from rawData by PostgreSQL)
   totalPrice: number | null; // Order total from rawData.total_price

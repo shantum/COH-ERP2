@@ -40,6 +40,10 @@ Login: `admin@coh.com` / `XOFiya@34`
 11. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
 12. **Line-level tracking**: delivery/RTO mutations are line-level; orders can have mixed states (partial delivery, multi-AWB)
 13. **Admin ship**: use `adminShip` mutation (not `ship` with force flag); requires admin role + `ENABLE_ADMIN_SHIP=true`
+14. **Tracking status mapping**: TEXT patterns override status codes; `cancel_status="Approved"` always means cancelled; "UD" code is unreliable
+15. **Shopify fulfillment**: syncs tracking data ONLY; ERP is source of truth for `shipped` status—never auto-ship from webhooks
+16. **Tracking sync**: excludes terminal statuses (`delivered`, `rto_delivered`) to avoid wasting API calls on unchangeable data
+17. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
 
 ## Orders Architecture
 
@@ -157,6 +161,36 @@ Source of truth: `server/src/services/shopifyOrderProcessor.ts`
 
 **Status precedence:** ERP is source of truth for `shipped`/`delivered`. Shopify captures tracking but does NOT auto-ship.
 
+## Tracking & iThink Integration
+
+### Status Mapping Priority (CRITICAL)
+
+Source: `server/src/config/mappings/trackingStatus.ts`
+
+**Resolution order** (check `cancel_status` FIRST, then apply resolver):
+1. **Cancel status field**: `cancel_status="Approved"` → `cancelled` (priority 110, checked before text/code)
+2. **Text patterns**: Match status text (e.g., "Reached At Destination") → MOST RELIABLE
+3. **Status codes**: Match code (e.g., "DL") → FALLBACK for reliable codes only
+4. **Unreliable codes**: "UD" is IGNORED in code matching—only text patterns apply
+
+**Why text-first?** Couriers reuse codes like "UD" for many states:
+- "UD" + "Reached At Destination" → `reached_destination` (text wins)
+- "UD" + "Cancelled" → `cancelled` (text wins)
+- "UD" + "In Transit" → `in_transit` (text wins)
+- "UD" with no text match → `in_transit` (fallback)
+
+### Tracking Sync Optimization
+
+- **Terminal statuses excluded**: `delivered`, `rto_delivered` never re-queried (saves 93% API calls)
+- **Page sizes**: Syncs process data in batches; use smaller pages for historical views
+- **Debug endpoint**: `/api/tracking/raw/:awbNumber` returns raw iThink response (no auth, debug only)
+
+### Key Gotchas
+- Always check `cancel_status` field before mapping status code/text
+- Never trust "UD" code alone—require text pattern match
+- Text patterns use `includes()` matching, codes use exact match
+- Exclude patterns (`excludePatterns`) prevent false positives (e.g., "rto delivered" won't match "delivered")
+
 ## Key Files
 
 ### Client
@@ -174,8 +208,10 @@ utils/orderHelpers.ts                    # flattenOrders, enrichRowsWithInventor
 ### Server
 ```
 config/                               # Centralized configuration system
+config/mappings/trackingStatus.ts     # iThink status mapping (text-first, cancel_status priority)
 routes/orders/mutations/              # crud, lifecycle, archive, lineOps, customization
 routes/orders/queries/                # views, search, summaries, analytics
+routes/tracking.ts                    # Tracking endpoints (AWB, batch, sync, debug /raw/:awb)
 utils/orderStateMachine.ts            # Line status state machine
 utils/orderViews.ts                   # VIEW_CONFIGS (flattening, enrichment)
 utils/orderEnrichment/                # Enrichment pipeline (9 files)
@@ -183,6 +219,8 @@ utils/patterns/                       # Query patterns (inventory, transactions,
 services/inventoryBalanceCache.ts     # Inventory cache
 services/customerStatsCache.ts        # Customer stats cache
 services/adminShipService.ts          # Admin force ship (isolated, feature-flagged)
+services/trackingSync.ts              # Background tracking sync (excludes terminal statuses)
+services/shopifyOrderProcessor.ts     # Shopify webhook processor (tracking sync only, no auto-ship)
 trpc/routers/orders.ts                # tRPC procedures
 ```
 
@@ -211,4 +249,4 @@ Centralized config system in `/server/src/config/`:
 - **Planning** → `Plan` agent
 
 ---
-**Updated till commit:** `fcf23c1` (2026-01-16)
+**Updated till commit:** `5a85ac5` (2026-01-17)
