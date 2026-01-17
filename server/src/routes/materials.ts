@@ -276,7 +276,7 @@ router.get('/tree', asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Full tree: fetch all data and nest it
-  const [allFabrics, allColours] = await Promise.all([
+  const [allFabrics, allColours, fabricVariations, colourBomLines] = await Promise.all([
     prisma.fabric.findMany({
       include: {
         material: { select: { name: true } },
@@ -302,7 +302,61 @@ router.get('/tree', asyncHandler(async (req: Request, res: Response) => {
       },
       orderBy: { colourName: 'asc' },
     }),
+    // Get variations using each fabric (for connected products)
+    // fabricId is required on Variation, so we get all variations
+    prisma.variation.findMany({
+      select: {
+        fabricId: true,
+        product: {
+          select: { id: true, name: true, styleCode: true },
+        },
+      },
+    }),
+    // Get BOM lines with fabric colours (for connected products at colour level)
+    prisma.variationBomLine.findMany({
+      where: { NOT: { fabricColourId: null } },
+      select: {
+        fabricColourId: true,
+        variation: {
+          select: {
+            product: {
+              select: { id: true, name: true, styleCode: true },
+            },
+          },
+        },
+      },
+    }),
   ]);
+
+  // Build fabric → products map
+  const fabricProductsMap = new Map<string, Array<{ id: string; name: string; styleCode: string | null }>>();
+  for (const v of fabricVariations) {
+    if (v.fabricId) {
+      const existing = fabricProductsMap.get(v.fabricId) || [];
+      // Avoid duplicates (same product through multiple variations)
+      if (!existing.some(p => p.id === v.product.id)) {
+        existing.push({ id: v.product.id, name: v.product.name, styleCode: v.product.styleCode });
+      }
+      fabricProductsMap.set(v.fabricId, existing);
+    }
+  }
+
+  // Build colour → products map
+  const colourProductsMap = new Map<string, Array<{ id: string; name: string; styleCode: string | null }>>();
+  for (const bom of colourBomLines) {
+    if (bom.fabricColourId && bom.variation?.product) {
+      const existing = colourProductsMap.get(bom.fabricColourId) || [];
+      // Avoid duplicates
+      if (!existing.some(p => p.id === bom.variation.product.id)) {
+        existing.push({
+          id: bom.variation.product.id,
+          name: bom.variation.product.name,
+          styleCode: bom.variation.product.styleCode,
+        });
+      }
+      colourProductsMap.set(bom.fabricColourId, existing);
+    }
+  }
 
   // Group fabrics by material
   const fabricsByMaterial = new Map<string, typeof allFabrics>();
@@ -327,42 +381,49 @@ router.get('/tree', asyncHandler(async (req: Request, res: Response) => {
     const materialFabrics = fabricsByMaterial.get(material.id) || [];
     const fabricNodes = materialFabrics.map((fabric) => {
       const fabricColours = coloursByFabric.get(fabric.id) || [];
-      const colourNodes = fabricColours.map((colour) => ({
-        id: colour.id,
-        type: 'colour' as const,
-        name: colour.colourName,
-        colourName: colour.colourName,
-        standardColour: colour.standardColour,
-        colourHex: colour.colourHex,
-        isActive: colour.isActive,
-        parentId: colour.fabricId,
-        fabricId: colour.fabricId,
-        fabricName: colour.fabric.name,
-        materialId: colour.fabric.materialId,
-        materialName: colour.fabric.material?.name,
-        // Own values
-        costPerUnit: colour.costPerUnit,
-        leadTimeDays: colour.leadTimeDays,
-        minOrderQty: colour.minOrderQty,
-        // Inherited values from fabric
-        inheritedCostPerUnit: colour.fabric.costPerUnit,
-        inheritedLeadTimeDays: colour.fabric.leadTimeDays,
-        inheritedMinOrderQty: colour.fabric.minOrderQty,
-        // Effective values (own or inherited)
-        effectiveCostPerUnit: colour.costPerUnit ?? colour.fabric.costPerUnit,
-        effectiveLeadTimeDays: colour.leadTimeDays ?? colour.fabric.leadTimeDays,
-        effectiveMinOrderQty: colour.minOrderQty ?? colour.fabric.minOrderQty,
-        // Inheritance flags
-        costInherited: colour.costPerUnit == null && colour.fabric.costPerUnit != null,
-        leadTimeInherited: colour.leadTimeDays == null && colour.fabric.leadTimeDays != null,
-        minOrderInherited: colour.minOrderQty == null && colour.fabric.minOrderQty != null,
-        // Supplier
-        supplierId: colour.supplierId,
-        supplierName: colour.supplier?.name,
-        // No children for colours
-        children: undefined,
-      }));
+      const colourNodes = fabricColours.map((colour) => {
+        const connectedProducts = colourProductsMap.get(colour.id) || [];
+        return {
+          id: colour.id,
+          type: 'colour' as const,
+          name: colour.colourName,
+          colourName: colour.colourName,
+          standardColour: colour.standardColour,
+          colourHex: colour.colourHex,
+          isActive: colour.isActive,
+          parentId: colour.fabricId,
+          fabricId: colour.fabricId,
+          fabricName: colour.fabric.name,
+          materialId: colour.fabric.materialId,
+          materialName: colour.fabric.material?.name,
+          // Own values
+          costPerUnit: colour.costPerUnit,
+          leadTimeDays: colour.leadTimeDays,
+          minOrderQty: colour.minOrderQty,
+          // Inherited values from fabric
+          inheritedCostPerUnit: colour.fabric.costPerUnit,
+          inheritedLeadTimeDays: colour.fabric.leadTimeDays,
+          inheritedMinOrderQty: colour.fabric.minOrderQty,
+          // Effective values (own or inherited)
+          effectiveCostPerUnit: colour.costPerUnit ?? colour.fabric.costPerUnit,
+          effectiveLeadTimeDays: colour.leadTimeDays ?? colour.fabric.leadTimeDays,
+          effectiveMinOrderQty: colour.minOrderQty ?? colour.fabric.minOrderQty,
+          // Inheritance flags
+          costInherited: colour.costPerUnit == null && colour.fabric.costPerUnit != null,
+          leadTimeInherited: colour.leadTimeDays == null && colour.fabric.leadTimeDays != null,
+          minOrderInherited: colour.minOrderQty == null && colour.fabric.minOrderQty != null,
+          // Supplier
+          supplierId: colour.supplierId,
+          supplierName: colour.supplier?.name,
+          // Connected products
+          productCount: connectedProducts.length,
+          connectedProducts: connectedProducts.slice(0, 5), // Limit to 5 for response size
+          // No children for colours
+          children: undefined,
+        };
+      });
 
+      const fabricConnectedProducts = fabricProductsMap.get(fabric.id) || [];
       return {
         id: fabric.id,
         type: 'fabric' as const,
@@ -385,6 +446,9 @@ router.get('/tree', asyncHandler(async (req: Request, res: Response) => {
         colourCount: fabric._count.colours,
         // Quantity unit: knit fabrics use kg, woven fabrics use m
         unit: fabric.unit || (fabric.constructionType === 'knit' ? 'kg' : 'm'),
+        // Connected products
+        productCount: fabricConnectedProducts.length,
+        connectedProducts: fabricConnectedProducts.slice(0, 5), // Limit to 5 for response size
         children: colourNodes.length > 0 ? colourNodes : undefined,
       };
     });

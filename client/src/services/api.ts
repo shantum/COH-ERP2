@@ -27,9 +27,9 @@ import type {
     CompleteBatchData,
 } from '../types';
 
-// In production, use relative URL; in development, use 127.0.0.1 (IPv4)
+// In production, use relative URL; in development, use localhost
 const API_BASE_URL = import.meta.env.VITE_API_URL ||
-    (import.meta.env.PROD ? '/api' : 'http://127.0.0.1:3001/api');
+    (import.meta.env.PROD ? '/api' : 'http://localhost:3001/api');
 
 const api = axios.create({
     baseURL: API_BASE_URL,
@@ -384,6 +384,33 @@ export const bomApi = {
 
     // Bulk apply template to all variations
     applyTemplateToAll: (productId: string) => api.post(`/bom/products/${productId}/apply-to-all`),
+
+    // Fabric colour linking
+    searchVariations: (params?: { q?: string; fabricId?: string; limit?: number }) =>
+        api.get('/bom/variations/search', { params }),
+    linkVariationsToColour: (colourId: string, variationIds: string[], roleId?: string) =>
+        api.post(`/bom/fabric-colours/${colourId}/link-variations`, { variationIds, roleId }),
+    // Get all fabric assignments for Fabric Mapping view
+    getFabricAssignments: (roleId?: string) =>
+        api.get('/bom/fabric-assignments', { params: roleId ? { roleId } : undefined }),
+
+    // Size-based consumption (quantity by size across all colors)
+    getSizeConsumptions: (productId: string, roleId: string) =>
+        api.get(`/bom/products/${productId}/size-consumptions`, { params: { roleId } }),
+    updateSizeConsumptions: (productId: string, roleId: string, consumptions: { size: string; quantity: number }[]) =>
+        api.put(`/bom/products/${productId}/size-consumptions`, { roleId, consumptions }),
+
+    // Consumption grid (spreadsheet view for bulk editing)
+    getConsumptionGrid: (params?: { role?: string; type?: string }) =>
+        api.get('/bom/consumption-grid', { params }),
+    updateConsumptionGrid: (updates: { productId: string; size: string; quantity: number }[], roleId: string) =>
+        api.put('/bom/consumption-grid', { updates, roleId }),
+
+    // Consumption import (CSV mapping)
+    getProductsForMapping: () => api.get('/bom/products-for-mapping'),
+    importConsumption: (imports: { productId: string; sizes: Record<string, number> }[]) =>
+        api.post('/bom/import-consumption', { imports }),
+    resetConsumption: () => api.post('/bom/reset-consumption'),
 };
 
 // Customers

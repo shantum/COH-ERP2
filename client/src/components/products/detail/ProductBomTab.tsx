@@ -1,16 +1,26 @@
 /**
- * ProductBomTab - Inline BOM display and editing for Product detail panel
+ * ProductBomTab - Unified BOM display for Product detail panel
  *
- * Shows the product's bill of materials:
- * - Template lines (trims, services)
- * - Cost summary
- * - Option to open full BOM editor
+ * Shows all BOM components (fabrics, trims, services) in a single table
+ * with type-specific badges and visual differentiation.
+ *
+ * At product level, fabrics show "Per variation" since specific colours
+ * are assigned at the variation level.
  */
 
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Package, Plus, Trash2, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { bomApi } from '../../../services/api';
+import {
+    BomLinesTable,
+    BomCostSummary,
+    AddBomLineModal,
+    SizeConsumptionModal,
+    type UnifiedBomLine,
+    type BomCostBreakdown,
+    type BomComponentType,
+} from '../bom';
 import type { ProductTreeNode } from '../types';
 
 interface ProductBomTabProps {
@@ -18,71 +28,162 @@ interface ProductBomTabProps {
     onOpenFullEditor?: () => void;
 }
 
-interface BomLine {
-    id?: string;
-    componentType: 'FABRIC' | 'TRIM' | 'SERVICE';
-    componentRole: string;
-    componentId?: string | null;
-    componentName?: string;
-    quantity: number;
-    resolvedQuantity?: number;
-    cost?: number;
-    resolvedCost?: number;
-    unit?: string;
-}
-
-export function ProductBomTab({ product, onOpenFullEditor }: ProductBomTabProps) {
+export function ProductBomTab({ product }: ProductBomTabProps) {
     const queryClient = useQueryClient();
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [consumptionModalLine, setConsumptionModalLine] = useState<UnifiedBomLine | null>(null);
 
     // Fetch BOM data
-    const { data: bomData, isLoading, error } = useQuery({
+    const {
+        data: bomData,
+        isLoading,
+        error,
+    } = useQuery({
         queryKey: ['productBom', product.id],
-        queryFn: () => bomApi.getProductBom(product.id).then(r => r.data),
+        queryFn: () => bomApi.getProductBom(product.id).then((r) => r.data),
         enabled: !!product.id,
     });
 
-    // Fetch component roles
-    const { data: componentRoles } = useQuery({
-        queryKey: ['componentRoles'],
-        queryFn: () => bomApi.getComponentRoles().then(r => r.data),
-        staleTime: 60 * 60 * 1000,
-    });
+    // Transform API data to unified lines
+    const { lines, costs, existingRoleIds } = useMemo(() => {
+        if (!bomData?.templates) {
+            return {
+                lines: [] as UnifiedBomLine[],
+                costs: { fabricCost: 0, trimCost: 0, serviceCost: 0, total: 0 },
+                existingRoleIds: [] as string[],
+            };
+        }
 
-    // Calculate cost summary
-    const costSummary = useMemo(() => {
-        if (!bomData?.template) return { fabricCost: 0, trimCost: 0, serviceCost: 0, total: 0 };
-
+        const unifiedLines: UnifiedBomLine[] = [];
         let fabricCost = 0;
         let trimCost = 0;
         let serviceCost = 0;
+        const roleIds: string[] = [];
 
-        bomData.template.forEach((line: BomLine) => {
-            const cost = line.resolvedCost || line.cost || 0;
-            const qty = line.resolvedQuantity || line.quantity || 0;
-            const lineTotal = cost * qty;
+        // Transform templates into unified lines
+        for (const template of bomData.templates) {
+            const typeCode = template.typeCode as BomComponentType;
+            roleIds.push(template.roleId);
 
-            if (line.componentType === 'FABRIC') fabricCost += lineTotal;
-            else if (line.componentType === 'TRIM') trimCost += lineTotal;
-            else if (line.componentType === 'SERVICE') serviceCost += lineTotal;
-        });
+            // Determine component name and cost based on type
+            let componentName: string | null = null;
+            let componentId: string | null = null;
+            let costPerUnit: number | null = null;
+            let colourHex: string | null = null;
+
+            if (typeCode === 'FABRIC') {
+                // At product level, fabric is "Per variation"
+                componentName = 'Per variation';
+                costPerUnit = null; // Cost determined at variation level
+            } else if (typeCode === 'TRIM' && template.trimItem) {
+                componentName = template.trimItem.name;
+                componentId = template.trimItemId;
+                costPerUnit = template.trimItem.costPerUnit;
+            } else if (typeCode === 'SERVICE' && template.serviceItem) {
+                componentName = template.serviceItem.name;
+                componentId = template.serviceItemId;
+                costPerUnit = template.serviceItem.costPerJob;
+            }
+
+            const qty = template.defaultQuantity ?? 0;
+            const total = (costPerUnit ?? 0) * qty;
+
+            // Accumulate costs
+            if (typeCode === 'FABRIC') fabricCost += total;
+            else if (typeCode === 'TRIM') trimCost += total;
+            else if (typeCode === 'SERVICE') serviceCost += total;
+
+            unifiedLines.push({
+                id: template.id,
+                type: typeCode,
+                roleCode: template.roleCode,
+                roleName: template.roleName,
+                roleId: template.roleId,
+                componentName,
+                componentId,
+                colourHex,
+                quantity: template.defaultQuantity,
+                quantityUnit: template.quantityUnit || 'unit',
+                costPerUnit,
+                totalCost: total,
+                source: 'template',
+                _raw: {
+                    templateId: template.id,
+                    trimItem: template.trimItem,
+                    serviceItem: template.serviceItem,
+                },
+            });
+        }
+
+        // Sort: FABRIC first, then TRIM, then SERVICE
+        const typeOrder: Record<BomComponentType, number> = { FABRIC: 0, TRIM: 1, SERVICE: 2 };
+        unifiedLines.sort((a, b) => typeOrder[a.type] - typeOrder[b.type]);
 
         return {
-            fabricCost,
-            trimCost,
-            serviceCost,
-            total: fabricCost + trimCost + serviceCost,
+            lines: unifiedLines,
+            costs: {
+                fabricCost,
+                trimCost,
+                serviceCost,
+                total: fabricCost + trimCost + serviceCost,
+            } as BomCostBreakdown,
+            existingRoleIds: roleIds,
         };
     }, [bomData]);
 
-    // Group template lines by type
-    const templateByType = useMemo(() => {
-        if (!bomData?.template) return { trims: [], services: [] };
+    // Add BOM line mutation
+    const addLineMutation = useMutation({
+        mutationFn: async (data: {
+            roleId: string;
+            componentType: BomComponentType;
+            componentId?: string;
+            quantity?: number;
+        }) => {
+            // Build the template line data
+            const lineData: any = {
+                roleId: data.roleId,
+                defaultQuantity: data.quantity ?? null,
+                quantityUnit: data.componentType === 'FABRIC' ? 'meter' : 'unit',
+            };
 
-        return {
-            trims: bomData.template.filter((l: BomLine) => l.componentType === 'TRIM'),
-            services: bomData.template.filter((l: BomLine) => l.componentType === 'SERVICE'),
-        };
-    }, [bomData]);
+            // Set component ID based on type
+            if (data.componentType === 'TRIM' && data.componentId) {
+                lineData.trimItemId = data.componentId;
+            } else if (data.componentType === 'SERVICE' && data.componentId) {
+                lineData.serviceItemId = data.componentId;
+            }
+            // For FABRIC, componentId is not set at product level
+
+            return bomApi.updateTemplate(product.id, {
+                lines: [...(bomData?.templates || []), lineData],
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['productBom', product.id] });
+        },
+    });
+
+    // Delete BOM line mutation
+    const deleteLineMutation = useMutation({
+        mutationFn: async (line: UnifiedBomLine) => {
+            // Filter out the line to delete and update
+            const remainingLines = (bomData?.templates || [])
+                .filter((t: any) => t.id !== line.id)
+                .map((t: any) => ({
+                    id: t.id,
+                    roleId: t.roleId,
+                    defaultQuantity: t.defaultQuantity,
+                    quantityUnit: t.quantityUnit,
+                    trimItemId: t.trimItemId,
+                    serviceItemId: t.serviceItemId,
+                }));
+
+            return bomApi.updateTemplate(product.id, { lines: remainingLines });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['productBom', product.id] });
+        },
+    });
 
     if (isLoading) {
         return (
@@ -102,95 +203,57 @@ export function ProductBomTab({ product, onOpenFullEditor }: ProductBomTabProps)
         );
     }
 
-    const hasNoBom = !bomData?.template || bomData.template.length === 0;
-
     return (
         <div className="space-y-6">
-            {/* Cost Summary Card */}
-            <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-4 border border-blue-100">
-                <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-medium text-gray-700">Cost Summary</h4>
-                    <span className="text-lg font-bold text-gray-900">
-                        ₹{costSummary.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                </div>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                        <span className="text-gray-500">Fabric</span>
-                        <p className="font-medium">₹{costSummary.fabricCost.toFixed(2)}</p>
-                    </div>
-                    <div>
-                        <span className="text-gray-500">Trims</span>
-                        <p className="font-medium">₹{costSummary.trimCost.toFixed(2)}</p>
-                    </div>
-                    <div>
-                        <span className="text-gray-500">Services</span>
-                        <p className="font-medium">₹{costSummary.serviceCost.toFixed(2)}</p>
-                    </div>
-                </div>
-            </div>
+            {/* Cost Summary */}
+            <BomCostSummary costs={costs} />
 
-            {/* Empty State */}
-            {hasNoBom && (
-                <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg">
-                    <Package size={40} className="mx-auto mb-3 text-gray-300" />
-                    <p className="text-sm text-gray-500">No BOM configured for this product</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                        Add trims and services to calculate COGS
-                    </p>
-                    {onOpenFullEditor && (
-                        <button
-                            onClick={onOpenFullEditor}
-                            className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100"
-                        >
-                            <Plus size={16} />
-                            Configure BOM
-                        </button>
-                    )}
-                </div>
-            )}
+            {/* Unified BOM Lines Table */}
+            <BomLinesTable
+                lines={lines}
+                context="product"
+                onAddLine={() => setIsAddModalOpen(true)}
+                onDeleteLine={(line) => deleteLineMutation.mutate(line)}
+                onRowClick={(line) => setConsumptionModalLine(line)}
+                emptyMessage="No BOM configured for this product"
+            />
 
-            {/* Trims Section */}
-            {templateByType.trims.length > 0 && (
-                <BomSection
-                    title="Trims"
-                    lines={templateByType.trims}
-                    componentRoles={componentRoles}
-                />
-            )}
-
-            {/* Services Section */}
-            {templateByType.services.length > 0 && (
-                <BomSection
-                    title="Services"
-                    lines={templateByType.services}
-                    componentRoles={componentRoles}
-                />
-            )}
-
-            {/* Variations Overview */}
+            {/* Variations Summary */}
             {bomData?.variations && bomData.variations.length > 0 && (
                 <div className="bg-gray-50 rounded-lg p-4">
                     <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                        Variation Assignments
+                        Variation Fabric Assignments
                     </h4>
                     <div className="space-y-2">
-                        {bomData.variations.slice(0, 5).map((v: any) => (
-                            <div key={v.variationId} className="flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                    {v.colorHex && (
-                                        <span
-                                            className="w-3 h-3 rounded-full border border-gray-300"
-                                            style={{ backgroundColor: v.colorHex }}
-                                        />
-                                    )}
-                                    <span className="text-gray-700">{v.colorName}</span>
+                        {bomData.variations.slice(0, 5).map((v: any) => {
+                            // Find main fabric assignment
+                            const mainFabric = v.bomLines?.find(
+                                (l: any) => l.roleCode === 'main' && l.typeCode === 'FABRIC'
+                            );
+                            return (
+                                <div
+                                    key={v.id}
+                                    className="flex items-center justify-between text-sm"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-gray-700">{v.colorName}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {mainFabric?.fabricColour?.colourHex && (
+                                            <span
+                                                className="w-3 h-3 rounded-full border border-gray-300"
+                                                style={{
+                                                    backgroundColor: mainFabric.fabricColour.colourHex,
+                                                }}
+                                            />
+                                        )}
+                                        <span className="text-gray-500 text-xs">
+                                            {mainFabric?.fabricColour?.name || 'No fabric assigned'}
+                                        </span>
+                                    </div>
                                 </div>
-                                <span className="text-gray-500 text-xs">
-                                    {v.fabricColourName || 'No fabric assigned'}
-                                </span>
-                            </div>
-                        ))}
+                            );
+                        })}
                         {bomData.variations.length > 5 && (
                             <p className="text-xs text-gray-400 mt-2">
                                 + {bomData.variations.length - 5} more variations
@@ -200,85 +263,28 @@ export function ProductBomTab({ product, onOpenFullEditor }: ProductBomTabProps)
                 </div>
             )}
 
-            {/* Open Full Editor Button */}
-            {onOpenFullEditor && !hasNoBom && (
-                <div className="pt-4 border-t">
-                    <button
-                        onClick={onOpenFullEditor}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                    >
-                        <ExternalLink size={16} />
-                        Open Full BOM Editor
-                    </button>
-                </div>
+            {/* Add Line Modal */}
+            <AddBomLineModal
+                isOpen={isAddModalOpen}
+                onClose={() => setIsAddModalOpen(false)}
+                onAdd={(data) => addLineMutation.mutateAsync(data)}
+                existingRoles={existingRoleIds}
+                context="product"
+                productId={product.id}
+            />
+
+            {/* Size Consumption Modal */}
+            {consumptionModalLine && (
+                <SizeConsumptionModal
+                    isOpen={!!consumptionModalLine}
+                    onClose={() => setConsumptionModalLine(null)}
+                    productId={product.id}
+                    productName={product.name}
+                    roleId={consumptionModalLine.roleId}
+                    roleName={consumptionModalLine.roleName}
+                    roleType={consumptionModalLine.type}
+                />
             )}
-        </div>
-    );
-}
-
-interface BomSectionProps {
-    title: string;
-    lines: BomLine[];
-    componentRoles?: any[];
-}
-
-function BomSection({ title, lines, componentRoles }: BomSectionProps) {
-    // Get role label from componentRoles
-    const getRoleLabel = (roleCode: string) => {
-        if (!componentRoles) return roleCode;
-        const role = componentRoles.find((r: any) => r.code === roleCode);
-        return role?.name || roleCode;
-    };
-
-    return (
-        <div>
-            <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                {title} ({lines.length})
-            </h4>
-            <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
-                        <tr>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Role</th>
-                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Component</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Qty</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Cost</th>
-                            <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Total</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                        {lines.map((line, idx) => {
-                            const qty = line.resolvedQuantity || line.quantity || 0;
-                            const cost = line.resolvedCost || line.cost || 0;
-                            const total = qty * cost;
-
-                            return (
-                                <tr key={line.id || idx} className="hover:bg-gray-50">
-                                    <td className="px-3 py-2">
-                                        <span className="text-gray-700">
-                                            {getRoleLabel(line.componentRole)}
-                                        </span>
-                                    </td>
-                                    <td className="px-3 py-2">
-                                        <span className="text-gray-900">
-                                            {line.componentName || 'Not assigned'}
-                                        </span>
-                                    </td>
-                                    <td className="px-3 py-2 text-right tabular-nums text-gray-600">
-                                        {qty} {line.unit || ''}
-                                    </td>
-                                    <td className="px-3 py-2 text-right tabular-nums text-gray-600">
-                                        ₹{cost.toFixed(2)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">
-                                        ₹{total.toFixed(2)}
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
         </div>
     );
 }

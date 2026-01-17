@@ -40,7 +40,11 @@ import {
     CompositionCell,
     WeightCell,
     StockCell,
+    ColoursCell,
+    ConnectedProductsCell,
 } from './cells';
+
+type ViewMode = 'fabric' | 'material';
 
 interface MaterialsTreeTableProps {
     /** Callback when edit action is clicked */
@@ -53,10 +57,18 @@ interface MaterialsTreeTableProps {
     onAddInward?: (node: MaterialNode) => void;
     /** Callback when deactivate is clicked */
     onDeactivate?: (node: MaterialNode) => void;
+    /** Callback when delete is clicked */
+    onDelete?: (node: MaterialNode) => void;
+    /** Callback when link products is clicked (colours only) */
+    onLinkProducts?: (node: MaterialNode) => void;
     /** Search query for filtering */
     searchQuery?: string;
     /** Height of the table container */
     height?: string | number;
+    /** View mode - fabric (default) shows fabrics at top level, material shows full hierarchy */
+    viewMode?: ViewMode;
+    /** Pre-transformed fabric-first data (fabrics at top level with colours as children) */
+    fabricFirstData?: MaterialNode[];
 }
 
 export function MaterialsTreeTable({
@@ -65,10 +77,14 @@ export function MaterialsTreeTable({
     onViewDetails,
     onAddInward,
     onDeactivate,
+    onDelete,
+    onLinkProducts,
     searchQuery = '',
     height = 'calc(100vh - 200px)',
+    viewMode = 'fabric',
+    fabricFirstData = [],
 }: MaterialsTreeTableProps) {
-    // Fetch tree data
+    // Fetch tree data (for material view and summary)
     const {
         data: treeData,
         summary,
@@ -77,6 +93,9 @@ export function MaterialsTreeTable({
         refetch,
         // loadChildren, // Reserved for lazy loading mode
     } = useMaterialsTree({ lazyLoad: false }); // Full tree for now
+
+    // Use fabric-first data when in fabric view mode
+    const isFabricView = viewMode === 'fabric';
 
     // Mutations for inline editing
     const { updateColour, updateFabric } = useMaterialsTreeMutations();
@@ -87,9 +106,12 @@ export function MaterialsTreeTable({
     // Expansion state - TanStack Table manages this
     const [expanded, setExpanded] = useState<ExpandedState>({});
 
+    // Select base data based on view mode
+    const baseData = isFabricView ? fabricFirstData : treeData;
+
     // Filter data by search query
     const filteredData = useMemo(() => {
-        if (!searchQuery.trim()) return treeData;
+        if (!searchQuery.trim()) return baseData;
 
         const query = searchQuery.toLowerCase();
 
@@ -118,8 +140,8 @@ export function MaterialsTreeTable({
             return result;
         }
 
-        return filterTree(treeData);
-    }, [treeData, searchQuery]);
+        return filterTree(baseData);
+    }, [baseData, searchQuery]);
 
     // Handle cost save
     const handleCostSave = useCallback((node: MaterialNode, value: number | null) => {
@@ -169,6 +191,22 @@ export function MaterialsTreeTable({
             size: 200,
             cell: ({ row }: CellContext<MaterialNode, unknown>) => <NameCell row={row} />,
         },
+        // Material category (fabric view only - shows parent material)
+        ...(isFabricView ? [{
+            id: 'material',
+            header: 'Material',
+            size: 100,
+            cell: ({ row }: CellContext<MaterialNode, unknown>) => {
+                const node = row.original;
+                // Only show for fabrics (top-level in fabric view)
+                if (node.type !== 'fabric') return null;
+                return (
+                    <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                        {node.materialName || '-'}
+                    </span>
+                );
+            },
+        }] : []),
         // Type badge
         {
             id: 'type',
@@ -232,6 +270,15 @@ export function MaterialsTreeTable({
                 }
                 return null;
             },
+        },
+        // Colour swatches (fabrics only)
+        {
+            id: 'colours',
+            header: 'Colours',
+            size: 160,
+            cell: ({ row }: CellContext<MaterialNode, unknown>) => (
+                <ColoursCell node={row.original} />
+            ),
         },
         // Cost per unit
         {
@@ -301,6 +348,15 @@ export function MaterialsTreeTable({
                 <StockCell node={row.original} />
             ),
         },
+        // Connected Products (fabrics and colours)
+        {
+            id: 'products',
+            header: 'Products',
+            size: 100,
+            cell: ({ row }: CellContext<MaterialNode, unknown>) => (
+                <ConnectedProductsCell node={row.original} />
+            ),
+        },
         // Actions dropdown menu
         {
             id: 'actions',
@@ -314,10 +370,12 @@ export function MaterialsTreeTable({
                     onViewDetails={onViewDetails}
                     onAddInward={onAddInward}
                     onDeactivate={onDeactivate}
+                    onDelete={onDelete}
+                    onLinkProducts={onLinkProducts}
                 />
             ),
         },
-    ], [loadingNodes, handleCostSave, handleLeadTimeSave, handleMinOrderSave, onEdit, onAddChild, onViewDetails, onAddInward, onDeactivate]);
+    ], [loadingNodes, handleCostSave, handleLeadTimeSave, handleMinOrderSave, onEdit, onAddChild, onViewDetails, onAddInward, onDeactivate, onDelete, onLinkProducts, isFabricView]);
 
     // TanStack Table instance
     const table = useReactTable({
@@ -344,11 +402,20 @@ export function MaterialsTreeTable({
         table.toggleAllRowsExpanded(false);
     }, [table]);
 
-    // Get row styling based on node type (depth)
-    // Material: white bg, blue left border, bold text
-    // Fabric: gray-50 bg, purple left border, medium weight
-    // Colour: gray-100 bg, teal left border, normal weight
+    // Get row styling based on node type and view mode
     const getRowStyle = (node: MaterialNode) => {
+        if (isFabricView) {
+            // In fabric view: fabrics are top-level (white), colours are children (gray)
+            switch (node.type) {
+                case 'fabric':
+                    return 'bg-white border-l-4 border-l-purple-500';
+                case 'colour':
+                    return 'bg-gray-50 border-l-4 border-l-teal-400';
+                default:
+                    return 'bg-white';
+            }
+        }
+        // In material view: full hierarchy styling
         switch (node.type) {
             case 'material':
                 return 'bg-white border-l-4 border-l-blue-500';
@@ -378,7 +445,11 @@ export function MaterialsTreeTable({
                     {/* Summary */}
                     {summary && (
                         <div className="text-xs text-gray-500">
-                            {summary.materials} materials, {summary.fabrics} fabrics, {summary.colours} colours
+                            {isFabricView ? (
+                                <>{filteredData.length} fabrics, {summary.colours} colours</>
+                            ) : (
+                                <>{summary.materials} materials, {summary.fabrics} fabrics, {summary.colours} colours</>
+                            )}
                         </div>
                     )}
                 </div>

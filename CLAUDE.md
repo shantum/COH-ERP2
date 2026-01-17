@@ -26,9 +26,15 @@ Login: `admin@coh.com` / `XOFiya@34`
 ## Stack
 
 - **Backend**: Express + tRPC + Prisma + PostgreSQL
-- **Frontend**: React 19 + TanStack Query + AG-Grid + Tailwind
+- **Frontend**: React 19 + TanStack Query v5 + TanStack Table v8 + AG-Grid + Tailwind + shadcn/ui
 - **Integrations**: Shopify (orders), iThink Logistics (tracking)
 - **Testing**: Playwright (E2E) - `cd client && npx playwright test`
+
+### UI Components
+- **Use shadcn/ui components wherever possible** - buttons, dialogs, dropdowns, inputs, etc.
+- Location: `client/src/components/ui/` - check existing components before creating new ones
+- Add new shadcn components via: `npx shadcn@latest add <component-name>`
+- **Dialog stacking**: Use `DialogStack` from `ui/dialog-stack.tsx` for nested modals (auto z-index management)
 
 ## Gotchas (Read First!)
 
@@ -40,7 +46,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 6. **Line fields**: use pre-computed O(1) fields (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` O(n)
 7. **View filters**: shipped/cancelled orders stay in Open until Release clicked
 8. **Prisma dates**: returns Date objects—use `toDateString()` from `utils/dateHelpers.ts`
-9. **Dev URLs**: use `127.0.0.1` not `localhost`—IPv6 causes silent failures
+9. **Dev URLs**: use `localhost` for API calls
 10. **tRPC params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
 11. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
 12. **Line-level tracking**: delivery/RTO mutations are line-level; orders can have mixed states (partial delivery, multi-AWB)
@@ -50,6 +56,11 @@ Login: `admin@coh.com` / `XOFiya@34`
 16. **Tracking sync**: excludes terminal statuses (`delivered`, `rto_delivered`) to avoid wasting API calls on unchangeable data
 17. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
 18. **TypeScript checks**: use `npx tsc --noEmit --force` to bypass incremental build cache; plain `tsc --noEmit` may miss errors due to `.tsbuildinfo` caching
+19. **TanStack Table trees**: use `getSubRows` for hierarchy, never mutate `children` directly; expansion state separate from data
+20. **Fabric hierarchy**: Database enforces Material→Fabric→Colour consistency; colours MUST have fabricId, fabrics MUST have materialId
+21. **Inheritance pattern**: Fabric colours inherit cost/lead/minOrder from parent fabric if not explicitly set (priority: colour → fabric → null)
+22. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
+23. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
 
 ## Orders Architecture
 
@@ -199,10 +210,10 @@ Source: `server/src/config/mappings/trackingStatus.ts`
 
 ## Key Files
 
-### Client
+### Client - Orders
 ```
 pages/Orders.tsx                         # Page orchestrator
-components/orders/OrdersGrid.tsx         # Grid component
+components/orders/OrdersGrid.tsx         # AG-Grid component
 components/orders/ordersGrid/columns/    # 6 modular column files
 components/orders/ordersGrid/formatting/ # Centralized AG-Grid styles (colors, statuses, thresholds)
 hooks/useOrdersMutations.ts              # Facade composing all mutation hooks
@@ -211,13 +222,41 @@ hooks/orders/                            # Focused mutation hooks
 utils/orderHelpers.ts                    # flattenOrders, enrichRowsWithInventory
 ```
 
+### Client - Products & Materials
+```
+pages/Products.tsx                       # Main page with 5 tabs (products/materials/trims/services/bom)
+components/products/
+  ProductsViewSwitcher.tsx               # Toggle: Hierarchy tree ↔ SKU flat table
+  ProductsTree.tsx                       # TanStack Table tree (Product→Variation→SKU)
+  SkuFlatView.tsx                        # Flat SKU table with column reordering + pagination
+  DetailPanel.tsx                        # Master-detail right panel
+  cells/                                 # Modular cell components
+  detail/                                # Detail panel tabs (Info, BOM, Costs, SKUs)
+  unified-edit/                          # Unified product/variation/SKU edit modal
+    UnifiedProductEditModal.tsx          # Main modal orchestrator
+    levels/                              # Level-specific forms
+    tabs/                                # Tab components
+    shared/                              # Shared form fields
+  types.ts                               # ProductTreeNode, ProductNodeType, tab types
+components/materials/
+  MaterialsTreeView.tsx                  # Page wrapper with view mode toggle
+  MaterialsTreeTable.tsx                 # TanStack Table tree (Material→Fabric→Colour)
+  LinkProductsModal.tsx                  # Link fabrics/colours to products
+  cells/                                 # Cell components (ColoursCell, ConnectedProductsCell, etc.)
+  types.ts                               # MaterialNode, MaterialNodeType, inheritance types
+```
+
 ### Server
 ```
 config/                               # Centralized configuration system
 config/mappings/trackingStatus.ts     # iThink status mapping (text-first, cancel_status priority)
-routes/orders/mutations/              # crud, lifecycle, archive, lineOps, customization
-routes/orders/queries/                # views, search, summaries, analytics
-routes/tracking.ts                    # Tracking endpoints (AWB, batch, sync, debug /raw/:awb)
+routes/
+  orders/mutations/                   # crud, lifecycle, archive, lineOps, customization
+  orders/queries/                     # views, search, summaries, analytics
+  materials.ts                        # Materials hierarchy (Material→Fabric→Colour) + Trims/Services
+  products.ts                         # Products hierarchy (Product→Variation→SKU)
+  bom.ts                              # BOM management (product/variation level)
+  tracking.ts                         # Tracking endpoints (AWB, batch, sync, debug /raw/:awb)
 utils/orderStateMachine.ts            # Line status state machine
 utils/orderViews.ts                   # VIEW_CONFIGS (flattening, enrichment)
 utils/orderEnrichment/                # Enrichment pipeline (9 files)
@@ -227,8 +266,86 @@ services/customerStatsCache.ts        # Customer stats cache
 services/adminShipService.ts          # Admin force ship (isolated, feature-flagged)
 services/trackingSync.ts              # Background tracking sync (excludes terminal statuses)
 services/shopifyOrderProcessor.ts     # Shopify webhook processor (tracking sync only, no auto-ship)
-trpc/routers/orders.ts                # tRPC procedures
+trpc/routers/
+  orders.ts                           # Orders tRPC procedures
+  products.ts                         # Products tree query
 ```
+
+## Products & Materials Architecture
+
+### Data Model
+**Products page** (`/products`) has 5 main tabs:
+1. **Products**: Dual-view (Hierarchy tree / SKU flat table) with column reordering + pagination
+2. **Materials**: 3-tier tree (Material → Fabric → Colour)
+3. **Trims**: Flat catalog
+4. **Services**: Flat catalog
+5. **BOM**: Master-detail with URL state sync
+
+### 3-Tier Hierarchies (TanStack Table)
+
+**Products**: `Product → Variation → SKU`
+- Tree: `ProductsTree` | Flat: `SkuFlatView` | View switcher: `ProductsViewSwitcher`
+- Types: `client/src/components/products/types.ts`
+- Cells: `client/src/components/products/cells/` (ExpanderCell, NameCell, TypeBadgeCell, etc.)
+
+**Materials**: `Material → Fabric → Colour`
+- Component: `MaterialsTreeTable` | View: `MaterialsTreeView`
+- Two view modes: `fabric` (fabrics at top) / `material` (full hierarchy)
+- Types: `client/src/components/materials/types.ts`
+- Cells: `client/src/components/materials/cells/` (ColoursCell, ConnectedProductsCell, etc.)
+- **Hierarchy rules**: DB-enforced FK constraints (colours→fabrics→materials)
+
+### TanStack Table Pattern
+
+```typescript
+// Define getSubRows for hierarchy
+const table = useReactTable({
+  data,
+  columns,
+  getSubRows: (row) => row.children, // Auto expansion
+  getCoreRowModel: getCoreRowModel(),
+  getExpandedRowModel: getExpandedRowModel(),
+  state: { expanded }, // Separate from data
+});
+
+// Cell components as separate files
+export function ExpanderCell({ row }: CellContext<NodeType>) {
+  return row.getCanExpand() ? (
+    <button onClick={row.getToggleExpandedHandler()}>
+      {row.getIsExpanded() ? <ChevronDown /> : <ChevronRight />}
+    </button>
+  ) : null;
+}
+```
+
+### Inheritance Pattern (Materials)
+
+Colours inherit `costPerUnit`, `leadTimeDays`, `minOrderQty` from parent fabric:
+
+```typescript
+// Server computes effective values
+effectiveCostPerUnit: colour.costPerUnit ?? fabric.costPerUnit,
+costInherited: colour.costPerUnit === null,
+```
+
+UI shows inheritance indicator (↑) when using fabric value.
+
+### Master-Detail with URL Sync
+
+Pattern used in Products BOM tab:
+
+```typescript
+// Parse URL on mount
+const selectedId = searchParams.get('id');
+const selectedType = searchParams.get('type');
+
+// Sync selection to URL
+const handleSelect = (node) => {
+  setSearchParams({ tab: 'bom', id: node.id, type: node.type });
+};
+```
+
+Enables deep linking to specific product/variation/SKU details.
 
 ## Configuration
 
@@ -254,5 +371,21 @@ Centralized config system in `/server/src/config/`:
 - **Documentation** → `doc-optimizer` or `codebase-steward`
 - **Planning** → `Plan` agent
 
+## Application Structure
+
+### Pages Overview
+| Page | Purpose | View Type |
+|------|---------|-----------|
+| `/orders` | Order fulfillment pipeline | AG-Grid (Open/Shipped/Cancelled views) |
+| `/products` | Product catalog + BOM | TanStack Table trees + flat tables (5 tabs) |
+| `/materials` | Materials catalog (legacy standalone) | Tree view |
+| `/inventory` | Stock management | AG-Grid |
+| `/customers` | Customer management | AG-Grid |
+| `/analytics` | Business metrics | Charts + tables |
+| `/returns` | Customer returns | AG-Grid |
+| `/returns-rto` | RTO processing | AG-Grid |
+
+**Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
+
 ---
-**Updated till commit:** `a3575bb` (2026-01-17)
+**Updated till commit:** `784431c` (2026-01-17)

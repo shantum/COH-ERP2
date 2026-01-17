@@ -18,6 +18,8 @@ import {
     Archive,
     Layers,
     Palette,
+    Trash2,
+    Link2,
 } from 'lucide-react';
 import type { MaterialNode } from '../types';
 
@@ -28,6 +30,8 @@ interface ActionsMenuProps {
     onViewDetails?: (node: MaterialNode) => void;
     onAddInward?: (node: MaterialNode) => void;
     onDeactivate?: (node: MaterialNode) => void;
+    onDelete?: (node: MaterialNode) => void;
+    onLinkProducts?: (node: MaterialNode) => void;
 }
 
 interface MenuItem {
@@ -46,6 +50,8 @@ export function ActionsMenu({
     onViewDetails,
     onAddInward,
     onDeactivate,
+    onDelete,
+    onLinkProducts,
 }: ActionsMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -127,6 +133,16 @@ export function ActionsMenu({
             show: node.type === 'colour' && !!onAddInward,
         },
         {
+            id: 'link-products',
+            label: 'Link Products',
+            icon: <Link2 size={14} />,
+            onClick: () => {
+                onLinkProducts?.(node);
+                setIsOpen(false);
+            },
+            show: node.type === 'colour' && !!onLinkProducts,
+        },
+        {
             id: 'view-details',
             label: 'View Details',
             icon: <Eye size={14} />,
@@ -145,7 +161,18 @@ export function ActionsMenu({
                 setIsOpen(false);
             },
             variant: 'danger',
-            show: !!onDeactivate,
+            show: !!onDeactivate && node.type === 'material', // Only show for materials which have isActive field
+        },
+        {
+            id: 'delete',
+            label: `Delete ${node.type}`,
+            icon: <Trash2 size={14} />,
+            onClick: () => {
+                onDelete?.(node);
+                setIsOpen(false);
+            },
+            variant: 'danger',
+            show: !!onDelete,
         },
     ];
 

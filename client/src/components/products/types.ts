@@ -97,7 +97,7 @@ export interface ProductSelectionState {
 /**
  * Main tab types for Products page
  */
-export type ProductsTabType = 'products' | 'materials' | 'trims' | 'services' | 'bom';
+export type ProductsTabType = 'products' | 'materials' | 'trims' | 'services' | 'bom' | 'consumption' | 'import' | 'fabricMapping';
 
 /**
  * Detail panel tab types for Product

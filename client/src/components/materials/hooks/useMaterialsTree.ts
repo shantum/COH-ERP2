@@ -335,9 +335,33 @@ export function useMaterialsTreeMutations() {
         },
     });
 
+    const deleteMaterial = useMutation({
+        mutationFn: (id: string) => materialsApi.deleteMaterial(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
+        },
+    });
+
+    const deleteFabric = useMutation({
+        mutationFn: (id: string) => materialsApi.deleteFabric(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
+        },
+    });
+
+    const deleteColour = useMutation({
+        mutationFn: (id: string) => materialsApi.deleteColour(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
+        },
+    });
+
     return {
         updateColour,
         updateFabric,
         updateMaterial,
+        deleteMaterial,
+        deleteFabric,
+        deleteColour,
     };
 }

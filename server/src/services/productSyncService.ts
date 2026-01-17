@@ -6,6 +6,7 @@
 
 import type { PrismaClient, Fabric, Product, Variation, Sku } from '@prisma/client';
 import shopifyClient, { ShopifyProduct, ShopifyVariant } from './shopify.js';
+import { resolveProductCategory } from '../config/mappings/index.js';
 
 // ============================================
 // TYPES & INTERFACES
@@ -315,7 +316,10 @@ export async function syncSingleProduct(
                 shopifyProductId: shopifyProductId,
                 shopifyProductIds: [shopifyProductId],
                 shopifyHandle: shopifyProduct.handle,
-                category: shopifyProduct.product_type?.toLowerCase() || 'dress',
+                category: resolveProductCategory({
+                    product_type: shopifyProduct.product_type,
+                    tags: shopifyProduct.tags,
+                }),
                 productType: 'basic',
                 gender: gender || 'unisex',
                 baseProductionTimeMins: 60,
@@ -325,12 +329,21 @@ export async function syncSingleProduct(
         result.created++;
         matchType = 'new';
     } else {
-        // Product exists - update image/handle if needed
+        // Product exists - update fields if changed
         const updates: Partial<Product> = {};
         if (mainImageUrl && !product.imageUrl) updates.imageUrl = mainImageUrl;
         // Only update handle if not set (preserve original)
         if (shopifyProduct.handle && !product.shopifyHandle) {
             updates.shopifyHandle = shopifyProduct.handle;
+        }
+
+        // Update category if Shopify tags changed (recalculate from current data)
+        const resolvedCategory = resolveProductCategory({
+            product_type: shopifyProduct.product_type,
+            tags: shopifyProduct.tags,
+        });
+        if (resolvedCategory !== product.category) {
+            updates.category = resolvedCategory;
         }
 
         if (Object.keys(updates).length > 0) {

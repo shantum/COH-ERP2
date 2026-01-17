@@ -11,15 +11,16 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Package, Layers, Scissors, Wrench, Plus, Search, GitBranch } from 'lucide-react';
+import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2 } from 'lucide-react';
 
 import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
-import { ProductsTree } from '../components/products/ProductsTree';
 import { DetailPanel } from '../components/products/DetailPanel';
 import { MaterialsTreeView } from '../components/materials/MaterialsTreeView';
 import { TrimsTable } from '../components/materials/TrimsTable';
 import { ServicesTable } from '../components/materials/ServicesTable';
 import { useProductsTree } from '../components/products/hooks/useProductsTree';
+import { BomProductList, ConsumptionGridView, ConsumptionImportView } from '../components/products/bom';
+import { FabricMappingView } from '../components/products/fabric-mapping';
 import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
 
 export default function Products() {
@@ -123,38 +124,6 @@ export default function Products() {
 
     return (
         <div className="flex flex-col h-[calc(100vh-4rem)]">
-            {/* Page Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b bg-white flex-shrink-0">
-                <div>
-                    <h1 className="text-lg font-semibold text-gray-900">Products</h1>
-                    <p className="text-xs text-gray-500">
-                        Manage products, materials, trims, and services
-                    </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    {/* Search */}
-                    <div className="relative">
-                        <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Search..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg w-48 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                        />
-                    </div>
-
-                    {/* Add button */}
-                    <button
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-                    >
-                        <Plus size={16} />
-                        Add
-                    </button>
-                </div>
-            </div>
-
             {/* Tab Navigation */}
             <div className="flex items-center gap-1 px-4 py-2 border-b bg-gray-50 flex-shrink-0">
                 <TabButton
@@ -188,6 +157,24 @@ export default function Products() {
                     isActive={activeTab === 'bom'}
                     onClick={() => setActiveTab('bom')}
                 />
+                <TabButton
+                    icon={Grid3X3}
+                    label="Consumption"
+                    isActive={activeTab === 'consumption'}
+                    onClick={() => setActiveTab('consumption')}
+                />
+                <TabButton
+                    icon={FileUp}
+                    label="Import"
+                    isActive={activeTab === 'import'}
+                    onClick={() => setActiveTab('import')}
+                />
+                <TabButton
+                    icon={Link2}
+                    label="Fabric Mapping"
+                    isActive={activeTab === 'fabricMapping'}
+                    onClick={() => setActiveTab('fabricMapping')}
+                />
             </div>
 
             {/* Main Content */}
@@ -197,6 +184,7 @@ export default function Products() {
                     <div className="flex-1 p-4 overflow-hidden">
                         <ProductsViewSwitcher
                             searchQuery={searchQuery}
+                            onSearchChange={setSearchQuery}
                             onViewProduct={handleViewProduct}
                             onEditBom={handleEditBom}
                         />
@@ -236,26 +224,46 @@ export default function Products() {
                     </div>
                 )}
 
-                {/* BOM Tab - Two Panel Layout */}
+                {/* BOM Tab - 50/50 Split Layout */}
                 {activeTab === 'bom' && (
                     <>
-                        {/* Left Panel - Tree */}
-                        <div className="w-[400px] border-r bg-white flex-shrink-0 overflow-hidden flex flex-col">
-                            <ProductsTree
+                        {/* Left Panel - Product List */}
+                        <div className="w-1/2 border-r bg-white flex-shrink-0 overflow-hidden flex flex-col">
+                            <BomProductList
                                 onSelect={handleBomSelect}
                                 selectedId={selectedNode?.id}
-                                searchQuery={searchQuery}
                             />
                         </div>
 
                         {/* Right Panel - Detail */}
-                        <div className="flex-1 overflow-hidden">
+                        <div className="w-1/2 overflow-hidden">
                             <DetailPanel
                                 node={selectedNode}
                                 onClose={handleCloseDetail}
                             />
                         </div>
                     </>
+                )}
+
+                {/* Consumption Tab - Spreadsheet Grid View */}
+                {activeTab === 'consumption' && (
+                    <div className="flex-1 overflow-hidden">
+                        <ConsumptionGridView />
+                    </div>
+                )}
+
+                {/* Import Tab - CSV Import with Mapping */}
+                {activeTab === 'import' && (
+                    <div className="flex-1 overflow-hidden">
+                        <ConsumptionImportView />
+                    </div>
+                )}
+
+                {/* Fabric Mapping Tab - Assign fabrics to variations */}
+                {activeTab === 'fabricMapping' && (
+                    <div className="flex-1 overflow-hidden">
+                        <FabricMappingView />
+                    </div>
                 )}
             </div>
 
@@ -275,6 +283,15 @@ export default function Products() {
                 )}
                 {activeTab === 'bom' && (
                     <span>Select a product or variation to edit its Bill of Materials</span>
+                )}
+                {activeTab === 'consumption' && (
+                    <span>Click any cell to edit • Tab/Enter to navigate • Save to apply changes</span>
+                )}
+                {activeTab === 'import' && (
+                    <span>Upload CSV • Map external names to internal products • Import consumption data</span>
+                )}
+                {activeTab === 'fabricMapping' && (
+                    <span>Set Material/Fabric at product level • Select Colour per variation • Save to apply</span>
                 )}
             </div>
         </div>

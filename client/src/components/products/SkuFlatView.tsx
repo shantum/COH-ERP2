@@ -44,7 +44,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
-import { ArrowUpDown, Package, Eye, GitBranch, ImageIcon, GripVertical, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { ArrowUpDown, Package, Eye, GitBranch, ImageIcon, GripVertical, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Edit } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -89,6 +89,7 @@ interface SkuFlatViewProps {
     searchQuery?: string;
     onViewProduct?: (product: ProductTreeNode) => void;
     onEditBom?: (product: ProductTreeNode) => void;
+    onEditProduct?: (product: ProductTreeNode) => void;
 }
 
 /**
@@ -148,6 +149,7 @@ export function SkuFlatView({
     searchQuery,
     onViewProduct,
     onEditBom,
+    onEditProduct,
 }: SkuFlatViewProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
     const [pagination, setPagination] = useState<PaginationState>({
@@ -418,7 +420,7 @@ export function SkuFlatView({
         },
         {
             id: 'actions',
-            size: 80,
+            size: 110,
             enableSorting: false,
             header: '',
             cell: ({ row }) => (
@@ -435,6 +437,15 @@ export function SkuFlatView({
                     <Button
                         variant="ghost"
                         size="icon"
+                        className="h-8 w-8 text-blue-600"
+                        onClick={() => row.original.skuNode && onEditProduct?.(row.original.skuNode)}
+                        title="Edit SKU"
+                    >
+                        <Edit size={16} />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-8 w-8 text-purple-600"
                         onClick={() => row.original.variationNode && onEditBom?.(row.original.variationNode)}
                         title="Edit BOM"
@@ -444,7 +455,7 @@ export function SkuFlatView({
                 </div>
             ),
         },
-    ], [onViewProduct, onEditBom]);
+    ], [onViewProduct, onEditBom, onEditProduct]);
 
     const table = useReactTable({
         data: filteredSkus,

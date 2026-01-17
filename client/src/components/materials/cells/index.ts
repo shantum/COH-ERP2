@@ -12,3 +12,5 @@ export { PatternCell } from './PatternCell';
 export { CompositionCell } from './CompositionCell';
 export { WeightCell } from './WeightCell';
 export { StockCell } from './StockCell';
+export { ColoursCell } from './ColoursCell';
+export { ConnectedProductsCell } from './ConnectedProductsCell';

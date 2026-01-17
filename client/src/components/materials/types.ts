@@ -81,6 +81,14 @@ export interface MaterialNode {
     // === Aggregated Stock (Material/Fabric levels) ===
     totalStock?: number;
 
+    // === Connected Products (Fabric/Colour levels) ===
+    productCount?: number;
+    connectedProducts?: Array<{
+        id: string;
+        name: string;
+        styleCode?: string;
+    }>;
+
     // === UI State (managed by component, not from server) ===
     _isExpanded?: boolean;
     _isLoading?: boolean;

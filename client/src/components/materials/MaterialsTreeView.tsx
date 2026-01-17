@@ -12,14 +12,18 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Search } from 'lucide-react';
+import { Users, Search, LayoutGrid, Layers } from 'lucide-react';
 
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { MaterialNode, MaterialNodeType } from './types';
 import { MaterialsTreeTable } from './MaterialsTreeTable';
 import { UnifiedMaterialModal } from './UnifiedMaterialModal';
+import { LinkProductsModal } from './LinkProductsModal';
 import { QuickAddButtons } from './QuickAddButtons';
 import { materialsApi } from '../../services/api';
 import { materialsTreeKeys, useMaterialsTreeMutations } from './hooks/useMaterialsTree';
+
+type ViewMode = 'fabric' | 'material';
 
 interface MaterialsTreeViewProps {
     /** Callback to show detail panel */
@@ -53,9 +57,13 @@ export function MaterialsTreeView({
 }: MaterialsTreeViewProps) {
     const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
+    const [viewMode, setViewMode] = useState<ViewMode>('fabric'); // Default to fabric view
 
     // Unified modal state
     const [modalState, setModalState] = useState<ModalState>(initialModalState);
+
+    // Link products modal state
+    const [linkProductsColour, setLinkProductsColour] = useState<MaterialNode | null>(null);
 
     // Fetch tree data for quick add buttons
     const { data: treeData } = useQuery({
@@ -95,8 +103,32 @@ export function MaterialsTreeView({
         return { materials: materialsList, fabrics: fabricsList };
     }, [treeData?.items]);
 
-    // Mutations for deactivation
-    const { updateMaterial } = useMaterialsTreeMutations();
+    // Transform data for fabric-first view
+    // Flatten fabrics to top level with materialName attached, colours as children
+    const fabricFirstData = useMemo(() => {
+        const items = treeData?.items || [];
+        const flatFabrics: MaterialNode[] = [];
+
+        for (const material of items) {
+            if (material.children) {
+                for (const fabric of material.children) {
+                    if (fabric.type === 'fabric') {
+                        // Attach material info to fabric for display
+                        flatFabrics.push({
+                            ...fabric,
+                            materialName: material.name,
+                            materialId: material.id,
+                        });
+                    }
+                }
+            }
+        }
+
+        return flatFabrics;
+    }, [treeData?.items]);
+
+    // Mutations for deactivation and deletion
+    const { updateMaterial, deleteMaterial, deleteFabric, deleteColour } = useMaterialsTreeMutations();
 
     // Close modal
     const closeModal = useCallback(() => {
@@ -204,15 +236,94 @@ export function MaterialsTreeView({
         }
     }, [updateMaterial]);
 
+    // Handle link products (colours only)
+    const handleLinkProducts = useCallback((node: MaterialNode) => {
+        if (node.type === 'colour') {
+            setLinkProductsColour(node);
+        }
+    }, []);
+
+    // Handle deletion
+    const handleDelete = useCallback((node: MaterialNode) => {
+        const typeLabel = node.type === 'colour' ? 'colour' : node.type;
+        const hasChildren = node.type === 'material'
+            ? (node.fabricCount || 0) > 0
+            : node.type === 'fabric'
+                ? (node.colourCount || 0) > 0
+                : false;
+
+        if (hasChildren) {
+            const childType = node.type === 'material' ? 'fabrics' : 'colours';
+            alert(`Cannot delete "${node.name}": It has ${node.type === 'material' ? node.fabricCount : node.colourCount} ${childType} linked to it. Please delete them first.`);
+            return;
+        }
+
+        const confirmMessage = `Are you sure you want to permanently delete "${node.name}"?\n\nThis action cannot be undone.`;
+
+        if (window.confirm(confirmMessage)) {
+            if (node.type === 'material') {
+                deleteMaterial.mutate(node.id, {
+                    onError: (error: any) => {
+                        alert(error?.response?.data?.error || 'Failed to delete material');
+                    },
+                });
+            } else if (node.type === 'fabric') {
+                deleteFabric.mutate(node.id, {
+                    onError: (error: any) => {
+                        alert(error?.response?.data?.error || 'Failed to delete fabric');
+                    },
+                });
+            } else if (node.type === 'colour') {
+                deleteColour.mutate(node.id, {
+                    onError: (error: any) => {
+                        alert(error?.response?.data?.error || 'Failed to delete colour');
+                    },
+                });
+            }
+        }
+    }, [deleteMaterial, deleteFabric, deleteColour]);
+
     return (
-        <div className="space-y-4">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                    <h2 className="text-lg font-semibold text-gray-900">Materials Hierarchy</h2>
-                    <p className="text-sm text-gray-500">Expand nodes to see fabrics and colours</p>
+        <div className="flex flex-col h-full">
+            {/* Header with View Switcher */}
+            <div className="flex items-center justify-between gap-4 px-4 py-3 border-b bg-gray-50 flex-shrink-0">
+                {/* Left: View Mode Tabs */}
+                <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
+                    <TabsList className="bg-gray-100/80">
+                        <TabsTrigger value="fabric" className="gap-2 data-[state=active]:bg-white">
+                            <LayoutGrid size={16} />
+                            <span className="hidden sm:inline">By Fabric</span>
+                        </TabsTrigger>
+                        <TabsTrigger value="material" className="gap-2 data-[state=active]:bg-white">
+                            <Layers size={16} />
+                            <span className="hidden sm:inline">By Material</span>
+                        </TabsTrigger>
+                    </TabsList>
+                </Tabs>
+
+                {/* Center: Search */}
+                <div className="flex-1 max-w-md">
+                    <div className="relative">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                            type="text"
+                            placeholder="Search fabrics, colours..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        />
+                    </div>
                 </div>
-                <div className="flex flex-wrap gap-2 sm:gap-3">
+
+                {/* Right: Quick Add + Supplier */}
+                <div className="flex items-center gap-2">
+                    <QuickAddButtons
+                        onAddMaterial={handleAddMaterial}
+                        onAddFabric={handleAddFabric}
+                        onAddColour={handleAddColour}
+                        materials={materials}
+                        fabrics={fabrics}
+                    />
                     {onAddSupplier && (
                         <button
                             onClick={onAddSupplier}
@@ -225,41 +336,36 @@ export function MaterialsTreeView({
                 </div>
             </div>
 
-            {/* Quick Add Buttons + Search */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <QuickAddButtons
-                    onAddMaterial={handleAddMaterial}
-                    onAddFabric={handleAddFabric}
-                    onAddColour={handleAddColour}
-                    materials={materials}
-                    fabrics={fabrics}
-                />
-
-                <div className="flex-1" />
-
-                <div className="relative w-full sm:w-72">
-                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Search materials, fabrics, colours..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
-                    />
-                </div>
-            </div>
-
             {/* Tree Table */}
-            <div className="border rounded-lg overflow-hidden bg-white">
+            <div className="flex-1 border-x border-b bg-white overflow-hidden">
                 <MaterialsTreeTable
                     onEdit={handleEdit}
                     onAddChild={handleAddChild}
                     onViewDetails={onViewDetails}
                     onAddInward={onAddInward}
                     onDeactivate={handleDeactivate}
+                    onDelete={handleDelete}
+                    onLinkProducts={handleLinkProducts}
                     searchQuery={searchQuery}
-                    height="calc(100vh - 340px)"
+                    viewMode={viewMode}
+                    fabricFirstData={fabricFirstData}
+                    height="100%"
                 />
+            </div>
+
+            {/* Footer Note */}
+            <div className="px-4 py-2 border-t bg-gray-50 text-xs text-gray-500 flex-shrink-0">
+                {viewMode === 'fabric' ? (
+                    <span>
+                        <strong>By Fabric view:</strong> Fabrics shown at top level, grouped by Material category.
+                        Click arrow to see colour variants. Switch to "By Material" for full hierarchy.
+                    </span>
+                ) : (
+                    <span>
+                        <strong>By Material view:</strong> Full hierarchy - Material → Fabric → Colour.
+                        Click arrows to expand. Switch to "By Fabric" for a flatter view.
+                    </span>
+                )}
             </div>
 
             {/* Unified Modal */}
@@ -271,6 +377,13 @@ export function MaterialsTreeView({
                 item={modalState.item}
                 parentId={modalState.parentId}
                 parentNode={modalState.parentNode}
+            />
+
+            {/* Link Products Modal */}
+            <LinkProductsModal
+                isOpen={!!linkProductsColour}
+                onClose={() => setLinkProductsColour(null)}
+                colour={linkProductsColour}
             />
         </div>
     );

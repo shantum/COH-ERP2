@@ -826,11 +826,19 @@ router.post('/fabric-colours/:colourId/link-variations', asyncHandler(async (req
 
   // Create/update BOM lines AND update variation.fabricId in a transaction
   // Use upsert for better performance and increase timeout for bulk operations
+  // CRITICAL: Update fabricId BEFORE creating BOM line to satisfy DB constraint
   const results = await prisma.$transaction(async (tx) => {
     const updated: string[] = [];
 
     for (const variation of variations) {
-      // 1. Create/update the BOM line with the fabric colour
+      // 1. FIRST update the variation's fabricId to match the colour's parent fabric
+      // This must happen before the BOM line creation to satisfy the hierarchy constraint
+      await tx.variation.update({
+        where: { id: variation.id },
+        data: { fabricId: colour.fabricId },
+      });
+
+      // 2. THEN create/update the BOM line with the fabric colour
       await tx.variationBomLine.upsert({
         where: {
           variationId_roleId: {
@@ -844,12 +852,6 @@ router.post('/fabric-colours/:colourId/link-variations', asyncHandler(async (req
           roleId: targetRoleId,
           fabricColourId: colourId,
         },
-      });
-
-      // 2. Also update the variation's fabricId to match the colour's parent fabric
-      await tx.variation.update({
-        where: { id: variation.id },
-        data: { fabricId: colour.fabricId },
       });
 
       updated.push(variation.id);
@@ -871,6 +873,805 @@ router.post('/fabric-colours/:colourId/link-variations', asyncHandler(async (req
       total: results.updated.length,
     },
   });
+}));
+
+/**
+ * GET /bom/fabric-assignments
+ * Returns all fabric assignments for variations (for Fabric Mapping view)
+ * Query params:
+ *   - roleId: ComponentRole ID (optional, defaults to main fabric role)
+ *
+ * Returns: { assignments: Array<{ variationId, colourId, fabricId, materialId, colourName, fabricName, materialName, colourHex }> }
+ */
+router.get('/fabric-assignments', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  let roleId = req.query.roleId as string | undefined;
+
+  // Get the main fabric role if not specified
+  if (!roleId) {
+    const mainFabricRole = await prisma.componentRole.findFirst({
+      where: {
+        code: 'main',
+        type: { code: 'FABRIC' },
+      },
+    });
+    if (!mainFabricRole) {
+      return res.status(500).json({ error: 'Main fabric role not configured' });
+    }
+    roleId = mainFabricRole.id;
+  }
+
+  // Fetch all variation BOM lines with fabric colour assignments
+  const bomLines = await prisma.variationBomLine.findMany({
+    where: {
+      roleId,
+      fabricColourId: { not: null },
+    },
+    select: {
+      variationId: true,
+      fabricColourId: true,
+      fabricColour: {
+        select: {
+          id: true,
+          colourName: true,
+          colourHex: true,
+          fabricId: true,
+          fabric: {
+            select: {
+              id: true,
+              name: true,
+              materialId: true,
+              material: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // Transform to flat response
+  const assignments = bomLines.map(line => ({
+    variationId: line.variationId,
+    colourId: line.fabricColour?.id || '',
+    colourName: line.fabricColour?.colourName || '',
+    colourHex: line.fabricColour?.colourHex || undefined,
+    fabricId: line.fabricColour?.fabric?.id || '',
+    fabricName: line.fabricColour?.fabric?.name || '',
+    materialId: line.fabricColour?.fabric?.material?.id || '',
+    materialName: line.fabricColour?.fabric?.material?.name || '',
+  }));
+
+  return res.json({ assignments, roleId });
+}));
+
+// ============================================
+// SIZE-BASED CONSUMPTION ENDPOINTS
+// ============================================
+
+/**
+ * GET /bom/products/:productId/size-consumptions
+ * Returns consumption by size for a product (aggregated across all colors)
+ * Query params:
+ *   - roleId: ComponentRole ID (required)
+ */
+router.get('/products/:productId/size-consumptions', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const productId = req.params.productId as string;
+  const roleId = req.query.roleId as string;
+
+  if (!roleId) {
+    return res.status(400).json({ error: 'roleId query param is required' });
+  }
+
+  // Get product with all variations and SKUs
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    include: {
+      variations: {
+        where: { isActive: true },
+        include: {
+          skus: {
+            where: { isActive: true },
+            orderBy: { size: 'asc' },
+          },
+        },
+      },
+    },
+  });
+
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+
+  // Get the role details
+  const role = await prisma.componentRole.findUnique({
+    where: { id: roleId },
+    include: { type: true },
+  });
+
+  if (!role) {
+    return res.status(404).json({ error: 'Component role not found' });
+  }
+
+  // Get product template for default quantity
+  const template = await prisma.productBomTemplate.findFirst({
+    where: { productId, roleId },
+  });
+
+  // Collect all SKU IDs
+  const allSkus = product.variations.flatMap(v => v.skus);
+  const skuIds = allSkus.map(s => s.id);
+
+  // Get SKU-level BOM lines for this role
+  const skuBomLines = await prisma.skuBomLine.findMany({
+    where: { skuId: { in: skuIds }, roleId },
+  });
+
+  // Create a map of skuId -> quantity
+  const skuQuantityMap = new Map<string, number | null>();
+  for (const line of skuBomLines) {
+    skuQuantityMap.set(line.skuId, line.quantity);
+  }
+
+  // Aggregate by size - get unique sizes and their consumption
+  const sizeConsumptionMap = new Map<string, { quantity: number | null; skuCount: number }>();
+  const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '2XL', '3XL', '4XL'];
+
+  for (const sku of allSkus) {
+    const size = sku.size;
+    const existing = sizeConsumptionMap.get(size);
+
+    // Get quantity: SKU BOM line → template default → SKU fabricConsumption (legacy)
+    let quantity = skuQuantityMap.get(sku.id);
+    if (quantity === undefined) {
+      quantity = template?.defaultQuantity ?? sku.fabricConsumption;
+    }
+
+    if (existing) {
+      // Use the first non-null value found for this size
+      if (existing.quantity === null && quantity !== null) {
+        existing.quantity = quantity;
+      }
+      existing.skuCount++;
+    } else {
+      sizeConsumptionMap.set(size, { quantity, skuCount: 1 });
+    }
+  }
+
+  // Sort sizes in standard order
+  const sizes = Array.from(sizeConsumptionMap.entries())
+    .sort((a, b) => {
+      const indexA = sizeOrder.indexOf(a[0]);
+      const indexB = sizeOrder.indexOf(b[0]);
+      if (indexA === -1 && indexB === -1) return a[0].localeCompare(b[0]);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    })
+    .map(([size, data]) => ({
+      size,
+      quantity: data.quantity,
+      skuCount: data.skuCount,
+    }));
+
+  return res.json({
+    productId,
+    productName: product.name,
+    roleId,
+    roleName: role.name,
+    roleType: role.type.code,
+    unit: template?.quantityUnit || 'meter',
+    defaultQuantity: template?.defaultQuantity ?? null,
+    sizes,
+    totalSkus: allSkus.length,
+    totalVariations: product.variations.length,
+  });
+}));
+
+/**
+ * PUT /bom/products/:productId/size-consumptions
+ * Bulk update consumption by size (applies to ALL SKUs of that size across all colors)
+ * Body: { roleId: string, consumptions: { size: string, quantity: number }[] }
+ */
+router.put('/products/:productId/size-consumptions', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const productId = req.params.productId as string;
+  const { roleId, consumptions } = req.body;
+
+  if (!roleId) {
+    return res.status(400).json({ error: 'roleId is required' });
+  }
+
+  if (!consumptions || !Array.isArray(consumptions)) {
+    return res.status(400).json({ error: 'consumptions array is required' });
+  }
+
+  // Get product with all SKUs
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    include: {
+      variations: {
+        where: { isActive: true },
+        include: {
+          skus: {
+            where: { isActive: true },
+            select: { id: true, size: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!product) {
+    return res.status(404).json({ error: 'Product not found' });
+  }
+
+  // Create size → quantity map from request
+  const sizeQuantityMap = new Map<string, number>();
+  for (const c of consumptions) {
+    if (c.size && c.quantity !== undefined && c.quantity !== null) {
+      sizeQuantityMap.set(c.size, c.quantity);
+    }
+  }
+
+  // Collect all SKUs by size
+  const allSkus = product.variations.flatMap(v => v.skus);
+  const skusToUpdate = allSkus.filter(sku => sizeQuantityMap.has(sku.size));
+
+  // Get role to check if it's main fabric (for backward compat)
+  const role = await prisma.componentRole.findUnique({
+    where: { id: roleId },
+    include: { type: true },
+  });
+
+  const isMainFabric = role?.type.code === 'FABRIC' && role.code === 'main';
+
+  // Batch update in transaction
+  let updatedCount = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const sku of skusToUpdate) {
+      const quantity = sizeQuantityMap.get(sku.size)!;
+
+      // Upsert SKU BOM line
+      await tx.skuBomLine.upsert({
+        where: {
+          skuId_roleId: { skuId: sku.id, roleId },
+        },
+        update: { quantity },
+        create: {
+          skuId: sku.id,
+          roleId,
+          quantity,
+        },
+      });
+
+      // Backward compatibility: also update legacy fabricConsumption field
+      if (isMainFabric) {
+        await tx.sku.update({
+          where: { id: sku.id },
+          data: { fabricConsumption: quantity },
+        });
+      }
+
+      updatedCount++;
+    }
+  }, {
+    timeout: 30000,
+  });
+
+  return res.json({
+    success: true,
+    updated: updatedCount,
+    sizesUpdated: consumptions.length,
+  });
+}));
+
+// ============================================
+// CONSUMPTION GRID ENDPOINTS
+// ============================================
+
+/**
+ * GET /bom/consumption-grid
+ * Returns consumption data for all products in a grid format
+ * Rows = Products, Columns = Sizes
+ */
+router.get('/consumption-grid', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const roleCode = (req.query.role as string) || 'main';
+  const typeCode = (req.query.type as string) || 'FABRIC';
+
+  // Get the role
+  const role = await prisma.componentRole.findFirst({
+    where: {
+      code: roleCode,
+      type: { code: typeCode },
+    },
+    include: { type: true },
+  });
+
+  if (!role) {
+    return res.status(404).json({ error: `Role ${roleCode} of type ${typeCode} not found` });
+  }
+
+  // Get all active products with their variations and SKUs
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    include: {
+      variations: {
+        where: { isActive: true },
+        include: {
+          skus: {
+            where: { isActive: true },
+            select: { id: true, size: true, fabricConsumption: true },
+          },
+        },
+      },
+    },
+    orderBy: [{ gender: 'asc' }, { category: 'asc' }, { name: 'asc' }],
+  });
+
+  // Get all SKU IDs
+  const allSkuIds: string[] = [];
+  for (const product of products) {
+    for (const variation of product.variations) {
+      for (const sku of variation.skus) {
+        allSkuIds.push(sku.id);
+      }
+    }
+  }
+
+  // Get SKU BOM lines for this role
+  const skuBomLines = await prisma.skuBomLine.findMany({
+    where: { skuId: { in: allSkuIds }, roleId: role.id },
+  });
+
+  // Create map of skuId -> quantity
+  const skuQuantityMap = new Map<string, number | null>();
+  for (const line of skuBomLines) {
+    skuQuantityMap.set(line.skuId, line.quantity);
+  }
+
+  // Get product templates for default quantities
+  const productIds = products.map(p => p.id);
+  const templates = await prisma.productBomTemplate.findMany({
+    where: { productId: { in: productIds }, roleId: role.id },
+  });
+  const templateMap = new Map<string, number | null>();
+  for (const t of templates) {
+    templateMap.set(t.productId, t.defaultQuantity);
+  }
+
+  // Collect all unique sizes across all products
+  const allSizes = new Set<string>();
+  for (const product of products) {
+    for (const variation of product.variations) {
+      for (const sku of variation.skus) {
+        allSizes.add(sku.size);
+      }
+    }
+  }
+
+  // Sort sizes in standard order
+  const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '2XL', '3XL', '4XL'];
+  const sizes = Array.from(allSizes).sort((a, b) => {
+    const indexA = sizeOrder.indexOf(a);
+    const indexB = sizeOrder.indexOf(b);
+    if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  });
+
+  // Build grid data
+  const rows = products.map(product => {
+    // Aggregate by size - get consumption for each size
+    const sizeData: Record<string, { quantity: number | null; skuCount: number }> = {};
+    const defaultQty = templateMap.get(product.id) ?? null;
+
+    for (const size of sizes) {
+      sizeData[size] = { quantity: null, skuCount: 0 };
+    }
+
+    for (const variation of product.variations) {
+      for (const sku of variation.skus) {
+        const bomQty = skuQuantityMap.get(sku.id);
+        const qty = bomQty ?? defaultQty ?? sku.fabricConsumption;
+
+        if (!sizeData[sku.size]) {
+          sizeData[sku.size] = { quantity: null, skuCount: 0 };
+        }
+
+        // Use first non-null value for this size
+        if (sizeData[sku.size].quantity === null && qty !== null) {
+          sizeData[sku.size].quantity = qty;
+        }
+        sizeData[sku.size].skuCount++;
+      }
+    }
+
+    return {
+      productId: product.id,
+      productName: product.name,
+      styleCode: product.styleCode,
+      category: product.category,
+      gender: product.gender,
+      imageUrl: product.imageUrl,
+      variationCount: product.variations.length,
+      skuCount: product.variations.reduce((sum, v) => sum + v.skus.length, 0),
+      defaultQuantity: defaultQty,
+      sizes: sizeData,
+    };
+  });
+
+  return res.json({
+    roleId: role.id,
+    roleName: role.name,
+    roleType: role.type.code,
+    sizes,
+    rows,
+  });
+}));
+
+/**
+ * PUT /bom/consumption-grid
+ * Bulk update consumption for multiple products/sizes
+ * Body: { roleId: string, updates: [{ productId, size, quantity }] }
+ */
+router.put('/consumption-grid', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const { roleId, updates } = req.body;
+
+  if (!roleId) {
+    return res.status(400).json({ error: 'roleId is required' });
+  }
+
+  if (!updates || !Array.isArray(updates)) {
+    return res.status(400).json({ error: 'updates array is required' });
+  }
+
+  // Get role to check if main fabric (for backward compat)
+  const role = await prisma.componentRole.findUnique({
+    where: { id: roleId },
+    include: { type: true },
+  });
+
+  if (!role) {
+    return res.status(404).json({ error: 'Role not found' });
+  }
+
+  const isMainFabric = role.type.code === 'FABRIC' && role.code === 'main';
+
+  // Group updates by productId
+  const updatesByProduct = new Map<string, Map<string, number>>();
+  for (const u of updates) {
+    if (u.productId && u.size && u.quantity !== undefined && u.quantity !== null) {
+      if (!updatesByProduct.has(u.productId)) {
+        updatesByProduct.set(u.productId, new Map());
+      }
+      updatesByProduct.get(u.productId)!.set(u.size, u.quantity);
+    }
+  }
+
+  // Get all products with their SKUs
+  const productIds = Array.from(updatesByProduct.keys());
+  const products = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    include: {
+      variations: {
+        where: { isActive: true },
+        include: {
+          skus: {
+            where: { isActive: true },
+            select: { id: true, size: true },
+          },
+        },
+      },
+    },
+  });
+
+  // Batch update in transaction
+  let updatedCount = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const product of products) {
+      const sizeQuantityMap = updatesByProduct.get(product.id);
+      if (!sizeQuantityMap) continue;
+
+      for (const variation of product.variations) {
+        for (const sku of variation.skus) {
+          const quantity = sizeQuantityMap.get(sku.size);
+          if (quantity === undefined) continue;
+
+          // Upsert SKU BOM line
+          await tx.skuBomLine.upsert({
+            where: {
+              skuId_roleId: { skuId: sku.id, roleId },
+            },
+            update: { quantity },
+            create: {
+              skuId: sku.id,
+              roleId,
+              quantity,
+            },
+          });
+
+          // Backward compatibility
+          if (isMainFabric) {
+            await tx.sku.update({
+              where: { id: sku.id },
+              data: { fabricConsumption: quantity },
+            });
+          }
+
+          updatedCount++;
+        }
+      }
+    }
+  }, {
+    timeout: 60000, // 60 second timeout for large batch
+  });
+
+  return res.json({
+    success: true,
+    updated: updatedCount,
+    productsUpdated: productIds.length,
+  });
+}));
+
+// ============================================
+// CONSUMPTION IMPORT ENDPOINTS
+// ============================================
+
+/**
+ * GET /bom/products-for-mapping
+ * Returns all products with basic info for mapping UI
+ * Includes flag for whether product has existing consumption data
+ */
+router.get('/products-for-mapping', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+
+  const products = await prisma.product.findMany({
+    where: { isActive: true },
+    select: {
+      id: true,
+      name: true,
+      styleCode: true,
+      category: true,
+      imageUrl: true,
+      gender: true,
+      variations: {
+        where: { isActive: true },
+        select: {
+          skus: {
+            where: { isActive: true },
+            select: { fabricConsumption: true },
+          },
+        },
+      },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  // Calculate if product has non-zero consumption
+  const result = products.map((p) => {
+    let hasConsumption = false;
+    let avgConsumption = 0;
+    let skuCount = 0;
+
+    for (const v of p.variations) {
+      for (const s of v.skus) {
+        skuCount++;
+        if (s.fabricConsumption && s.fabricConsumption > 0) {
+          hasConsumption = true;
+          avgConsumption += s.fabricConsumption;
+        }
+      }
+    }
+
+    return {
+      id: p.id,
+      name: p.name,
+      styleCode: p.styleCode,
+      category: p.category,
+      imageUrl: p.imageUrl,
+      gender: p.gender,
+      hasConsumption,
+      avgConsumption: skuCount > 0 ? avgConsumption / skuCount : 0,
+    };
+  });
+
+  return res.json(result);
+}));
+
+/**
+ * POST /bom/reset-consumption
+ * Reset all fabric consumption values to 0
+ * Use this before importing to track what hasn't been updated
+ */
+router.post('/reset-consumption', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+
+  // Get the main fabric role
+  const mainFabricRole = await prisma.componentRole.findFirst({
+    where: {
+      code: 'main',
+      type: { code: 'FABRIC' },
+    },
+  });
+
+  if (!mainFabricRole) {
+    return res.status(500).json({ error: 'Main fabric role not found' });
+  }
+
+  // Delete all SKU BOM lines for main fabric role
+  const deletedBomLines = await prisma.skuBomLine.deleteMany({
+    where: { roleId: mainFabricRole.id },
+  });
+
+  // Reset product template default quantities to 0
+  const updatedTemplates = await prisma.productBomTemplate.updateMany({
+    where: { roleId: mainFabricRole.id },
+    data: { defaultQuantity: 0 },
+  });
+
+  // Reset all Sku.fabricConsumption to 0 to indicate unset
+  const updatedSkus = await prisma.sku.updateMany({
+    data: { fabricConsumption: 0 },
+  });
+
+  return res.json({
+    success: true,
+    deletedBomLines: deletedBomLines.count,
+    updatedTemplates: updatedTemplates.count,
+    resetSkus: updatedSkus.count,
+  });
+}));
+
+/**
+ * POST /bom/import-consumption
+ * Import consumption data for multiple products
+ * Body: { imports: [{ productId, sizes: { XS: 1.2, S: 1.3, ... } }] }
+ */
+router.post('/import-consumption', asyncHandler(async (req: Request, res: Response) => {
+  const { prisma } = req;
+  const { imports } = req.body;
+
+  console.log('[import-consumption] Received', imports?.length, 'imports');
+
+  if (!imports || !Array.isArray(imports)) {
+    return res.status(400).json({ error: 'imports array is required' });
+  }
+
+  // Validate imports data
+  const validImports = imports.filter((imp: any) => {
+    if (!imp.productId || typeof imp.productId !== 'string') {
+      console.log('[import-consumption] Skipping invalid import - no productId:', imp);
+      return false;
+    }
+    if (!imp.sizes || typeof imp.sizes !== 'object') {
+      console.log('[import-consumption] Skipping invalid import - no sizes:', imp);
+      return false;
+    }
+    return true;
+  });
+
+  console.log('[import-consumption] Valid imports:', validImports.length);
+
+  if (validImports.length === 0) {
+    return res.json({ success: true, productsImported: 0, skusUpdated: 0 });
+  }
+
+  try {
+    // Get the main fabric role
+    const mainFabricRole = await prisma.componentRole.findFirst({
+      where: {
+        code: 'main',
+        type: { code: 'FABRIC' },
+      },
+    });
+
+    if (!mainFabricRole) {
+      return res.status(500).json({ error: 'Main fabric role not found' });
+    }
+
+    // Get all products with their SKUs
+    const productIds = validImports.map((i: any) => i.productId);
+    console.log('[import-consumption] Fetching', productIds.length, 'products');
+
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      include: {
+        variations: {
+          where: { isActive: true },
+          include: {
+            skus: {
+              where: { isActive: true },
+              select: { id: true, size: true },
+            },
+          },
+        },
+      },
+    });
+
+    console.log('[import-consumption] Found', products.length, 'products');
+
+    // Create map of productId -> product
+    const productMap = new Map(products.map(p => [p.id, p]));
+
+    // Build batch operations
+    const skuUpdates: { skuId: string; quantity: number }[] = [];
+
+    for (const imp of validImports) {
+      const product = productMap.get(imp.productId);
+      if (!product || !imp.sizes) continue;
+
+      for (const variation of product.variations) {
+        for (const sku of variation.skus) {
+          const quantity = imp.sizes[sku.size];
+          if (quantity === undefined || quantity === null || quantity === '') continue;
+
+          const numQuantity = typeof quantity === 'number' ? quantity : parseFloat(quantity);
+          if (isNaN(numQuantity)) continue;
+
+          skuUpdates.push({ skuId: sku.id, quantity: numQuantity });
+        }
+      }
+    }
+
+    console.log('[import-consumption] Processing', skuUpdates.length, 'SKU updates');
+
+    // Use raw SQL for fast batch update
+    const skuIds = skuUpdates.map(u => u.skuId);
+
+    // Build CASE statement for quantity updates
+    const caseStatements = skuUpdates.map(u =>
+      `WHEN id = '${u.skuId}' THEN ${u.quantity}`
+    ).join(' ');
+
+    // Batch update Sku.fabricConsumption using raw SQL
+    await prisma.$executeRawUnsafe(`
+      UPDATE "Sku"
+      SET "fabricConsumption" = CASE ${caseStatements} END
+      WHERE id IN (${skuIds.map(id => `'${id}'`).join(',')})
+    `);
+
+    console.log('[import-consumption] Updated Sku.fabricConsumption');
+
+    // For SkuBomLine, delete existing and insert new (faster than upsert)
+    await prisma.skuBomLine.deleteMany({
+      where: {
+        skuId: { in: skuIds },
+        roleId: mainFabricRole.id,
+      },
+    });
+
+    // Batch create all BOM lines
+    await prisma.skuBomLine.createMany({
+      data: skuUpdates.map(u => ({
+        skuId: u.skuId,
+        roleId: mainFabricRole.id,
+        quantity: u.quantity,
+      })),
+    });
+
+    const uniqueProducts = new Set(validImports.map((i: any) => i.productId)).size;
+    const updatedSkus = skuUpdates.length;
+
+    console.log('[import-consumption] Done:', uniqueProducts, 'products,', updatedSkus, 'SKUs');
+
+    return res.json({
+      success: true,
+      productsImported: uniqueProducts,
+      skusUpdated: updatedSkus,
+    });
+  } catch (error: any) {
+    console.error('[import-consumption] Error:', error.message);
+    return res.status(500).json({ error: error.message || 'Import failed' });
+  }
 }));
 
 export default router;

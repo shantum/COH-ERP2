@@ -1,12 +1,22 @@
 /**
- * VariationBomTab - Inline BOM display for Variation detail panel
+ * VariationBomTab - Unified BOM display for Variation detail panel
  *
- * Shows the variation's fabric assignment and any BOM overrides.
+ * Shows all BOM components (fabrics, trims, services) in a single table.
+ * At variation level, fabrics show the assigned colour with swatch.
+ * Trims and services are inherited from the product template.
  */
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, AlertCircle, Palette, Scissors } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { bomApi } from '../../../services/api';
+import {
+    BomLinesTable,
+    BomCostSummary,
+    type UnifiedBomLine,
+    type BomCostBreakdown,
+    type BomComponentType,
+} from '../bom';
 import type { ProductTreeNode } from '../types';
 
 interface VariationBomTabProps {
@@ -15,14 +25,141 @@ interface VariationBomTabProps {
 
 export function VariationBomTab({ variation }: VariationBomTabProps) {
     // Fetch BOM data for the parent product
-    const { data: bomData, isLoading, error } = useQuery({
+    const {
+        data: bomData,
+        isLoading,
+        error,
+    } = useQuery({
         queryKey: ['productBom', variation.productId],
-        queryFn: () => bomApi.getProductBom(variation.productId!).then(r => r.data),
+        queryFn: () => bomApi.getProductBom(variation.productId!).then((r) => r.data),
         enabled: !!variation.productId,
     });
 
-    // Find this variation's BOM data
-    const variationBom = bomData?.variations?.find((v: any) => v.variationId === variation.id);
+    // Transform API data to unified lines for this variation
+    const { lines, costs } = useMemo(() => {
+        if (!bomData?.templates) {
+            return {
+                lines: [] as UnifiedBomLine[],
+                costs: { fabricCost: 0, trimCost: 0, serviceCost: 0, total: 0 },
+            };
+        }
+
+        // Find this variation's BOM data
+        const variationBom = bomData.variations?.find(
+            (v: any) => v.id === variation.id
+        );
+        const variationLines = variationBom?.bomLines || [];
+
+        // Create a map of variation-level overrides
+        const variationLinesByRole = new Map<string, any>();
+        for (const line of variationLines) {
+            variationLinesByRole.set(line.roleId, line);
+        }
+
+        const unifiedLines: UnifiedBomLine[] = [];
+        let fabricCost = 0;
+        let trimCost = 0;
+        let serviceCost = 0;
+
+        // Transform templates, applying variation-level overrides
+        for (const template of bomData.templates) {
+            const typeCode = template.typeCode as BomComponentType;
+            const variationLine = variationLinesByRole.get(template.roleId);
+
+            // Determine component name and cost based on type
+            let componentName: string | null = null;
+            let componentId: string | null = null;
+            let costPerUnit: number | null = null;
+            let colourHex: string | null = null;
+            let isInherited = false;
+
+            if (typeCode === 'FABRIC') {
+                // At variation level, show the assigned fabric colour
+                if (variationLine?.fabricColour) {
+                    componentName = variationLine.fabricColour.name;
+                    componentId = variationLine.fabricColourId;
+                    colourHex = variationLine.fabricColour.colourHex;
+                    // Get cost from fabric colour (would need to be included in API response)
+                    costPerUnit = null; // TODO: Include cost in variation line response
+                } else {
+                    componentName = null; // Not assigned yet
+                }
+            } else if (typeCode === 'TRIM') {
+                // Check for variation override first
+                if (variationLine?.trimItem) {
+                    componentName = variationLine.trimItem.name;
+                    componentId = variationLine.trimItemId;
+                    costPerUnit = variationLine.trimItem.costPerUnit;
+                } else if (template.trimItem) {
+                    // Inherit from template
+                    componentName = template.trimItem.name;
+                    componentId = template.trimItemId;
+                    costPerUnit = template.trimItem.costPerUnit;
+                    isInherited = true;
+                }
+            } else if (typeCode === 'SERVICE') {
+                // Check for variation override first
+                if (variationLine?.serviceItem) {
+                    componentName = variationLine.serviceItem.name;
+                    componentId = variationLine.serviceItemId;
+                    costPerUnit = variationLine.serviceItem.costPerJob;
+                } else if (template.serviceItem) {
+                    // Inherit from template
+                    componentName = template.serviceItem.name;
+                    componentId = template.serviceItemId;
+                    costPerUnit = template.serviceItem.costPerJob;
+                    isInherited = true;
+                }
+            }
+
+            // Get quantity (variation can override template)
+            const qty = variationLine?.quantity ?? template.defaultQuantity ?? 0;
+            const total = (costPerUnit ?? 0) * qty;
+
+            // Accumulate costs
+            if (typeCode === 'FABRIC') fabricCost += total;
+            else if (typeCode === 'TRIM') trimCost += total;
+            else if (typeCode === 'SERVICE') serviceCost += total;
+
+            unifiedLines.push({
+                id: variationLine?.id || template.id,
+                type: typeCode,
+                roleCode: template.roleCode,
+                roleName: template.roleName,
+                roleId: template.roleId,
+                componentName,
+                componentId,
+                colourHex,
+                quantity: qty,
+                quantityUnit: template.quantityUnit || 'unit',
+                costPerUnit,
+                totalCost: total,
+                source: variationLine ? 'variation' : 'template',
+                isInherited,
+                _raw: {
+                    templateId: template.id,
+                    variationLineId: variationLine?.id,
+                    trimItem: variationLine?.trimItem || template.trimItem,
+                    serviceItem: variationLine?.serviceItem || template.serviceItem,
+                    fabricColour: variationLine?.fabricColour,
+                },
+            });
+        }
+
+        // Sort: FABRIC first, then TRIM, then SERVICE
+        const typeOrder: Record<BomComponentType, number> = { FABRIC: 0, TRIM: 1, SERVICE: 2 };
+        unifiedLines.sort((a, b) => typeOrder[a.type] - typeOrder[b.type]);
+
+        return {
+            lines: unifiedLines,
+            costs: {
+                fabricCost,
+                trimCost,
+                serviceCost,
+                total: fabricCost + trimCost + serviceCost,
+            } as BomCostBreakdown,
+        };
+    }, [bomData, variation.id]);
 
     if (isLoading) {
         return (
@@ -44,147 +181,23 @@ export function VariationBomTab({ variation }: VariationBomTabProps) {
 
     return (
         <div className="space-y-6">
-            {/* Fabric Assignment */}
-            <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-4 border border-purple-100">
-                <div className="flex items-center gap-2 mb-3">
-                    <Scissors size={16} className="text-purple-600" />
-                    <h4 className="text-sm font-medium text-gray-700">Fabric Assignment</h4>
-                </div>
+            {/* Cost Summary */}
+            <BomCostSummary costs={costs} />
 
-                <div className="space-y-3">
-                    {/* Main Fabric */}
-                    <div className="bg-white rounded-lg p-3 border border-purple-200">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <span className="text-xs text-gray-500 uppercase">Main Fabric</span>
-                                <p className="text-sm font-medium text-gray-900 mt-0.5">
-                                    {variation.fabricName || 'Not assigned'}
-                                </p>
-                            </div>
-                            {variation.colorHex && (
-                                <span
-                                    className="w-8 h-8 rounded-full border-2 border-white shadow"
-                                    style={{ backgroundColor: variation.colorHex }}
-                                    title={variation.colorName}
-                                />
-                            )}
-                        </div>
-                    </div>
+            {/* Unified BOM Lines Table */}
+            <BomLinesTable
+                lines={lines}
+                context="variation"
+                emptyMessage="No BOM template defined for this product"
+            />
 
-                    {/* Lining Fabric (if applicable) */}
-                    {variation.hasLining && (
-                        <div className="bg-white rounded-lg p-3 border border-purple-200">
-                            <span className="text-xs text-gray-500 uppercase">Lining Fabric</span>
-                            <p className="text-sm font-medium text-gray-900 mt-0.5">
-                                {variationBom?.liningFabricColourName || 'Not assigned'}
-                            </p>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            {/* BOM Overrides */}
-            {variationBom?.overrides && variationBom.overrides.length > 0 ? (
-                <div>
-                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                        Component Overrides
-                    </h4>
-                    <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                            <thead className="bg-gray-50 border-b">
-                                <tr>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">Component</th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Qty</th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">Cost</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                                {variationBom.overrides.map((override: any, idx: number) => (
-                                    <tr key={idx} className="hover:bg-gray-50">
-                                        <td className="px-3 py-2 text-gray-900">
-                                            {override.componentName || override.componentRole}
-                                        </td>
-                                        <td className="px-3 py-2 text-right tabular-nums text-gray-600">
-                                            {override.quantity}
-                                        </td>
-                                        <td className="px-3 py-2 text-right tabular-nums text-gray-600">
-                                            ₹{(override.cost || 0).toFixed(2)}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            ) : (
-                <div className="text-center py-6 border border-dashed border-gray-300 rounded-lg">
-                    <Palette size={32} className="mx-auto mb-2 text-gray-300" />
-                    <p className="text-sm text-gray-500">No component overrides</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                        This variation uses the product template defaults
-                    </p>
-                </div>
+            {/* Inheritance Note */}
+            {lines.some((l) => l.isInherited) && (
+                <p className="text-xs text-gray-500 flex items-center gap-1">
+                    <span className="text-gray-400">↑</span>
+                    Lines marked with ↑ are inherited from the product template
+                </p>
             )}
-
-            {/* Cost Summary for Variation */}
-            {variationBom && (
-                <div className="bg-gray-50 rounded-lg p-4">
-                    <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-                        Variation Cost Summary
-                    </h4>
-                    <div className="space-y-2">
-                        <CostRow
-                            label="Fabric Cost"
-                            value={variationBom.fabricCost}
-                        />
-                        <CostRow
-                            label="Trims Cost"
-                            value={variation.trimsCost}
-                            inherited={variation.trimsCost === null}
-                        />
-                        <CostRow
-                            label="Lining Cost"
-                            value={variation.hasLining ? variation.liningCost : null}
-                            inherited={variation.liningCost === null}
-                            show={variation.hasLining}
-                        />
-                        <div className="pt-2 border-t">
-                            <CostRow
-                                label="Total COGS"
-                                value={variationBom.totalCost}
-                                bold
-                            />
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-interface CostRowProps {
-    label: string;
-    value?: number | null;
-    inherited?: boolean;
-    bold?: boolean;
-    show?: boolean;
-}
-
-function CostRow({ label, value, inherited, bold, show = true }: CostRowProps) {
-    if (!show) return null;
-
-    return (
-        <div className={`flex justify-between text-sm ${bold ? 'font-medium' : ''}`}>
-            <span className="text-gray-500">
-                {label}
-                {inherited && <span className="text-gray-400 ml-1 text-[10px]">↑ inherited</span>}
-            </span>
-            <span className={bold ? 'text-gray-900' : 'text-gray-700'}>
-                {value !== null && value !== undefined
-                    ? `₹${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : '-'
-                }
-            </span>
         </div>
     );
 }

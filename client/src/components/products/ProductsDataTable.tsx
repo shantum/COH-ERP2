@@ -9,9 +9,10 @@
  * - Rich data columns: MRP, Type, Fabric, Stock, Status
  */
 
-import { useState, useMemo, Fragment } from 'react';
-import { type ColumnDef, type ExpandedState, flexRender, getCoreRowModel, getExpandedRowModel, useReactTable } from '@tanstack/react-table';
-import { Eye, Package, Layers, Box, AlertTriangle, CheckCircle, XCircle, GitBranch, ChevronRight, ChevronDown, ImageIcon } from 'lucide-react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
+import { type ColumnDef, type ExpandedState, type PaginationState, flexRender, getCoreRowModel, getExpandedRowModel, getPaginationRowModel, useReactTable } from '@tanstack/react-table';
+import { Eye, Package, Layers, Box, AlertTriangle, CheckCircle, XCircle, GitBranch, ChevronRight, ChevronDown, ChevronLeft, ImageIcon, Edit } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -22,14 +23,21 @@ import { sortBySizeOrder } from './types';
 interface ProductsDataTableProps {
     onViewProduct?: (product: ProductTreeNode) => void;
     onEditBom?: (product: ProductTreeNode) => void;
+    onEditProduct?: (product: ProductTreeNode) => void;
     searchQuery?: string;
     /** Pre-filtered data from parent component */
     filteredData?: ProductTreeNode[];
 }
 
-export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filteredData }: ProductsDataTableProps) {
+const PAGE_SIZE = 100;
+
+export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, searchQuery, filteredData }: ProductsDataTableProps) {
     const { data: treeData, summary, isLoading } = useProductsTree({ enabled: !filteredData });
     const [expanded, setExpanded] = useState<ExpandedState>({});
+    const [pagination, setPagination] = useState<PaginationState>({
+        pageIndex: 0,
+        pageSize: PAGE_SIZE,
+    });
 
     // Use filtered data if provided, otherwise apply search filter
     const products = useMemo(() => {
@@ -49,6 +57,11 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
                 )
         );
     }, [treeData, filteredData, searchQuery]);
+
+    // Reset to first page when data changes
+    useEffect(() => {
+        setPagination(prev => ({ ...prev, pageIndex: 0 }));
+    }, [searchQuery, filteredData]);
 
     // Column definitions for products
     const columns = useMemo<ColumnDef<ProductTreeNode>[]>(
@@ -144,7 +157,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
             {
                 accessorKey: 'fabricTypeName',
                 header: 'Fabric Type',
-                size: 120,
+                size: 100,
                 cell: ({ row }) => (
                     <span className="text-sm">
                         {row.original.fabricTypeName || (
@@ -154,17 +167,75 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
                 ),
             },
             {
-                accessorKey: 'variationCount',
+                id: 'colorSwatches',
                 header: 'Colors',
-                size: 70,
-                cell: ({ row }) => (
-                    <div className="flex items-center gap-1.5">
-                        <Layers size={14} className="text-purple-500" />
-                        <span className="font-medium tabular-nums">
-                            {row.original.variationCount || 0}
-                        </span>
-                    </div>
-                ),
+                size: 140,
+                cell: ({ row }) => {
+                    const variations = row.original.children || [];
+                    if (variations.length === 0) return <span className="text-gray-400 text-xs">-</span>;
+
+                    // Show variation thumbnails (max 5)
+                    const visibleVariations = variations.slice(0, 5);
+                    const remaining = variations.length - 5;
+
+                    return (
+                        <div className="flex items-center gap-1">
+                            {visibleVariations.map((v) => (
+                                <div
+                                    key={v.id}
+                                    className="w-6 h-6 rounded-md border border-gray-200 flex-shrink-0 overflow-hidden bg-gray-100"
+                                    title={v.colorName || v.name}
+                                >
+                                    {v.imageUrl ? (
+                                        <img
+                                            src={v.imageUrl}
+                                            alt={v.colorName || ''}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : v.colorHex ? (
+                                        <div
+                                            className="w-full h-full"
+                                            style={{ backgroundColor: v.colorHex }}
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center text-[8px] text-gray-400">
+                                            {(v.colorName || '?')[0]}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                            {remaining > 0 && (
+                                <span className="text-xs text-gray-500 ml-0.5">+{remaining}</span>
+                            )}
+                        </div>
+                    );
+                },
+            },
+            {
+                id: 'fabrics',
+                header: 'Fabrics',
+                size: 150,
+                cell: ({ row }) => {
+                    const variations = row.original.children || [];
+                    if (variations.length === 0) return <span className="text-gray-400 text-xs">-</span>;
+
+                    // Get unique fabric names
+                    const fabrics = [...new Set(variations.map(v => v.fabricName).filter(Boolean))];
+                    if (fabrics.length === 0) return <span className="text-red-500 text-xs">Not set</span>;
+
+                    return (
+                        <div className="flex flex-wrap gap-1">
+                            {fabrics.slice(0, 2).map((fabric, i) => (
+                                <Badge key={i} variant="outline" className="text-xs truncate max-w-[70px]">
+                                    {fabric}
+                                </Badge>
+                            ))}
+                            {fabrics.length > 2 && (
+                                <span className="text-xs text-gray-500">+{fabrics.length - 2}</span>
+                            )}
+                        </div>
+                    );
+                },
             },
             {
                 accessorKey: 'skuCount',
@@ -245,7 +316,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
             {
                 id: 'actions',
                 header: '',
-                size: 70,
+                size: 100,
                 cell: ({ row }) => (
                     <div className="flex items-center gap-1">
                         <button
@@ -261,6 +332,16 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
+                                onEditProduct?.(row.original);
+                            }}
+                            className="p-1.5 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
+                            title="Edit Product"
+                        >
+                            <Edit size={14} />
+                        </button>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
                                 onEditBom?.(row.original);
                             }}
                             className="p-1.5 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
@@ -272,24 +353,26 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
                 ),
             },
         ],
-        [onViewProduct, onEditBom]
+        [onViewProduct, onEditBom, onEditProduct]
     );
 
     const table = useReactTable({
         data: products,
         columns,
-        state: { expanded },
+        state: { expanded, pagination },
         onExpandedChange: setExpanded,
+        onPaginationChange: setPagination,
         getCoreRowModel: getCoreRowModel(),
         getExpandedRowModel: getExpandedRowModel(),
+        getPaginationRowModel: getPaginationRowModel(),
         getRowCanExpand: (row) => !!row.original.children?.length,
     });
 
     return (
-        <div className="space-y-4">
+        <div className="flex flex-col h-full">
             {/* Summary Stats */}
             {summary && (
-                <div className="flex items-center gap-4 px-1 flex-wrap">
+                <div className="flex items-center gap-4 px-1 flex-wrap mb-4 flex-shrink-0">
                     <div className="flex items-center gap-2 text-sm">
                         <Package size={16} className="text-gray-400" />
                         <span className="text-gray-600">{summary.products} Products</span>
@@ -315,17 +398,17 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
             )}
 
             {/* Table with sticky header */}
-            <div className="rounded-md border overflow-hidden">
-                <div className="max-h-[calc(100vh-280px)] overflow-auto">
-                    <Table>
-                        <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
+            <div className="rounded-md border overflow-hidden flex-1 min-h-0 flex flex-col">
+                <div className="overflow-auto flex-1">
+                    <Table className="relative">
+                        <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-sm">
                             {table.getHeaderGroups().map((headerGroup) => (
-                                <TableRow key={headerGroup.id} className="bg-gray-50/80 backdrop-blur">
+                                <TableRow key={headerGroup.id} className="border-b hover:bg-gray-50">
                                     {headerGroup.headers.map((header) => (
                                         <TableHead
                                             key={header.id}
                                             style={{ width: header.column.getSize() }}
-                                            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                                            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap bg-gray-50"
                                         >
                                             {header.isPlaceholder
                                                 ? null
@@ -369,6 +452,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
                                                             variations={row.original.children}
                                                             onViewVariation={onViewProduct}
                                                             onEditBom={onEditBom}
+                                                            onEditVariation={onEditProduct}
                                                         />
                                                     </div>
                                                 </TableCell>
@@ -387,6 +471,45 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery, filte
                     </Table>
                 </div>
             </div>
+
+            {/* Pagination Controls - Always visible at bottom */}
+            {products.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 border rounded-md bg-gray-50/50 mt-4 flex-shrink-0">
+                    <div className="text-sm text-muted-foreground">
+                        Showing {Math.min(pagination.pageIndex * PAGE_SIZE + 1, products.length)} to{' '}
+                        {Math.min((pagination.pageIndex + 1) * PAGE_SIZE, products.length)} of{' '}
+                        {products.length} products
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => table.previousPage()}
+                            disabled={!table.getCanPreviousPage()}
+                            className="gap-1"
+                        >
+                            <ChevronLeft size={16} />
+                            Previous
+                        </Button>
+                        <div className="flex items-center gap-1 text-sm">
+                            <span className="text-muted-foreground">Page</span>
+                            <span className="font-medium">{pagination.pageIndex + 1}</span>
+                            <span className="text-muted-foreground">of</span>
+                            <span className="font-medium">{Math.max(1, table.getPageCount())}</span>
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => table.nextPage()}
+                            disabled={!table.getCanNextPage()}
+                            className="gap-1"
+                        >
+                            Next
+                            <ChevronRight size={16} />
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -398,9 +521,10 @@ interface VariationsTableProps {
     variations: ProductTreeNode[];
     onViewVariation?: (variation: ProductTreeNode) => void;
     onEditBom?: (variation: ProductTreeNode) => void;
+    onEditVariation?: (variation: ProductTreeNode) => void;
 }
 
-function VariationsTable({ variations, onViewVariation, onEditBom }: VariationsTableProps) {
+function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariation }: VariationsTableProps) {
     const [expandedVariations, setExpandedVariations] = useState<Record<string, boolean>>({});
 
     const toggleVariation = (id: string) => {
@@ -517,6 +641,16 @@ function VariationsTable({ variations, onViewVariation, onEditBom }: VariationsT
                                             title="View"
                                         >
                                             <Eye size={14} />
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onEditVariation?.(variation);
+                                            }}
+                                            className="p-1 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
+                                            title="Edit Variation"
+                                        >
+                                            <Edit size={14} />
                                         </button>
                                         <button
                                             onClick={(e) => {

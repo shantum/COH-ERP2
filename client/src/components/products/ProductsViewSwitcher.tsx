@@ -12,8 +12,9 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { LayoutGrid, Grid2x2, Filter, X, Users, Shirt, Scissors } from 'lucide-react';
+import { LayoutGrid, Grid2x2, Filter, X, Users, Shirt, Scissors, Search, Plus } from 'lucide-react';
 
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,14 +28,18 @@ import {
 import { ProductsDataTable } from './ProductsDataTable';
 import { SkuFlatView } from './SkuFlatView';
 import { useProductsTree } from './hooks/useProductsTree';
+import { UnifiedProductEditModal } from './unified-edit';
 import type { ProductTreeNode } from './types';
+import type { EditLevel } from './unified-edit/types';
 
 type ViewMode = 'product' | 'sku';
 
 interface ProductsViewSwitcherProps {
     searchQuery?: string;
+    onSearchChange?: (query: string) => void;
     onViewProduct?: (product: ProductTreeNode) => void;
     onEditBom?: (product: ProductTreeNode) => void;
+    onAddProduct?: () => void;
 }
 
 interface FilterState {
@@ -43,7 +48,7 @@ interface FilterState {
     category: string | null;
 }
 
-export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: ProductsViewSwitcherProps) {
+export function ProductsViewSwitcher({ searchQuery, onSearchChange, onViewProduct, onEditBom, onAddProduct }: ProductsViewSwitcherProps) {
     const [viewMode, setViewMode] = useState<ViewMode>('product');
     const [filters, setFilters] = useState<FilterState>({
         gender: null,
@@ -52,7 +57,16 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
     });
     const [showFilters, setShowFilters] = useState(false);
 
-    const { data: treeData, summary } = useProductsTree();
+    // Edit modal state
+    const [editModalOpen, setEditModalOpen] = useState(false);
+    const [editTarget, setEditTarget] = useState<{
+        level: EditLevel;
+        productId: string;
+        variationId?: string;
+        skuId?: string;
+    } | null>(null);
+
+    const { data: treeData, summary, refetch } = useProductsTree();
 
     // Extract unique filter options from data
     const filterOptions = useMemo(() => {
@@ -102,11 +116,50 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
         setFilters(prev => ({ ...prev, [key]: value }));
     }, []);
 
+    // Open edit modal for a product/variation/SKU
+    const handleEditProduct = useCallback((node: ProductTreeNode) => {
+        // Find the product ID for any level
+        let productId = node.id;
+        let variationId: string | undefined;
+        let skuId: string | undefined;
+        let level: EditLevel = 'product';
+
+        if (node.type === 'variation') {
+            productId = node.productId || '';
+            variationId = node.id;
+            level = 'variation';
+        } else if (node.type === 'sku') {
+            // Need to find product and variation from the tree
+            const productNode = treeData?.find(p =>
+                p.children?.some(v => v.children?.some(s => s.id === node.id))
+            );
+            const variationNode = productNode?.children?.find(v =>
+                v.children?.some(s => s.id === node.id)
+            );
+            productId = productNode?.id || '';
+            variationId = variationNode?.id;
+            skuId = node.id;
+            level = 'sku';
+        }
+
+        setEditTarget({ level, productId, variationId, skuId });
+        setEditModalOpen(true);
+    }, [treeData]);
+
+    const handleEditModalClose = useCallback(() => {
+        setEditModalOpen(false);
+        setEditTarget(null);
+    }, []);
+
+    const handleEditSuccess = useCallback(() => {
+        refetch();
+    }, [refetch]);
+
     return (
         <div className="flex flex-col h-full">
             {/* View Switcher Header */}
-            <div className="flex items-center justify-between gap-4 pb-4 border-b mb-4">
-                {/* View Mode Tabs */}
+            <div className="flex items-center justify-between gap-4 pb-4 border-b mb-4 flex-shrink-0">
+                {/* Left: View Mode Tabs */}
                 <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
                     <TabsList className="bg-gray-100/80">
                         <TabsTrigger value="product" className="gap-2 data-[state=active]:bg-white">
@@ -120,11 +173,33 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                     </TabsList>
                 </Tabs>
 
-                {/* Filter Controls */}
+                {/* Center: Search */}
+                <div className="flex-1 max-w-md">
+                    <div className="relative">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Input
+                            type="text"
+                            placeholder="Search products, SKUs, colors..."
+                            value={searchQuery || ''}
+                            onChange={(e) => onSearchChange?.(e.target.value)}
+                            className="pl-9 h-9"
+                        />
+                        {searchQuery && (
+                            <button
+                                onClick={() => onSearchChange?.('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Right: Stats, Filters, Add */}
                 <div className="flex items-center gap-2">
                     {/* Quick Stats */}
                     {summary && (
-                        <div className="hidden md:flex items-center gap-3 text-sm text-muted-foreground mr-2">
+                        <div className="hidden lg:flex items-center text-sm text-muted-foreground mr-2">
                             <span>{filteredProducts.length} of {summary.products} products</span>
                         </div>
                     )}
@@ -137,7 +212,7 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                         className="gap-2"
                     >
                         <Filter size={16} />
-                        Filters
+                        <span className="hidden sm:inline">Filters</span>
                         {activeFilterCount > 0 && (
                             <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
                                 {activeFilterCount}
@@ -157,6 +232,16 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                             Clear
                         </Button>
                     )}
+
+                    {/* Add Product Button */}
+                    <Button
+                        size="sm"
+                        onClick={onAddProduct}
+                        className="gap-1.5"
+                    >
+                        <Plus size={16} />
+                        <span className="hidden sm:inline">Add Product</span>
+                    </Button>
                 </div>
             </div>
 
@@ -290,6 +375,7 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                         searchQuery={searchQuery}
                         onViewProduct={onViewProduct}
                         onEditBom={onEditBom}
+                        onEditProduct={handleEditProduct}
                         filteredData={filteredProducts}
                     />
                 ) : (
@@ -298,9 +384,23 @@ export function ProductsViewSwitcher({ searchQuery, onViewProduct, onEditBom }: 
                         searchQuery={searchQuery}
                         onViewProduct={onViewProduct}
                         onEditBom={onEditBom}
+                        onEditProduct={handleEditProduct}
                     />
                 )}
             </div>
+
+            {/* Unified Edit Modal */}
+            {editTarget && (
+                <UnifiedProductEditModal
+                    isOpen={editModalOpen}
+                    onClose={handleEditModalClose}
+                    initialLevel={editTarget.level}
+                    productId={editTarget.productId}
+                    variationId={editTarget.variationId}
+                    skuId={editTarget.skuId}
+                    onSuccess={handleEditSuccess}
+                />
+            )}
         </div>
     );
 }

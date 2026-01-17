@@ -25,3 +25,13 @@ export {
     getStatusLabel,
     type StatusMappingRule,
 } from './trackingStatus.js';
+
+// Shopify Product → Category
+export {
+    GARMENT_TYPE_PATTERNS,
+    DEFAULT_CATEGORY,
+    resolveProductCategory,
+    isDefaultCategory,
+    type GarmentTypeRule,
+    type ShopifyProductInput,
+} from './productCategory.js';
