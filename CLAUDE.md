@@ -8,6 +8,9 @@
 4. **Document as you go.** Comment undocumented code when you encounter it.
 5. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
 6. **Commit early, commit often.** Always commit your changes. Small, frequent commits.
+7. **Separate config from code.** Magic numbers, thresholds, mappings → `/config/`. Code should read config, not contain it.
+8. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
+9. **Build for the long term.** Write code your future self will thank you for. Maintainability over cleverness.
 
 ## Quick Start
 
