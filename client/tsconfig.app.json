@@ -27,6 +27,7 @@
     /* Path mapping for workspace packages */
     "baseUrl": ".",
     "paths": {
+      "@/*": ["./src/*"],
       "@coh/shared": ["../shared/src"],
       "@coh/shared/*": ["../shared/src/*"]
     }
