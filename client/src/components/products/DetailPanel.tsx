@@ -39,7 +39,6 @@ export function DetailPanel({ node, onClose, onEdit }: DetailPanelProps) {
             return (
                 <ProductDetail
                     product={node}
-                    onEdit={onEdit}
                     onClose={onClose}
                 />
             );

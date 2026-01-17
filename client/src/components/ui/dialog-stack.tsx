@@ -44,10 +44,6 @@ const DialogStackContext = createContext<DialogStackContextType>({
   clickable: false,
 });
 
-type _DialogStackChildProps = {
-  index?: number;
-};
-
 export type DialogStackProps = HTMLAttributes<HTMLDivElement> & {
   open?: boolean;
   clickable?: boolean;

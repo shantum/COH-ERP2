@@ -49,7 +49,6 @@ export function useSkuEditForm({
         mrp: data.mrp ?? undefined,
         targetStockQty: data.targetStockQty ?? undefined,
         trimsCost: data.trimsCost ?? undefined,
-        liningCost: data.liningCost ?? undefined,
         packagingCost: data.packagingCost ?? undefined,
         laborMinutes: data.laborMinutes ?? undefined,
         isActive: data.isActive,

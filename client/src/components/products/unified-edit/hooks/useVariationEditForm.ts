@@ -47,7 +47,6 @@ export function useVariationEditForm({
         fabricId: data.fabricId ?? undefined,
         hasLining: data.hasLining,
         trimsCost: data.trimsCost ?? undefined,
-        liningCost: data.liningCost ?? undefined,
         packagingCost: data.packagingCost ?? undefined,
         laborMinutes: data.laborMinutes ?? undefined,
         isActive: data.isActive,
