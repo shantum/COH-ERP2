@@ -312,7 +312,7 @@ export function CustomerTab({ customer, currentOrderId, onSelectOrder, isLoading
   }
 
   const totalColorQty = customer.colorAffinity?.reduce((sum, c) => sum + c.qty, 0) || 1;
-  const tierConfig = TIER_CONFIG[customer.customerTier?.toLowerCase() as keyof typeof TIER_CONFIG] || TIER_CONFIG.bronze;
+  const tierConfig = getTierConfig(customer.customerTier || 'bronze');
 
   return (
     <div className="space-y-5">

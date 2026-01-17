@@ -250,11 +250,6 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     return calculateOrderTotal(order).total;
   }, [order]);
 
-  // Total items count
-  const totalItems = useMemo(() => {
-    return activeLines.reduce((sum, l) => sum + l.qty, 0);
-  }, [activeLines]);
-
   // Mode change handler
   const handleModeChange = useCallback((newMode: ModalMode) => {
     if (newMode === 'edit' && !canEdit) return;
@@ -349,26 +344,6 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     });
   }, [order.id, onNavigateToOrder]);
 
-  // Update navigation state when order changes
-  const updateNavigationForNewOrder = useCallback((newOrder: Order, newMode: ModalMode = 'view') => {
-    setNavigationState(prev => {
-      // Don't add duplicate entries
-      const lastEntry = prev.history[prev.history.length - 1];
-      if (lastEntry?.orderId === newOrder.id && lastEntry?.mode === newMode) {
-        return prev;
-      }
-
-      return {
-        history: [...prev.history, {
-          orderId: newOrder.id,
-          orderNumber: newOrder.orderNumber,
-          mode: newMode,
-        }],
-        currentIndex: prev.history.length,
-      };
-    });
-  }, []);
-
   // Computed navigation values
   const canGoBack = navigationState.currentIndex > 0;
   const navigationHistory = navigationState.history.slice(0, navigationState.currentIndex + 1);
@@ -410,56 +385,10 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     });
   }, []);
 
-  // Select all packed lines
-  const handleSelectAllLines = useCallback(() => {
-    const packedLineIds = categorizedLines.packed.map(l => l.id);
-    setShipForm(prev => ({ ...prev, selectedLineIds: new Set(packedLineIds) }));
-  }, [categorizedLines.packed]);
-
-  // Deselect all lines
-  const handleDeselectAllLines = useCallback(() => {
-    setShipForm(prev => ({ ...prev, selectedLineIds: new Set() }));
-  }, []);
-
-  // Toggle section expansion
-  const toggleSection = useCallback((section: keyof ExpandedSections) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  }, []);
-
   // Toggle address picker (convenience wrapper)
   const toggleAddressPicker = useCallback(() => {
     setExpandedSections(prev => ({ ...prev, addressPicker: !prev.addressPicker }));
   }, []);
-
-  // Get save data for order update
-  const getSaveData = useCallback(() => {
-    return {
-      customerName: editForm.customerName,
-      customerEmail: editForm.customerEmail,
-      customerPhone: editForm.customerPhone,
-      shippingAddress: stringifyAddress(addressForm),
-      internalNotes: editForm.internalNotes,
-      shipByDate: editForm.shipByDate ? new Date(editForm.shipByDate).toISOString() : null,
-      isExchange: editForm.isExchange,
-    };
-  }, [editForm, addressForm]);
-
-  // Get ship data
-  const getShipData = useCallback(() => {
-    return {
-      awbNumber: shipForm.awbNumber.trim().toUpperCase(),
-      courier: shipForm.courier,
-    };
-  }, [shipForm]);
-
-  // Get ship lines data
-  const getShipLinesData = useCallback(() => {
-    return {
-      lineIds: Array.from(shipForm.selectedLineIds),
-      awbNumber: shipForm.awbNumber.trim().toUpperCase(),
-      courier: shipForm.courier,
-    };
-  }, [shipForm]);
 
   // AWB verification
   const expectedAwb = order.shopifyCache?.trackingNumber || order.awbNumber || '';
@@ -496,58 +425,6 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
   const handleUncancelLine = useCallback((_lineId: string) => {
     // State update happens via mutation + cache invalidation
   }, []);
-
-  // Reset form to initial state
-  const resetForm = useCallback(() => {
-    // Get shopify details for fallback data
-    const orderWithDetails = order as Order & {
-      shopifyDetails?: {
-        shippingAddress?: AddressData;
-        billingAddress?: AddressData;
-        customerEmail?: string;
-        customerPhone?: string;
-      };
-    };
-    const shopifyDetails = orderWithDetails.shopifyDetails;
-    const shopifyAddr = shopifyDetails?.shippingAddress;
-
-    // Parse shipping address JSON for phone fallback
-    let parsedAddressPhone = '';
-    if (order.shippingAddress) {
-      try {
-        const parsed = typeof order.shippingAddress === 'string'
-          ? JSON.parse(order.shippingAddress)
-          : order.shippingAddress;
-        if (parsed?.phone) parsedAddressPhone = parsed.phone;
-      } catch {
-        // Not valid JSON
-      }
-    }
-
-    // Email/phone fallback chain
-    const customerEmail = order.customerEmail || order.customer?.email || shopifyDetails?.customerEmail || '';
-    const customerPhone = order.customerPhone || order.customer?.phone || shopifyDetails?.customerPhone || parsedAddressPhone || shopifyAddr?.phone || '';
-
-    setEditForm({
-      customerName: order.customerName || '',
-      customerEmail,
-      customerPhone,
-      internalNotes: order.internalNotes || '',
-      shipByDate: order.shipByDate ? order.shipByDate.split('T')[0] : '',
-      isExchange: order.isExchange || false,
-    });
-
-    // Try to get address from order.shippingAddress, fall back to shopifyDetails
-    let addressData = parseAddress(order.shippingAddress);
-    if (
-      Object.keys(addressData).length === 0 &&
-      orderWithDetails.shopifyDetails?.shippingAddress
-    ) {
-      addressData = orderWithDetails.shopifyDetails.shippingAddress;
-    }
-    setAddressForm(addressData);
-    setHasUnsavedChanges(false);
-  }, [order]);
 
   return {
     // Mode

@@ -18,7 +18,6 @@ import {
 import { trpc } from '../../services/trpc';
 import {
     TIER_CONFIG,
-    COLOR_MAP,
     calculateHealthScore,
     getHealthScoreColor,
     getHealthScoreLabel,
