@@ -283,6 +283,34 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     }
   }, [canEdit, canShip, canCustomer, order.id, order.orderNumber]);
 
+  // Track the order ID to detect when order changes (for navigation)
+  const [previousOrderId, setPreviousOrderId] = useState(order.id);
+
+  // When order changes (from navigation), update mode and history
+  useEffect(() => {
+    if (order.id !== previousOrderId) {
+      setPreviousOrderId(order.id);
+      // Switch to view mode for the new order
+      setMode('view');
+      // Add new order to navigation history
+      setNavigationState(prev => {
+        const lastEntry = prev.history[prev.history.length - 1];
+        // Don't add duplicate entries
+        if (lastEntry?.orderId === order.id) {
+          return prev;
+        }
+        return {
+          history: [...prev.history, {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            mode: 'view',
+          }],
+          currentIndex: prev.history.length,
+        };
+      });
+    }
+  }, [order.id, order.orderNumber, previousOrderId]);
+
   // Navigate to a different order (from Customer tab order history)
   const navigateToOrder = useCallback((orderId: string) => {
     if (orderId === order.id) {

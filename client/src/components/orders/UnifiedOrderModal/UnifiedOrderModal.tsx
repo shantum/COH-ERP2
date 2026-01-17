@@ -44,9 +44,11 @@ export function UnifiedOrderModal({
   const [isShipping, setIsShipping] = useState(false);
   // Track current order for navigation
   const [currentOrderId, setCurrentOrderId] = useState(initialOrder.id);
+  // Keep track of last valid order for smooth transitions
+  const [lastValidOrder, setLastValidOrder] = useState<Order>(initialOrder);
 
   // Fetch fresh order data to ensure we have all fields
-  const { data: fetchedOrder, isLoading: isLoadingOrder } = useQuery({
+  const { data: fetchedOrder, isLoading: isLoadingOrder, isFetching } = useQuery({
     queryKey: ['order', currentOrderId],
     queryFn: async () => {
       const response = await ordersApi.getById(currentOrderId);
@@ -55,13 +57,24 @@ export function UnifiedOrderModal({
     staleTime: 30 * 1000, // 30 seconds
   });
 
-  // Use fetched order if available, otherwise fall back to initial order
-  const order = fetchedOrder || (currentOrderId === initialOrder.id ? initialOrder : null);
+  // Use fetched order if available, otherwise fall back to initial order or last valid order
+  const order = fetchedOrder || (currentOrderId === initialOrder.id ? initialOrder : lastValidOrder);
 
-  // Handle order navigation
+  // Update last valid order when we get new data
+  useEffect(() => {
+    if (fetchedOrder) {
+      setLastValidOrder(fetchedOrder);
+    }
+  }, [fetchedOrder]);
+
+  // Check if we're loading a different order (navigating)
+  const isNavigating = isFetching && currentOrderId !== order?.id;
+
+  // Handle order navigation - switch to view mode and load new order
   const handleNavigateToOrder = useCallback((orderId: string) => {
+    if (orderId === currentOrderId) return; // Don't navigate to same order
     setCurrentOrderId(orderId);
-  }, []);
+  }, [currentOrderId]);
 
   // Initialize modal state
   const modalState = useUnifiedOrderModal({
@@ -369,18 +382,20 @@ export function UnifiedOrderModal({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* Loading state while fetching fresh order data */}
-          {isLoadingOrder && !fetchedOrder && (
+          {/* Loading state while fetching order data or navigating */}
+          {(isLoadingOrder && !fetchedOrder) || isNavigating ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <Loader2 size={24} className="animate-spin text-sky-500 mx-auto mb-3" />
-                <p className="text-sm text-slate-500">Loading order details...</p>
+                <p className="text-sm text-slate-500">
+                  {isNavigating ? 'Loading order...' : 'Loading order details...'}
+                </p>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Content sections - show after data is loaded */}
-          {(!isLoadingOrder || fetchedOrder) && order && (
+          {!isNavigating && (!isLoadingOrder || fetchedOrder) && order && (
             <>
               {/* Customer Tab - Full customer intelligence view */}
               {mode === 'customer' && (
