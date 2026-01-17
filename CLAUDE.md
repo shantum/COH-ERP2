@@ -49,6 +49,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 15. **Shopify fulfillment**: syncs tracking data ONLY; ERP is source of truth for `shipped` status—never auto-ship from webhooks
 16. **Tracking sync**: excludes terminal statuses (`delivered`, `rto_delivered`) to avoid wasting API calls on unchangeable data
 17. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
+18. **TypeScript checks**: use `npx tsc --noEmit --force` to bypass incremental build cache; plain `tsc --noEmit` may miss errors due to `.tsbuildinfo` caching
 
 ## Orders Architecture
 
@@ -254,4 +255,4 @@ Centralized config system in `/server/src/config/`:
 - **Planning** → `Plan` agent
 
 ---
-**Updated till commit:** `5a85ac5` (2026-01-17)
+**Updated till commit:** `a3575bb` (2026-01-17)
