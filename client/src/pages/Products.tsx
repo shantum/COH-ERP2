@@ -1,28 +1,26 @@
 /**
- * Products Page - Unified two-panel master-detail layout
+ * Products Page - Unified catalog view
  *
  * Main tabs:
- * - Products: Product → Variation → SKU hierarchy
- * - Materials: Material → Fabric → Colour hierarchy (Phase 5)
- * - Trims: Trim items catalog (Phase 6)
- * - Services: Service items catalog (Phase 6)
- *
- * Layout:
- * - Left panel: Hierarchical tree (350px, resizable)
- * - Right panel: Detail view with tabs
+ * - Products: DataTable view for product catalog (view/check data)
+ * - Materials: Material → Fabric → Colour hierarchy
+ * - Trims: Trim items catalog
+ * - Services: Service items catalog
+ * - BOM: Two-panel master-detail layout for BOM setup
  */
 
 import { useState, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Package, Layers, Scissors, Wrench, Plus, Search } from 'lucide-react';
+import { Package, Layers, Scissors, Wrench, Plus, Search, GitBranch } from 'lucide-react';
 
+import { ProductsDataTable } from '../components/products/ProductsDataTable';
 import { ProductsTree } from '../components/products/ProductsTree';
 import { DetailPanel } from '../components/products/DetailPanel';
 import { MaterialsTreeView } from '../components/materials/MaterialsTreeView';
 import { TrimsTable } from '../components/materials/TrimsTable';
 import { ServicesTable } from '../components/materials/ServicesTable';
 import { useProductsTree } from '../components/products/hooks/useProductsTree';
-import type { ProductTreeNode, ProductsTabType, ProductNodeType } from '../components/products/types';
+import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
 
 export default function Products() {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -30,7 +28,7 @@ export default function Products() {
     // Active main tab from URL
     const activeTab = (searchParams.get('tab') as ProductsTabType) || 'products';
 
-    // Selected node ID and type from URL
+    // Selected node ID and type from URL (for BOM tab)
     const selectedId = searchParams.get('id');
     const selectedType = searchParams.get('type') as ProductNodeType | null;
 
@@ -44,12 +42,12 @@ export default function Products() {
     const [showMaterialDetail, setShowMaterialDetail] = useState<any>(null);
     const [showMaterialInward, setShowMaterialInward] = useState<any>(null);
 
-    // Fetch products tree for URL resolution
-    const { data: productsData } = useProductsTree({ enabled: activeTab === 'products' });
+    // Fetch products tree for URL resolution (only for BOM tab)
+    const { data: productsData } = useProductsTree({ enabled: activeTab === 'bom' });
 
-    // Resolve selected node from URL params when data loads
+    // Resolve selected node from URL params when data loads (BOM tab)
     useEffect(() => {
-        if (!selectedId || !selectedType || activeTab !== 'products') {
+        if (!selectedId || !selectedType || activeTab !== 'bom') {
             return;
         }
 
@@ -85,11 +83,12 @@ export default function Products() {
         setShowMaterialDetail(null);
     }, [setSearchParams]);
 
-    // Handle node selection - sync to URL
-    const handleSelect = useCallback((node: ProductTreeNode | null) => {
+    // Handle node selection in BOM tab - sync to URL
+    const handleBomSelect = useCallback((node: ProductTreeNode | null) => {
         setSelectedNode(node);
         if (node) {
             const newParams = new URLSearchParams(searchParams);
+            newParams.set('tab', 'bom');
             newParams.set('id', node.id);
             newParams.set('type', node.type);
             setSearchParams(newParams, { replace: true });
@@ -101,7 +100,7 @@ export default function Products() {
         }
     }, [searchParams, setSearchParams]);
 
-    // Handle close detail panel
+    // Handle close detail panel in BOM tab
     const handleCloseDetail = useCallback(() => {
         setSelectedNode(null);
         const newParams = new URLSearchParams(searchParams);
@@ -109,6 +108,18 @@ export default function Products() {
         newParams.delete('type');
         setSearchParams(newParams, { replace: true });
     }, [searchParams, setSearchParams]);
+
+    // Handle view product from DataTable - switch to BOM tab and select
+    const handleViewProduct = useCallback((product: ProductTreeNode) => {
+        setSelectedNode(product);
+        setSearchParams({ tab: 'bom', id: product.id, type: product.type }, { replace: true });
+    }, [setSearchParams]);
+
+    // Handle edit BOM from DataTable
+    const handleEditBom = useCallback((product: ProductTreeNode) => {
+        setSelectedNode(product);
+        setSearchParams({ tab: 'bom', id: product.id, type: product.type }, { replace: true });
+    }, [setSearchParams]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -170,30 +181,26 @@ export default function Products() {
                     isActive={activeTab === 'services'}
                     onClick={() => setActiveTab('services')}
                 />
+                <div className="w-px h-6 bg-gray-300 mx-2" />
+                <TabButton
+                    icon={GitBranch}
+                    label="BOM Editor"
+                    isActive={activeTab === 'bom'}
+                    onClick={() => setActiveTab('bom')}
+                />
             </div>
 
-            {/* Main Content - Two Panel Layout */}
+            {/* Main Content */}
             <div className="flex-1 flex overflow-hidden">
-                {/* Products Tab */}
+                {/* Products Tab - DataTable View */}
                 {activeTab === 'products' && (
-                    <>
-                        {/* Left Panel - Tree */}
-                        <div className="w-[400px] border-r bg-white flex-shrink-0 overflow-hidden flex flex-col">
-                            <ProductsTree
-                                onSelect={handleSelect}
-                                selectedId={selectedNode?.id}
-                                searchQuery={searchQuery}
-                            />
-                        </div>
-
-                        {/* Right Panel - Detail */}
-                        <div className="flex-1 overflow-hidden">
-                            <DetailPanel
-                                node={selectedNode}
-                                onClose={handleCloseDetail}
-                            />
-                        </div>
-                    </>
+                    <div className="flex-1 p-4 overflow-auto">
+                        <ProductsDataTable
+                            searchQuery={searchQuery}
+                            onViewProduct={handleViewProduct}
+                            onEditBom={handleEditBom}
+                        />
+                    </div>
                 )}
 
                 {/* Materials Tab */}
@@ -228,12 +235,34 @@ export default function Products() {
                         />
                     </div>
                 )}
+
+                {/* BOM Tab - Two Panel Layout */}
+                {activeTab === 'bom' && (
+                    <>
+                        {/* Left Panel - Tree */}
+                        <div className="w-[400px] border-r bg-white flex-shrink-0 overflow-hidden flex flex-col">
+                            <ProductsTree
+                                onSelect={handleBomSelect}
+                                selectedId={selectedNode?.id}
+                                searchQuery={searchQuery}
+                            />
+                        </div>
+
+                        {/* Right Panel - Detail */}
+                        <div className="flex-1 overflow-hidden">
+                            <DetailPanel
+                                node={selectedNode}
+                                onClose={handleCloseDetail}
+                            />
+                        </div>
+                    </>
+                )}
             </div>
 
             {/* Footer Summary */}
             <div className="px-4 py-2 border-t bg-gray-50 text-xs text-gray-500 flex-shrink-0">
                 {activeTab === 'products' && (
-                    <span>Click a row to view details • Double-click to edit</span>
+                    <span>Click a row to view details • Use actions menu to edit BOM</span>
                 )}
                 {activeTab === 'materials' && (
                     <span>Materials hierarchy • Click to expand • Use actions menu for operations</span>
@@ -243,6 +272,9 @@ export default function Products() {
                 )}
                 {activeTab === 'services' && (
                     <span>Service items catalog • Click Add to create new service</span>
+                )}
+                {activeTab === 'bom' && (
+                    <span>Select a product or variation to edit its Bill of Materials</span>
                 )}
             </div>
         </div>
