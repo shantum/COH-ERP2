@@ -48,7 +48,6 @@ export function useVariationEditForm({
         hasLining: data.hasLining,
         trimsCost: data.trimsCost ?? undefined,
         packagingCost: data.packagingCost ?? undefined,
-        laborMinutes: data.laborMinutes ?? undefined,
         isActive: data.isActive,
       });
       return response.data;

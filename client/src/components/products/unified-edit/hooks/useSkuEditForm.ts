@@ -50,7 +50,6 @@ export function useSkuEditForm({
         targetStockQty: data.targetStockQty ?? undefined,
         trimsCost: data.trimsCost ?? undefined,
         packagingCost: data.packagingCost ?? undefined,
-        laborMinutes: data.laborMinutes ?? undefined,
         isActive: data.isActive,
       });
       return response.data;
