@@ -7,21 +7,44 @@
  * - Stock levels, MRP
  * - Quick actions
  *
- * Supports filtering by gender, material type, fabric, etc.
+ * Features:
+ * - Filtering by gender, material type, fabric
+ * - Column sorting
+ * - Drag-and-drop column reordering
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
     useReactTable,
     getCoreRowModel,
     getSortedRowModel,
     getFilteredRowModel,
+    getPaginationRowModel,
     flexRender,
     type ColumnDef,
     type SortingState,
+    type ColumnOrderState,
+    type PaginationState,
+    type Header,
 } from '@tanstack/react-table';
-import { useState } from 'react';
-import { ArrowUpDown, Package, Eye, GitBranch, ImageIcon } from 'lucide-react';
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    horizontalListSortingStrategy,
+    useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
+import { ArrowUpDown, Package, Eye, GitBranch, ImageIcon, GripVertical, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,7 +79,6 @@ interface FlatSku {
     mrp?: number;
     currentBalance?: number;
     availableBalance?: number;
-    // Keep original nodes for actions
     productNode?: ProductTreeNode;
     variationNode?: ProductTreeNode;
     skuNode: ProductTreeNode;
@@ -69,6 +91,58 @@ interface SkuFlatViewProps {
     onEditBom?: (product: ProductTreeNode) => void;
 }
 
+/**
+ * Draggable table header cell
+ */
+function DraggableHeader<TData>({
+    header,
+}: {
+    header: Header<TData, unknown>;
+}) {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({
+        id: header.id,
+    });
+
+    const style: React.CSSProperties = {
+        transform: CSS.Translate.toString(transform),
+        transition,
+        opacity: isDragging ? 0.8 : 1,
+        position: 'relative',
+        width: header.getSize(),
+        zIndex: isDragging ? 1 : 0,
+    };
+
+    return (
+        <TableHead
+            ref={setNodeRef}
+            style={style}
+            className={`whitespace-nowrap select-none ${isDragging ? 'bg-gray-100 shadow-lg' : ''}`}
+        >
+            <div className="flex items-center gap-1">
+                {/* Drag handle */}
+                <button
+                    {...attributes}
+                    {...listeners}
+                    className="cursor-grab active:cursor-grabbing p-0.5 -ml-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 touch-none"
+                    title="Drag to reorder"
+                >
+                    <GripVertical size={14} />
+                </button>
+                {header.isPlaceholder
+                    ? null
+                    : flexRender(header.column.columnDef.header, header.getContext())}
+            </div>
+        </TableHead>
+    );
+}
+
 export function SkuFlatView({
     products,
     searchQuery,
@@ -76,6 +150,37 @@ export function SkuFlatView({
     onEditBom,
 }: SkuFlatViewProps) {
     const [sorting, setSorting] = useState<SortingState>([]);
+    const [pagination, setPagination] = useState<PaginationState>({
+        pageIndex: 0,
+        pageSize: 250,
+    });
+
+    // Define default column order
+    const defaultColumnOrder = [
+        'image',
+        'skuCode',
+        'size',
+        'productName',
+        'variationName',
+        'gender',
+        'category',
+        'fabricTypeName',
+        'mrp',
+        'currentBalance',
+        'actions',
+    ];
+
+    const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(defaultColumnOrder);
+
+    // DnD sensors
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: {
+                distance: 5,
+            },
+        }),
+        useSensor(KeyboardSensor)
+    );
 
     // Flatten tree to get all SKUs with parent context
     const flatSkus = useMemo(() => {
@@ -135,6 +240,7 @@ export function SkuFlatView({
             id: 'image',
             header: '',
             size: 48,
+            enableSorting: false,
             cell: ({ row }) => (
                 <div className="w-10 h-10 rounded bg-gray-100 overflow-hidden flex-shrink-0">
                     {row.original.imageUrl ? (
@@ -152,16 +258,17 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'skuCode',
             accessorKey: 'skuCode',
             header: ({ column }) => (
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="-ml-3 h-8"
+                    className="h-8 px-1"
                     onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
                 >
                     SKU Code
-                    <ArrowUpDown className="ml-2 h-4 w-4" />
+                    <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
                 </Button>
             ),
             cell: ({ row }) => (
@@ -174,6 +281,7 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'size',
             accessorKey: 'size',
             header: 'Size',
             size: 70,
@@ -184,16 +292,17 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'productName',
             accessorKey: 'productName',
             header: ({ column }) => (
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="-ml-3 h-8"
+                    className="h-8 px-1"
                     onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
                 >
                     Product
-                    <ArrowUpDown className="ml-2 h-4 w-4" />
+                    <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
                 </Button>
             ),
             cell: ({ row }) => (
@@ -206,6 +315,7 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'variationName',
             accessorKey: 'variationName',
             header: 'Variation',
             cell: ({ row }) => (
@@ -226,6 +336,7 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'gender',
             accessorKey: 'gender',
             header: 'Gender',
             size: 80,
@@ -236,6 +347,7 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'category',
             accessorKey: 'category',
             header: 'Category',
             size: 100,
@@ -246,6 +358,7 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'fabricTypeName',
             accessorKey: 'fabricTypeName',
             header: 'Fabric Type',
             size: 120,
@@ -256,16 +369,17 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'mrp',
             accessorKey: 'mrp',
             header: ({ column }) => (
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="-ml-3 h-8"
+                    className="h-8 px-1"
                     onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
                 >
                     MRP
-                    <ArrowUpDown className="ml-2 h-4 w-4" />
+                    <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
                 </Button>
             ),
             size: 100,
@@ -276,16 +390,17 @@ export function SkuFlatView({
             ),
         },
         {
+            id: 'currentBalance',
             accessorKey: 'currentBalance',
             header: ({ column }) => (
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="-ml-3 h-8"
+                    className="h-8 px-1"
                     onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
                 >
                     Stock
-                    <ArrowUpDown className="ml-2 h-4 w-4" />
+                    <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
                 </Button>
             ),
             size: 90,
@@ -304,6 +419,8 @@ export function SkuFlatView({
         {
             id: 'actions',
             size: 80,
+            enableSorting: false,
+            header: '',
             cell: ({ row }) => (
                 <div className="flex items-center gap-1">
                     <Button
@@ -332,12 +449,27 @@ export function SkuFlatView({
     const table = useReactTable({
         data: filteredSkus,
         columns,
-        state: { sorting },
+        state: { sorting, columnOrder, pagination },
         onSortingChange: setSorting,
+        onColumnOrderChange: setColumnOrder,
+        onPaginationChange: setPagination,
         getCoreRowModel: getCoreRowModel(),
         getSortedRowModel: getSortedRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
+        getPaginationRowModel: getPaginationRowModel(),
     });
+
+    // Handle drag end for column reordering
+    const handleDragEnd = (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (over && active.id !== over.id) {
+            setColumnOrder(currentOrder => {
+                const oldIndex = currentOrder.indexOf(active.id as string);
+                const newIndex = currentOrder.indexOf(over.id as string);
+                return arrayMove(currentOrder, oldIndex, newIndex);
+            });
+        }
+    };
 
     if (filteredSkus.length === 0) {
         return (
@@ -348,55 +480,124 @@ export function SkuFlatView({
         );
     }
 
+    const totalPages = table.getPageCount();
+    const currentPage = table.getState().pagination.pageIndex + 1;
+    const startRow = pagination.pageIndex * pagination.pageSize + 1;
+    const endRow = Math.min((pagination.pageIndex + 1) * pagination.pageSize, filteredSkus.length);
+
     return (
         <div className="flex flex-col h-full">
             {/* Summary */}
             <div className="flex items-center justify-between mb-3 text-sm text-muted-foreground">
                 <span>{filteredSkus.length.toLocaleString()} SKUs</span>
-                <span>
-                    Total Stock: {filteredSkus.reduce((sum, s) => sum + (s.currentBalance || 0), 0).toLocaleString()}
-                </span>
+                <div className="flex items-center gap-4">
+                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <GripVertical size={12} />
+                        Drag columns to reorder
+                    </span>
+                    <span>
+                        Total Stock: {filteredSkus.reduce((sum, s) => sum + (s.currentBalance || 0), 0).toLocaleString()}
+                    </span>
+                </div>
             </div>
 
-            {/* Table */}
-            <ScrollArea className="flex-1 border rounded-lg">
-                <Table>
-                    <TableHeader className="sticky top-0 bg-gray-50/95 backdrop-blur z-10">
-                        {table.getHeaderGroups().map(headerGroup => (
-                            <TableRow key={headerGroup.id}>
-                                {headerGroup.headers.map(header => (
-                                    <TableHead
-                                        key={header.id}
-                                        style={{ width: header.getSize() }}
-                                        className="whitespace-nowrap"
+            {/* Table with DnD */}
+            <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+                modifiers={[restrictToHorizontalAxis]}
+            >
+                <ScrollArea className="flex-1 border rounded-lg">
+                    <Table>
+                        <TableHeader className="sticky top-0 bg-gray-50/95 backdrop-blur z-10">
+                            {table.getHeaderGroups().map(headerGroup => (
+                                <TableRow key={headerGroup.id}>
+                                    <SortableContext
+                                        items={columnOrder}
+                                        strategy={horizontalListSortingStrategy}
                                     >
-                                        {header.isPlaceholder
-                                            ? null
-                                            : flexRender(header.column.columnDef.header, header.getContext())}
-                                    </TableHead>
-                                ))}
-                            </TableRow>
-                        ))}
-                    </TableHeader>
-                    <TableBody>
-                        {table.getRowModel().rows.map(row => (
-                            <TableRow
-                                key={row.id}
-                                className="hover:bg-gray-50/50"
-                            >
-                                {row.getVisibleCells().map(cell => (
-                                    <TableCell
-                                        key={cell.id}
-                                        style={{ width: cell.column.getSize() }}
-                                    >
-                                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                                    </TableCell>
-                                ))}
-                            </TableRow>
-                        ))}
-                    </TableBody>
-                </Table>
-            </ScrollArea>
+                                        {headerGroup.headers.map(header => (
+                                            <DraggableHeader key={header.id} header={header} />
+                                        ))}
+                                    </SortableContext>
+                                </TableRow>
+                            ))}
+                        </TableHeader>
+                        <TableBody>
+                            {table.getRowModel().rows.map(row => (
+                                <TableRow
+                                    key={row.id}
+                                    className="hover:bg-gray-50/50"
+                                >
+                                    {row.getVisibleCells().map(cell => (
+                                        <TableCell
+                                            key={cell.id}
+                                            style={{ width: cell.column.getSize() }}
+                                        >
+                                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                        </TableCell>
+                                    ))}
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </ScrollArea>
+            </DndContext>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-4 border-t mt-4">
+                    <div className="text-sm text-muted-foreground">
+                        Showing {startRow.toLocaleString()} - {endRow.toLocaleString()} of {filteredSkus.length.toLocaleString()}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => table.setPageIndex(0)}
+                            disabled={!table.getCanPreviousPage()}
+                            title="First page"
+                        >
+                            <ChevronsLeft size={16} />
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => table.previousPage()}
+                            disabled={!table.getCanPreviousPage()}
+                            title="Previous page"
+                        >
+                            <ChevronLeft size={16} />
+                        </Button>
+                        <span className="text-sm font-medium px-2">
+                            Page {currentPage} of {totalPages}
+                        </span>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => table.nextPage()}
+                            disabled={!table.getCanNextPage()}
+                            title="Next page"
+                        >
+                            <ChevronRight size={16} />
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => table.setPageIndex(totalPages - 1)}
+                            disabled={!table.getCanNextPage()}
+                            title="Last page"
+                        >
+                            <ChevronsRight size={16} />
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
