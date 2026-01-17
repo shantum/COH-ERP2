@@ -8,19 +8,12 @@
  * - Actions (View, Edit BOM)
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { type ColumnDef } from '@tanstack/react-table';
-import { Eye, Package, Layers, Box, AlertTriangle, CheckCircle, XCircle, MoreHorizontal } from 'lucide-react';
+import { Eye, Package, Layers, Box, AlertTriangle, CheckCircle, XCircle, GitBranch } from 'lucide-react';
 
 import { DataTable } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useProductsTree } from './hooks/useProductsTree';
 import type { ProductTreeNode } from './types';
 
@@ -180,23 +173,28 @@ export function ProductsDataTable({ onViewProduct, onEditBom, searchQuery }: Pro
                 id: 'actions',
                 header: '',
                 cell: ({ row }) => (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                <MoreHorizontal size={16} />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => onViewProduct?.(row.original)}>
-                                <Eye size={14} className="mr-2" />
-                                View Details
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onEditBom?.(row.original)}>
-                                <Package size={14} className="mr-2" />
-                                Edit BOM
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onViewProduct?.(row.original);
+                            }}
+                            className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                            title="View Details"
+                        >
+                            <Eye size={16} />
+                        </button>
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onEditBom?.(row.original);
+                            }}
+                            className="p-1.5 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
+                            title="Edit BOM"
+                        >
+                            <GitBranch size={16} />
+                        </button>
+                    </div>
                 ),
             },
         ],
