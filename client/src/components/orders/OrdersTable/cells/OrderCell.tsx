@@ -10,27 +10,18 @@ import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
 /**
- * Smart date formatting - relative for recent, date for older
+ * Format date and time separately for two-line display
  */
-function formatSmartDate(date: Date): { text: string; isOld: boolean } {
+function formatDateTime(date: Date): { dateStr: string; timeStr: string; isOld: boolean } {
     const now = Date.now();
     const diffMs = now - date.getTime();
-    const diffMins = Math.floor(diffMs / (1000 * 60));
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
     const isOld = diffDays >= 3;
 
-    if (diffMins < 60) {
-        return { text: `${diffMins}m`, isOld };
-    } else if (diffHours < 24) {
-        return { text: `${diffHours}h`, isOld };
-    } else if (diffDays < 7) {
-        return { text: `${diffDays}d`, isOld };
-    } else {
-        const formatted = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        return { text: formatted, isOld: true };
-    }
+    const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    const timeStr = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+    return { dateStr, timeStr, isOld };
 }
 
 /**
@@ -49,7 +40,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     // Order info
     const date = new Date(row.orderDate);
-    const { text: dateText, isOld } = formatSmartDate(date);
+    const { dateStr, timeStr, isOld } = formatDateTime(date);
     const city = row.city || '';
 
     // Customer info
@@ -106,16 +97,17 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             'border-l-[3px]',
             getBorderColor()
         )}>
-            {/* Time - spans both lines */}
-            <span
+            {/* Date/Time - two lines */}
+            <div
                 className={cn(
-                    'text-gray-400 shrink-0 w-10 text-right text-[13px] pr-2',
-                    isOld && 'text-amber-600'
+                    'shrink-0 w-12 text-right pr-2 flex flex-col',
+                    isOld ? 'text-amber-600' : 'text-gray-400'
                 )}
                 title={date.toLocaleString('en-IN')}
             >
-                {dateText}
-            </span>
+                <span className="text-[11px] leading-tight">{dateStr}</span>
+                <span className="text-[10px] leading-tight">{timeStr}</span>
+            </div>
 
             {/* Separator */}
             <div className="w-px h-8 bg-gray-200 shrink-0" />

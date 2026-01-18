@@ -218,6 +218,7 @@ export interface FlattenedOrderRow {
     lineShippedAt: string | null;
     lineDeliveredAt: string | null;
     lineTrackingStatus: string | null;
+    lineLastTrackingUpdate: string | null;
     lineAwbNumber?: string | null;
     lineCourier?: string | null;
 
@@ -333,6 +334,7 @@ export function flattenOrders(
                 lineShippedAt: null,
                 lineDeliveredAt: null,
                 lineTrackingStatus: null,
+                lineLastTrackingUpdate: null,
             });
             continue;
         }
@@ -411,6 +413,7 @@ export function flattenOrders(
                 lineShippedAt: line.shippedAt || null,
                 lineDeliveredAt: line.deliveredAt || null,
                 lineTrackingStatus: line.trackingStatus || null,
+                lineLastTrackingUpdate: line.lastTrackingUpdate || null,
             });
         }
     }

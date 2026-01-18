@@ -1,5 +1,6 @@
 /**
  * TrackingStatusCell - Displays tracking status with color-coded badge
+ * Two-line layout: status badge on line 1, last update time on line 2
  */
 
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
@@ -8,6 +9,24 @@ import { cn } from '../../../../lib/utils';
 
 interface TrackingStatusCellProps {
     row: FlattenedOrderRow;
+}
+
+/**
+ * Format the last tracking update time
+ */
+function formatLastUpdate(dateStr: string | null): string | null {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    const now = Date.now();
+    const diffMs = now - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
 export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
@@ -20,15 +39,24 @@ export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
         label: status,
     };
 
+    const lastUpdate = formatLastUpdate(row.lineLastTrackingUpdate);
+
     return (
-        <span
-            className={cn(
-                'px-1.5 py-0.5 rounded font-medium whitespace-nowrap',
-                style.bg,
-                style.text
+        <div className="flex flex-col">
+            <span
+                className={cn(
+                    'px-1.5 py-0.5 rounded font-medium whitespace-nowrap text-[11px] w-fit',
+                    style.bg,
+                    style.text
+                )}
+            >
+                {style.label}
+            </span>
+            {lastUpdate && (
+                <span className="text-[10px] text-gray-400 mt-0.5">
+                    {lastUpdate}
+                </span>
             )}
-        >
-            {style.label}
-        </span>
+        </div>
     );
 }
