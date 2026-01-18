@@ -201,21 +201,26 @@ export function ProductNameCell({ row }: ProductNameCellProps) {
                         </span>
                     )}
                 </div>
-                {/* Line 2: Color pill + SKU */}
-                <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
+                {/* Line 2: Color swatch + color name + SKU */}
+                <div className="flex items-center gap-1 mt-0.5 text-[10px]">
                     {colorName && colorName !== '-' && (
-                        <span
-                            className={cn(
-                                'inline-flex items-center gap-1 px-1.5 py-0 rounded-full font-medium shrink-0 max-w-[120px]',
-                                isLight ? 'border border-gray-300' : ''
-                            )}
-                            style={{
-                                backgroundColor: colorHex || '#e5e7eb',
-                                color: isLight ? '#374151' : '#ffffff',
-                            }}
-                        >
-                            <span className="truncate">{colorName}</span>
-                        </span>
+                        <>
+                            {/* Small color dot */}
+                            <span
+                                className={cn(
+                                    'w-2 h-2 rounded-full shrink-0',
+                                    isLight ? 'border border-gray-300' : ''
+                                )}
+                                style={{ backgroundColor: colorHex || '#9ca3af' }}
+                            />
+                            {/* Color name in gray (cleaner) */}
+                            <span className="text-gray-500 truncate">
+                                {colorName}
+                            </span>
+                        </>
+                    )}
+                    {colorName && colorName !== '-' && skuCode && (
+                        <span className="text-gray-300">·</span>
                     )}
                     {skuCode && (
                         <span className="font-mono text-gray-400 truncate">

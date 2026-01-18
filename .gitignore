@@ -51,3 +51,6 @@ prisma/migrations/
 coverage/
 server/coverage/
 
+
+# Auto Claude data directory
+.auto-claude/
