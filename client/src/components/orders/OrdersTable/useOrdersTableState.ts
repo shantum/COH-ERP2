@@ -83,13 +83,17 @@ function arrayToVisibility(columns: string[]): VisibilityState {
 
 // Migration: map old column IDs to new ones
 const COLUMN_MIGRATIONS: Record<string, string> = {
-    'orderDate': 'orderInfo',
-    'orderAge': 'orderInfo',
-    'orderNumber': 'orderInfo',
-    'customerName': 'customerInfo',
-    'city': 'customerInfo',
-    'customerOrderCount': 'customerInfo',
-    'customerLtv': 'customerInfo',
+    // v2: orderInfo + customerInfo → orderCustomer
+    'orderInfo': 'orderCustomer',
+    'customerInfo': 'orderCustomer',
+    // v1: old granular columns → combined columns
+    'orderDate': 'orderCustomer',
+    'orderAge': 'orderCustomer',
+    'orderNumber': 'orderCustomer',
+    'customerName': 'orderCustomer',
+    'city': 'orderCustomer',
+    'customerOrderCount': 'orderCustomer',
+    'customerLtv': 'orderCustomer',
     'skuCode': 'productName', // SKU is now part of productName cell
     'paymentMethod': 'paymentInfo',
     'orderValue': 'paymentInfo',
