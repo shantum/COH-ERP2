@@ -12,8 +12,8 @@
 
 import type { FlattenedOrderRow } from '../../utils/orderHelpers';
 
-// Constants
-export const PAGE_SIZE = 500;
+// Constants (must match useUnifiedOrdersData)
+export const PAGE_SIZE = 250;
 
 // Types for tRPC query input
 export interface OrdersQueryInput {

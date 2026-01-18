@@ -74,7 +74,7 @@ interface UseOrderSSEOptions {
 }
 
 // Page size must match useUnifiedOrdersData.ts
-const PAGE_SIZE = 500;
+const PAGE_SIZE = 250;
 
 // Heartbeat monitoring interval
 const HEARTBEAT_CHECK_INTERVAL = 15000; // 15 seconds

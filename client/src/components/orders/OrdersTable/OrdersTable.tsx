@@ -314,6 +314,8 @@ export function OrdersTable({
                             width: Math.max(tableWidth, 900),
                             minWidth: '900px',
                             tableLayout: 'fixed',
+                            marginRight: '8px',
+                            marginBottom: '8px',
                         }}
                     >
                         {/* Define column widths once via colgroup */}

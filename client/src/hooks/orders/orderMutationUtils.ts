@@ -9,7 +9,7 @@ import { orderTabInvalidationMap } from '../../constants/queryKeys';
 import { trpc } from '../../services/trpc';
 
 // Page size for orders pagination (must match useUnifiedOrdersData)
-export const PAGE_SIZE = 500;
+export const PAGE_SIZE = 250;
 
 // Map view names to tRPC query input
 export const viewToTrpcInput: Record<string, { view: string; limit?: number }> = {
