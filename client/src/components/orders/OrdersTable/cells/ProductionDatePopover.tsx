@@ -100,12 +100,12 @@ export function ProductionDatePopover({
                         ? isLocked(currentDate)
                             ? 'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200'
                             : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200'
-                        : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 border border-dashed border-gray-300 hover:border-amber-300'
+                        : 'text-gray-300 hover:text-amber-600 hover:bg-amber-50 border border-dashed border-gray-300 hover:border-amber-300'
                 }`}
-                title={currentDate ? `Production: ${formatDisplayDate(currentDate)}` : 'Schedule production'}
+                title={currentDate ? `Production: ${formatDisplayDate(currentDate)}` : 'Set production date'}
             >
                 <Calendar size={10} />
-                {currentDate ? formatDisplayDate(currentDate) : ''}
+                {currentDate ? formatDisplayDate(currentDate) : <span className="text-[10px] italic">Set date</span>}
             </button>
 
             {isOpen && createPortal(

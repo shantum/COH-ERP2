@@ -3,6 +3,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { Calendar } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
@@ -46,7 +47,19 @@ export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
     }
 
     if (!currentDate) {
-        return null; // Don't show anything when no ship-by date
+        return (
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (onUpdateShipByDate) setIsEditing(true);
+                }}
+                className="text-xs px-1.5 py-0.5 rounded flex items-center gap-1 text-gray-300 hover:text-blue-600 hover:bg-blue-50 border border-dashed border-gray-300 hover:border-blue-300 transition-colors"
+                title="Set ship by date"
+            >
+                <Calendar size={10} />
+                <span className="text-[10px] italic">Set date</span>
+            </button>
+        );
     }
 
     const formatted = new Date(currentDate).toLocaleDateString('en-IN', {
