@@ -1,0 +1,162 @@
+/**
+ * Type definitions for OrdersTable component (TanStack Table version)
+ */
+
+import type { MutableRefObject } from 'react';
+import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
+
+/**
+ * View type for unified order views
+ */
+export type OrderViewType = 'open' | 'shipped' | 'rto' | 'cod_pending' | 'archived' | 'cancelled';
+
+/**
+ * Props for customization data
+ */
+export interface CustomizeLineData {
+    lineId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+}
+
+export interface EditCustomizationData extends CustomizeLineData {
+    customizationType: string | null;
+    customizationValue: string | null;
+    customizationNotes: string | null;
+}
+
+/**
+ * Dynamic values that change frequently - accessed via ref for stable column context.
+ * This prevents column definitions from rebuilding on every state change.
+ */
+export interface DynamicColumnHandlers {
+    // UI State (changes on every action)
+    allocatingLines: Set<string>;
+    isCancellingLine: boolean;
+    isUncancellingLine: boolean;
+    isCancellingOrder: boolean;
+    isDeletingOrder: boolean;
+
+    // Fulfillment handlers
+    onAllocate: (lineId: string) => void;
+    onUnallocate: (lineId: string) => void;
+    onPick: (lineId: string) => void;
+    onUnpick: (lineId: string) => void;
+    onPack: (lineId: string) => void;
+    onUnpack: (lineId: string) => void;
+    onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
+    onUnmarkShippedLine: (lineId: string) => void;
+
+    // Admin actions (optional)
+    isAdmin?: boolean;
+    onForceShipLine?: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+
+    // Production handlers
+    onCreateBatch: (data: any) => void;
+    onUpdateBatch: (id: string, data: any) => void;
+    onDeleteBatch: (id: string) => void;
+
+    // Line handlers
+    onUpdateLineNotes: (lineId: string, notes: string) => void;
+    onCancelLine: (lineId: string) => void;
+    onUncancelLine: (lineId: string) => void;
+    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+
+    // Customization handlers
+    onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
+    onEditCustomization?: (lineId: string, lineData: EditCustomizationData) => void;
+    onRemoveCustomization?: (lineId: string, skuCode: string) => void;
+
+    // Post-ship handlers
+    onMarkCodRemitted?: (orderId: string) => void;
+    onTrack?: (awbNumber: string, orderNumber: string) => void;
+
+    // Order Info handlers
+    onViewOrder: (orderId: string) => void;
+    onViewCustomer: (order: any) => void;
+    onUpdateShipByDate?: (orderId: string, date: string | null) => void;
+}
+
+/**
+ * Context passed to cell components.
+ * Contains stable refs and static values.
+ */
+export interface OrdersTableContext {
+    // Header customization (stable - uses useCallback)
+    getHeaderName: (colId: string) => string;
+    setCustomHeader: (colId: string, value: string) => void;
+
+    // Current view (changes rarely)
+    currentView?: OrderViewType;
+
+    // Utilities (stable)
+    isDateLocked: (date: string) => boolean;
+
+    // All dynamic handlers accessed via ref for stability
+    handlersRef: MutableRefObject<DynamicColumnHandlers>;
+}
+
+/**
+ * Common cell component props
+ */
+export interface CellProps {
+    row: FlattenedOrderRow;
+    handlersRef: MutableRefObject<DynamicColumnHandlers>;
+}
+
+/**
+ * Props for OrdersTable component
+ */
+export interface OrdersTableProps {
+    rows: FlattenedOrderRow[];
+    lockedDates: string[];
+    currentView?: OrderViewType;
+    onAllocate: (lineId: string) => void;
+    onUnallocate: (lineId: string) => void;
+    onPick: (lineId: string) => void;
+    onUnpick: (lineId: string) => void;
+    onPack: (lineId: string) => void;
+    onUnpack: (lineId: string) => void;
+    onMarkShippedLine: (lineId: string, data?: { awbNumber?: string; courier?: string }) => void;
+    onUnmarkShippedLine: (lineId: string) => void;
+    onUpdateLineTracking: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+    onShip?: (order: any) => void;
+    onCreateBatch: (data: any) => void;
+    onUpdateBatch: (id: string, data: any) => void;
+    onDeleteBatch: (id: string) => void;
+    onUpdateLineNotes: (lineId: string, notes: string) => void;
+    onViewOrder: (orderId: string) => void;
+    onEditOrder: (order: any) => void;
+    onCancelOrder: (id: string, reason?: string) => void;
+    onDeleteOrder: (id: string) => void;
+    onCancelLine: (lineId: string) => void;
+    onUncancelLine: (lineId: string) => void;
+    onViewCustomer: (order: any) => void;
+    onCustomize?: (lineId: string, lineData: CustomizeLineData) => void;
+    onEditCustomization?: (lineId: string, lineData: EditCustomizationData) => void;
+    onRemoveCustomization?: (lineId: string, skuCode: string) => void;
+    onUpdateShipByDate?: (orderId: string, date: string | null) => void;
+    onForceShipLine?: (lineId: string, data: { awbNumber?: string; courier?: string }) => void;
+    // Post-ship action handlers
+    onUnship?: (orderId: string) => void;
+    onMarkDelivered?: (orderId: string) => void;
+    onMarkRto?: (orderId: string) => void;
+    onUnarchive?: (orderId: string) => void;
+    onTrack?: (awbNumber: string, orderNumber: string) => void;
+    onMarkCodRemitted?: (orderId: string) => void;
+    onMarkRtoReceived?: (orderId: string) => void;
+    // Loading states
+    allocatingLines: Set<string>;
+    isCancellingOrder: boolean;
+    isCancellingLine: boolean;
+    isUncancellingLine: boolean;
+    isDeletingOrder: boolean;
+    isUnshipping?: boolean;
+    isMarkingDelivered?: boolean;
+    isMarkingRto?: boolean;
+    isUnarchiving?: boolean;
+    isAdmin?: boolean;
+}

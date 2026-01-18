@@ -259,3 +259,13 @@ body {
 .avatar-pulse {
   animation: pulse-ring 2s ease-in-out infinite;
 }
+
+/* Hide native scrollbars (using custom scroll indicators instead) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

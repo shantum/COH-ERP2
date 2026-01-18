@@ -3,10 +3,10 @@
  * Re-exports all order-related components for clean imports
  */
 
-// Grids
-export { OrdersGrid } from './OrdersGrid';
+// Table (TanStack Table implementation)
+export { OrdersTable } from './OrdersTable';
+export type { OrdersTableProps, OrderViewType } from './OrdersTable';
 export { OrdersGridSkeleton } from './OrdersGridSkeleton';
-export type { OrderViewType } from './OrdersGrid';
 
 // Modals
 export { UnifiedOrderModal } from './UnifiedOrderModal';

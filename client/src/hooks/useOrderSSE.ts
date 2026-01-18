@@ -16,7 +16,6 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { trpc } from '../services/trpc';
-import type { AgGridReact } from 'ag-grid-react';
 
 // Event types from server (expanded)
 interface SSEEvent {
@@ -72,8 +71,6 @@ interface UseOrderSSEOptions {
     page?: number;
     /** Enable/disable SSE connection */
     enabled?: boolean;
-    /** Optional grid ref for transaction-based updates */
-    gridRef?: React.RefObject<AgGridReact | null>;
 }
 
 // Page size must match useUnifiedOrdersData.ts
@@ -87,7 +84,6 @@ export function useOrderSSE({
     currentView,
     page = 1,
     enabled = true,
-    gridRef,
 }: UseOrderSSEOptions) {
     const trpcUtils = trpc.useUtils();
     const eventSourceRef = useRef<EventSource | null>(null);
@@ -113,47 +109,6 @@ export function useOrderSSE({
         reconnectAttempts: 0,
         quality: 'unknown',
     });
-
-    // Helper to update cache with AG-Grid transaction if available
-    const updateWithTransaction = useCallback((
-        lineId: string,
-        changes: Record<string, unknown>
-    ) => {
-        const api = gridRef?.current?.api;
-        if (api) {
-            // Try transaction-based update first (fastest)
-            const rowNode = api.getRowNode(lineId);
-            if (rowNode) {
-                api.applyTransaction({
-                    update: [{ ...rowNode.data, ...changes }]
-                });
-                return true;
-            }
-        }
-        return false;
-    }, [gridRef]);
-
-    // Helper to update batch with AG-Grid transaction if available
-    const updateBatchWithTransaction = useCallback((
-        lineIds: string[],
-        changes: Record<string, unknown>
-    ) => {
-        const api = gridRef?.current?.api;
-        if (api) {
-            const updates = lineIds
-                .map(id => {
-                    const node = api.getRowNode(id);
-                    return node ? { ...node.data, ...changes } : null;
-                })
-                .filter((item): item is NonNullable<typeof item> => item !== null);
-
-            if (updates.length > 0) {
-                api.applyTransaction({ update: updates });
-                return true;
-            }
-        }
-        return false;
-    }, [gridRef]);
 
     const handleEvent = useCallback((event: MessageEvent) => {
         try {
@@ -193,68 +148,55 @@ export function useOrderSSE({
             // Handle line status changes
             // Now supports full rowData for complete row replacement (no merge needed)
             if (data.type === 'line_status' && data.lineId) {
-                // Use full rowData if provided, otherwise fall back to partial changes
-                const updateData = data.rowData || data.changes || {};
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
 
-                // Try AG-Grid transaction first
-                const usedTransaction = updateWithTransaction(data.lineId, updateData);
+                    const newRows = old.rows.map((row: any) =>
+                        row.lineId === data.lineId
+                            ? data.rowData
+                                ? { ...row, ...data.rowData }  // Full row from SSE
+                                : { ...row, ...data.changes }  // Partial merge (legacy)
+                            : row
+                    );
 
-                if (!usedTransaction) {
-                    // Fallback to cache update
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
-                        if (!old) return old;
-
-                        const newRows = old.rows.map((row: any) =>
-                            row.lineId === data.lineId
-                                ? data.rowData
-                                    ? { ...row, ...data.rowData }  // Full row from SSE
-                                    : { ...row, ...data.changes }  // Partial merge (legacy)
-                                : row
-                        );
-
-                        const newOrders = old.orders.map((order: any) => {
-                            const hasLine = order.orderLines?.some((line: any) => line.id === data.lineId);
-                            if (!hasLine) return order;
-                            return {
-                                ...order,
-                                orderLines: order.orderLines.map((line: any) =>
-                                    line.id === data.lineId ? { ...line, ...data.changes } : line
-                                )
-                            };
-                        });
-
-                        return { ...old, rows: newRows, orders: newOrders };
+                    const newOrders = old.orders.map((order: any) => {
+                        const hasLine = order.orderLines?.some((line: any) => line.id === data.lineId);
+                        if (!hasLine) return order;
+                        return {
+                            ...order,
+                            orderLines: order.orderLines.map((line: any) =>
+                                line.id === data.lineId ? { ...line, ...data.changes } : line
+                            )
+                        };
                     });
-                }
+
+                    return { ...old, rows: newRows, orders: newOrders };
+                });
             }
 
             // Handle batch line updates
             if (data.type === 'lines_batch_update' && data.lineIds && data.changes) {
-                const usedTransaction = updateBatchWithTransaction(data.lineIds, data.changes);
+                const lineIdSet = new Set(data.lineIds);
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
 
-                if (!usedTransaction) {
-                    const lineIdSet = new Set(data.lineIds);
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
-                        if (!old) return old;
+                    const newRows = old.rows.map((row: any) =>
+                        lineIdSet.has(row.lineId)
+                            ? { ...row, ...data.changes }
+                            : row
+                    );
 
-                        const newRows = old.rows.map((row: any) =>
-                            lineIdSet.has(row.lineId)
-                                ? { ...row, ...data.changes }
-                                : row
-                        );
+                    const newOrders = old.orders.map((order: any) => ({
+                        ...order,
+                        orderLines: order.orderLines?.map((line: any) =>
+                            lineIdSet.has(line.id)
+                                ? { ...line, ...data.changes }
+                                : line
+                        )
+                    }));
 
-                        const newOrders = old.orders.map((order: any) => ({
-                            ...order,
-                            orderLines: order.orderLines?.map((line: any) =>
-                                lineIdSet.has(line.id)
-                                    ? { ...line, ...data.changes }
-                                    : line
-                            )
-                        }));
-
-                        return { ...old, rows: newRows, orders: newOrders };
-                    });
-                }
+                    return { ...old, rows: newRows, orders: newOrders };
+                });
             }
 
             // Handle new order created
@@ -324,21 +266,18 @@ export function useOrderSSE({
 
             // Handle lines shipped
             if (data.type === 'lines_shipped' && data.lineIds && data.changes) {
-                const usedTransaction = updateBatchWithTransaction(data.lineIds, data.changes);
-                if (!usedTransaction) {
-                    const lineIdSet = new Set(data.lineIds);
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
-                        if (!old) return old;
+                const lineIdSet = new Set(data.lineIds);
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
 
-                        const newRows = old.rows.map((row: any) =>
-                            lineIdSet.has(row.lineId)
-                                ? { ...row, ...data.changes }
-                                : row
-                        );
+                    const newRows = old.rows.map((row: any) =>
+                        lineIdSet.has(row.lineId)
+                            ? { ...row, ...data.changes }
+                            : row
+                    );
 
-                        return { ...old, rows: newRows };
-                    });
-                }
+                    return { ...old, rows: newRows };
+                });
             }
 
             // Handle order delivered
@@ -379,39 +318,33 @@ export function useOrderSSE({
                 data.lineId &&
                 data.changes
             ) {
-                // Try AG-Grid transaction first for instant update
-                const usedTransaction = updateWithTransaction(data.lineId, data.changes);
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
 
-                if (!usedTransaction) {
-                    // Fallback to cache update
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
-                        if (!old) return old;
+                    const newRows = old.rows.map((row: any) =>
+                        row.lineId === data.lineId
+                            ? { ...row, ...data.changes }
+                            : row
+                    );
 
-                        const newRows = old.rows.map((row: any) =>
-                            row.lineId === data.lineId
-                                ? { ...row, ...data.changes }
-                                : row
-                        );
+                    const newOrders = old.orders.map((order: any) => ({
+                        ...order,
+                        orderLines: order.orderLines?.map((line: any) =>
+                            line.id === data.lineId
+                                ? { ...line, ...data.changes }
+                                : line
+                        ),
+                    }));
 
-                        const newOrders = old.orders.map((order: any) => ({
-                            ...order,
-                            orderLines: order.orderLines?.map((line: any) =>
-                                line.id === data.lineId
-                                    ? { ...line, ...data.changes }
-                                    : line
-                            ),
-                        }));
-
-                        return { ...old, rows: newRows, orders: newOrders };
-                    });
-                }
+                    return { ...old, rows: newRows, orders: newOrders };
+                });
             }
 
         } catch (err) {
             console.error('SSE: Failed to parse event', err);
         }
     // Using refs for currentView/page to avoid reconnection on navigation (Issue 3 fix)
-    }, [trpcUtils, updateWithTransaction, updateBatchWithTransaction]);
+    }, [trpcUtils]);
 
     const connect = useCallback(() => {
         // Don't connect if disabled

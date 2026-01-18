@@ -9,7 +9,7 @@
  *
  * Views: open, shipped, cancelled (3 views)
  * Shipped view has sub-filters: all, rto, cod_pending (server-side filtering)
- * Pagination: 500/page for Open, 100/page for Shipped/Cancelled
+ * Pagination: 250 orders per page
  */
 
 import { useMemo, useEffect } from 'react';
@@ -27,24 +27,15 @@ const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views (no SSE)
 const STALE_TIME = 60000;  // 1 minute (increased since SSE handles updates)
 // Cache retention time (5 minutes) - keeps stale data for instant display
 const GC_TIME = 5 * 60 * 1000;
-// Orders per page (view-specific)
-const PAGE_SIZE_OPEN = 500;
-const PAGE_SIZE_SHIPPED = 100;
-const PAGE_SIZE_CANCELLED = 100;
+// Orders per page
+const PAGE_SIZE = 250;
 
 // All available views (3 views - RTO and COD Pending are now filter chips in Shipped)
 export type OrderView = 'open' | 'shipped' | 'cancelled';
 
 // Helper to get page size for a view
-export const getPageSize = (view: OrderView): number => {
-    switch (view) {
-        case 'shipped':
-            return PAGE_SIZE_SHIPPED;
-        case 'cancelled':
-            return PAGE_SIZE_CANCELLED;
-        default:
-            return PAGE_SIZE_OPEN;
-    }
+export const getPageSize = (_view: OrderView): number => {
+    return PAGE_SIZE;
 };
 
 // Shipped view sub-filters (server-side filtering)

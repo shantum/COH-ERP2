@@ -547,10 +547,13 @@ export const ORDER_UNIFIED_SELECT = {
                         select: {
                             id: true,
                             colorName: true,
+                            colorHex: true,
+                            imageUrl: true,
                             product: {
                                 select: {
                                     id: true,
                                     name: true,
+                                    imageUrl: true,
                                 },
                             },
                         },
@@ -645,6 +648,8 @@ export interface FlattenedOrderRow {
     // Line-level fields
     productName: string;
     colorName: string;
+    colorHex: string | null;
+    imageUrl: string | null;
     size: string;
     skuCode: string;
     skuId: string | null;
@@ -771,7 +776,9 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 variation: {
                     id: string;
                     colorName: string | null;
-                    product: { id: string; name: string } | null;
+                    colorHex: string | null;
+                    imageUrl: string | null;
+                    product: { id: string; name: string; imageUrl: string | null } | null;
                 } | null;
             } | null;
             productionBatch: {
@@ -843,6 +850,8 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 orderTrackingStatus: (order.trackingStatus as string) || null,
                 productName: '(no items)',
                 colorName: '-',
+                colorHex: null,
+                imageUrl: null,
                 size: '-',
                 skuCode: '-',
                 skuId: null,
@@ -929,6 +938,8 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 orderTrackingStatus: (order.trackingStatus as string) || null,
                 productName: sku?.variation?.product?.name || '-',
                 colorName: sku?.variation?.colorName || '-',
+                colorHex: sku?.variation?.colorHex || null,
+                imageUrl: sku?.variation?.imageUrl || sku?.variation?.product?.imageUrl || null,
                 size: sku?.size || '-',
                 skuCode: sku?.skuCode || '-',
                 skuId: line.skuId || null,
@@ -1018,10 +1029,13 @@ export const LINE_SSE_SELECT = {
                 select: {
                     id: true,
                     colorName: true,
+                    colorHex: true,
+                    imageUrl: true,
                     product: {
                         select: {
                             id: true,
                             name: true,
+                            imageUrl: true,
                         },
                     },
                 },
@@ -1117,6 +1131,8 @@ export function flattenLineForSSE(
     // Build SKU display strings
     const productName = sku?.variation?.product?.name || '-';
     const colorName = sku?.variation?.colorName || '-';
+    const colorHex = sku?.variation?.colorHex || null;
+    const imageUrl = sku?.variation?.imageUrl || sku?.variation?.product?.imageUrl || null;
     const skuCode = sku?.skuCode || '-';
     const size = sku?.size || '-';
 
@@ -1165,6 +1181,8 @@ export function flattenLineForSSE(
         lineNotes: line.notes || '',
         productName,
         colorName,
+        colorHex,
+        imageUrl,
         skuCode,
         size,
 

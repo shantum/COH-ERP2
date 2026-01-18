@@ -3,7 +3,7 @@
  */
 
 import { Package, CheckCircle, AlertTriangle } from 'lucide-react';
-import { TRACKING_STATUS_STYLES, GRID_COLORS } from '../../orders/ordersGrid/formatting';
+import { TRACKING_STATUS_STYLES, GRID_COLORS } from '../../../utils/gridFormatting';
 
 interface TrackingStatusBadgeProps {
     status: string;

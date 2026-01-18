@@ -168,7 +168,7 @@ export function useShipmentsMutations(options: UseShipmentsMutationsOptions = {}
             // but we need to invalidate the query key for when user navigates back to Orders page
             queryClient.invalidateQueries({ queryKey: ['openOrders'] });
             // Also invalidate tRPC cache for open orders
-            trpcUtils.orders.list.invalidate({ view: 'open', limit: 500 });
+            trpcUtils.orders.list.invalidate({ view: 'open' });
         },
         onError: (err: any) => {
             const errorMsg = err.response?.data?.error || 'Failed to unship order';

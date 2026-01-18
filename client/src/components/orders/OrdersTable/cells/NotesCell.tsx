@@ -1,0 +1,87 @@
+/**
+ * NotesCell - Inline editable notes for order lines
+ */
+
+import { useState, useRef, useEffect } from 'react';
+import type { CellProps } from '../types';
+
+export function NotesCell({ row, handlersRef }: CellProps) {
+    if (!row?.lineId) return null;
+
+    const { onUpdateLineNotes } = handlersRef.current;
+    const [isEditing, setIsEditing] = useState(false);
+    const [value, setValue] = useState(row.lineNotes || '');
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    // Update local value when row changes
+    useEffect(() => {
+        setValue(row.lineNotes || '');
+    }, [row.lineNotes]);
+
+    // Focus input when editing starts
+    useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+            inputRef.current.select();
+        }
+    }, [isEditing]);
+
+    const handleSave = () => {
+        if (value !== row.lineNotes) {
+            onUpdateLineNotes(row.lineId!, value);
+        }
+        setIsEditing(false);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleSave();
+        } else if (e.key === 'Escape') {
+            setValue(row.lineNotes || '');
+            setIsEditing(false);
+        }
+    };
+
+    if (isEditing) {
+        return (
+            <input
+                ref={inputRef}
+                type="text"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={handleSave}
+                onKeyDown={handleKeyDown}
+                className="w-full px-1 py-0 border border-blue-300 rounded focus:outline-none bg-white text-xs"
+                placeholder="Note..."
+            />
+        );
+    }
+
+    const notes = row.lineNotes || '';
+
+    if (!notes) {
+        return (
+            <div
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditing(true);
+                }}
+                className="w-full h-full cursor-pointer"
+                title="Click to add note"
+            />
+        );
+    }
+
+    return (
+        <div
+            onClick={(e) => {
+                e.stopPropagation();
+                setIsEditing(true);
+            }}
+            className="cursor-pointer truncate text-amber-700 bg-amber-50 px-1 rounded"
+            title={notes}
+        >
+            {notes}
+        </div>
+    );
+}

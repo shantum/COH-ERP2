@@ -3,7 +3,7 @@
  */
 
 import { CheckCircle, AlertCircle } from 'lucide-react';
-import { STOCK_STATUS_STYLES } from '../../orders/ordersGrid/formatting';
+import { STOCK_STATUS_STYLES } from '../../../utils/gridFormatting';
 
 interface StatusBadgeProps {
     status: string;

@@ -170,9 +170,11 @@ export interface FlattenedOrderRow {
     // Line-level fields
     productName: string;
     colorName: string;
+    colorHex: string | null;
     size: string;
     skuCode: string;
     skuId: string | null;
+    imageUrl: string | null;
     qty: number;
     lineId: string | null;
     lineStatus: string | null;
@@ -297,9 +299,11 @@ export function flattenOrders(
                 internalNotes: order.internalNotes || null,
                 productName: '(no items)',
                 colorName: '-',
+                colorHex: null,
                 size: '-',
                 skuCode: '-',
                 skuId: null,
+                imageUrl: null,
                 qty: 0,
                 lineId: null,
                 lineStatus: null,
@@ -370,9 +374,11 @@ export function flattenOrders(
                 internalNotes: order.internalNotes || null,
                 productName: line.sku?.variation?.product?.name || '-',
                 colorName: line.sku?.variation?.colorName || '-',
+                colorHex: line.sku?.variation?.colorHex || null,
                 size: line.sku?.size || '-',
                 skuCode: line.sku?.skuCode || '-',
                 skuId: line.skuId,
+                imageUrl: line.sku?.variation?.imageUrl || line.sku?.variation?.product?.imageUrl || null,
                 qty: line.qty,
                 lineId: line.id,
                 lineStatus: line.lineStatus,

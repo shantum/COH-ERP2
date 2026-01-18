@@ -5,8 +5,7 @@
  * Note: Archived view hidden from UI but auto-archive still runs. Search shows archived orders.
  */
 
-import { useState, useMemo, useCallback, useRef } from 'react';
-import type { AgGridReact } from 'ag-grid-react';
+import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, RefreshCw, Send, ChevronDown, Archive, ChevronLeft, ChevronRight, XCircle } from 'lucide-react';
@@ -24,14 +23,13 @@ import {
 
 // Components
 import {
-    OrdersGrid,
+    OrdersTable,
     OrdersGridSkeleton,
     CreateOrderModal,
     CustomizationModal,
     UnifiedOrderModal,
     GlobalOrderSearch,
 } from '../components/orders';
-import { GridPreferencesToolbar } from '../components/common/grid';
 import type { Order } from '../types';
 
 // View configuration (3 views: Open, Shipped, Cancelled)
@@ -48,9 +46,6 @@ type ShippedFilter = 'all' | 'rto' | 'cod_pending';
 export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
-
-    // Grid ref for AG-Grid transaction-based updates from SSE
-    const gridRef = useRef<AgGridReact>(null);
 
     // View and page state - persisted in URL
     const [searchParams, setSearchParams] = useSearchParams();
@@ -110,8 +105,7 @@ export default function Orders() {
 
     // Real-time updates via SSE (for multi-user collaboration)
     // When SSE is connected, polling is reduced since SSE handles updates
-    // Pass gridRef for AG-Grid transaction-based updates (faster than cache updates)
-    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page, gridRef });
+    const { isConnected: isSSEConnected } = useOrderSSE({ currentView: view, page });
 
     // Data hook - simplified, single view with pagination
     const {
@@ -467,22 +461,11 @@ export default function Orders() {
         [customizingLine, isEditingCustomization, mutations.customizeLine, mutations.removeCustomization]
     );
 
-    // Grid component
-    const {
-        gridComponent,
-        columnVisibilityDropdown,
-        statusLegend,
-        hasUserCustomizations,
-        differsFromAdminDefaults,
-        isSavingPrefs,
-        resetToDefaults,
-        isManager,
-        savePreferencesToServer,
-    } = OrdersGrid({
+    // Common grid props shared between AG-Grid and TanStack Table
+    const gridProps = {
         rows: filteredRows,
         lockedDates: lockedDates || [],
         currentView: view,
-        externalGridRef: gridRef,
         onAllocate: handleAllocate,
         onUnallocate: handleUnallocate,
         onPick: handlePick,
@@ -493,19 +476,19 @@ export default function Orders() {
         onUnmarkShippedLine: handleUnmarkShippedLine,
         onUpdateLineTracking: handleUpdateLineTracking,
         onShip: handleShipOrderUnified,
-        onCreateBatch: (data) => mutations.createBatch.mutate(data),
-        onUpdateBatch: (id, data) => mutations.updateBatch.mutate({ id, data }),
-        onDeleteBatch: (id) => mutations.deleteBatch.mutate(id),
-        onUpdateLineNotes: (lineId, notes) => mutations.updateLineNotes.mutate({ lineId, notes }),
+        onCreateBatch: (data: any) => mutations.createBatch.mutate(data),
+        onUpdateBatch: (id: string, data: any) => mutations.updateBatch.mutate({ id, data }),
+        onDeleteBatch: (id: string) => mutations.deleteBatch.mutate(id),
+        onUpdateLineNotes: (lineId: string, notes: string) => mutations.updateLineNotes.mutate({ lineId, notes }),
         onViewOrder: handleViewOrderById,
         onEditOrder: handleEditOrderUnified,
-        onCancelOrder: (id, reason) => mutations.cancelOrder.mutate({ id, reason }),
-        onDeleteOrder: (id) => mutations.deleteOrder.mutate(id),
-        onCancelLine: (lineId) => {
+        onCancelOrder: (id: string, reason?: string) => mutations.cancelOrder.mutate({ id, reason }),
+        onDeleteOrder: (id: string) => mutations.deleteOrder.mutate(id),
+        onCancelLine: (lineId: string) => {
             startProcessing(lineId);
             mutations.cancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
         },
-        onUncancelLine: (lineId) => {
+        onUncancelLine: (lineId: string) => {
             startProcessing(lineId);
             mutations.uncancelLine.mutate(lineId, { onSettled: () => stopProcessing(lineId) });
         },
@@ -513,36 +496,66 @@ export default function Orders() {
         onCustomize: handleCustomize,
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
-        onUpdateShipByDate: (orderId, date) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onForceShipLine: (lineId, data) => mutations.adminShip.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }),
+        onUpdateShipByDate: (orderId: string, date: string | null) => mutations.updateShipByDate.mutate({ orderId, date }),
+        onForceShipLine: (lineId: string, data: { awbNumber?: string; courier?: string }) => mutations.adminShip.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }),
         allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
         isAdmin: user?.role === 'admin',
-    });
+    };
+
+    // Grid component using TanStack Table
+    const {
+        tableComponent,
+        columnVisibilityDropdown,
+    } = OrdersTable(gridProps);
 
     return (
-        <div className="space-y-4">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <h1 className="text-xl md:text-2xl font-bold text-gray-900">Orders</h1>
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="space-y-1.5">
+            {/* Unified Header Bar */}
+            <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg">
+                {/* Left: Title */}
+                <h1 className="text-sm font-semibold text-gray-900 whitespace-nowrap">Orders</h1>
+
+                {/* Center: Pipeline counts (Open view only) */}
+                {view === 'open' && (
+                    <div className="hidden sm:flex items-center gap-2 text-[11px]">
+                        <div className="flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span className="text-gray-500">Pending</span>
+                            <span className="font-semibold text-gray-800">{pipelineCounts.pending}</span>
+                        </div>
+                        <span className="text-gray-300">→</span>
+                        <div className="flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                            <span className="text-gray-500">Allocated</span>
+                            <span className="font-semibold text-gray-800">{pipelineCounts.allocated}</span>
+                        </div>
+                        <span className="text-gray-300">→</span>
+                        <div className="flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                            <span className="text-gray-500">Ready</span>
+                            <span className="font-semibold text-gray-800">{pipelineCounts.ready}</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Right: Search + New Order */}
+                <div className="flex items-center gap-1.5">
                     <GlobalOrderSearch
                         onSelectOrder={(orderId, selectedView) => {
-                            // Map search results to views (RTO/COD route to Shipped with filter)
                             const viewMap: Record<string, OrderView> = {
                                 'open': 'open',
                                 'shipped': 'shipped',
-                                'rto': 'shipped',         // RTO routes to shipped with filter
-                                'cod-pending': 'shipped', // COD Pending routes to shipped with filter
-                                'archived': 'shipped',    // Archived orders route to shipped view
+                                'rto': 'shipped',
+                                'cod-pending': 'shipped',
+                                'archived': 'shipped',
                                 'cancelled': 'cancelled',
                             };
                             const mappedView = viewMap[selectedView] || 'open';
                             setView(mappedView);
-                            // Set shipped filter based on search result tab
                             if (selectedView === 'rto') {
                                 setShippedFilter('rto');
                             } else if (selectedView === 'cod-pending') {
@@ -559,196 +572,117 @@ export default function Orders() {
                     />
                     <button
                         onClick={() => setShowCreateOrder(true)}
-                        className="btn-primary flex items-center gap-1.5 text-sm px-4 py-2 whitespace-nowrap"
+                        className="btn-primary flex items-center gap-1 text-[11px] px-2 py-1 whitespace-nowrap"
                     >
-                        <Plus size={16} />
-                        New Order
+                        <Plus size={12} />
+                        New
                     </button>
                 </div>
             </div>
 
-            {/* Pipeline Status Bar - Only for Open view */}
-            {view === 'open' && (
-                <div className="flex items-center gap-4 px-4 py-2.5 bg-white border border-gray-200 rounded-lg">
-                    <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                        <span className="text-sm text-gray-600">Pending</span>
-                        <span className="text-sm font-semibold text-gray-900">{pipelineCounts.pending}</span>
-                    </div>
-                    <span className="text-gray-300">→</span>
-                    <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-                        <span className="text-sm text-gray-600">Allocated</span>
-                        <span className="text-sm font-semibold text-gray-900">{pipelineCounts.allocated}</span>
-                    </div>
-                    <span className="text-gray-300">→</span>
-                    <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                        <span className="text-sm text-gray-600">Ready</span>
-                        <span className="text-sm font-semibold text-gray-900">{pipelineCounts.ready}</span>
-                    </div>
-                </div>
-            )}
-
             {/* Main Content Card */}
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                {/* Toolbar */}
-                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50/80 border-b border-gray-100">
-                    {/* Left side: View selector + filters */}
-                    <div className="flex items-center gap-3">
-                        {/* View Dropdown */}
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                {/* Top Toolbar - Filters, Actions, Grid Controls */}
+                <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
+                    {/* Left: View selector + filters */}
+                    <div className="flex items-center gap-1.5">
                         <div className="relative">
                             <select
                                 value={view}
                                 onChange={(e) => setView(e.target.value as OrderView)}
-                                className="appearance-none text-sm font-medium bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-300 cursor-pointer"
+                                className="appearance-none text-[10px] font-medium bg-white border border-gray-200 rounded px-1.5 py-0.5 pr-5 focus:outline-none cursor-pointer"
                             >
-                                <option value="open">Open Orders{pagination?.total ? ` (${pagination.total})` : ''}</option>
+                                <option value="open">Open{pagination?.total ? ` (${pagination.total})` : ''}</option>
                                 <option value="shipped">Shipped</option>
                                 <option value="cancelled">Cancelled</option>
                             </select>
-                            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                            <ChevronDown size={10} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                         </div>
 
-                        {/* Open view filters */}
                         {view === 'open' && (
                             <>
-                                <div className="w-px h-5 bg-gray-200" />
                                 <select
                                     value={allocatedFilter}
                                     onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
-                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
                                 >
-                                    <option value="">All status</option>
+                                    <option value="">All</option>
                                     <option value="yes">Allocated</option>
-                                    <option value="no">Not allocated</option>
+                                    <option value="no">Pending</option>
                                 </select>
                                 <select
                                     value={productionFilter}
                                     onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
-                                    className="text-xs border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-primary-200 focus:border-primary-300"
+                                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
                                 >
-                                    <option value="">All production</option>
+                                    <option value="">All</option>
                                     <option value="scheduled">Scheduled</option>
-                                    <option value="needs">Needs production</option>
-                                    <option value="ready">Ready to ship</option>
+                                    <option value="needs">Needs prod</option>
+                                    <option value="ready">Ready</option>
                                 </select>
                             </>
                         )}
 
-                        {/* Shipped view filter chips */}
                         {view === 'shipped' && (
-                            <>
-                                <div className="w-px h-5 bg-gray-200" />
-                                <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-0.5">
+                                {(['all', 'rto', 'cod_pending'] as const).map((f) => (
                                     <button
-                                        onClick={() => { setShippedFilter('all'); setPage(1); }}
-                                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
-                                            shippedFilter === 'all'
-                                                ? 'bg-blue-600 text-white'
+                                        key={f}
+                                        onClick={() => { setShippedFilter(f); setPage(1); }}
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                            shippedFilter === f
+                                                ? f === 'rto' ? 'bg-orange-600 text-white' : f === 'cod_pending' ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
                                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                     >
-                                        All
+                                        {f === 'cod_pending' ? 'COD' : f.toUpperCase()}
                                     </button>
-                                    <button
-                                        onClick={() => { setShippedFilter('rto'); setPage(1); }}
-                                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
-                                            shippedFilter === 'rto'
-                                                ? 'bg-orange-600 text-white'
-                                                : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
-                                        }`}
-                                    >
-                                        RTO
-                                    </button>
-                                    <button
-                                        onClick={() => { setShippedFilter('cod_pending'); setPage(1); }}
-                                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
-                                            shippedFilter === 'cod_pending'
-                                                ? 'bg-amber-600 text-white'
-                                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                                        }`}
-                                    >
-                                        COD Pending
-                                    </button>
-                                </div>
-                            </>
+                                ))}
+                            </div>
                         )}
-                    </div>
 
-                    {/* Right side: Actions */}
-                    <div className="flex items-center gap-2">
-                        {/* Release shipped button - Open view only */}
+                        <div className="w-px h-3 bg-gray-200" />
+
+                        {/* Actions */}
                         {view === 'open' && releasableOrderCount > 0 && (
                             <button
                                 onClick={() => {
-                                    if (confirm(`Release ${releasableOrderCount} shipped orders?\n\nThis will move them to the Shipped view.`)) {
+                                    if (confirm(`Release ${releasableOrderCount} shipped orders?`)) {
                                         mutations.releaseToShipped.mutate(undefined);
                                     }
                                 }}
                                 disabled={mutations.releaseToShipped.isPending}
-                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-medium"
+                                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-medium"
                             >
-                                <Send size={12} />
                                 Release {releasableOrderCount}
                             </button>
                         )}
-
-                        {/* Release cancelled button - Open view only */}
                         {view === 'open' && releasableCancelledCount > 0 && (
                             <button
                                 onClick={() => {
-                                    if (confirm(`Release ${releasableCancelledCount} cancelled orders?\n\nThis will move them to the Cancelled view.`)) {
+                                    if (confirm(`Release ${releasableCancelledCount} cancelled orders?`)) {
                                         mutations.releaseToCancelled.mutate(undefined);
                                     }
                                 }}
                                 disabled={mutations.releaseToCancelled.isPending}
-                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 font-medium"
+                                className="text-[9px] px-1.5 py-0.5 rounded bg-red-600 text-white font-medium"
                             >
-                                <XCircle size={12} />
-                                Release {releasableCancelledCount} Cancelled
+                                {releasableCancelledCount} Cancelled
                             </button>
                         )}
+                    </div>
 
-                        {/* Admin migrate button - Open view only */}
-                        {view === 'open' && user?.role === 'admin' && (
-                            <button
-                                onClick={() => mutations.migrateShopifyFulfilled.mutate()}
-                                disabled={mutations.migrateShopifyFulfilled.isPending}
-                                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
-                            >
-                                <Archive size={12} />
-                                {mutations.migrateShopifyFulfilled.isPending ? 'Migrating...' : 'Migrate'}
-                            </button>
-                        )}
-
-                        {/* Refresh - non-blocking with visual feedback */}
+                    {/* Right: Grid controls */}
+                    <div className="flex items-center gap-1">
+                        {columnVisibilityDropdown}
                         <button
                             onClick={() => refetch()}
                             disabled={isFetching}
-                            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                                isFetching
-                                    ? 'text-blue-600 bg-blue-50 border border-blue-200'
-                                    : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50'
-                            }`}
+                            className={`p-0.5 rounded ${isFetching ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                            title="Refresh"
                         >
-                            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-                            {isFetching ? 'Refreshing...' : 'Refresh'}
+                            <RefreshCw size={11} className={isFetching ? 'animate-spin' : ''} />
                         </button>
-
-                        <div className="w-px h-4 bg-gray-200" />
-
-                        {/* Grid controls */}
-                        {view === 'open' && statusLegend}
-                        {columnVisibilityDropdown}
-                        <GridPreferencesToolbar
-                            hasUserCustomizations={hasUserCustomizations}
-                            differsFromAdminDefaults={differsFromAdminDefaults}
-                            isSavingPrefs={isSavingPrefs}
-                            onResetToDefaults={resetToDefaults}
-                            isManager={isManager}
-                            onSaveAsDefaults={savePreferencesToServer}
-                        />
                     </div>
                 </div>
 
@@ -759,45 +693,47 @@ export default function Orders() {
                     </div>
                 )}
 
-                {/* Grid - show even with stale data while refreshing in background */}
+                {/* Table - show even with stale data while refreshing in background */}
                 {filteredRows.length > 0 && (
-                    <div>{gridComponent}</div>
+                    <div>{tableComponent}</div>
                 )}
                 {!isLoading && filteredRows.length === 0 && (
-                    <div className="text-center text-gray-400 py-16">
+                    <div className="text-center text-gray-400 py-12 text-xs">
                         No {VIEW_CONFIG[view].label.toLowerCase()}
                     </div>
                 )}
 
-                {/* Pagination */}
-                {pagination && pagination.totalPages > 1 && (
-                    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
-                        <div className="text-sm text-gray-600">
-                            Showing {((page - 1) * pagination.limit) + 1}–{Math.min(page * pagination.limit, pagination.total)} of {pagination.total} orders
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setPage(page - 1)}
-                                disabled={page === 1 || isFetching}
-                                className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                <ChevronLeft size={14} />
-                                Previous
-                            </button>
-                            <span className="text-sm text-gray-600 px-2">
-                                Page {page} of {pagination.totalPages}
-                            </span>
-                            <button
-                                onClick={() => setPage(page + 1)}
-                                disabled={page >= pagination.totalPages || isFetching}
-                                className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Next
-                                <ChevronRight size={14} />
-                            </button>
-                        </div>
+                {/* Bottom Bar - Pagination */}
+                <div className="flex items-center justify-between gap-2 px-2 py-1 border-t border-gray-100 bg-gray-50/50">
+                    {/* Left: Record count */}
+                    <div className="text-[10px] text-gray-500">
+                        {pagination && pagination.total > 0
+                            ? `${((page - 1) * pagination.limit) + 1}–${Math.min(page * pagination.limit, pagination.total)} of ${pagination.total}`
+                            : '0 orders'
+                        }
                     </div>
-                )}
+
+                    {/* Right: Pagination controls */}
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setPage(page - 1)}
+                            disabled={page === 1 || isFetching || !pagination}
+                            className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                        >
+                            <ChevronLeft size={14} />
+                        </button>
+                        <span className="text-[10px] text-gray-600 min-w-[30px] text-center">
+                            {page}/{pagination?.totalPages || 1}
+                        </span>
+                        <button
+                            onClick={() => setPage(page + 1)}
+                            disabled={!pagination || page >= pagination.totalPages || isFetching}
+                            className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                        >
+                            <ChevronRight size={14} />
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* Modals */}

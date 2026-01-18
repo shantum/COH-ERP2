@@ -11,7 +11,7 @@ import { useIThinkTracking, type IThinkTrackingData, type IThinkScanHistoryItem 
 import {
     getTrackingStatusClasses,
     getTrackingStatusLabel,
-} from '../../ordersGrid/formatting/statusStyles';
+} from '../../../../utils/gridFormatting';
 
 interface TrackingDetailsProps {
     /** AWB number to track */
