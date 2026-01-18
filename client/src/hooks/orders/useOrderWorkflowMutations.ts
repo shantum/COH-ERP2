@@ -56,15 +56,16 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             // Snapshot the previous value
             const previousData = getCachedData();
 
-            // Get rows to calculate inventory deltas
+            // Get rows and calculate inventory deltas in a single pass
             const rows = getRowsByLineIds(previousData, lineIds);
             const inventoryDeltas = new Map<string, number>();
-            rows.forEach((row) => {
+
+            for (const row of rows) {
                 if (row.lineId) {
                     const delta = calculateInventoryDelta(row.lineStatus || 'pending', 'allocated', row.qty || 0);
                     inventoryDeltas.set(row.lineId, delta);
                 }
-            });
+            }
 
             // Optimistically update the cache
             // Cast through `any` as tRPC inferred types are stricter than our FlattenedOrderRow
@@ -73,20 +74,8 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
                 (old: any) => optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas) as any
             );
 
-            // Also update inventory balance cache surgically
-            const affectedSkuIds = new Set<string>();
-            const skuDeltas = new Map<string, number>();
-            rows.forEach((row) => {
-                if (row.skuId) {
-                    affectedSkuIds.add(row.skuId);
-                    const currentDelta = skuDeltas.get(row.skuId) || 0;
-                    const delta = calculateInventoryDelta(row.lineStatus || 'pending', 'allocated', row.qty || 0);
-                    skuDeltas.set(row.skuId, currentDelta + delta);
-                }
-            });
-
             // Return context with data for rollback
-            return { previousData, queryInput, skuDeltas } as OptimisticUpdateContext & { skuDeltas: Map<string, number> };
+            return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             // Rollback to the previous value on error

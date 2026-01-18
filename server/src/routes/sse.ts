@@ -213,11 +213,11 @@ router.get('/', sseAuth, (req: Request, res: Response): void => {
  * Broadcast an order update to all connected clients
  *
  * @param data - The event data to broadcast
- * @param _excludeUserId - DEPRECATED: Previously excluded initiating user from broadcast.
- *                         Now ignored - all users receive broadcasts to ensure consistency
- *                         even if optimistic updates fail.
+ * @param excludeUserId - User ID to exclude from broadcast (typically the mutation initiator).
+ *                        The initiating user already has optimistic updates applied,
+ *                        so sending SSE to them causes duplicate/flickering updates.
  */
-export function broadcastOrderUpdate(data: OrderUpdateEvent, _excludeUserId: string | null = null): void {
+export function broadcastOrderUpdate(data: OrderUpdateEvent, excludeUserId: string | null = null): void {
     const eventId = generateEventId();
     const storedEvent: StoredEvent = { id: eventId, data, timestamp: Date.now() };
     storeEvent(storedEvent);
@@ -226,7 +226,12 @@ export function broadcastOrderUpdate(data: OrderUpdateEvent, _excludeUserId: str
 
     let broadcastCount = 0;
     clients.forEach((clientSet, userId) => {
-        // Broadcast to ALL users including initiator - ensures consistency even if optimistic update fails
+        // Skip initiating user - they already have optimistic updates applied
+        // Sending to them causes double updates and UI flickering
+        if (userId === excludeUserId) {
+            return;
+        }
+
         clientSet.forEach(client => {
             try {
                 client.write(message);
@@ -243,7 +248,7 @@ export function broadcastOrderUpdate(data: OrderUpdateEvent, _excludeUserId: str
     });
 
     if (broadcastCount > 0) {
-        console.log(`SSE: Broadcast ${data.type} (id: ${eventId}) to ${broadcastCount} clients`);
+        console.log(`SSE: Broadcast ${data.type} (id: ${eventId}) to ${broadcastCount} clients${excludeUserId ? ` (excluded user ${excludeUserId})` : ''}`);
     }
 }
 
