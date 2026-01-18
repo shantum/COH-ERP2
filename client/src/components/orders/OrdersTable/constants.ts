@@ -5,7 +5,7 @@
 // All column IDs in display order (includes post-ship columns)
 export const ALL_COLUMN_IDS = [
     'order', 'shipByDate',
-    'tags', 'customerNotes', 'customerTags', 'productName', 'customize', 'qty', 'skuStock', 'fabricBalance',
+    'tags', 'customerNotes', 'customerTags', 'productName', 'customize', 'qty', 'fabricBalance',
     'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine',
     'shopifyTracking', 'awb', 'courier', 'trackingStatus',
     // Post-ship columns (for shipped/archived views)
@@ -19,7 +19,7 @@ export type ColumnId = typeof ALL_COLUMN_IDS[number];
 // Columns shown by default
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
     'order', 'productName',
-    'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine',
+    'qty', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine',
     'shopifyTracking', 'awb', 'courier', 'trackingStatus',
 ];
 
@@ -33,7 +33,6 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     productName: 'Product',
     customize: 'Custom',
     qty: 'Qty',
-    skuStock: 'Stock',
     fabricBalance: 'Fabric',
     allocate: 'Alloc',
     production: 'Production',
@@ -81,8 +80,7 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
     customerTags: 100,
     productName: 220,
     customize: 50,
-    qty: 30,
-    skuStock: 45,
+    qty: 40,
     fabricBalance: 50,
     allocate: 35,
     production: 70,

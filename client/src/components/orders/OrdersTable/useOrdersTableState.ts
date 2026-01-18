@@ -107,6 +107,8 @@ const COLUMN_MIGRATIONS: Record<string, string> = {
     'shopifyStatus': 'shopifyTracking',
     'shopifyAwb': 'shopifyTracking',
     'shopifyCourier': 'shopifyTracking',
+    // v4: skuStock merged into qty
+    'skuStock': 'qty',
 };
 
 // Migrate old column IDs to new ones

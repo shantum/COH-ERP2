@@ -37,6 +37,7 @@ export { CustomerOrderCountCell } from './CustomerOrderCountCell';
 export { ProductNameCell } from './ProductNameCell';
 export { QtyCell } from './QtyCell';
 export { StockCell } from './StockCell';
+export { QtyStockCell } from './QtyStockCell';
 export { NotesCell } from './NotesCell';
 
 // Tracking cells

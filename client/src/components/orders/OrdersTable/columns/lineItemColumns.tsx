@@ -9,8 +9,7 @@ import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
     ProductNameCell,
-    QtyCell,
-    StockCell,
+    QtyStockCell,
 } from '../cells';
 import { Sparkles, Edit3 } from 'lucide-react';
 
@@ -109,24 +108,14 @@ export function buildLineItemColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             },
         },
 
-        // Quantity
+        // Quantity + Stock (combined)
         {
             id: 'qty',
             header: getHeaderName('qty'),
             size: DEFAULT_COLUMN_WIDTHS.qty,
-            cell: ({ row }) => <QtyCell row={row.original} />,
+            cell: ({ row }) => <QtyStockCell row={row.original} />,
             enableSorting: true,
             sortingFn: (a, b) => (a.original.qty || 0) - (b.original.qty || 0),
-        },
-
-        // SKU Stock
-        {
-            id: 'skuStock',
-            header: getHeaderName('skuStock'),
-            size: DEFAULT_COLUMN_WIDTHS.skuStock,
-            cell: ({ row }) => <StockCell row={row.original} />,
-            enableSorting: true,
-            sortingFn: (a, b) => (a.original.skuStock || 0) - (b.original.skuStock || 0),
         },
 
         // Fabric Balance
