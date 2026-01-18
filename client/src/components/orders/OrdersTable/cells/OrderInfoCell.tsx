@@ -1,16 +1,16 @@
 /**
- * OrderInfoCell - Combined display of order number, date, and age in 2 lines
+ * OrderInfoCell - Combined display of order number and smart date
  * Line 1: Order number (clickable)
- * Line 2: Date · Age
+ * Line 2: Smart date (relative for recent, date for older)
  */
 
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
 /**
- * Format age as relative time (minutes, hours, or days)
+ * Smart date formatting - shows relative time for recent, date for older
  */
-function formatAge(date: Date): { text: string; urgency: 'low' | 'medium' | 'high' } {
+function formatSmartDate(date: Date): { text: string; urgency: 'low' | 'medium' | 'high' } {
     const now = Date.now();
     const diffMs = now - date.getTime();
     const diffMins = Math.floor(diffMs / (1000 * 60));
@@ -22,13 +22,17 @@ function formatAge(date: Date): { text: string; urgency: 'low' | 'medium' | 'hig
         diffDays > 5 ? 'high' :
         diffDays >= 3 ? 'medium' : 'low';
 
-    // Format text based on time range
+    // Recent: relative time | Older: date
     if (diffMins < 60) {
         return { text: `${diffMins}m ago`, urgency };
     } else if (diffHours < 24) {
         return { text: `${diffHours}h ago`, urgency };
-    } else {
+    } else if (diffDays < 7) {
         return { text: `${diffDays}d ago`, urgency };
+    } else {
+        // Older than a week: show date
+        const formatted = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        return { text: formatted, urgency };
     }
 }
 
@@ -37,22 +41,15 @@ export function OrderInfoCell({ row, handlersRef }: CellProps) {
 
     const { onViewOrder } = handlersRef.current;
 
-    // Format date
     const date = new Date(row.orderDate);
-    const formattedDate = date.toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-    });
+    const { text: dateText, urgency } = formatSmartDate(date);
 
-    // Calculate age with relative formatting
-    const { text: ageText, urgency } = formatAge(date);
-
-    // Age color based on urgency
-    const ageColor = urgency === 'high'
-        ? 'text-red-600'
+    // Color based on urgency (only for older orders)
+    const dateColor = urgency === 'high'
+        ? 'text-red-600 font-medium'
         : urgency === 'medium'
             ? 'text-amber-600'
-            : 'text-gray-500';
+            : 'text-gray-400';
 
     return (
         <div className="flex flex-col justify-center leading-tight py-0.5">
@@ -67,16 +64,13 @@ export function OrderInfoCell({ row, handlersRef }: CellProps) {
             >
                 {row.orderNumber}
             </button>
-            {/* Line 2: Date · Age */}
-            <div className="flex items-center gap-1 text-[10px] mt-0.5">
-                <span className="text-gray-500" title={date.toLocaleString('en-IN')}>
-                    {formattedDate}
-                </span>
-                <span className="text-gray-300">·</span>
-                <span className={cn('font-semibold', ageColor)}>
-                    {ageText}
-                </span>
-            </div>
+            {/* Line 2: Smart date */}
+            <span
+                className={cn('text-[10px] mt-0.5', dateColor)}
+                title={date.toLocaleString('en-IN')}
+            >
+                {dateText}
+            </span>
         </div>
     );
 }
