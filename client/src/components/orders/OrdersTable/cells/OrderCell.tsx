@@ -1,13 +1,14 @@
 /**
  * OrderCell - Combined Order + Customer + Payment display
- * Signal-first design: Calm by default, problems create contrast
+ * Signal-first design: Left border indicates risk level
  *
- * Line 1: Order# · Customer · ₹Value
- * Line 2: Time · City · Repeat · Badge
+ * Line 1: Order# + Customer name                    ₹Value
+ * Line 2: Time · 📍City · Repeat · Badge
  */
 
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
+import { MapPin } from 'lucide-react';
 
 /**
  * Smart date formatting - relative for recent, date for older
@@ -22,7 +23,7 @@ function formatSmartDate(date: Date): { text: string; isOld: boolean } {
     const isOld = diffDays >= 3;
 
     if (diffMins < 60) {
-        return { text: `${diffMins}m`, isOld };
+        return { text: `${diffMins} min`, isOld };
     } else if (diffHours < 24) {
         return { text: `${diffHours}h`, isOld };
     } else if (diffDays < 7) {
@@ -31,16 +32,6 @@ function formatSmartDate(date: Date): { text: string; isOld: boolean } {
         const formatted = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
         return { text: formatted, isOld: true };
     }
-}
-
-/**
- * Format currency value compactly
- */
-function formatValue(value: number): string {
-    if (value === 0) return '-';
-    if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`;
-    if (value >= 1000) return `₹${(value / 1000).toFixed(1)}K`;
-    return `₹${Math.round(value).toLocaleString('en-IN')}`;
 }
 
 /**
@@ -72,132 +63,118 @@ export function OrderCell({ row, handlersRef }: CellProps) {
     const isCod = paymentMethod.toLowerCase().includes('cod') ||
                   paymentMethod.toLowerCase().includes('cash');
     const orderValue = row.totalAmount || 0;
-    const isHighValue = orderValue >= 10000;
 
     // Risk assessment
     const rtoCount = row.customerRtoCount || 0;
     const isFirstOrder = orderCount <= 1;
     const isFirstCod = isFirstOrder && isCod;
     const hasRtoHistory = rtoCount > 0;
-
-    // Determine risk level for badge styling
-    const hasRisk = isFirstCod || hasRtoHistory;
     const isHighRisk = hasRtoHistory && rtoCount >= 2;
 
-    // Build risk badge text
-    const getRiskBadge = () => {
-        if (!isCod) {
-            // Prepaid - subtle green text only
-            return {
-                text: 'Prepaid',
-                className: 'text-emerald-600 text-[10px] font-medium',
-            };
-        }
-
-        // COD with potential risk
-        if (isHighRisk) {
-            // High risk: COD + RTO history
-            return {
-                text: `COD · ${rtoCount}R`,
-                className: 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700',
-            };
-        } else if (isFirstCod && hasRtoHistory) {
-            // First COD + RTO history
-            return {
-                text: `COD · 1st · ${rtoCount}R`,
-                className: 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700',
-            };
-        } else if (isFirstCod) {
-            // First COD only
-            return {
-                text: 'COD · 1st',
-                className: 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-600',
-            };
-        } else if (hasRtoHistory) {
-            // COD + RTO history
-            return {
-                text: `COD · ${rtoCount}R`,
-                className: 'px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700',
-            };
-        } else {
-            // Regular COD
-            return {
-                text: 'COD',
-                className: 'px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700',
-            };
-        }
+    // Left border color based on risk
+    const getBorderColor = () => {
+        if (!isCod) return 'border-l-emerald-400'; // Prepaid = green
+        if (isHighRisk || (isFirstCod && hasRtoHistory)) return 'border-l-red-400'; // High risk = red
+        if (isFirstCod || hasRtoHistory) return 'border-l-orange-400'; // Medium risk = orange
+        return 'border-l-amber-400'; // Regular COD = amber
     };
 
-    const badge = getRiskBadge();
+    // Payment badge
+    const getBadge = () => {
+        if (!isCod) {
+            return { text: 'Prepaid', className: 'text-emerald-600' };
+        }
+        if (isHighRisk) {
+            return { text: `COD · ${rtoCount}R`, className: 'text-red-600 font-semibold' };
+        }
+        if (isFirstCod && hasRtoHistory) {
+            return { text: `COD · 1st · ${rtoCount}R`, className: 'text-red-600 font-semibold' };
+        }
+        if (isFirstCod) {
+            return { text: 'COD · 1st', className: 'text-red-600 font-medium' };
+        }
+        if (hasRtoHistory) {
+            return { text: `COD · ${rtoCount}R`, className: 'text-amber-600 font-medium' };
+        }
+        return { text: 'COD', className: 'text-amber-600' };
+    };
+
+    const badge = getBadge();
 
     return (
-        <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
-            {/* Line 1: Order# · Customer · ₹Value */}
-            <div className="flex items-center gap-1.5 min-w-0">
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onViewOrder(row.orderId);
-                    }}
-                    className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
-                    title={`View order ${row.orderNumber}`}
-                >
-                    {row.orderNumber}
-                </button>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onViewCustomer(row.order);
-                    }}
-                    className="text-gray-600 hover:text-blue-600 hover:underline truncate"
-                    title={row.customerName}
-                >
-                    {row.customerName}
-                </button>
-                <span className="text-gray-300">·</span>
-                <span
-                    className={cn(
-                        'shrink-0 tabular-nums',
-                        isHighValue ? 'font-bold text-gray-900' : 'font-semibold text-gray-700'
+        <div className={cn(
+            'flex items-center justify-between gap-3 py-1 pl-3 pr-1 -ml-3 min-w-0',
+            'border-l-[3px]',
+            getBorderColor()
+        )}>
+            {/* Left content */}
+            <div className="flex flex-col justify-center leading-tight min-w-0 flex-1">
+                {/* Line 1: Order# + Customer */}
+                <div className="flex items-center gap-2 min-w-0">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onViewOrder(row.orderId);
+                        }}
+                        className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
+                        title={`View order ${row.orderNumber}`}
+                    >
+                        {row.orderNumber}
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onViewCustomer(row.order);
+                        }}
+                        className="text-gray-700 hover:text-blue-600 hover:underline truncate"
+                        title={row.customerName}
+                    >
+                        {row.customerName}
+                    </button>
+                </div>
+
+                {/* Line 2: Time · 📍City · Repeat · Badge */}
+                <div className="flex items-center gap-1.5 text-[11px] mt-0.5 min-w-0">
+                    <span
+                        className={cn(isOld ? 'text-amber-600' : 'text-gray-400')}
+                        title={date.toLocaleString('en-IN')}
+                    >
+                        {dateText}
+                    </span>
+                    {city && (
+                        <>
+                            <span className="text-gray-300">·</span>
+                            <span className="flex items-center gap-0.5 text-gray-400">
+                                <MapPin size={10} className="shrink-0" />
+                                <span className="truncate max-w-[70px]" title={city}>{city}</span>
+                            </span>
+                        </>
                     )}
-                    title={`₹${orderValue.toLocaleString('en-IN')}`}
-                >
-                    {formatValue(orderValue)}
-                </span>
+                    {isRepeatCustomer && (
+                        <>
+                            <span className="text-gray-300">·</span>
+                            <span
+                                className="text-emerald-600 shrink-0"
+                                title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
+                            >
+                                {formatLtv(ltv)}({orderCount})
+                            </span>
+                        </>
+                    )}
+                    <span className="text-gray-300">·</span>
+                    <span className={badge.className}>
+                        {badge.text}
+                    </span>
+                </div>
             </div>
 
-            {/* Line 2: Time · City · Repeat · Badge */}
-            <div className="flex items-center gap-1 text-[10px] mt-0.5 min-w-0">
-                <span
-                    className={cn(isOld ? 'text-amber-600' : 'text-gray-400')}
-                    title={date.toLocaleString('en-IN')}
-                >
-                    {dateText}
-                </span>
-                {city && (
-                    <>
-                        <span className="text-gray-300">·</span>
-                        <span className="text-gray-400 truncate max-w-[80px]" title={city}>
-                            {city}
-                        </span>
-                    </>
-                )}
-                {isRepeatCustomer && (
-                    <>
-                        <span className="text-gray-300">·</span>
-                        <span
-                            className="text-emerald-600 shrink-0"
-                            title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
-                        >
-                            {formatLtv(ltv)}({orderCount})
-                        </span>
-                    </>
-                )}
-                <span className="text-gray-300">·</span>
-                <span className={badge.className} title={isCod ? 'Cash on Delivery' : 'Prepaid'}>
-                    {badge.text}
-                </span>
-            </div>
+            {/* Right: Value */}
+            <span
+                className="text-gray-800 font-semibold tabular-nums shrink-0 text-[15px]"
+                title={`₹${orderValue.toLocaleString('en-IN')}`}
+            >
+                ₹{orderValue.toLocaleString('en-IN')}
+            </span>
         </div>
     );
 }

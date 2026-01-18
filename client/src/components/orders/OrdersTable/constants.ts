@@ -74,7 +74,7 @@ export const COURIER_OPTIONS = [
 
 // Default column widths (compact for small screens)
 export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> = {
-    order: 260,
+    order: 320,
     shipByDate: 65,
     tags: 80,
     customerNotes: 120,
