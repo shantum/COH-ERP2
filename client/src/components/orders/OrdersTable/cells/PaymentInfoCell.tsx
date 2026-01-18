@@ -63,7 +63,7 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
                 <div className="flex items-center gap-1 mt-0.5 text-[10px]">
                     {discountCode && (
                         <span
-                            className="text-violet-600 font-medium truncate max-w-[90px]"
+                            className="text-gray-500 truncate max-w-[90px]"
                             title={discountCode}
                         >
                             {discountCode}
