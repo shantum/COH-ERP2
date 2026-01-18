@@ -532,6 +532,7 @@ export const ORDER_UNIFIED_SELECT = {
             isCustomized: true,
             rtoCondition: true,
             trackingStatus: true,
+            lastTrackingUpdate: true,
             shopifyLineId: true,
             // SKU with minimal nested data (includes customization fields)
             sku: {
@@ -1014,6 +1015,7 @@ export const LINE_SSE_SELECT = {
     deliveredAt: true,
     isCustomized: true,
     trackingStatus: true,
+    lastTrackingUpdate: true,
     productionBatchId: true,
     orderId: true,
     sku: {
