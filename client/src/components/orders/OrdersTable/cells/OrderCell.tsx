@@ -10,18 +10,29 @@ import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
 /**
- * Format date and time separately for two-line display
+ * Format date and relative time for two-line display
  */
-function formatDateTime(date: Date): { dateStr: string; timeStr: string; isOld: boolean } {
+function formatDateTime(date: Date): { dateStr: string; relativeStr: string; isOld: boolean } {
     const now = Date.now();
     const diffMs = now - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const isOld = diffDays >= 3;
 
     const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-    const timeStr = date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
 
-    return { dateStr, timeStr, isOld };
+    // Relative time - keep it short
+    let relativeStr: string;
+    if (diffMins < 60) {
+        relativeStr = `${diffMins}m`;
+    } else if (diffHours < 24) {
+        relativeStr = `${diffHours}h`;
+    } else {
+        relativeStr = `${diffDays}d`;
+    }
+
+    return { dateStr, relativeStr, isOld };
 }
 
 /**
@@ -40,7 +51,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     // Order info
     const date = new Date(row.orderDate);
-    const { dateStr, timeStr, isOld } = formatDateTime(date);
+    const { dateStr, relativeStr, isOld } = formatDateTime(date);
     const city = row.city || '';
 
     // Customer info
@@ -100,13 +111,13 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             {/* Date/Time - two lines */}
             <div
                 className={cn(
-                    'shrink-0 w-12 text-right pr-2 flex flex-col',
+                    'shrink-0 w-11 text-right pr-2 flex flex-col',
                     isOld ? 'text-amber-600' : 'text-gray-400'
                 )}
                 title={date.toLocaleString('en-IN')}
             >
-                <span className="text-[11px] leading-tight">{dateStr}</span>
-                <span className="text-[10px] leading-tight">{timeStr}</span>
+                <span className="text-[11px] leading-tight whitespace-nowrap">{dateStr}</span>
+                <span className="text-[10px] leading-tight">{relativeStr}</span>
             </div>
 
             {/* Separator */}
