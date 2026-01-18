@@ -3,6 +3,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { Pencil } from 'lucide-react';
 import type { CellProps } from '../types';
 
 export function NotesCell({ row, handlersRef }: CellProps) {
@@ -66,9 +67,12 @@ export function NotesCell({ row, handlersRef }: CellProps) {
                     e.stopPropagation();
                     setIsEditing(true);
                 }}
-                className="w-full h-full cursor-pointer"
+                className="flex items-center gap-1 cursor-pointer text-gray-300 hover:text-gray-400 transition-colors group"
                 title="Click to add note"
-            />
+            >
+                <Pencil size={12} className="opacity-50 group-hover:opacity-100" />
+                <span className="text-[10px] italic">Add note</span>
+            </div>
         );
     }
 
@@ -78,10 +82,13 @@ export function NotesCell({ row, handlersRef }: CellProps) {
                 e.stopPropagation();
                 setIsEditing(true);
             }}
-            className="cursor-pointer truncate text-amber-700 bg-amber-50 px-1 rounded"
-            title={notes}
+            className="flex items-center gap-1 cursor-pointer group"
+            title={`${notes} (click to edit)`}
         >
-            {notes}
+            <span className="truncate text-amber-700 bg-amber-50 px-1 rounded text-xs">
+                {notes}
+            </span>
+            <Pencil size={10} className="text-gray-300 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
         </div>
     );
 }
