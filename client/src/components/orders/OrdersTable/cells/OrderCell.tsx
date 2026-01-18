@@ -1,9 +1,10 @@
 /**
  * OrderCell - Combined Order + Customer + Payment display
- * Signal-first design: Left border indicates risk level
+ * 3-line layout with left border risk signal
  *
- * Line 1: Order# + Customer name                    ₹Value
- * Line 2: Time · 📍City · Repeat · Badge
+ * Line 1: Order# + Customer                         ₹Value
+ * Line 2: Time · 📍City
+ * Line 3: Badge · Repeat
  */
 
 import type { CellProps } from '../types';
@@ -103,12 +104,12 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     return (
         <div className={cn(
-            'flex items-center justify-between gap-3 py-1 pl-3 pr-1 -ml-3 min-w-0',
+            'flex items-center justify-between gap-3 py-1.5 pl-3 pr-1 -ml-3 min-w-0',
             'border-l-[3px]',
             getBorderColor()
         )}>
             {/* Left content */}
-            <div className="flex flex-col justify-center leading-tight min-w-0 flex-1">
+            <div className="flex flex-col justify-center leading-snug min-w-0 flex-1">
                 {/* Line 1: Order# + Customer */}
                 <div className="flex items-center gap-2 min-w-0">
                     <button
@@ -133,10 +134,10 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                     </button>
                 </div>
 
-                {/* Line 2: Time · 📍City · Repeat · Badge */}
-                <div className="flex items-center gap-1.5 text-[11px] mt-0.5 min-w-0">
+                {/* Line 2: Time · 📍City */}
+                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-0.5">
                     <span
-                        className={cn(isOld ? 'text-amber-600' : 'text-gray-400')}
+                        className={cn(isOld && 'text-amber-600')}
                         title={date.toLocaleString('en-IN')}
                     >
                         {dateText}
@@ -144,27 +145,30 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                     {city && (
                         <>
                             <span className="text-gray-300">·</span>
-                            <span className="flex items-center gap-0.5 text-gray-400">
+                            <span className="flex items-center gap-0.5">
                                 <MapPin size={10} className="shrink-0" />
-                                <span className="truncate max-w-[70px]" title={city}>{city}</span>
+                                <span className="truncate max-w-[80px]" title={city}>{city}</span>
                             </span>
                         </>
                     )}
+                </div>
+
+                {/* Line 3: Badge · Repeat */}
+                <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
+                    <span className={badge.className}>
+                        {badge.text}
+                    </span>
                     {isRepeatCustomer && (
                         <>
                             <span className="text-gray-300">·</span>
                             <span
-                                className="text-emerald-600 shrink-0"
+                                className="text-emerald-600"
                                 title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
                             >
                                 {formatLtv(ltv)}({orderCount})
                             </span>
                         </>
                     )}
-                    <span className="text-gray-300">·</span>
-                    <span className={badge.className}>
-                        {badge.text}
-                    </span>
                 </div>
             </div>
 

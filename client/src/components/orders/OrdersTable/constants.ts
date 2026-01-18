@@ -108,7 +108,7 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
 };
 
 // Row height for virtualization
-export const ROW_HEIGHT = 36;
+export const ROW_HEIGHT = 52;
 export const HEADER_HEIGHT = 24;
 
 // Table ID for localStorage
