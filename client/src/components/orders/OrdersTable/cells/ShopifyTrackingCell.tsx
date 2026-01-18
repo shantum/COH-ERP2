@@ -1,10 +1,10 @@
 /**
  * ShopifyTrackingCell - Shopify-style fulfillment status display
- * High-end logistics feel with status indicators
+ * High-end logistics feel with courier branding
  */
 
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
-import { Package, Truck, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { Truck, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 
 interface ShopifyTrackingCellProps {
@@ -12,6 +12,24 @@ interface ShopifyTrackingCellProps {
 }
 
 type FulfillmentState = 'unfulfilled' | 'fulfilled' | 'in_transit' | 'delivered' | 'partial';
+
+// Courier brand colors and short codes
+const courierBranding: Record<string, { code: string; bg: string; text: string }> = {
+    delhivery: { code: 'DEL', bg: 'bg-red-500', text: 'text-white' },
+    bluedart: { code: 'BD', bg: 'bg-blue-600', text: 'text-white' },
+    dtdc: { code: 'DTDC', bg: 'bg-red-600', text: 'text-white' },
+    ekart: { code: 'EK', bg: 'bg-yellow-500', text: 'text-gray-900' },
+    xpressbees: { code: 'XB', bg: 'bg-yellow-400', text: 'text-gray-900' },
+    shadowfax: { code: 'SF', bg: 'bg-purple-600', text: 'text-white' },
+    'ecom express': { code: 'ECE', bg: 'bg-blue-500', text: 'text-white' },
+    ecomexpress: { code: 'ECE', bg: 'bg-blue-500', text: 'text-white' },
+};
+
+function getCourierBrand(courier: string | null): { code: string; bg: string; text: string } | null {
+    if (!courier) return null;
+    const key = courier.toLowerCase().trim();
+    return courierBranding[key] || { code: courier.slice(0, 3).toUpperCase(), bg: 'bg-gray-500', text: 'text-white' };
+}
 
 function getFulfillmentState(status: string | null | undefined, awb: string | null): FulfillmentState {
     if (!status || status === '-' || status === 'unfulfilled') {
@@ -26,7 +44,7 @@ function getFulfillmentState(status: string | null | undefined, awb: string | nu
 }
 
 const stateConfig: Record<FulfillmentState, {
-    icon: typeof Package;
+    icon: typeof Truck;
     label: string;
     iconClass: string;
     labelClass: string;
@@ -79,12 +97,15 @@ export function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
     const state = getFulfillmentState(status, awb);
     const config = stateConfig[state];
     const Icon = config.icon;
+    const courierBrand = getCourierBrand(courier);
 
     // Unfulfilled - minimal display
     if (state === 'unfulfilled') {
         return (
             <div className="flex items-center gap-1.5">
-                <Icon size={14} className={config.iconClass} />
+                <div className="w-5 h-5 rounded bg-amber-100 flex items-center justify-center">
+                    <Icon size={12} className={config.iconClass} />
+                </div>
                 <span className={cn('text-[11px] font-medium', config.labelClass)}>
                     {config.label}
                 </span>
@@ -94,40 +115,42 @@ export function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
 
     // Has tracking info
     return (
-        <div className="flex flex-col gap-0.5">
-            {/* AWB with icon */}
-            <div className="flex items-center gap-1.5">
-                <Icon size={14} className={config.iconClass} />
-                {awb ? (
+        <div className="flex items-center gap-2">
+            {/* Courier badge */}
+            {courierBrand ? (
+                <div
+                    className={cn(
+                        'w-8 h-8 rounded flex items-center justify-center text-[9px] font-bold shrink-0',
+                        courierBrand.bg,
+                        courierBrand.text
+                    )}
+                    title={courier || undefined}
+                >
+                    {courierBrand.code}
+                </div>
+            ) : (
+                <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center shrink-0">
+                    <Icon size={16} className={config.iconClass} />
+                </div>
+            )}
+
+            {/* AWB + Status */}
+            <div className="flex flex-col min-w-0">
+                {awb && (
                     <span
-                        className="font-mono text-[11px] text-gray-700 truncate max-w-[120px]"
+                        className="font-mono text-[11px] text-gray-700 truncate"
                         title={awb}
                     >
                         {awb}
                     </span>
-                ) : (
-                    <span className={cn('text-[11px] font-medium', config.labelClass)}>
-                        {config.label}
-                    </span>
                 )}
+                <span className={cn(
+                    'text-[10px] font-medium',
+                    config.labelClass
+                )}>
+                    {config.label}
+                </span>
             </div>
-            {/* Courier + Status badge */}
-            {(courier || awb) && (
-                <div className="flex items-center gap-1.5 ml-5">
-                    {courier && (
-                        <span className="text-[10px] text-gray-500 truncate max-w-[60px]" title={courier}>
-                            {courier}
-                        </span>
-                    )}
-                    <span className={cn(
-                        'text-[9px] font-medium px-1.5 py-0.5 rounded-full',
-                        config.bgClass,
-                        config.labelClass
-                    )}>
-                        {config.label}
-                    </span>
-                </div>
-            )}
         </div>
     );
 }
