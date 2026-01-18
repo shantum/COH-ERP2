@@ -1,15 +1,13 @@
 /**
  * OrderCell - Combined Order + Customer + Payment display
- * 3-line layout with left border risk signal
+ * 2-line layout with left border risk signal
  *
- * Line 1: Order# + Customer
- * Line 2: ₹Value · Badge
- * Line 3: Time · 📍City · Repeat
+ * Line 1: Time | Order# Customer | City
+ * Line 2: ₹Value Badge · Repeat
  */
 
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
-import { MapPin } from 'lucide-react';
 
 /**
  * Smart date formatting - relative for recent, date for older
@@ -24,7 +22,7 @@ function formatSmartDate(date: Date): { text: string; isOld: boolean } {
     const isOld = diffDays >= 3;
 
     if (diffMins < 60) {
-        return { text: `${diffMins} min`, isOld };
+        return { text: `${diffMins}h`, isOld };
     } else if (diffHours < 24) {
         return { text: `${diffHours}h`, isOld };
     } else if (diffDays < 7) {
@@ -86,10 +84,10 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             return { text: 'Prepaid', className: 'text-emerald-600' };
         }
         if (isHighRisk) {
-            return { text: `COD · ${rtoCount}R`, className: 'text-red-600 font-semibold' };
+            return { text: `COD · ${rtoCount}R`, className: 'text-red-600 font-medium' };
         }
         if (isFirstCod && hasRtoHistory) {
-            return { text: `COD · 1st · ${rtoCount}R`, className: 'text-red-600 font-semibold' };
+            return { text: `COD · 1st · ${rtoCount}R`, className: 'text-red-600 font-medium' };
         }
         if (isFirstCod) {
             return { text: 'COD · 1st', className: 'text-red-600 font-medium' };
@@ -104,18 +102,25 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     return (
         <div className={cn(
-            'flex flex-col justify-center py-1.5 pl-3 -ml-3 min-w-0',
+            'flex flex-col justify-center py-1 pl-3 -ml-3 min-w-0',
             'border-l-[3px]',
             getBorderColor()
         )}>
-            {/* Line 1: Order# + Customer */}
-            <div className="flex items-center gap-2 min-w-0">
+            {/* Line 1: Time | Order# Customer | City */}
+            <div className="flex items-center gap-1.5 min-w-0">
+                <span
+                    className={cn('text-gray-400 shrink-0', isOld && 'text-amber-600')}
+                    title={date.toLocaleString('en-IN')}
+                >
+                    {dateText}
+                </span>
+                <span className="text-gray-300">|</span>
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
                         onViewOrder(row.orderId);
                     }}
-                    className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
+                    className="text-gray-800 hover:text-blue-600 hover:underline font-semibold shrink-0"
                     title={`View order ${row.orderNumber}`}
                 >
                     {row.orderNumber}
@@ -125,17 +130,25 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                         e.stopPropagation();
                         onViewCustomer(row.order);
                     }}
-                    className="text-gray-700 hover:text-blue-600 hover:underline truncate"
+                    className="text-gray-700 hover:text-blue-600 hover:underline truncate font-medium"
                     title={row.customerName}
                 >
                     {row.customerName}
                 </button>
+                {city && (
+                    <>
+                        <span className="text-gray-300">|</span>
+                        <span className="text-gray-400 truncate max-w-[80px]" title={city}>
+                            {city}
+                        </span>
+                    </>
+                )}
             </div>
 
-            {/* Line 2: ₹Value · Badge */}
-            <div className="flex items-center gap-2 text-[12px] mt-0.5">
+            {/* Line 2: ₹Value Badge · Repeat */}
+            <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
                 <span
-                    className="text-gray-700 font-medium tabular-nums"
+                    className="text-gray-600 tabular-nums"
                     title={`₹${orderValue.toLocaleString('en-IN')}`}
                 >
                     ₹{Math.round(orderValue).toLocaleString('en-IN')}
@@ -143,25 +156,6 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 <span className={badge.className}>
                     {badge.text}
                 </span>
-            </div>
-
-            {/* Line 3: Time · 📍City · Repeat */}
-            <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-0.5">
-                <span
-                    className={cn(isOld && 'text-amber-600')}
-                    title={date.toLocaleString('en-IN')}
-                >
-                    {dateText}
-                </span>
-                {city && (
-                    <>
-                        <span className="text-gray-300">·</span>
-                        <span className="flex items-center gap-0.5">
-                            <MapPin size={10} className="shrink-0" />
-                            <span className="truncate max-w-[80px]" title={city}>{city}</span>
-                        </span>
-                    </>
-                )}
                 {isRepeatCustomer && (
                     <>
                         <span className="text-gray-300">·</span>
