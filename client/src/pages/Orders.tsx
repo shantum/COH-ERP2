@@ -688,9 +688,7 @@ export default function Orders() {
 
                 {/* Loading - show skeleton for initial load (no cached data) */}
                 {isLoading && filteredRows.length === 0 && (
-                    <div className="px-4 py-2">
-                        <OrdersGridSkeleton rowCount={25} columnCount={10} />
-                    </div>
+                    <OrdersGridSkeleton />
                 )}
 
                 {/* Table - show even with stale data while refreshing in background */}
