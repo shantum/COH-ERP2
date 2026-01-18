@@ -158,14 +158,14 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 </div>
 
                 {/* Line 2: ₹Value Badge · City */}
-                <div className="flex items-center gap-2 text-[12px] mt-0.5">
+                <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
                     <span
                         className="text-gray-600 tabular-nums w-12"
                         title={`₹${orderValue.toLocaleString('en-IN')}`}
                     >
                         ₹{Math.round(orderValue).toLocaleString('en-IN')}
                     </span>
-                    <span className={cn(badge.className, 'w-16')}>
+                    <span className={badge.className}>
                         {badge.text}
                     </span>
                     {city && (
