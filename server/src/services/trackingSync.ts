@@ -91,6 +91,7 @@ interface OrderUpdateData {
     terminalStatus?: string;
     terminalAt?: Date;
     status?: OrderStatus;
+    lastScanAt?: Date;
 }
 
 /** Result of line tracking update */
@@ -320,6 +321,12 @@ async function updateLineTracking(
     // Also update Order.trackingStatus as denormalized cache (for query compatibility)
     // This maintains backward compatibility with existing queries while lines are source of truth
     orderUpdateData.trackingStatus = trackingData.internalStatus;
+
+    // Store the courier's last scan timestamp (from iThink API)
+    if (trackingData.lastScan?.datetime) {
+        orderUpdateData.lastScanAt = new Date(trackingData.lastScan.datetime);
+    }
+
     if (trackingData.internalStatus === 'delivered') {
         orderUpdateData.deliveredAt = lineUpdateData.deliveredAt;
     }
