@@ -39,7 +39,10 @@ export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
         label: status,
     };
 
-    const lastUpdate = formatLastUpdate(row.lineLastTrackingUpdate);
+    // Use order-level lastScanAt (courier's scan time) or fall back to line-level lastTrackingUpdate
+    const lastUpdate = formatLastUpdate(
+        row.order?.lastScanAt || row.lineLastTrackingUpdate
+    );
 
     return (
         <div className="flex flex-col">
