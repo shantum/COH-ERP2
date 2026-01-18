@@ -82,23 +82,28 @@ function arrayToVisibility(columns: string[]): VisibilityState {
 }
 
 // Migration: map old column IDs to new ones
+// v3: All order/customer/payment info merged into single 'order' column
 const COLUMN_MIGRATIONS: Record<string, string> = {
-    // v2: orderInfo + customerInfo → orderCustomer
-    'orderInfo': 'orderCustomer',
-    'customerInfo': 'orderCustomer',
-    // v1: old granular columns → combined columns
-    'orderDate': 'orderCustomer',
-    'orderAge': 'orderCustomer',
-    'orderNumber': 'orderCustomer',
-    'customerName': 'orderCustomer',
-    'city': 'orderCustomer',
-    'customerOrderCount': 'orderCustomer',
-    'customerLtv': 'orderCustomer',
-    'skuCode': 'productName', // SKU is now part of productName cell
-    'paymentMethod': 'paymentInfo',
-    'orderValue': 'paymentInfo',
-    'discountCode': 'paymentInfo',
-    'rtoHistory': 'paymentInfo',
+    // v3: orderCustomer + paymentInfo → order
+    'orderCustomer': 'order',
+    'paymentInfo': 'order',
+    // v2: orderInfo + customerInfo → order
+    'orderInfo': 'order',
+    'customerInfo': 'order',
+    // v1: old granular columns → order
+    'orderDate': 'order',
+    'orderAge': 'order',
+    'orderNumber': 'order',
+    'customerName': 'order',
+    'city': 'order',
+    'customerOrderCount': 'order',
+    'customerLtv': 'order',
+    'paymentMethod': 'order',
+    'orderValue': 'order',
+    'discountCode': 'order',
+    'rtoHistory': 'order',
+    // Other migrations
+    'skuCode': 'productName',
     'shopifyStatus': 'shopifyTracking',
     'shopifyAwb': 'shopifyTracking',
     'shopifyCourier': 'shopifyTracking',

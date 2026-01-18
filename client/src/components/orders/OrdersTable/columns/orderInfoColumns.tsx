@@ -1,6 +1,6 @@
 /**
  * Order Info Columns - TanStack Table column definitions
- * Columns: orderCustomer (combined order + customer), shipByDate
+ * Columns: order (combined order + customer + payment), shipByDate
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
@@ -8,7 +8,7 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
-    OrderCustomerCell,
+    OrderCell,
     ShipByDateCell,
 } from '../cells';
 
@@ -16,12 +16,12 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
     const { getHeaderName, handlersRef } = ctx;
 
     return [
-        // Order + Customer combined
+        // Combined Order + Customer + Payment
         {
-            id: 'orderCustomer',
-            header: getHeaderName('orderCustomer'),
-            size: DEFAULT_COLUMN_WIDTHS.orderCustomer,
-            cell: ({ row }) => <OrderCustomerCell row={row.original} handlersRef={handlersRef} />,
+            id: 'order',
+            header: getHeaderName('order'),
+            size: DEFAULT_COLUMN_WIDTHS.order,
+            cell: ({ row }) => <OrderCell row={row.original} handlersRef={handlersRef} />,
             enableSorting: true,
             sortingFn: (a, b) => {
                 const dateA = new Date(a.original.orderDate).getTime();

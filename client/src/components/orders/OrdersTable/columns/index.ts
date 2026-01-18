@@ -8,7 +8,6 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 
 import { buildOrderInfoColumns } from './orderInfoColumns';
-import { buildPaymentColumns } from './paymentColumns';
 import { buildLineItemColumns } from './lineItemColumns';
 import { buildFulfillmentColumns } from './fulfillmentColumns';
 import { buildTrackingColumns } from './trackingColumns';
@@ -16,7 +15,6 @@ import { buildPostShipColumns } from './postShipColumns';
 
 // Re-export individual builders
 export { buildOrderInfoColumns } from './orderInfoColumns';
-export { buildPaymentColumns } from './paymentColumns';
 export { buildLineItemColumns } from './lineItemColumns';
 export { buildFulfillmentColumns } from './fulfillmentColumns';
 export { buildTrackingColumns } from './trackingColumns';
@@ -24,11 +22,11 @@ export { buildPostShipColumns } from './postShipColumns';
 
 /**
  * Build all columns in the correct order
+ * Note: Payment info is now merged into the Order column
  */
 export function buildAllColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrderRow>[] {
     return [
         ...buildOrderInfoColumns(ctx),
-        ...buildPaymentColumns(ctx),
         ...buildLineItemColumns(ctx),
         ...buildFulfillmentColumns(ctx),
         ...buildTrackingColumns(ctx),

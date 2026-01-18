@@ -15,6 +15,7 @@ export { ProductionCell } from './ProductionCell';
 export { ProductionDatePopover } from './ProductionDatePopover';
 
 // Order info cells
+export { OrderCell } from './OrderCell';
 export { OrderInfoCell } from './OrderInfoCell';
 export { CustomerInfoCell } from './CustomerInfoCell';
 export { OrderCustomerCell } from './OrderCustomerCell';
