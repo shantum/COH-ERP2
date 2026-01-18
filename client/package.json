@@ -40,6 +40,8 @@
     "@tanstack/react-virtual": "^3.13.18",
     "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
+    "ag-grid-community": "^35.0.0",
+    "ag-grid-react": "^35.0.0",
     "axios": "^1.13.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

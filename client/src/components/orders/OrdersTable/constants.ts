@@ -20,6 +20,7 @@ export type ColumnId = typeof ALL_COLUMN_IDS[number];
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
     'orderInfo', 'customerInfo', 'paymentInfo', 'productName',
     'qty', 'skuStock', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine',
+    'shopifyTracking', 'awb', 'courier', 'trackingStatus',
 ];
 
 // Default column headers

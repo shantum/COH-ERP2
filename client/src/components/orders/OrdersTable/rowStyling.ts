@@ -27,14 +27,6 @@ const PENDING_SUBSTATE_CLASSES = {
 } as const;
 
 /**
- * Urgency classes based on order age
- */
-const URGENCY_CLASSES = {
-    urgent: 'border-l-4 border-l-red-500',    // > 5 days old
-    warning: 'border-l-4 border-l-amber-500', // 3-5 days old
-} as const;
-
-/**
  * Get row className based on order line data
  * Used with TanStack Table to apply styling to rows
  */

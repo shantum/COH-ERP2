@@ -37,7 +37,6 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
 
     // RTO risk level
     const isHighRisk = rtoCount >= 3;
-    const isMediumRisk = rtoCount >= 1;
 
     return (
         <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
