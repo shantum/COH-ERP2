@@ -2,8 +2,8 @@
  * OrderCell - Combined Order + Customer + Payment display
  * 2-line layout with left border risk signal
  *
- * Line 1: Time | Order# Customer · Repeat
- * Line 2: ₹Value Badge · City
+ * Time (spans both lines) | Line 1: Order# Customer · Repeat
+ *                         | Line 2: ₹Value Badge · City
  */
 
 import type { CellProps } from '../types';
@@ -102,71 +102,78 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     return (
         <div className={cn(
-            'flex flex-col justify-center py-1 pl-3 -ml-3 min-w-0',
+            'flex items-center gap-2 py-1 pl-3 -ml-3 min-w-0',
             'border-l-[3px]',
             getBorderColor()
         )}>
-            {/* Line 1: Time | Order# Customer · Repeat */}
-            <div className="flex items-center gap-1.5 min-w-0">
-                <span
-                    className={cn('text-gray-400 shrink-0', isOld && 'text-amber-600')}
-                    title={date.toLocaleString('en-IN')}
-                >
-                    {dateText}
-                </span>
-                <span className="text-gray-300">|</span>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onViewOrder(row.orderId);
-                    }}
-                    className="text-gray-800 hover:text-blue-600 hover:underline font-semibold shrink-0"
-                    title={`View order ${row.orderNumber}`}
-                >
-                    {row.orderNumber}
-                </button>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onViewCustomer(row.order);
-                    }}
-                    className="text-gray-600 hover:text-blue-600 hover:underline truncate"
-                    title={row.customerName}
-                >
-                    {row.customerName}
-                </button>
-                {isRepeatCustomer && (
-                    <>
-                        <span className="text-gray-300">·</span>
-                        <span
-                            className="text-emerald-600 text-[12px] shrink-0"
-                            title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
-                        >
-                            {formatLtv(ltv)} ({orderCount})
-                        </span>
-                    </>
+            {/* Time - spans both lines */}
+            <span
+                className={cn(
+                    'text-gray-400 shrink-0 w-8 text-right text-[13px]',
+                    isOld && 'text-amber-600'
                 )}
-            </div>
+                title={date.toLocaleString('en-IN')}
+            >
+                {dateText}
+            </span>
 
-            {/* Line 2: ₹Value Badge · City */}
-            <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
-                <span
-                    className="text-gray-600 tabular-nums"
-                    title={`₹${orderValue.toLocaleString('en-IN')}`}
-                >
-                    ₹{Math.round(orderValue).toLocaleString('en-IN')}
-                </span>
-                <span className={badge.className}>
-                    {badge.text}
-                </span>
-                {city && (
-                    <>
-                        <span className="text-gray-300">·</span>
-                        <span className="text-gray-400 truncate max-w-[80px]" title={city}>
-                            {city}
-                        </span>
-                    </>
-                )}
+            {/* Right content - two lines */}
+            <div className="flex flex-col justify-center min-w-0 flex-1">
+                {/* Line 1: Order# Customer · Repeat */}
+                <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onViewOrder(row.orderId);
+                        }}
+                        className="text-gray-800 hover:text-blue-600 hover:underline font-semibold shrink-0"
+                        title={`View order ${row.orderNumber}`}
+                    >
+                        {row.orderNumber}
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onViewCustomer(row.order);
+                        }}
+                        className="text-gray-600 hover:text-blue-600 hover:underline truncate"
+                        title={row.customerName}
+                    >
+                        {row.customerName}
+                    </button>
+                    {isRepeatCustomer && (
+                        <>
+                            <span className="text-gray-300">·</span>
+                            <span
+                                className="text-emerald-600 text-[12px] shrink-0"
+                                title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
+                            >
+                                {formatLtv(ltv)} ({orderCount})
+                            </span>
+                        </>
+                    )}
+                </div>
+
+                {/* Line 2: ₹Value Badge · City */}
+                <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
+                    <span
+                        className="text-gray-600 tabular-nums"
+                        title={`₹${orderValue.toLocaleString('en-IN')}`}
+                    >
+                        ₹{Math.round(orderValue).toLocaleString('en-IN')}
+                    </span>
+                    <span className={badge.className}>
+                        {badge.text}
+                    </span>
+                    {city && (
+                        <>
+                            <span className="text-gray-300">·</span>
+                            <span className="text-gray-400 truncate max-w-[80px]" title={city}>
+                                {city}
+                            </span>
+                        </>
+                    )}
+                </div>
             </div>
         </div>
     );
