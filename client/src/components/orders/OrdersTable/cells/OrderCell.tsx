@@ -170,10 +170,10 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
             {/* Right: Value */}
             <span
-                className="text-gray-800 font-semibold tabular-nums shrink-0 text-[15px]"
+                className="text-gray-700 font-medium tabular-nums shrink-0 text-[15px]"
                 title={`₹${orderValue.toLocaleString('en-IN')}`}
             >
-                ₹{orderValue.toLocaleString('en-IN')}
+                ₹{Math.round(orderValue).toLocaleString('en-IN')}
             </span>
         </div>
     );
