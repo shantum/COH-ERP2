@@ -22,7 +22,7 @@ function formatSmartDate(date: Date): { text: string; isOld: boolean } {
     const isOld = diffDays >= 3;
 
     if (diffMins < 60) {
-        return { text: `${diffMins}h`, isOld };
+        return { text: `${diffMins}m`, isOld };
     } else if (diffHours < 24) {
         return { text: `${diffHours}h`, isOld };
     } else if (diffDays < 7) {
@@ -130,7 +130,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                         e.stopPropagation();
                         onViewCustomer(row.order);
                     }}
-                    className="text-gray-700 hover:text-blue-600 hover:underline truncate font-medium"
+                    className="text-gray-600 hover:text-blue-600 hover:underline truncate"
                     title={row.customerName}
                 >
                     {row.customerName}
@@ -142,7 +142,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                             className="text-emerald-600 text-[12px] shrink-0"
                             title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
                         >
-                            {formatLtv(ltv)}({orderCount})
+                            {formatLtv(ltv)} ({orderCount})
                         </span>
                     </>
                 )}
