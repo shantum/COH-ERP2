@@ -1,12 +1,11 @@
 /**
  * PaymentInfoCell - Combined display of payment method, order value, discount, and risk indicators
- * Line 1: Order value + Payment badge + Risk indicators
+ * Line 1: Order value + Payment badge + Risk pills
  * Line 2: Discount code (if applicable)
  */
 
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
-import { AlertTriangle, UserX, User } from 'lucide-react';
 
 interface PaymentInfoCellProps {
     row: FlattenedOrderRow;
@@ -25,8 +24,8 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
     const orderCount = row.customerOrderCount || 0;
 
     // Risk indicators
-    const isFirstOrder = orderCount <= 1; // This is their first order
-    const isFirstCod = isFirstOrder && isCod; // First order AND COD = high risk
+    const isFirstOrder = orderCount <= 1;
+    const isFirstCod = isFirstOrder && isCod;
     const hasRtoHistory = rtoCount > 0;
     const isHighRtoRisk = rtoCount >= 3;
 
@@ -44,7 +43,7 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
 
     return (
         <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
-            {/* Line 1: Order value + Payment badge + Risk indicators */}
+            {/* Line 1: Order value + Payment badge + Risk pills */}
             <div className="flex items-center gap-1">
                 <span className="font-semibold text-gray-800">
                     {formatValue(orderValue)}
@@ -60,36 +59,33 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
                     {isCod ? 'COD' : 'Prepaid'}
                 </span>
 
-                {/* Risk indicators */}
+                {/* Risk pills - small text badges */}
                 {isFirstCod && (
                     <span
-                        className="flex items-center text-orange-600 shrink-0"
-                        title="⚠️ First order + COD - Higher RTO risk"
+                        className="px-1 py-0 rounded text-[9px] font-semibold bg-orange-100 text-orange-700 shrink-0"
+                        title="First order + COD = Higher RTO risk"
                     >
-                        <User size={11} strokeWidth={2.5} />
+                        1st
                     </span>
                 )}
                 {hasRtoHistory && (
                     <span
                         className={cn(
-                            'flex items-center shrink-0',
-                            isHighRtoRisk ? 'text-red-600' : 'text-amber-600'
+                            'px-1 py-0 rounded text-[9px] font-semibold shrink-0',
+                            isHighRtoRisk
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-700'
                         )}
-                        title={`⚠️ Customer has ${rtoCount} past RTO${rtoCount > 1 ? 's' : ''}`}
+                        title={`Customer has ${rtoCount} past RTO${rtoCount > 1 ? 's' : ''}`}
                     >
-                        <UserX size={11} strokeWidth={2.5} />
+                        {rtoCount}R
                     </span>
                 )}
             </div>
             {/* Line 2: Discount code only */}
             {discountCode && (
-                <div className="flex items-center gap-1 mt-0.5 text-[10px]">
-                    <span
-                        className="text-gray-500 truncate max-w-[90px]"
-                        title={discountCode}
-                    >
-                        {discountCode}
-                    </span>
+                <div className="text-[10px] text-gray-500 truncate mt-0.5" title={discountCode}>
+                    {discountCode}
                 </div>
             )}
         </div>
