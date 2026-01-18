@@ -4,9 +4,34 @@
 
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { Package } from 'lucide-react';
+import { cn } from '../../../../lib/utils';
 
 interface ProductNameCellProps {
     row: FlattenedOrderRow;
+}
+
+/**
+ * Get size badge styles using slate scale for visual hierarchy
+ * Larger sizes = darker colors
+ */
+function getSizeBadgeClasses(size: string): string {
+    const s = size.toUpperCase().trim();
+
+    // Map sizes to Tailwind slate classes
+    const sizeStyles: Record<string, string> = {
+        'XXS': 'bg-slate-50 text-slate-600 border border-slate-200',
+        'XS': 'bg-slate-100 text-slate-700 border border-slate-200',
+        'S': 'bg-slate-200 text-slate-700',
+        'M': 'bg-slate-300 text-slate-800',
+        'L': 'bg-slate-400 text-white',
+        'XL': 'bg-slate-500 text-white',
+        '2XL': 'bg-slate-600 text-white',
+        '3XL': 'bg-slate-700 text-white',
+        '4XL': 'bg-slate-800 text-white',
+        '5XL': 'bg-slate-900 text-white',
+    };
+
+    return sizeStyles[s] || 'bg-slate-300 text-slate-800'; // Default to M-like
 }
 
 /**
@@ -22,7 +47,7 @@ function getColorFromName(colorName: string): string | null {
     const colorMap: Record<string, string> = {
         // Basics
         'black': '#1a1a1a',
-        'white': '#f8f8f8',
+        'white': '#ffffff',
         'grey': '#808080',
         'gray': '#808080',
         // Blues
@@ -33,13 +58,16 @@ function getColorFromName(colorName: string): string | null {
         'sky blue': '#7dd3fc',
         'light blue': '#93c5fd',
         'royal blue': '#1d4ed8',
+        'indigo': '#4f46e5',
         'carbon black': '#2d2d2d',
+        'midnight black': '#1a1a1a',
         // Greens
         'green': '#22c55e',
         'pine green': '#1d4d4f',
         'olive': '#6b8e23',
         'sage': '#9caf88',
         'mint': '#98fb98',
+        'marine green': '#2e8b57',
         // Pinks/Reds
         'pink': '#ec4899',
         'berry pink': '#c41e7a',
@@ -99,6 +127,33 @@ function getColorFromName(colorName: string): string | null {
     return `hsl(${hue}, 45%, 55%)`;
 }
 
+/**
+ * Check if a color is light (for contrast calculation)
+ */
+function isLightColor(hex: string): boolean {
+    // Remove # if present
+    const color = hex.replace('#', '');
+
+    // Handle HSL colors
+    if (hex.startsWith('hsl')) {
+        const match = hex.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (match) {
+            const lightness = parseInt(match[3], 10);
+            return lightness > 60;
+        }
+        return false;
+    }
+
+    // Parse hex
+    const r = parseInt(color.slice(0, 2), 16);
+    const g = parseInt(color.slice(2, 4), 16);
+    const b = parseInt(color.slice(4, 6), 16);
+
+    // Calculate luminance (perceived brightness)
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.7;
+}
+
 export function ProductNameCell({ row }: ProductNameCellProps) {
     const productName = row.productName || '-';
     const skuCode = row.skuCode || '';
@@ -108,6 +163,7 @@ export function ProductNameCell({ row }: ProductNameCellProps) {
 
     // Get color hex from data or derive from name
     const colorHex = row.colorHex || getColorFromName(colorName);
+    const isLight = colorHex ? isLightColor(colorHex) : false;
 
     const fullName = [productName, colorName, size, skuCode].filter(Boolean).join(' / ');
 
@@ -137,31 +193,29 @@ export function ProductNameCell({ row }: ProductNameCellProps) {
                         {productName}
                     </span>
                     {size && size !== '-' && (
-                        <span className="text-[10px] font-bold px-1.5 py-0 rounded bg-blue-600 text-white shrink-0">
+                        <span className={cn(
+                            'text-[10px] font-bold px-1.5 py-0 rounded shrink-0',
+                            getSizeBadgeClasses(size)
+                        )}>
                             {size}
                         </span>
                     )}
                 </div>
-                {/* Line 2: Color swatch + Color name + SKU */}
+                {/* Line 2: Color pill + SKU */}
                 <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
                     {colorName && colorName !== '-' && (
-                        <>
-                            {/* Color swatch */}
-                            <span
-                                className="w-2.5 h-2.5 rounded-full shrink-0 border border-gray-200"
-                                style={{ backgroundColor: colorHex || '#ccc' }}
-                            />
-                            {/* Color name - bold and colored if we have hex */}
-                            <span
-                                className="font-semibold truncate"
-                                style={{ color: colorHex || '#6b7280' }}
-                            >
-                                {colorName}
-                            </span>
-                        </>
-                    )}
-                    {colorName && colorName !== '-' && skuCode && (
-                        <span className="text-gray-300">·</span>
+                        <span
+                            className={cn(
+                                'inline-flex items-center gap-1 px-1.5 py-0 rounded-full font-medium shrink-0 max-w-[120px]',
+                                isLight ? 'border border-gray-300' : ''
+                            )}
+                            style={{
+                                backgroundColor: colorHex || '#e5e7eb',
+                                color: isLight ? '#374151' : '#ffffff',
+                            }}
+                        >
+                            <span className="truncate">{colorName}</span>
+                        </span>
                     )}
                     {skuCode && (
                         <span className="font-mono text-gray-400 truncate">
