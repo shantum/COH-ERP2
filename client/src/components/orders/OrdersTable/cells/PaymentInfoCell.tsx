@@ -38,52 +38,51 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
     // RTO risk level
     const isHighRisk = rtoCount >= 3;
 
+    const hasSecondLine = discountCode || rtoCount > 0;
+
     return (
         <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
             {/* Line 1: Order value + Payment badge */}
             <div className="flex items-center gap-1.5">
-                <span className="font-medium text-gray-800">
+                <span className="font-semibold text-gray-800">
                     {formatValue(orderValue)}
                 </span>
                 <span
                     className={cn(
-                        'px-1.5 py-0 rounded text-[10px] font-semibold shrink-0',
+                        'px-1.5 py-0 rounded text-[10px] font-medium shrink-0',
                         isCod
-                            ? 'bg-orange-100 text-orange-700'
-                            : 'bg-green-100 text-green-700'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-emerald-100 text-emerald-700'
                     )}
                 >
                     {isCod ? 'COD' : 'Prepaid'}
                 </span>
             </div>
-            {/* Line 2: Discount + RTO warning */}
-            <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
-                {discountCode ? (
-                    <span
-                        className="text-purple-600 font-medium truncate max-w-[80px]"
-                        title={discountCode}
-                    >
-                        {discountCode}
-                    </span>
-                ) : (
-                    <span className="text-gray-300">No discount</span>
-                )}
-                {rtoCount > 0 && (
-                    <>
-                        <span className="text-gray-300">·</span>
+            {/* Line 2: Only show if discount or RTO warning exists */}
+            {hasSecondLine && (
+                <div className="flex items-center gap-1 mt-0.5 text-[10px]">
+                    {discountCode && (
+                        <span
+                            className="text-violet-600 font-medium truncate max-w-[90px]"
+                            title={discountCode}
+                        >
+                            {discountCode}
+                        </span>
+                    )}
+                    {rtoCount > 0 && (
                         <span
                             className={cn(
                                 'flex items-center gap-0.5 shrink-0',
-                                isHighRisk ? 'text-red-600' : 'text-amber-600'
+                                isHighRisk ? 'text-red-600' : 'text-amber-500'
                             )}
-                            title={`⚠️ Customer has ${rtoCount} RTO(s) in history`}
+                            title={`Customer has ${rtoCount} RTO(s)`}
                         >
-                            <AlertTriangle size={10} />
-                            <span className="font-semibold">{rtoCount}</span>
+                            <AlertTriangle size={9} />
+                            <span className="font-semibold">{rtoCount} RTO</span>
                         </span>
-                    </>
-                )}
-            </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
