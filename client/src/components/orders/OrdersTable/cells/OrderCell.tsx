@@ -22,14 +22,14 @@ function formatDateTime(date: Date): { dateStr: string; relativeStr: string; isO
 
     const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
-    // Relative time - keep it short
+    // Relative time
     let relativeStr: string;
     if (diffMins < 60) {
-        relativeStr = `${diffMins}m`;
+        relativeStr = `${diffMins}m ago`;
     } else if (diffHours < 24) {
-        relativeStr = `${diffHours}h`;
+        relativeStr = `${diffHours}h ago`;
     } else {
-        relativeStr = `${diffDays}d`;
+        relativeStr = `${diffDays}d ago`;
     }
 
     return { dateStr, relativeStr, isOld };
@@ -111,13 +111,13 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             {/* Date/Time - two lines */}
             <div
                 className={cn(
-                    'shrink-0 w-11 text-right pr-2 flex flex-col',
+                    'shrink-0 w-14 text-right pr-2 flex flex-col',
                     isOld ? 'text-amber-600' : 'text-gray-400'
                 )}
                 title={date.toLocaleString('en-IN')}
             >
                 <span className="text-[11px] leading-tight whitespace-nowrap">{dateStr}</span>
-                <span className="text-[10px] leading-tight">{relativeStr}</span>
+                <span className="text-[10px] leading-tight whitespace-nowrap">{relativeStr}</span>
             </div>
 
             {/* Separator */}
