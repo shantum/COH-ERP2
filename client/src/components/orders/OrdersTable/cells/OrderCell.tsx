@@ -102,14 +102,14 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     return (
         <div className={cn(
-            'flex items-center gap-2 py-1 pl-3 -ml-3 min-w-0',
+            'flex items-center py-1 pl-3 -ml-3 min-w-0',
             'border-l-[3px]',
             getBorderColor()
         )}>
             {/* Time - spans both lines */}
             <span
                 className={cn(
-                    'text-gray-400 shrink-0 w-8 text-right text-[13px]',
+                    'text-gray-400 shrink-0 w-10 text-right text-[13px] pr-2',
                     isOld && 'text-amber-600'
                 )}
                 title={date.toLocaleString('en-IN')}
@@ -117,16 +117,19 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 {dateText}
             </span>
 
+            {/* Separator */}
+            <div className="w-px h-8 bg-gray-200 shrink-0" />
+
             {/* Right content - two lines */}
-            <div className="flex flex-col justify-center min-w-0 flex-1">
+            <div className="flex flex-col justify-center min-w-0 flex-1 pl-2">
                 {/* Line 1: Order# Customer · Repeat */}
-                <div className="flex items-center gap-1.5 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
                             onViewOrder(row.orderId);
                         }}
-                        className="text-gray-800 hover:text-blue-600 hover:underline font-semibold shrink-0"
+                        className="text-gray-800 hover:text-blue-600 hover:underline font-semibold shrink-0 w-12"
                         title={`View order ${row.orderNumber}`}
                     >
                         {row.orderNumber}
@@ -136,7 +139,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                             e.stopPropagation();
                             onViewCustomer(row.order);
                         }}
-                        className="text-gray-600 hover:text-blue-600 hover:underline truncate"
+                        className="text-gray-600 hover:text-blue-600 hover:underline truncate max-w-[100px]"
                         title={row.customerName}
                     >
                         {row.customerName}
@@ -155,20 +158,20 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 </div>
 
                 {/* Line 2: ₹Value Badge · City */}
-                <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
+                <div className="flex items-center gap-2 text-[12px] mt-0.5">
                     <span
-                        className="text-gray-600 tabular-nums"
+                        className="text-gray-600 tabular-nums w-12"
                         title={`₹${orderValue.toLocaleString('en-IN')}`}
                     >
                         ₹{Math.round(orderValue).toLocaleString('en-IN')}
                     </span>
-                    <span className={badge.className}>
+                    <span className={cn(badge.className, 'w-16')}>
                         {badge.text}
                     </span>
                     {city && (
                         <>
                             <span className="text-gray-300">·</span>
-                            <span className="text-gray-400 truncate max-w-[80px]" title={city}>
+                            <span className="text-gray-400 truncate" title={city}>
                                 {city}
                             </span>
                         </>
