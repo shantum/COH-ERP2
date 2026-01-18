@@ -47,10 +47,10 @@ export function CustomerInfoCell({ row, handlersRef }: CellProps) {
                 )}
                 {isRepeatCustomer && (
                     <span
-                        className="text-emerald-600 font-medium shrink-0"
+                        className="text-emerald-600 shrink-0"
                         title={`Repeat customer: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
                     >
-                        {orderCount}× · {formatLtv(ltv)}
+                        {formatLtv(ltv)} ({orderCount})
                     </span>
                 )}
             </div>
