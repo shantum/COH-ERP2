@@ -644,7 +644,10 @@ export interface CreateTailorData {
 export interface CreateBatchData {
   batchDate: string;
   tailorId?: string;
-  skuId: string;
+  skuId?: string;        // Either skuId OR sampleName required
+  sampleName?: string;   // Name for sample batch (new trial items)
+  sampleColour?: string; // Colour for sample batch
+  sampleSize?: string;   // Size for sample batch
   qtyPlanned: number;
   priority?: string;
   sourceOrderLineId?: string;

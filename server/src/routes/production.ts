@@ -3,8 +3,8 @@
  * Production batch management and capacity planning.
  *
  * Status flow:
- *   planned -> in_progress -> completed
- *   (status auto-updates based on qtyCompleted vs qtyPlanned)
+ *   planned -> completed
+ *   (legacy batches may still have in_progress status)
  *
  * Key operations:
  * - Batch completion: Creates inventory inward + fabric outward (cascade: SKU -> Product -> 1.5m default)
@@ -71,7 +71,10 @@ interface BatchListQuery {
 interface CreateBatchBody {
     batchDate?: string;
     tailorId?: string;
-    skuId: string;
+    skuId?: string;          // Either skuId OR sampleName required
+    sampleName?: string;     // Name for sample batch
+    sampleColour?: string;   // Colour for sample batch
+    sampleSize?: string;     // Size for sample batch
     qtyPlanned: number;
     priority?: BatchPriority;
     sourceOrderLineId?: string;
@@ -116,7 +119,11 @@ interface CapacityQuery {
 interface BatchData {
     batchDate: Date;
     tailorId: string | null;
-    skuId: string;
+    skuId: string | null;       // Nullable for sample batches
+    sampleCode: string | null;  // SAMPLE-XX for sample batches
+    sampleName: string | null;  // Description for sample batches
+    sampleColour: string | null; // Colour for sample batches
+    sampleSize: string | null;  // Size for sample batches
     qtyPlanned: number;
     priority: BatchPriority;
     sourceOrderLineId: string | null;
@@ -244,8 +251,37 @@ const generateBatchCode = async (prisma: PrismaClient, targetDate: Date): Promis
 };
 
 /**
+ * Generate a unique sample code (SAMPLE-XX format)
+ * Finds the highest existing sample code and increments the serial number
+ *
+ * @param prisma - Prisma client instance
+ * @returns Unique sample code (SAMPLE-XX)
+ *
+ * @example
+ * const code = await generateSampleCode(prisma);
+ * // Returns: "SAMPLE-01" (or higher if others exist)
+ */
+const generateSampleCode = async (prisma: PrismaClient): Promise<string> => {
+    const latest = await prisma.productionBatch.findFirst({
+        where: { sampleCode: { not: null } },
+        orderBy: { sampleCode: 'desc' },
+        select: { sampleCode: true }
+    });
+
+    let nextSerial = 1;
+    if (latest?.sampleCode) {
+        const match = latest.sampleCode.match(/SAMPLE-(\d+)$/);
+        if (match) {
+            nextSerial = parseInt(match[1], 10) + 1;
+        }
+    }
+    return `SAMPLE-${String(nextSerial).padStart(2, '0')}`;
+};
+
+/**
  * Create batch with atomic batch code generation
  * Handles race conditions by catching unique constraint violations and retrying
+ * For sample batches (no skuId), generates a sampleCode instead of batchCode
  */
 const createBatchWithAtomicCode = async (
     prisma: PrismaClient,
@@ -253,18 +289,23 @@ const createBatchWithAtomicCode = async (
     targetDate: Date,
     maxRetries: number = 5
 ): Promise<BatchWithRelations> => {
+    const isSampleBatch = !batchData.skuId && batchData.sampleName;
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-            const batchCode = await generateBatchCode(prisma, targetDate);
+            // Generate appropriate code based on batch type
+            const batchCode = isSampleBatch ? null : await generateBatchCode(prisma, targetDate);
+            const sampleCode = isSampleBatch ? await generateSampleCode(prisma) : null;
 
             const batch = await prisma.productionBatch.create({
                 data: {
                     ...batchData,
                     batchCode,
+                    sampleCode,
                 },
                 include: {
                     tailor: true,
-                    sku: { include: { variation: { include: { product: true } } } }
+                    sku: batchData.skuId ? { include: { variation: { include: { product: true } } } } : false
                 },
             });
 
@@ -272,10 +313,11 @@ const createBatchWithAtomicCode = async (
         } catch (error) {
             const prismaError = error as PrismaError;
             // P2002 is Prisma's unique constraint violation error code
-            if (prismaError.code === 'P2002' && prismaError.meta?.target?.includes('batchCode')) {
+            const constraintTarget = prismaError.meta?.target || [];
+            if (prismaError.code === 'P2002' && (constraintTarget.includes('batchCode') || constraintTarget.includes('sampleCode'))) {
                 // Race condition occurred, retry with new code
                 if (attempt === maxRetries - 1) {
-                    throw new Error('Failed to generate unique batch code after multiple attempts');
+                    throw new Error('Failed to generate unique batch/sample code after multiple attempts');
                 }
                 // Small delay before retry to reduce contention
                 await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
@@ -376,14 +418,26 @@ router.get('/batches', authenticateToken, asyncHandler(async (req: Request, res:
         orderBy: { batchDate: 'desc' },
     }) as unknown as BatchWithRelations[];
 
-    // Enrich batches with customization display info
-    const enrichedBatches = batches.map(batch => {
+    // Enrich batches with customization display info and sample info
+    const enrichedBatches = batches.map((batch: any) => {
         const isCustom = batch.sku?.isCustomSku || false;
+        const isSample = !batch.skuId && batch.sampleCode;
 
         return {
             ...batch,
             // Add explicit custom SKU indicator
             isCustomSku: isCustom,
+            // Add sample batch indicator
+            isSampleBatch: isSample,
+            // Add sample info if this is a sample batch
+            ...(isSample && {
+                sampleInfo: {
+                    sampleCode: batch.sampleCode,
+                    sampleName: batch.sampleName,
+                    sampleColour: batch.sampleColour,
+                    sampleSize: batch.sampleSize
+                }
+            }),
             // Add customization details if this is a custom batch
             ...(isCustom && batch.sku && {
                 customization: {
@@ -403,7 +457,15 @@ router.get('/batches', authenticateToken, asyncHandler(async (req: Request, res:
 
 // Create batch
 router.post('/batches', authenticateToken, requirePermission('production:create'), asyncHandler(async (req: Request, res: Response) => {
-    const { batchDate, tailorId, skuId, qtyPlanned, priority, sourceOrderLineId, notes } = req.body as CreateBatchBody;
+    const { batchDate, tailorId, skuId, sampleName, sampleColour, sampleSize, qtyPlanned, priority, sourceOrderLineId, notes } = req.body as CreateBatchBody;
+
+    // Validate: Either skuId OR sampleName must be provided (but not both)
+    if (!skuId && !sampleName) {
+        throw new ValidationError('Either skuId or sampleName must be provided');
+    }
+    if (skuId && sampleName) {
+        throw new ValidationError('Cannot provide both skuId and sampleName - choose one');
+    }
 
     // Check if date is locked
     const targetDate = batchDate ? new Date(batchDate) : new Date();
@@ -425,11 +487,20 @@ router.post('/batches', authenticateToken, requirePermission('production:create'
         throw new ValidationError('Cannot schedule batch for a past date');
     }
 
+    // Sample batches cannot be linked to order lines
+    if (sampleName && sourceOrderLineId) {
+        throw new ValidationError('Sample batches cannot be linked to order lines');
+    }
+
     // Create batch with atomic batch code generation (handles race conditions)
     const batchData: BatchData = {
         batchDate: targetDate,
         tailorId: tailorId || null,
-        skuId,
+        skuId: skuId || null,
+        sampleCode: null,  // Will be generated if sampleName is provided
+        sampleName: sampleName || null,
+        sampleColour: sampleColour || null,
+        sampleSize: sampleSize || null,
         qtyPlanned,
         priority: priority || 'normal',
         sourceOrderLineId: sourceOrderLineId || null,
@@ -462,13 +533,6 @@ router.post('/batches', authenticateToken, requirePermission('production:create'
             }, userId);
         });
     }
-}));
-
-// Start batch
-router.post('/batches/:id/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params.id as string;
-    const batch = await req.prisma.productionBatch.update({ where: { id }, data: { status: 'in_progress' } });
-    res.json(batch);
 }));
 
 // Update batch (change date, qty, notes)
@@ -623,6 +687,7 @@ router.delete('/batches/:id', authenticateToken, requirePermission('production:d
 
 // Complete batch (creates inventory inward + fabric outward)
 // Custom SKUs auto-allocate to their linked order line
+// Sample batches skip inventory/fabric transactions entirely
 router.post('/batches/:id/complete', authenticateToken, requirePermission('production:complete'), asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const { qtyCompleted } = req.body as CompleteBatchBody;
@@ -635,20 +700,23 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
     const batch = await req.prisma.productionBatch.findUnique({
         where: { id },
         include: { sku: { include: { variation: { include: { product: true } } } } }
-    }) as unknown as (BatchWithRelations & { sku: SkuWithRelations }) | null;
+    }) as unknown as (BatchWithRelations & { sku: SkuWithRelations | null; sampleCode?: string | null; sampleName?: string | null }) | null;
 
     if (!batch) {
         throw new NotFoundError('Batch not found', 'ProductionBatch', id);
     }
 
-    // Pre-calculate fabric consumption for use in transaction
+    // Check if this is a sample batch (no SKU, has sampleCode)
+    const isSampleBatch = !batch.skuId && batch.sampleCode;
+
+    // Pre-calculate fabric consumption for use in transaction (only for non-sample batches)
     // Now uses shared utility from queryPatterns.ts for consistency
-    const consumptionPerUnit = getEffectiveFabricConsumption(batch.sku);
+    const consumptionPerUnit = isSampleBatch ? 0 : getEffectiveFabricConsumption(batch.sku!);
     const totalFabricConsumption = consumptionPerUnit * qtyCompleted;
-    const fabricId = batch.sku.variation.fabricId;
+    const fabricId = isSampleBatch ? null : batch.sku?.variation?.fabricId;
 
     // Check if this is a custom SKU batch that should auto-allocate
-    const isCustomSkuBatch = batch.sku.isCustomSku && batch.sourceOrderLineId;
+    const isCustomSkuBatch = !isSampleBatch && batch.sku?.isCustomSku && batch.sourceOrderLineId;
 
     let autoAllocated = false;
     await req.prisma.$transaction(async (tx) => {
@@ -691,41 +759,45 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
             }
         });
 
-        // Create inventory inward with batch code for tracking
-        const inwardReason = isCustomSkuBatch ? 'production_custom' : TXN_REASON.PRODUCTION;
-        await tx.inventoryTransaction.create({
-            data: {
-                skuId: batch.skuId,
-                txnType: TXN_TYPE.INWARD,
-                qty: qtyCompleted,
-                reason: inwardReason,
-                referenceId: batch.id,
-                notes: isCustomSkuBatch
-                    ? `Custom production: ${batch.sku.skuCode}`
-                    : `Production ${batch.batchCode || batch.id}`,
-                createdById: req.user!.id
-            },
-        });
-
-        // Create fabric outward transaction
-        if (fabricId) {
-            await tx.fabricTransaction.create({
+        // SAMPLE BATCHES: Skip inventory/fabric transactions entirely
+        // Sample batches are for trial/prototype items that don't need inventory tracking
+        if (!isSampleBatch && batch.skuId) {
+            // Create inventory inward with batch code for tracking
+            const inwardReason = isCustomSkuBatch ? 'production_custom' : TXN_REASON.PRODUCTION;
+            await tx.inventoryTransaction.create({
                 data: {
-                    fabricId: fabricId,
-                    txnType: 'outward',
-                    qty: totalFabricConsumption,
-                    unit: 'meter',
-                    reason: 'production',
+                    skuId: batch.skuId,
+                    txnType: TXN_TYPE.INWARD,
+                    qty: qtyCompleted,
+                    reason: inwardReason,
                     referenceId: batch.id,
+                    notes: isCustomSkuBatch
+                        ? `Custom production: ${batch.sku!.skuCode}`
+                        : `Production ${batch.batchCode || batch.id}`,
                     createdById: req.user!.id
                 },
             });
+
+            // Create fabric outward transaction
+            if (fabricId) {
+                await tx.fabricTransaction.create({
+                    data: {
+                        fabricId: fabricId,
+                        txnType: 'outward',
+                        qty: totalFabricConsumption,
+                        unit: 'meter',
+                        reason: 'production',
+                        referenceId: batch.id,
+                        createdById: req.user!.id
+                    },
+                });
+            }
         }
 
         // CUSTOM SKU AUTO-ALLOCATION:
         // When a custom SKU batch completes, auto-allocate to the linked order line
         // Standard order-linked batches do NOT auto-allocate (staff allocates manually)
-        if (isCustomSkuBatch && batch.sourceOrderLineId) {
+        if (isCustomSkuBatch && batch.sourceOrderLineId && batch.skuId) {
             // Create OUTWARD transaction (simplified model - allocation deducts immediately)
             await tx.inventoryTransaction.create({
                 data: {
@@ -734,7 +806,7 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
                     qty: qtyCompleted,
                     reason: TXN_REASON.ORDER_ALLOCATION,
                     referenceId: batch.sourceOrderLineId,
-                    notes: `Auto-allocated from custom production: ${batch.sku.skuCode}`,
+                    notes: `Auto-allocated from custom production: ${batch.sku!.skuCode}`,
                     createdById: req.user!.id
                 },
             });
@@ -761,12 +833,22 @@ router.post('/batches/:id/complete', authenticateToken, requirePermission('produ
     res.json({
         ...updated,
         autoAllocated,
-        isCustomSku: batch.sku.isCustomSku,
+        isSampleBatch,
+        isCustomSku: batch.sku?.isCustomSku || false,
         ...(isCustomSkuBatch && {
             allocationInfo: {
                 orderLineId: batch.sourceOrderLineId,
                 qtyAllocated: qtyCompleted,
                 message: 'Custom SKU auto-allocated to order line'
+            }
+        }),
+        ...(isSampleBatch && {
+            sampleInfo: {
+                sampleCode: batch.sampleCode,
+                sampleName: batch.sampleName,
+                sampleColour: (batch as any).sampleColour,
+                sampleSize: (batch as any).sampleSize,
+                message: 'Sample batch completed - no inventory transactions created'
             }
         })
     });

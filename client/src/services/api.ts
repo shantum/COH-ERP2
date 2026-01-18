@@ -242,6 +242,9 @@ export const ordersApi = {
     receiveRto: (id: string) => api.post(`/orders/${id}/receive-rto`),
     // Cross-tab search
     searchAll: (q: string, limit?: number) => api.get('/orders/search-all', { params: { q, limit } }),
+    // Unified search - returns flattened rows for grid display
+    searchUnified: (q: string, page?: number, pageSize?: number) =>
+        api.get('/orders/search-unified', { params: { q, page, pageSize } }),
     // Bulk archive
     archiveDeliveredPrepaid: () => api.post('/orders/archive-delivered-prepaid'),
     // Release shipped orders to shipped view
@@ -548,7 +551,6 @@ export const productionApi = {
     createBatch: (data: CreateBatchData) => api.post('/production/batches', data),
     updateBatch: (id: string, data: UpdateBatchData) => api.put(`/production/batches/${id}`, data),
     deleteBatch: (id: string) => api.delete(`/production/batches/${id}`),
-    startBatch: (id: string) => api.post(`/production/batches/${id}/start`),
     completeBatch: (id: string, data: CompleteBatchData) => api.post(`/production/batches/${id}/complete`, data),
     uncompleteBatch: (id: string) => api.post(`/production/batches/${id}/uncomplete`),
     getCapacity: (date?: string) => api.get('/production/capacity', { params: { date } }),

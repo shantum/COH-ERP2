@@ -8,13 +8,15 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
 
 // Custom hooks
 import { useUnifiedOrdersData, type OrderView } from '../hooks/useUnifiedOrdersData';
+import { useSearchOrders } from '../hooks/useSearchOrders';
 import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useOrderSSE } from '../hooks/useOrderSSE';
 import { useAuth } from '../hooks/useAuth';
+import { useDebounce } from '../hooks/useDebounce';
 
 // Utilities
 import {
@@ -73,6 +75,12 @@ export default function Orders() {
         }, { replace: true });
     }, [setSearchParams]);
 
+    // Search state - when active, overrides view filtering
+    const [searchInput, setSearchInput] = useState('');
+    const debouncedSearch = useDebounce(searchInput, 300);
+    const isSearchMode = debouncedSearch.length >= 2;
+    const [searchPage, setSearchPage] = useState(1);
+
     // Filter state (Open view only)
     const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
     const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
@@ -111,15 +119,15 @@ export default function Orders() {
     const {
         rows: serverRows,
         orders,
-        pagination,
+        pagination: viewPagination,
         allSkus,
         inventoryBalance,
         fabricStock,
         channels,
         lockedDates,
-        isLoading,
-        isFetching,
-        refetch,
+        isLoading: viewLoading,
+        isFetching: viewFetching,
+        refetch: viewRefetch,
     } = useUnifiedOrdersData({
         currentView: view,
         page,
@@ -127,6 +135,29 @@ export default function Orders() {
         // Pass shipped filter for server-side filtering (rto, cod_pending)
         shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
     });
+
+    // Search data hook - only active when searching
+    const {
+        rows: searchRows,
+        pagination: searchPagination,
+        isLoading: searchLoading,
+        isFetching: searchFetching,
+        refetch: searchRefetch,
+    } = useSearchOrders({
+        query: debouncedSearch,
+        page: searchPage,
+        pageSize: 100,
+        enabled: isSearchMode,
+    });
+
+    // Select appropriate data based on search mode
+    const activeRows = isSearchMode ? searchRows : serverRows;
+    const pagination = isSearchMode ? searchPagination : viewPagination;
+    const isLoading = isSearchMode ? searchLoading : viewLoading;
+    const isFetching = isSearchMode ? searchFetching : viewFetching;
+    const refetch = isSearchMode ? searchRefetch : viewRefetch;
+    const activePage = isSearchMode ? searchPage : page;
+    const setActivePage = isSearchMode ? setSearchPage : setPage;
 
     // Modal handlers
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' | 'customer' = 'view') => {
@@ -169,13 +200,29 @@ export default function Orders() {
     // Enrich server-flattened rows with client-side inventory data
     // This is O(n) with O(1) Map lookups - much faster than full flatten
     const currentRows = useMemo(
-        () => enrichRowsWithInventory(serverRows, inventoryBalance, fabricStock),
-        [serverRows, inventoryBalance, fabricStock]
+        () => enrichRowsWithInventory(activeRows, inventoryBalance, fabricStock),
+        [activeRows, inventoryBalance, fabricStock]
     );
 
-    // Apply filters
+    // Search handlers
+    const handleSearchChange = useCallback((query: string) => {
+        setSearchInput(query);
+        setSearchPage(1); // Reset to page 1 when search changes
+    }, []);
+
+    const handleClearSearch = useCallback(() => {
+        setSearchInput('');
+        setSearchPage(1);
+    }, []);
+
+    // Apply filters (only in normal view mode, not search mode)
     const filteredRows = useMemo(() => {
         let rows = currentRows;
+
+        // Skip client-side filters in search mode - search returns all matching orders
+        if (isSearchMode) {
+            return rows;
+        }
 
         // Open view specific filters
         if (view === 'open') {
@@ -215,7 +262,7 @@ export default function Orders() {
         // Note: Shipped view filters (RTO, COD Pending) are applied server-side
 
         return rows;
-    }, [currentRows, view, allocatedFilter, productionFilter]);
+    }, [currentRows, view, allocatedFilter, productionFilter, isSearchMode]);
 
     // Count of fully shipped orders ready for release (Open view only)
     const releasableOrderCount = useMemo(() => {
@@ -545,30 +592,11 @@ export default function Orders() {
                 {/* Right: Search + New Order */}
                 <div className="flex items-center gap-1.5">
                     <GlobalOrderSearch
-                        onSelectOrder={(orderId, selectedView) => {
-                            const viewMap: Record<string, OrderView> = {
-                                'open': 'open',
-                                'shipped': 'shipped',
-                                'rto': 'shipped',
-                                'cod-pending': 'shipped',
-                                'archived': 'shipped',
-                                'cancelled': 'cancelled',
-                            };
-                            const mappedView = viewMap[selectedView] || 'open';
-                            setView(mappedView);
-                            if (selectedView === 'rto') {
-                                setShippedFilter('rto');
-                            } else if (selectedView === 'cod-pending') {
-                                setShippedFilter('cod_pending');
-                            } else if (mappedView === 'shipped') {
-                                setShippedFilter('all');
-                            }
-                            const order = orders?.find(o => o.id === orderId);
-                            if (order) {
-                                setUnifiedModalOrder(order as unknown as Order);
-                                setUnifiedModalMode('view');
-                            }
-                        }}
+                        searchQuery={searchInput}
+                        onSearchChange={handleSearchChange}
+                        onClearSearch={handleClearSearch}
+                        isSearchMode={isSearchMode}
+                        placeholder="Search orders..."
                     />
                     <button
                         onClick={() => setShowCreateOrder(true)}
@@ -584,91 +612,118 @@ export default function Orders() {
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 {/* Top Toolbar - Filters, Actions, Grid Controls */}
                 <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
-                    {/* Left: View selector + filters */}
+                    {/* Left: View selector + filters OR Search results indicator */}
                     <div className="flex items-center gap-1.5">
-                        <div className="relative">
-                            <select
-                                value={view}
-                                onChange={(e) => setView(e.target.value as OrderView)}
-                                className="appearance-none text-[10px] font-medium bg-white border border-gray-200 rounded px-1.5 py-0.5 pr-5 focus:outline-none cursor-pointer"
-                            >
-                                <option value="open">Open{pagination?.total ? ` (${pagination.total})` : ''}</option>
-                                <option value="shipped">Shipped</option>
-                                <option value="cancelled">Cancelled</option>
-                            </select>
-                            <ChevronDown size={10} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                        </div>
-
-                        {view === 'open' && (
-                            <>
-                                <select
-                                    value={allocatedFilter}
-                                    onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
-                                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
+                        {isSearchMode ? (
+                            /* Search Mode: Show search results header */
+                            <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-100 border border-blue-200 rounded">
+                                    <Search size={10} className="text-blue-600" />
+                                    <span className="text-[10px] font-medium text-blue-800">
+                                        Search Results
+                                    </span>
+                                    {pagination?.total !== undefined && (
+                                        <span className="text-[10px] text-blue-600">
+                                            ({pagination.total} found)
+                                        </span>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={handleClearSearch}
+                                    className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
                                 >
-                                    <option value="">All</option>
-                                    <option value="yes">Allocated</option>
-                                    <option value="no">Pending</option>
-                                </select>
-                                <select
-                                    value={productionFilter}
-                                    onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
-                                    className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
-                                >
-                                    <option value="">All</option>
-                                    <option value="scheduled">Scheduled</option>
-                                    <option value="needs">Needs prod</option>
-                                    <option value="ready">Ready</option>
-                                </select>
-                            </>
-                        )}
-
-                        {view === 'shipped' && (
-                            <div className="flex items-center gap-0.5">
-                                {(['all', 'rto', 'cod_pending'] as const).map((f) => (
-                                    <button
-                                        key={f}
-                                        onClick={() => { setShippedFilter(f); setPage(1); }}
-                                        className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
-                                            shippedFilter === f
-                                                ? f === 'rto' ? 'bg-orange-600 text-white' : f === 'cod_pending' ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
-                                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                        }`}
-                                    >
-                                        {f === 'cod_pending' ? 'COD' : f.toUpperCase()}
-                                    </button>
-                                ))}
+                                    <X size={10} />
+                                    Clear
+                                </button>
                             </div>
-                        )}
+                        ) : (
+                            /* Normal Mode: View selector + filters */
+                            <>
+                                <div className="relative">
+                                    <select
+                                        value={view}
+                                        onChange={(e) => setView(e.target.value as OrderView)}
+                                        className="appearance-none text-[10px] font-medium bg-white border border-gray-200 rounded px-1.5 py-0.5 pr-5 focus:outline-none cursor-pointer"
+                                    >
+                                        <option value="open">Open{viewPagination?.total ? ` (${viewPagination.total})` : ''}</option>
+                                        <option value="shipped">Shipped</option>
+                                        <option value="cancelled">Cancelled</option>
+                                    </select>
+                                    <ChevronDown size={10} className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                </div>
 
-                        <div className="w-px h-3 bg-gray-200" />
+                                {view === 'open' && (
+                                    <>
+                                        <select
+                                            value={allocatedFilter}
+                                            onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
+                                            className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
+                                        >
+                                            <option value="">All</option>
+                                            <option value="yes">Allocated</option>
+                                            <option value="no">Pending</option>
+                                        </select>
+                                        <select
+                                            value={productionFilter}
+                                            onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
+                                            className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
+                                        >
+                                            <option value="">All</option>
+                                            <option value="scheduled">Scheduled</option>
+                                            <option value="needs">Needs prod</option>
+                                            <option value="ready">Ready</option>
+                                        </select>
+                                    </>
+                                )}
 
-                        {/* Actions */}
-                        {view === 'open' && releasableOrderCount > 0 && (
-                            <button
-                                onClick={() => {
-                                    if (confirm(`Release ${releasableOrderCount} shipped orders?`)) {
-                                        mutations.releaseToShipped.mutate(undefined);
-                                    }
-                                }}
-                                disabled={mutations.releaseToShipped.isPending}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-medium"
-                            >
-                                Release {releasableOrderCount}
-                            </button>
-                        )}
-                        {view === 'open' && releasableCancelledCount > 0 && (
-                            <button
-                                onClick={() => {
-                                    if (confirm(`Release ${releasableCancelledCount} cancelled orders?`)) {
-                                        mutations.releaseToCancelled.mutate(undefined);
-                                    }
-                                }}
-                                disabled={mutations.releaseToCancelled.isPending}
-                                className="text-[9px] px-1.5 py-0.5 rounded bg-red-600 text-white font-medium"
-                            >
-                                {releasableCancelledCount} Cancelled
-                            </button>
+                                {view === 'shipped' && (
+                                    <div className="flex items-center gap-0.5">
+                                        {(['all', 'rto', 'cod_pending'] as const).map((f) => (
+                                            <button
+                                                key={f}
+                                                onClick={() => { setShippedFilter(f); setPage(1); }}
+                                                className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                                    shippedFilter === f
+                                                        ? f === 'rto' ? 'bg-orange-600 text-white' : f === 'cod_pending' ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
+                                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                                }`}
+                                            >
+                                                {f === 'cod_pending' ? 'COD' : f.toUpperCase()}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <div className="w-px h-3 bg-gray-200" />
+
+                                {/* Actions */}
+                                {view === 'open' && releasableOrderCount > 0 && (
+                                    <button
+                                        onClick={() => {
+                                            if (confirm(`Release ${releasableOrderCount} shipped orders?`)) {
+                                                mutations.releaseToShipped.mutate(undefined);
+                                            }
+                                        }}
+                                        disabled={mutations.releaseToShipped.isPending}
+                                        className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-medium"
+                                    >
+                                        Release {releasableOrderCount}
+                                    </button>
+                                )}
+                                {view === 'open' && releasableCancelledCount > 0 && (
+                                    <button
+                                        onClick={() => {
+                                            if (confirm(`Release ${releasableCancelledCount} cancelled orders?`)) {
+                                                mutations.releaseToCancelled.mutate(undefined);
+                                            }
+                                        }}
+                                        disabled={mutations.releaseToCancelled.isPending}
+                                        className="text-[9px] px-1.5 py-0.5 rounded bg-red-600 text-white font-medium"
+                                    >
+                                        {releasableCancelledCount} Cancelled
+                                    </button>
+                                )}
+                            </>
                         )}
                     </div>
 
@@ -697,7 +752,20 @@ export default function Orders() {
                 )}
                 {!isLoading && filteredRows.length === 0 && (
                     <div className="text-center text-gray-400 py-12 text-xs">
-                        No {VIEW_CONFIG[view].label.toLowerCase()}
+                        {isSearchMode ? (
+                            <div className="space-y-2">
+                                <Search size={24} className="mx-auto text-gray-300" />
+                                <div>No orders found for "{debouncedSearch}"</div>
+                                <button
+                                    onClick={handleClearSearch}
+                                    className="text-blue-500 hover:text-blue-600 underline"
+                                >
+                                    Clear search
+                                </button>
+                            </div>
+                        ) : (
+                            <>No {VIEW_CONFIG[view].label.toLowerCase()}</>
+                        )}
                     </div>
                 )}
 
@@ -706,26 +774,31 @@ export default function Orders() {
                     {/* Left: Record count */}
                     <div className="text-[10px] text-gray-500">
                         {pagination && pagination.total > 0
-                            ? `${((page - 1) * pagination.limit) + 1}–${Math.min(page * pagination.limit, pagination.total)} of ${pagination.total}`
+                            ? `${((activePage - 1) * (pagination.pageSize || pagination.limit || 100)) + 1}–${Math.min(activePage * (pagination.pageSize || pagination.limit || 100), pagination.total)} of ${pagination.total}`
                             : '0 orders'
                         }
+                        {isSearchMode && debouncedSearch && (
+                            <span className="ml-1 text-blue-600">
+                                for "{debouncedSearch}"
+                            </span>
+                        )}
                     </div>
 
                     {/* Right: Pagination controls */}
                     <div className="flex items-center gap-1">
                         <button
-                            onClick={() => setPage(page - 1)}
-                            disabled={page === 1 || isFetching || !pagination}
+                            onClick={() => setActivePage(activePage - 1)}
+                            disabled={activePage === 1 || isFetching || !pagination}
                             className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30"
                         >
                             <ChevronLeft size={14} />
                         </button>
                         <span className="text-[10px] text-gray-600 min-w-[30px] text-center">
-                            {page}/{pagination?.totalPages || 1}
+                            {activePage}/{pagination?.totalPages || 1}
                         </span>
                         <button
-                            onClick={() => setPage(page + 1)}
-                            disabled={!pagination || page >= pagination.totalPages || isFetching}
+                            onClick={() => setActivePage(activePage + 1)}
+                            disabled={!pagination || activePage >= pagination.totalPages || isFetching}
                             className="p-0.5 text-gray-500 hover:text-gray-700 disabled:opacity-30"
                         >
                             <ChevronRight size={14} />

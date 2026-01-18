@@ -793,7 +793,11 @@ model ProductionBatch {
   batchCode         String?     @unique
   batchDate         DateTime    @default(now())
   tailorId          String?
-  skuId             String
+  skuId             String?     // Nullable for sample batches
+  sampleCode        String?     @unique  // SAMPLE-01, SAMPLE-02, etc.
+  sampleName        String?     // Description of sample item
+  sampleColour      String?     // Colour for sample item
+  sampleSize        String?     // Size for sample item
   qtyPlanned        Int
   qtyCompleted      Int         @default(0)
   priority          String
@@ -803,7 +807,7 @@ model ProductionBatch {
   createdAt         DateTime    @default(now())
   completedAt       DateTime?
   orderLines        OrderLine[]
-  sku               Sku         @relation(fields: [skuId], references: [id])
+  sku               Sku?        @relation(fields: [skuId], references: [id])  // Optional for samples
   tailor            Tailor?     @relation(fields: [tailorId], references: [id])
 
   @@index([skuId])

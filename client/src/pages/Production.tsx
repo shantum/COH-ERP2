@@ -1,9 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { productionApi } from '../services/api';
-import { trpc } from '../services/trpc';
 import { useState, useMemo } from 'react';
-import { Plus, Play, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, Search } from 'lucide-react';
+import { Plus, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, FlaskConical } from 'lucide-react';
 import { sortBySizeOrder } from '../constants/sizes';
+import { AddToPlanModal } from '../components/production/AddToPlanModal';
 
 // Default date range for production batches (14 days past to 45 days future)
 const getDefaultDateRange = () => {
@@ -27,14 +27,11 @@ export default function Production() {
     const [showComplete, setShowComplete] = useState<any>(null);
     const [qtyCompleted, setQtyCompleted] = useState(0);
     const [customConfirmed, setCustomConfirmed] = useState(false);
-    const [showAddItem, setShowAddItem] = useState<string | null>(null); // date string
-    const [newItem, setNewItem] = useState({ skuId: '', qty: 1 });
-    const [itemSelection, setItemSelection] = useState({ productId: '', variationId: '' });
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [addModalDate, setAddModalDate] = useState<string | null>(null);
     const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
     const [copiedDate, setCopiedDate] = useState<string | null>(null);
     const [requirementsLimit, setRequirementsLimit] = useState(10);
-    const [skuSearch, setSkuSearch] = useState('');
-    const [showSkuDropdown, setShowSkuDropdown] = useState(false);
 
     // Memoize date range to prevent query key changes on every render
     const dateRange = useMemo(() => getDefaultDateRange(), []);
@@ -46,30 +43,6 @@ export default function Production() {
     });
     const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
     const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
-    // Migrated to tRPC - lazy load all products with variations and SKUs
-    const allSkusQueryResult = trpc.products.list.useQuery(
-        { limit: 1000 }, // High limit to get comprehensive list
-        {
-            enabled: !!showAddItem, // Lazy load - only fetch when Add Item modal is open
-            staleTime: 60000, // SKUs don't change rapidly
-            // Transform response to flat SKU list for compatibility
-            select: (data) => {
-                const skus: any[] = [];
-                data.products.forEach((product: any) => {
-                    product.variations?.forEach((variation: any) => {
-                        variation.skus?.forEach((sku: any) => {
-                            skus.push({
-                                ...sku,
-                                variation,
-                            });
-                        });
-                    });
-                });
-                return skus;
-            }
-        }
-    );
-    const allSkus = allSkusQueryResult.data; // Extract data for existing code compatibility
     const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
     const { data: requirements, isLoading: requirementsLoading } = useQuery({
         queryKey: ['productionRequirements'],
@@ -93,16 +66,6 @@ export default function Production() {
             );
         });
     };
-
-    const startBatch = useMutation({
-        mutationFn: (id: string) => productionApi.startBatch(id),
-        onMutate: async (id) => {
-            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
-            optimisticBatchUpdate(id, { status: 'in_progress' });
-        },
-        onSuccess: invalidateAll,
-        onError: () => invalidateAll() // Revert on error
-    });
 
     const completeBatch = useMutation({
         mutationFn: ({ id, data }: any) => productionApi.completeBatch(id, data),
@@ -139,7 +102,7 @@ export default function Production() {
     });
     const createBatch = useMutation({
         mutationFn: (data: any) => productionApi.createBatch(data),
-        onSuccess: () => { invalidateAll(); setShowAddItem(null); setNewItem({ skuId: '', qty: 1 }); setItemSelection({ productId: '', variationId: '' }); setSkuSearch(''); setShowSkuDropdown(false); },
+        onSuccess: invalidateAll,
         onError: (error: any) => { alert(error.response?.data?.error || 'Failed to add item'); }
     });
     const lockDate = useMutation({
@@ -156,25 +119,39 @@ export default function Production() {
 
     // Copy production plan to clipboard
     const copyToClipboard = (group: any) => {
-        // For custom SKUs, don't consolidate - each custom batch is unique
+        // For custom SKUs and samples, don't consolidate - each batch is unique
         // For regular SKUs, consolidate by SKU ID
-        const consolidatedMap = new Map<string, { sku: any; totalQty: number; notes: string[]; isCustomSku: boolean; customization: any }>();
-        const customBatches: any[] = [];
+        const consolidatedMap = new Map<string, { sku: any; totalQty: number; notes: string[]; isCustomSku: boolean; isSampleBatch: boolean; customization: any; sampleInfo: any }>();
+        const specialBatches: any[] = []; // Custom and sample batches
 
         group.batches.forEach((batch: any) => {
+            // Sample batches are kept separate
+            if (batch.isSampleBatch) {
+                specialBatches.push({
+                    sku: null,
+                    totalQty: batch.qtyPlanned,
+                    notes: batch.notes ? [batch.notes] : [],
+                    isCustomSku: false,
+                    isSampleBatch: true,
+                    customization: null,
+                    sampleInfo: batch.sampleInfo
+                });
+            }
             // Custom SKU batches are kept separate (not consolidated)
-            if (batch.isCustomSku) {
-                customBatches.push({
+            else if (batch.isCustomSku) {
+                specialBatches.push({
                     sku: batch.sku,
                     totalQty: batch.qtyPlanned,
                     notes: batch.notes ? [batch.notes] : [],
                     isCustomSku: true,
-                    customization: batch.customization
+                    isSampleBatch: false,
+                    customization: batch.customization,
+                    sampleInfo: null
                 });
             } else {
                 const key = batch.skuId;
                 if (!consolidatedMap.has(key)) {
-                    consolidatedMap.set(key, { sku: batch.sku, totalQty: 0, notes: [], isCustomSku: false, customization: null });
+                    consolidatedMap.set(key, { sku: batch.sku, totalQty: 0, notes: [], isCustomSku: false, isSampleBatch: false, customization: null, sampleInfo: null });
                 }
                 const entry = consolidatedMap.get(key)!;
                 entry.totalQty += batch.qtyPlanned;
@@ -182,11 +159,16 @@ export default function Production() {
             }
         });
 
-        // Combine regular consolidated entries with custom batches
+        // Combine regular consolidated entries with special batches (samples first, then custom)
         const consolidated = [
+            ...specialBatches.filter(b => b.isSampleBatch), // Samples first
             ...Array.from(consolidatedMap.values()),
-            ...customBatches
+            ...specialBatches.filter(b => !b.isSampleBatch) // Custom SKUs
         ].sort((a, b) => {
+            // Samples come first
+            if (a.isSampleBatch && !b.isSampleBatch) return -1;
+            if (!a.isSampleBatch && b.isSampleBatch) return 1;
+            // Then sort by product name
             const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
             if (productCompare !== 0) return productCompare;
             const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
@@ -204,17 +186,27 @@ export default function Production() {
         let totalPcs = 0;
 
         consolidated.forEach((entry, index) => {
-            const product = entry.sku?.variation?.product?.name || '';
-            const size = entry.sku?.size || '';
-            const color = entry.sku?.variation?.colorName || '';
-            const skuCode = entry.sku?.skuCode || '';
             const qty = entry.totalQty;
             totalPcs += qty;
+            let line: string;
 
-            let line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${skuCode}`;
+            // Handle sample batches - format like regular items: Name - Size - Colour - qty - code
+            if (entry.isSampleBatch && entry.sampleInfo) {
+                const sampleSize = entry.sampleInfo.sampleSize || '-';
+                const sampleColour = entry.sampleInfo.sampleColour || '-';
+                line = `${index + 1}. ${entry.sampleInfo.sampleName} - ${sampleSize} - ${sampleColour} - ${qty}pc - ${entry.sampleInfo.sampleCode}`;
+                if (entry.notes.length > 0) {
+                    line += ` (${entry.notes.join(', ')})`;
+                }
+            }
+            // Handle custom SKU batches
+            else if (entry.isCustomSku && entry.customization) {
+                const product = entry.sku?.variation?.product?.name || '';
+                const size = entry.sku?.size || '';
+                const color = entry.sku?.variation?.colorName || '';
+                const skuCode = entry.sku?.skuCode || '';
+                line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${skuCode}`;
 
-            // Add CUSTOM badge and customization details for custom SKUs
-            if (entry.isCustomSku && entry.customization) {
                 const customParts = ['[CUSTOM'];
                 if (entry.customization.type && entry.customization.value) {
                     customParts.push(`: ${entry.customization.type} ${entry.customization.value}`);
@@ -222,20 +214,27 @@ export default function Production() {
                 customParts.push(']');
                 line += ` ${customParts.join('')}`;
 
-                // Add notes if present
                 if (entry.customization.notes) {
                     line += ` (Notes: ${entry.customization.notes})`;
                 }
 
-                // Add linked order info
                 if (entry.customization.linkedOrder) {
                     line += ` - For Order: ${entry.customization.linkedOrder.orderNumber}`;
                     if (entry.customization.linkedOrder.customerName) {
                         line += ` (${entry.customization.linkedOrder.customerName})`;
                     }
                 }
-            } else if (entry.notes.length > 0) {
-                line += ` (${entry.notes.join(', ')})`;
+            }
+            // Handle regular batches
+            else {
+                const product = entry.sku?.variation?.product?.name || '';
+                const size = entry.sku?.size || '';
+                const color = entry.sku?.variation?.colorName || '';
+                const skuCode = entry.sku?.skuCode || '';
+                line = `${index + 1}. ${product} - ${size} - ${color} - ${qty}pc - ${skuCode}`;
+                if (entry.notes.length > 0) {
+                    line += ` (${entry.notes.join(', ')})`;
+                }
             }
             lines.push(line);
         });
@@ -356,75 +355,6 @@ export default function Production() {
         setExpandedDates(newSet);
     };
 
-    const handleAddItem = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!showAddItem || !newItem.skuId) return;
-        createBatch.mutate({
-            skuId: newItem.skuId,
-            qtyPlanned: newItem.qty,
-            priority: 'stock_replenishment',
-            batchDate: showAddItem
-        });
-    };
-
-    // SKU selection helpers
-    const getUniqueProducts = () => {
-        if (!allSkus) return [];
-        const products = new Map();
-        allSkus.forEach((sku: any) => {
-            const product = sku.variation?.product;
-            if (product && !products.has(product.id)) {
-                products.set(product.id, { id: product.id, name: product.name });
-            }
-        });
-        return Array.from(products.values()).sort((a, b) => a.name.localeCompare(b.name));
-    };
-
-    const getColorsForProduct = (productId: string) => {
-        if (!allSkus || !productId) return [];
-        const colors = new Map();
-        allSkus.forEach((sku: any) => {
-            if (sku.variation?.product?.id === productId) {
-                const variation = sku.variation;
-                if (!colors.has(variation.id)) {
-                    colors.set(variation.id, { id: variation.id, name: variation.colorName });
-                }
-            }
-        });
-        return Array.from(colors.values()).sort((a, b) => a.name.localeCompare(b.name));
-    };
-
-    const getSizesForProductColor = (variationId: string) => {
-        if (!allSkus || !variationId) return [];
-        return allSkus
-            .filter((sku: any) => sku.variation?.id === variationId)
-            .map((sku: any) => ({ id: sku.id, size: sku.size, skuCode: sku.skuCode }))
-            .sort((a: any, b: any) => sortBySizeOrder(a.size || '', b.size || ''));
-    };
-
-    // Filter SKUs based on search term (code, product name, color)
-    const getFilteredSkus = () => {
-        if (!allSkus || !skuSearch.trim()) return [];
-        const search = skuSearch.toLowerCase().trim();
-        return allSkus
-            .filter((sku: any) => {
-                const skuCode = sku.skuCode?.toLowerCase() || '';
-                const productName = sku.variation?.product?.name?.toLowerCase() || '';
-                const colorName = sku.variation?.colorName?.toLowerCase() || '';
-                const size = sku.size?.toLowerCase() || '';
-                return skuCode.includes(search) || productName.includes(search) || colorName.includes(search) || size.includes(search);
-            })
-            .slice(0, 20); // Limit results for performance
-    };
-
-    // Get selected SKU display text
-    const getSelectedSkuDisplay = () => {
-        if (!newItem.skuId || !allSkus) return '';
-        const sku = allSkus.find((s: any) => s.id === newItem.skuId);
-        if (!sku) return '';
-        return `${sku.skuCode} - ${sku.variation?.product?.name} ${sku.variation?.colorName} ${sku.size}`;
-    };
-
     const dateGroups = groupBatchesByDate(batches);
 
     // Expand today and tomorrow by default
@@ -447,7 +377,10 @@ export default function Production() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <h1 className="text-xl md:text-2xl font-bold text-gray-900">Production</h1>
                 <button
-                    onClick={() => setShowAddItem(today)}
+                    onClick={() => {
+                        setAddModalDate(today);
+                        setShowAddModal(true);
+                    }}
                     className="btn-primary flex items-center text-sm w-full sm:w-auto justify-center"
                 >
                     <Plus size={18} className="mr-1" />Add to Plan
@@ -655,7 +588,7 @@ export default function Production() {
                                     ) : (
                                         <>
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); setShowAddItem(group.date); }}
+                                                onClick={(e) => { e.stopPropagation(); setAddModalDate(group.date); setShowAddModal(true); }}
                                                 className="text-xs text-gray-400 hover:text-gray-600"
                                                 title="Add item"
                                             >
@@ -701,30 +634,74 @@ export default function Production() {
                                     <tbody>
                                         {group.batches
                                             .sort((a: any, b: any) => {
-                                                const productCompare = (a.sku?.variation?.product?.name || '').localeCompare(b.sku?.variation?.product?.name || '');
+                                                // Samples come first
+                                                if (a.isSampleBatch && !b.isSampleBatch) return -1;
+                                                if (!a.isSampleBatch && b.isSampleBatch) return 1;
+                                                const productCompare = (a.sku?.variation?.product?.name || a.sampleInfo?.sampleName || '').localeCompare(b.sku?.variation?.product?.name || b.sampleInfo?.sampleName || '');
                                                 if (productCompare !== 0) return productCompare;
                                                 const colorCompare = (a.sku?.variation?.colorName || '').localeCompare(b.sku?.variation?.colorName || '');
                                                 if (colorCompare !== 0) return colorCompare;
                                                 return sortBySizeOrder(a.sku?.size || '', b.sku?.size || '');
                                             })
                                             .map((batch: any) => (
-                                            <tr key={batch.id} className={`border-t hover:bg-gray-50 ${batch.isCustomSku ? 'bg-orange-50/50' : ''}`}>
-                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">{batch.batchCode || '-'}</td>
-                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">{batch.sku?.variation?.product?.styleCode || '-'}</td>
+                                            <tr key={batch.id} className={`border-t hover:bg-gray-50 ${batch.isSampleBatch ? 'bg-purple-50/50' : batch.isCustomSku ? 'bg-orange-50/50' : ''}`}>
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-500">
+                                                    {batch.isSampleBatch ? (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                                                            <FlaskConical size={10} />
+                                                            {batch.sampleInfo?.sampleCode || 'SAMPLE'}
+                                                        </span>
+                                                    ) : (
+                                                        batch.batchCode || '-'
+                                                    )}
+                                                </td>
+                                                <td className="py-2 px-4 font-mono text-xs text-gray-600">
+                                                    {batch.isSampleBatch ? '-' : (batch.sku?.variation?.product?.styleCode || '-')}
+                                                </td>
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-500">
                                                     <div className="flex items-center gap-1.5">
-                                                        {batch.isCustomSku && (
-                                                            <Scissors size={12} className="text-orange-500 flex-shrink-0" />
+                                                        {batch.isSampleBatch ? (
+                                                            <span className="text-purple-600 italic">Sample</span>
+                                                        ) : (
+                                                            <>
+                                                                {batch.isCustomSku && (
+                                                                    <Scissors size={12} className="text-orange-500 flex-shrink-0" />
+                                                                )}
+                                                                <span>{batch.sku?.skuCode}</span>
+                                                            </>
                                                         )}
-                                                        <span>{batch.sku?.skuCode}</span>
                                                     </div>
                                                 </td>
-                                                <td className="py-2 px-4 font-medium text-gray-900">{batch.sku?.variation?.product?.name}</td>
-                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.variation?.colorName}</td>
-                                                <td className="py-2 px-4 text-gray-600">{batch.sku?.size}</td>
+                                                <td className="py-2 px-4 font-medium text-gray-900">
+                                                    {batch.isSampleBatch ? batch.sampleInfo?.sampleName : batch.sku?.variation?.product?.name}
+                                                </td>
+                                                <td className="py-2 px-4 text-gray-600">
+                                                    {batch.isSampleBatch
+                                                        ? (batch.sampleInfo?.sampleColour || <span className="text-gray-400">-</span>)
+                                                        : batch.sku?.variation?.colorName}
+                                                </td>
+                                                <td className="py-2 px-4 text-gray-600">
+                                                    {batch.isSampleBatch
+                                                        ? (batch.sampleInfo?.sampleSize || <span className="text-gray-400">-</span>)
+                                                        : batch.sku?.size}
+                                                </td>
                                                 <td className="py-2 px-4 text-center font-medium">{batch.qtyPlanned}</td>
                                                 <td className="py-2 px-4">
-                                                    {batch.isCustomSku && batch.customization ? (
+                                                    {batch.isSampleBatch ? (
+                                                        <div className="space-y-1">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium border border-purple-200">
+                                                                <FlaskConical size={10} />
+                                                                SAMPLE
+                                                            </span>
+                                                            {batch.notes && (
+                                                                <div className="text-xs text-purple-600 italic" title={batch.notes}>
+                                                                    {batch.notes.length > 30
+                                                                        ? batch.notes.substring(0, 30) + '...'
+                                                                        : batch.notes}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ) : batch.isCustomSku && batch.customization ? (
                                                         <div className="space-y-1">
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-medium border border-orange-200">
                                                                 <Scissors size={10} />
@@ -768,25 +745,7 @@ export default function Production() {
                                                 </td>
                                                 <td className="py-2 px-4">
                                                     <div className="flex items-center gap-2">
-                                                        {batch.status === 'planned' && !group.isLocked && (
-                                                            <>
-                                                                <button
-                                                                    onClick={() => startBatch.mutate(batch.id)}
-                                                                    className="text-blue-600 hover:text-blue-800"
-                                                                    title="Start"
-                                                                >
-                                                                    <Play size={14} />
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => deleteBatch.mutate(batch.id)}
-                                                                    className="text-gray-400 hover:text-red-500"
-                                                                    title="Delete"
-                                                                >
-                                                                    <X size={14} />
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                        {batch.status === 'in_progress' && (
+                                                        {(batch.status === 'planned' || batch.status === 'in_progress') && (
                                                             <button
                                                                 onClick={() => {
                                                                     setShowComplete(batch);
@@ -797,6 +756,15 @@ export default function Production() {
                                                                 title="Mark Complete"
                                                             >
                                                                 <CheckCircle size={14} />
+                                                            </button>
+                                                        )}
+                                                        {batch.status === 'planned' && !group.isLocked && (
+                                                            <button
+                                                                onClick={() => deleteBatch.mutate(batch.id)}
+                                                                className="text-gray-400 hover:text-red-500"
+                                                                title="Delete"
+                                                            >
+                                                                <X size={14} />
                                                             </button>
                                                         )}
                                                         {batch.status === 'completed' && !group.isLocked && (
@@ -979,174 +947,13 @@ export default function Production() {
                 );
             })()}
 
-            {/* Add Item Modal */}
-            {showAddItem && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl p-6 w-full max-w-sm">
-                        <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-lg font-semibold">Add to Production</h2>
-                            <button onClick={() => { setShowAddItem(null); setSkuSearch(''); setShowSkuDropdown(false); }} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                        </div>
-                        <form onSubmit={handleAddItem} className="space-y-4">
-                            <div>
-                                <label className="text-xs text-gray-500 mb-1 block">Production Date</label>
-                                <input
-                                    type="date"
-                                    className="input text-sm"
-                                    value={showAddItem}
-                                    min={new Date().toISOString().split('T')[0]}
-                                    onChange={(e) => setShowAddItem(e.target.value)}
-                                />
-                            </div>
-
-                            {/* Product → Color → Size Cascading Selection */}
-                            <div>
-                                <label className="text-xs text-gray-500 mb-1 block">Product</label>
-                                <select
-                                    className="input text-sm"
-                                    value={itemSelection.productId}
-                                    onChange={(e) => {
-                                        setItemSelection({ productId: e.target.value, variationId: '' });
-                                        setNewItem(n => ({ ...n, skuId: '' }));
-                                    }}
-                                >
-                                    <option value="">Select product...</option>
-                                    {getUniqueProducts().map((p: any) => (
-                                        <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            {itemSelection.productId && (
-                                <div>
-                                    <label className="text-xs text-gray-500 mb-1 block">Color</label>
-                                    <select
-                                        className="input text-sm"
-                                        value={itemSelection.variationId}
-                                        onChange={(e) => {
-                                            setItemSelection(s => ({ ...s, variationId: e.target.value }));
-                                            setNewItem(n => ({ ...n, skuId: '' }));
-                                        }}
-                                    >
-                                        <option value="">Select color...</option>
-                                        {getColorsForProduct(itemSelection.productId).map((c: any) => (
-                                            <option key={c.id} value={c.id}>{c.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-                            {itemSelection.variationId && (
-                                <div>
-                                    <label className="text-xs text-gray-500 mb-1 block">Size</label>
-                                    <select
-                                        className="input text-sm"
-                                        value={newItem.skuId}
-                                        onChange={(e) => setNewItem(n => ({ ...n, skuId: e.target.value }))}
-                                        required
-                                    >
-                                        <option value="">Select size...</option>
-                                        {getSizesForProductColor(itemSelection.variationId).map((s: any) => (
-                                            <option key={s.id} value={s.id}>{s.size} ({s.skuCode})</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-
-                            {/* Divider */}
-                            <div className="flex items-center gap-2 text-xs text-gray-400">
-                                <div className="flex-1 border-t" />
-                                <span>or search by SKU code</span>
-                                <div className="flex-1 border-t" />
-                            </div>
-
-                            {/* Direct SKU Search - Searchable */}
-                            <div className="relative">
-                                <label className="text-xs text-gray-500 mb-1 block">SKU Code</label>
-                                {newItem.skuId && !showSkuDropdown ? (
-                                    // Show selected SKU with clear button
-                                    <div className="flex items-center gap-2">
-                                        <div className="input text-sm flex-1 bg-gray-50 text-gray-700 truncate">
-                                            {getSelectedSkuDisplay()}
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setNewItem(n => ({ ...n, skuId: '' }));
-                                                setSkuSearch('');
-                                            }}
-                                            className="text-gray-400 hover:text-gray-600 p-1"
-                                        >
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    // Search input
-                                    <div className="relative">
-                                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                                            <Search size={16} />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            className="input text-sm pl-9"
-                                            placeholder="Type to search SKU, product, color..."
-                                            value={skuSearch}
-                                            onChange={(e) => {
-                                                setSkuSearch(e.target.value);
-                                                setShowSkuDropdown(true);
-                                            }}
-                                            onFocus={() => setShowSkuDropdown(true)}
-                                        />
-                                    </div>
-                                )}
-                                {/* Dropdown results */}
-                                {showSkuDropdown && skuSearch.trim() && (
-                                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                                        {getFilteredSkus().length === 0 ? (
-                                            <div className="px-3 py-2 text-sm text-gray-500">No SKUs found</div>
-                                        ) : (
-                                            getFilteredSkus().map((sku: any) => (
-                                                <button
-                                                    key={sku.id}
-                                                    type="button"
-                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                                                    onClick={() => {
-                                                        setNewItem(n => ({ ...n, skuId: sku.id }));
-                                                        setItemSelection({ productId: '', variationId: '' });
-                                                        setShowSkuDropdown(false);
-                                                        setSkuSearch('');
-                                                    }}
-                                                >
-                                                    <div className="font-medium text-gray-900">{sku.skuCode}</div>
-                                                    <div className="text-xs text-gray-500">
-                                                        {sku.variation?.product?.name} • {sku.variation?.colorName} • {sku.size}
-                                                    </div>
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div>
-                                <label className="text-xs text-gray-500 mb-1 block">Quantity</label>
-                                <input
-                                    type="number"
-                                    className="input text-sm"
-                                    value={newItem.qty}
-                                    onChange={(e) => setNewItem(n => ({ ...n, qty: Number(e.target.value) }))}
-                                    min={1}
-                                    required
-                                />
-                            </div>
-                            <div className="flex gap-3 pt-2">
-                                <button type="button" onClick={() => { setShowAddItem(null); setSkuSearch(''); setShowSkuDropdown(false); }} className="btn-secondary flex-1 text-sm">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1 text-sm" disabled={createBatch.isPending}>
-                                    {createBatch.isPending ? 'Adding...' : 'Add to Plan'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
+            {/* Add to Plan Modal */}
+            <AddToPlanModal
+                open={showAddModal}
+                onOpenChange={setShowAddModal}
+                defaultDate={addModalDate || today}
+                lockedDates={lockedDates || []}
+            />
         </div>
     );
 }
