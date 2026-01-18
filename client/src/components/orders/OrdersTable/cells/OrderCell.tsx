@@ -2,8 +2,8 @@
  * OrderCell - Combined Order + Customer + Payment display
  * 2-line layout with left border risk signal
  *
- * Line 1: Time | Order# Customer | City
- * Line 2: ₹Value Badge · Repeat
+ * Line 1: Time | Order# Customer
+ * Line 2: ₹Value Badge · Repeat · City
  */
 
 import type { CellProps } from '../types';
@@ -106,7 +106,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             'border-l-[3px]',
             getBorderColor()
         )}>
-            {/* Line 1: Time | Order# Customer | City */}
+            {/* Line 1: Time | Order# Customer */}
             <div className="flex items-center gap-1.5 min-w-0">
                 <span
                     className={cn('text-gray-400 shrink-0', isOld && 'text-amber-600')}
@@ -135,17 +135,9 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 >
                     {row.customerName}
                 </button>
-                {city && (
-                    <>
-                        <span className="text-gray-300">|</span>
-                        <span className="text-gray-400 truncate max-w-[80px]" title={city}>
-                            {city}
-                        </span>
-                    </>
-                )}
             </div>
 
-            {/* Line 2: ₹Value Badge · Repeat */}
+            {/* Line 2: ₹Value Badge · Repeat · City */}
             <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
                 <span
                     className="text-gray-600 tabular-nums"
@@ -164,6 +156,14 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                             title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
                         >
                             {formatLtv(ltv)}({orderCount})
+                        </span>
+                    </>
+                )}
+                {city && (
+                    <>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-gray-400 truncate max-w-[80px]" title={city}>
+                            {city}
                         </span>
                     </>
                 )}
