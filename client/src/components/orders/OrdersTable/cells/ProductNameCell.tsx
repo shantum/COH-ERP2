@@ -193,10 +193,12 @@ export function ProductNameCell({ row }: ProductNameCellProps) {
                         {productName}
                     </span>
                     {size && size !== '-' && (
-                        <span className={cn(
-                            'text-[10px] font-bold px-1.5 py-0 rounded shrink-0',
-                            getSizeBadgeClasses(size)
-                        )}>
+                        <span
+                            className={cn(
+                                'text-[10px] font-bold px-1.5 py-0 rounded shrink-0',
+                                getSizeBadgeClasses(size)
+                            )}
+                        >
                             {size}
                         </span>
                     )}
