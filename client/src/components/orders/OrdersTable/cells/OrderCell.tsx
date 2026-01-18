@@ -3,8 +3,8 @@
  * 3-line layout with left border risk signal
  *
  * Line 1: Order# + Customer
- * Line 2: Time · 📍City · Repeat
- * Line 3: Badge · ₹Value
+ * Line 2: ₹Value · Badge
+ * Line 3: Time · 📍City · Repeat
  */
 
 import type { CellProps } from '../types';
@@ -132,7 +132,20 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 </button>
             </div>
 
-            {/* Line 2: Time · 📍City · Repeat */}
+            {/* Line 2: ₹Value · Badge */}
+            <div className="flex items-center gap-2 text-[12px] mt-0.5">
+                <span
+                    className="text-gray-700 font-medium tabular-nums"
+                    title={`₹${orderValue.toLocaleString('en-IN')}`}
+                >
+                    ₹{Math.round(orderValue).toLocaleString('en-IN')}
+                </span>
+                <span className={badge.className}>
+                    {badge.text}
+                </span>
+            </div>
+
+            {/* Line 3: Time · 📍City · Repeat */}
             <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-0.5">
                 <span
                     className={cn(isOld && 'text-amber-600')}
@@ -160,20 +173,6 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                         </span>
                     </>
                 )}
-            </div>
-
-            {/* Line 3: Badge · ₹Value */}
-            <div className="flex items-center gap-2 text-[11px] mt-0.5">
-                <span className={badge.className}>
-                    {badge.text}
-                </span>
-                <span className="text-gray-300">·</span>
-                <span
-                    className="text-gray-600 font-medium tabular-nums"
-                    title={`₹${orderValue.toLocaleString('en-IN')}`}
-                >
-                    ₹{Math.round(orderValue).toLocaleString('en-IN')}
-                </span>
             </div>
         </div>
     );
