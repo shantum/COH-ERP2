@@ -17,9 +17,13 @@ export function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
     const courier = row.shopifyCourier;
     const status = row.shopifyStatus;
 
-    // If all empty, show dash
-    if (!awb && !courier && (!status || status === '-')) {
-        return <span className="text-gray-300">-</span>;
+    // If no tracking info, show "Unfulfilled" status
+    if (!awb && !courier && (!status || status === '-' || status === 'unfulfilled')) {
+        return (
+            <span className="text-gray-400 text-[11px]">
+                Unfulfilled
+            </span>
+        );
     }
 
     // Build line 2 parts
