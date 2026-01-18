@@ -1,11 +1,12 @@
 /**
- * TrackingStatusCell - Displays tracking status with color-coded badge
- * Two-line layout: status badge on line 1, last update time on line 2
+ * TrackingStatusCell - Displays tracking status with iThink logo
+ * Two-line layout: status on line 1, last update time on line 2
  */
 
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { TRACKING_STATUS_STYLES } from '../rowStyling';
 import { cn } from '../../../../lib/utils';
+import ithinkLogo from '../../../../assets/ithinklogistics.png';
 
 interface TrackingStatusCellProps {
     row: FlattenedOrderRow;
@@ -45,20 +46,27 @@ export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
     );
 
     return (
-        <div className="flex flex-col leading-tight">
-            <span
-                className={cn(
-                    'font-medium whitespace-nowrap text-[11px]',
-                    style.text
-                )}
-            >
-                {style.label}
-            </span>
-            {lastUpdate && (
-                <span className="text-[10px] text-gray-400">
-                    {lastUpdate}
+        <div className="flex items-center gap-1.5">
+            <img
+                src={ithinkLogo}
+                alt="iThink"
+                className="w-4 h-4 object-contain shrink-0"
+            />
+            <div className="flex flex-col leading-tight min-w-0">
+                <span
+                    className={cn(
+                        'font-medium whitespace-nowrap text-[11px]',
+                        style.text
+                    )}
+                >
+                    {style.label}
                 </span>
-            )}
+                {lastUpdate && (
+                    <span className="text-[10px] text-gray-400">
+                        {lastUpdate}
+                    </span>
+                )}
+            </div>
         </div>
     );
 }
