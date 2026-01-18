@@ -5,6 +5,7 @@
 import { Check } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
+import { CheckboxSpinner } from './CheckboxSpinner';
 
 export function PackCell({ row, handlersRef }: CellProps) {
     if (!row || row.lineStatus === 'cancelled') return null;
@@ -27,13 +28,15 @@ export function PackCell({ row, handlersRef }: CellProps) {
                 disabled={isToggling || isShipped}
                 className={cn(
                     'w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all',
-                    isShipped
+                    isToggling
+                        ? 'bg-blue-100 border-blue-300'
+                        : isShipped
                         ? 'bg-blue-200 border-blue-200 text-blue-600 cursor-not-allowed'
                         : 'bg-blue-500 border-blue-500 text-white hover:bg-blue-600 shadow-sm'
                 )}
-                title={isShipped ? 'Already shipped' : 'Click to unpack'}
+                title={isToggling ? 'Updating...' : isShipped ? 'Already shipped' : 'Click to unpack'}
             >
-                <Check size={12} strokeWidth={3} />
+                {isToggling ? <CheckboxSpinner color="blue" /> : <Check size={12} strokeWidth={3} />}
             </button>
         );
     }
@@ -50,10 +53,15 @@ export function PackCell({ row, handlersRef }: CellProps) {
                 if (row.lineId) onPack(row.lineId);
             }}
             disabled={isToggling}
-            className="w-5 h-5 rounded border-2 border-blue-400 bg-white hover:bg-blue-100 hover:border-blue-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm transition-all"
-            title="Click to pack"
+            className={cn(
+                'w-5 h-5 rounded border-2 flex items-center justify-center mx-auto cursor-pointer shadow-sm transition-all',
+                isToggling
+                    ? 'bg-blue-100 border-blue-300'
+                    : 'border-blue-400 bg-white hover:bg-blue-100 hover:border-blue-500'
+            )}
+            title={isToggling ? 'Packing...' : 'Click to pack'}
         >
-            {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+            {isToggling ? <CheckboxSpinner color="blue" /> : null}
         </button>
     );
 }

@@ -4,7 +4,8 @@
 
 import { Check } from 'lucide-react';
 import type { CellProps } from '../types';
-import { cn } from '../../../../lib/utils';  // Used for isPicked state
+import { cn } from '../../../../lib/utils';
+import { CheckboxSpinner } from './CheckboxSpinner';
 
 export function PickCell({ row, handlersRef }: CellProps) {
     if (!row || row.lineStatus === 'cancelled') return null;
@@ -26,19 +27,23 @@ export function PickCell({ row, handlersRef }: CellProps) {
                 disabled={isToggling || row.lineStatus !== 'picked'}
                 className={cn(
                     'w-5 h-5 rounded border-2 flex items-center justify-center mx-auto transition-all',
-                    row.lineStatus === 'picked'
+                    isToggling
+                        ? 'bg-teal-100 border-teal-300'
+                        : row.lineStatus === 'picked'
                         ? 'bg-teal-500 border-teal-500 text-white hover:bg-teal-600 shadow-sm'
                         : 'bg-teal-200 border-teal-200 text-teal-600'
                 )}
                 title={
-                    row.lineStatus === 'picked'
+                    isToggling
+                        ? 'Updating...'
+                        : row.lineStatus === 'picked'
                         ? 'Click to unpick'
                         : row.lineStatus === 'shipped'
                         ? 'Shipped'
                         : 'Packed'
                 }
             >
-                <Check size={12} strokeWidth={3} />
+                {isToggling ? <CheckboxSpinner color="teal" /> : <Check size={12} strokeWidth={3} />}
             </button>
         );
     }
@@ -55,10 +60,15 @@ export function PickCell({ row, handlersRef }: CellProps) {
                 if (row.lineId) onPick(row.lineId);
             }}
             disabled={isToggling}
-            className="w-5 h-5 rounded border-2 border-teal-400 bg-white hover:bg-teal-100 hover:border-teal-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm transition-all"
-            title="Click to pick"
+            className={cn(
+                'w-5 h-5 rounded border-2 flex items-center justify-center mx-auto cursor-pointer shadow-sm transition-all',
+                isToggling
+                    ? 'bg-teal-100 border-teal-300'
+                    : 'border-teal-400 bg-white hover:bg-teal-100 hover:border-teal-500'
+            )}
+            title={isToggling ? 'Picking...' : 'Click to pick'}
         >
-            {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+            {isToggling ? <CheckboxSpinner color="teal" /> : null}
         </button>
     );
 }

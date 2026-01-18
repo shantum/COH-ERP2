@@ -2,6 +2,9 @@
  * Barrel export for OrdersTable cell components
  */
 
+// Shared components
+export { CheckboxSpinner } from './CheckboxSpinner';
+
 // Fulfillment action cells
 export { AllocateCell } from './AllocateCell';
 export { PickCell } from './PickCell';

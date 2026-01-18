@@ -4,6 +4,8 @@
 
 import { Check } from 'lucide-react';
 import type { CellProps } from '../types';
+import { cn } from '../../../../lib/utils';
+import { CheckboxSpinner } from './CheckboxSpinner';
 
 export function ShipCell({ row, handlersRef }: CellProps) {
     if (!row || row.lineStatus === 'cancelled') return null;
@@ -24,10 +26,15 @@ export function ShipCell({ row, handlersRef }: CellProps) {
                     if (row.lineId) onUnmarkShippedLine(row.lineId);
                 }}
                 disabled={isToggling}
-                className="w-5 h-5 rounded border-2 bg-green-500 border-green-500 text-white flex items-center justify-center mx-auto shadow-sm hover:bg-green-600 cursor-pointer disabled:opacity-50"
-                title="Click to unship"
+                className={cn(
+                    'w-5 h-5 rounded border-2 flex items-center justify-center mx-auto shadow-sm cursor-pointer transition-all',
+                    isToggling
+                        ? 'bg-green-100 border-green-300'
+                        : 'bg-green-500 border-green-500 text-white hover:bg-green-600'
+                )}
+                title={isToggling ? 'Updating...' : 'Click to unship'}
             >
-                {isToggling ? <span className="animate-spin text-xs">·</span> : <Check size={12} strokeWidth={3} />}
+                {isToggling ? <CheckboxSpinner color="green" /> : <Check size={12} strokeWidth={3} />}
             </button>
         );
     }
@@ -55,10 +62,15 @@ export function ShipCell({ row, handlersRef }: CellProps) {
                     }
                 }}
                 disabled={isToggling}
-                className="w-5 h-5 rounded border-2 border-green-400 bg-white hover:bg-green-100 hover:border-green-500 flex items-center justify-center mx-auto cursor-pointer shadow-sm disabled:opacity-50"
-                title={existingAwb ? `Ship with AWB: ${existingAwb}` : 'Click to ship (will prompt for AWB)'}
+                className={cn(
+                    'w-5 h-5 rounded border-2 flex items-center justify-center mx-auto cursor-pointer shadow-sm transition-all',
+                    isToggling
+                        ? 'bg-green-100 border-green-300'
+                        : 'border-green-400 bg-white hover:bg-green-100 hover:border-green-500'
+                )}
+                title={isToggling ? 'Shipping...' : existingAwb ? `Ship with AWB: ${existingAwb}` : 'Click to ship (will prompt for AWB)'}
             >
-                {isToggling ? <span className="animate-spin text-xs">·</span> : null}
+                {isToggling ? <CheckboxSpinner color="green" /> : null}
             </button>
         );
     }
