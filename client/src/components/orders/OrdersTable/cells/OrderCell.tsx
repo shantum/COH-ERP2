@@ -2,9 +2,9 @@
  * OrderCell - Combined Order + Customer + Payment display
  * 3-line layout with left border risk signal
  *
- * Line 1: Order# + Customer                         ₹Value
- * Line 2: Time · 📍City
- * Line 3: Badge · Repeat
+ * Line 1: Order# + Customer
+ * Line 2: Time · 📍City · Repeat
+ * Line 3: Badge · ₹Value
  */
 
 import type { CellProps } from '../types';
@@ -104,81 +104,77 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     return (
         <div className={cn(
-            'flex items-center justify-between gap-3 py-1.5 pl-3 pr-1 -ml-3 min-w-0',
+            'flex flex-col justify-center py-1.5 pl-3 -ml-3 min-w-0',
             'border-l-[3px]',
             getBorderColor()
         )}>
-            {/* Left content */}
-            <div className="flex flex-col justify-center leading-snug min-w-0 flex-1">
-                {/* Line 1: Order# + Customer */}
-                <div className="flex items-center gap-2 min-w-0">
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onViewOrder(row.orderId);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
-                        title={`View order ${row.orderNumber}`}
-                    >
-                        {row.orderNumber}
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onViewCustomer(row.order);
-                        }}
-                        className="text-gray-700 hover:text-blue-600 hover:underline truncate"
-                        title={row.customerName}
-                    >
-                        {row.customerName}
-                    </button>
-                </div>
-
-                {/* Line 2: Time · 📍City */}
-                <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-0.5">
-                    <span
-                        className={cn(isOld && 'text-amber-600')}
-                        title={date.toLocaleString('en-IN')}
-                    >
-                        {dateText}
-                    </span>
-                    {city && (
-                        <>
-                            <span className="text-gray-300">·</span>
-                            <span className="flex items-center gap-0.5">
-                                <MapPin size={10} className="shrink-0" />
-                                <span className="truncate max-w-[80px]" title={city}>{city}</span>
-                            </span>
-                        </>
-                    )}
-                </div>
-
-                {/* Line 3: Badge · Repeat */}
-                <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
-                    <span className={badge.className}>
-                        {badge.text}
-                    </span>
-                    {isRepeatCustomer && (
-                        <>
-                            <span className="text-gray-300">·</span>
-                            <span
-                                className="text-emerald-600"
-                                title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
-                            >
-                                {formatLtv(ltv)}({orderCount})
-                            </span>
-                        </>
-                    )}
-                </div>
+            {/* Line 1: Order# + Customer */}
+            <div className="flex items-center gap-2 min-w-0">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onViewOrder(row.orderId);
+                    }}
+                    className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
+                    title={`View order ${row.orderNumber}`}
+                >
+                    {row.orderNumber}
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onViewCustomer(row.order);
+                    }}
+                    className="text-gray-700 hover:text-blue-600 hover:underline truncate"
+                    title={row.customerName}
+                >
+                    {row.customerName}
+                </button>
             </div>
 
-            {/* Right: Value */}
-            <span
-                className="text-gray-700 font-medium tabular-nums shrink-0 text-[15px]"
-                title={`₹${orderValue.toLocaleString('en-IN')}`}
-            >
-                ₹{Math.round(orderValue).toLocaleString('en-IN')}
-            </span>
+            {/* Line 2: Time · 📍City · Repeat */}
+            <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-0.5">
+                <span
+                    className={cn(isOld && 'text-amber-600')}
+                    title={date.toLocaleString('en-IN')}
+                >
+                    {dateText}
+                </span>
+                {city && (
+                    <>
+                        <span className="text-gray-300">·</span>
+                        <span className="flex items-center gap-0.5">
+                            <MapPin size={10} className="shrink-0" />
+                            <span className="truncate max-w-[80px]" title={city}>{city}</span>
+                        </span>
+                    </>
+                )}
+                {isRepeatCustomer && (
+                    <>
+                        <span className="text-gray-300">·</span>
+                        <span
+                            className="text-emerald-600"
+                            title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
+                        >
+                            {formatLtv(ltv)}({orderCount})
+                        </span>
+                    </>
+                )}
+            </div>
+
+            {/* Line 3: Badge · ₹Value */}
+            <div className="flex items-center gap-2 text-[11px] mt-0.5">
+                <span className={badge.className}>
+                    {badge.text}
+                </span>
+                <span className="text-gray-300">·</span>
+                <span
+                    className="text-gray-600 font-medium tabular-nums"
+                    title={`₹${orderValue.toLocaleString('en-IN')}`}
+                >
+                    ₹{Math.round(orderValue).toLocaleString('en-IN')}
+                </span>
+            </div>
         </div>
     );
 }
