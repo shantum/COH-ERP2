@@ -2,8 +2,8 @@
  * OrderCell - Combined Order + Customer + Payment display
  * 2-line layout with left border risk signal
  *
- * Line 1: Time | Order# Customer
- * Line 2: ₹Value Badge · Repeat · City
+ * Line 1: Time | Order# Customer · Repeat
+ * Line 2: ₹Value Badge · City
  */
 
 import type { CellProps } from '../types';
@@ -106,7 +106,7 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             'border-l-[3px]',
             getBorderColor()
         )}>
-            {/* Line 1: Time | Order# Customer */}
+            {/* Line 1: Time | Order# Customer · Repeat */}
             <div className="flex items-center gap-1.5 min-w-0">
                 <span
                     className={cn('text-gray-400 shrink-0', isOld && 'text-amber-600')}
@@ -135,9 +135,20 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 >
                     {row.customerName}
                 </button>
+                {isRepeatCustomer && (
+                    <>
+                        <span className="text-gray-300">·</span>
+                        <span
+                            className="text-emerald-600 text-[12px] shrink-0"
+                            title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
+                        >
+                            {formatLtv(ltv)}({orderCount})
+                        </span>
+                    </>
+                )}
             </div>
 
-            {/* Line 2: ₹Value Badge · Repeat · City */}
+            {/* Line 2: ₹Value Badge · City */}
             <div className="flex items-center gap-1.5 text-[12px] mt-0.5">
                 <span
                     className="text-gray-600 tabular-nums"
@@ -148,17 +159,6 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 <span className={badge.className}>
                     {badge.text}
                 </span>
-                {isRepeatCustomer && (
-                    <>
-                        <span className="text-gray-300">·</span>
-                        <span
-                            className="text-emerald-600"
-                            title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
-                        >
-                            {formatLtv(ltv)}({orderCount})
-                        </span>
-                    </>
-                )}
                 {city && (
                     <>
                         <span className="text-gray-300">·</span>
