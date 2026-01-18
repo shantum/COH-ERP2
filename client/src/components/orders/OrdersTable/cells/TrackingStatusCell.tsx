@@ -45,18 +45,17 @@ export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
     );
 
     return (
-        <div className="flex flex-col">
+        <div className="flex flex-col leading-tight">
             <span
                 className={cn(
-                    'px-1.5 py-0.5 rounded font-medium whitespace-nowrap text-[11px] w-fit',
-                    style.bg,
+                    'font-medium whitespace-nowrap text-[11px]',
                     style.text
                 )}
             >
                 {style.label}
             </span>
             {lastUpdate && (
-                <span className="text-[10px] text-gray-400 mt-0.5">
+                <span className="text-[10px] text-gray-400">
                     {lastUpdate}
                 </span>
             )}
