@@ -1,12 +1,12 @@
 /**
- * PaymentInfoCell - Combined display of payment method, order value, discount, and RTO risk
- * Line 1: Payment badge + Order value
- * Line 2: Discount code + RTO warning (if applicable)
+ * PaymentInfoCell - Combined display of payment method, order value, discount, and risk indicators
+ * Line 1: Order value + Payment badge + Risk indicators
+ * Line 2: Discount code (if applicable)
  */
 
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, UserX, User } from 'lucide-react';
 
 interface PaymentInfoCellProps {
     row: FlattenedOrderRow;
@@ -22,6 +22,13 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
     const orderValue = row.totalAmount || 0;
     const discountCode = row.discountCodes;
     const rtoCount = row.customerRtoCount || 0;
+    const orderCount = row.customerOrderCount || 0;
+
+    // Risk indicators
+    const isFirstOrder = orderCount <= 1; // This is their first order
+    const isFirstCod = isFirstOrder && isCod; // First order AND COD = high risk
+    const hasRtoHistory = rtoCount > 0;
+    const isHighRtoRisk = rtoCount >= 3;
 
     // Format order value compactly
     const formatValue = (value: number): string => {
@@ -35,15 +42,10 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
         return `₹${value}`;
     };
 
-    // RTO risk level
-    const isHighRisk = rtoCount >= 3;
-
-    const hasSecondLine = discountCode || rtoCount > 0;
-
     return (
         <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
-            {/* Line 1: Order value + Payment badge */}
-            <div className="flex items-center gap-1.5">
+            {/* Line 1: Order value + Payment badge + Risk indicators */}
+            <div className="flex items-center gap-1">
                 <span className="font-semibold text-gray-800">
                     {formatValue(orderValue)}
                 </span>
@@ -57,30 +59,37 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
                 >
                     {isCod ? 'COD' : 'Prepaid'}
                 </span>
+
+                {/* Risk indicators */}
+                {isFirstCod && (
+                    <span
+                        className="flex items-center text-orange-600 shrink-0"
+                        title="⚠️ First order + COD - Higher RTO risk"
+                    >
+                        <User size={11} strokeWidth={2.5} />
+                    </span>
+                )}
+                {hasRtoHistory && (
+                    <span
+                        className={cn(
+                            'flex items-center shrink-0',
+                            isHighRtoRisk ? 'text-red-600' : 'text-amber-600'
+                        )}
+                        title={`⚠️ Customer has ${rtoCount} past RTO${rtoCount > 1 ? 's' : ''}`}
+                    >
+                        <UserX size={11} strokeWidth={2.5} />
+                    </span>
+                )}
             </div>
-            {/* Line 2: Only show if discount or RTO warning exists */}
-            {hasSecondLine && (
+            {/* Line 2: Discount code only */}
+            {discountCode && (
                 <div className="flex items-center gap-1 mt-0.5 text-[10px]">
-                    {discountCode && (
-                        <span
-                            className="text-gray-500 truncate max-w-[90px]"
-                            title={discountCode}
-                        >
-                            {discountCode}
-                        </span>
-                    )}
-                    {rtoCount > 0 && (
-                        <span
-                            className={cn(
-                                'flex items-center gap-0.5 shrink-0',
-                                isHighRisk ? 'text-red-600' : 'text-amber-500'
-                            )}
-                            title={`Customer has ${rtoCount} RTO(s)`}
-                        >
-                            <AlertTriangle size={9} />
-                            <span className="font-semibold">{rtoCount} RTO</span>
-                        </span>
-                    )}
+                    <span
+                        className="text-gray-500 truncate max-w-[90px]"
+                        title={discountCode}
+                    >
+                        {discountCode}
+                    </span>
                 </div>
             )}
         </div>
