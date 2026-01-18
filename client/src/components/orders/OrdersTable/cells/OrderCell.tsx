@@ -2,8 +2,8 @@
  * OrderCell - Combined Order + Customer + Payment display
  * Signal-first design: Calm by default, problems create contrast
  *
- * Line 1: Order# · Customer name                    ₹Value
- * Line 2: Time · City · Repeat              [Payment Badge]
+ * Line 1: Order# · Customer · ₹Value
+ * Line 2: Time · City · Repeat · Badge
  */
 
 import type { CellProps } from '../types';
@@ -132,30 +132,29 @@ export function OrderCell({ row, handlersRef }: CellProps) {
 
     return (
         <div className="flex flex-col justify-center leading-tight py-0.5 min-w-0">
-            {/* Line 1: Order# · Customer name                    ₹Value */}
+            {/* Line 1: Order# · Customer · ₹Value */}
             <div className="flex items-center gap-1.5 min-w-0">
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onViewOrder(row.orderId);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
-                        title={`View order ${row.orderNumber}`}
-                    >
-                        {row.orderNumber}
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onViewCustomer(row.order);
-                        }}
-                        className="text-gray-600 hover:text-blue-600 hover:underline truncate"
-                        title={row.customerName}
-                    >
-                        {row.customerName}
-                    </button>
-                </div>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onViewOrder(row.orderId);
+                    }}
+                    className="text-blue-600 hover:text-blue-800 hover:underline font-semibold shrink-0"
+                    title={`View order ${row.orderNumber}`}
+                >
+                    {row.orderNumber}
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onViewCustomer(row.order);
+                    }}
+                    className="text-gray-600 hover:text-blue-600 hover:underline truncate"
+                    title={row.customerName}
+                >
+                    {row.customerName}
+                </button>
+                <span className="text-gray-300">·</span>
                 <span
                     className={cn(
                         'shrink-0 tabular-nums',
@@ -167,35 +166,34 @@ export function OrderCell({ row, handlersRef }: CellProps) {
                 </span>
             </div>
 
-            {/* Line 2: Time · City · Repeat              [Payment Badge] */}
-            <div className="flex items-center gap-1.5 text-[10px] mt-0.5 min-w-0">
-                <div className="flex items-center gap-1 min-w-0 flex-1">
-                    <span
-                        className={cn(isOld ? 'text-amber-600' : 'text-gray-400')}
-                        title={date.toLocaleString('en-IN')}
-                    >
-                        {dateText}
-                    </span>
-                    {city && (
-                        <>
-                            <span className="text-gray-300">·</span>
-                            <span className="text-gray-400 truncate" title={city}>
-                                {city}
-                            </span>
-                        </>
-                    )}
-                    {isRepeatCustomer && (
-                        <>
-                            <span className="text-gray-300">·</span>
-                            <span
-                                className="text-emerald-600 shrink-0"
-                                title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
-                            >
-                                {formatLtv(ltv)}({orderCount})
-                            </span>
-                        </>
-                    )}
-                </div>
+            {/* Line 2: Time · City · Repeat · Badge */}
+            <div className="flex items-center gap-1 text-[10px] mt-0.5 min-w-0">
+                <span
+                    className={cn(isOld ? 'text-amber-600' : 'text-gray-400')}
+                    title={date.toLocaleString('en-IN')}
+                >
+                    {dateText}
+                </span>
+                {city && (
+                    <>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-gray-400 truncate max-w-[80px]" title={city}>
+                            {city}
+                        </span>
+                    </>
+                )}
+                {isRepeatCustomer && (
+                    <>
+                        <span className="text-gray-300">·</span>
+                        <span
+                            className="text-emerald-600 shrink-0"
+                            title={`Repeat: ${orderCount} orders, LTV ${formatLtv(ltv)}`}
+                        >
+                            {formatLtv(ltv)}({orderCount})
+                        </span>
+                    </>
+                )}
+                <span className="text-gray-300">·</span>
                 <span className={badge.className} title={isCod ? 'Cash on Delivery' : 'Prepaid'}>
                     {badge.text}
                 </span>
