@@ -3,19 +3,19 @@
  * Light checkbox style - thin border, subtle colors
  */
 
-import { memo } from 'react';
 import { X } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 import { CheckboxSpinner } from './CheckboxSpinner';
 
-export const CancelLineCell = memo(function CancelLineCell({ row, handlersRef }: CellProps) {
+export function CancelLineCell({ row, handlersRef }: CellProps) {
     if (!row || !row.lineId) return null;
 
-    const { isCancellingLine, isUncancellingLine, onCancelLine, onUncancelLine } = handlersRef.current;
+    const { allocatingLines, onCancelLine, onUncancelLine } = handlersRef.current;
 
     const isCancelled = row.lineStatus === 'cancelled';
-    const isToggling = isCancellingLine || isUncancellingLine;
+    // Check if THIS specific line is being processed (not a global flag)
+    const isToggling = allocatingLines?.has(row.lineId) || false;
 
     // Cancelled - checked with X
     if (isCancelled) {
@@ -58,9 +58,4 @@ export const CancelLineCell = memo(function CancelLineCell({ row, handlersRef }:
             {isToggling ? <CheckboxSpinner color="red" /> : null}
         </button>
     );
-}, (prev, next) => (
-    prev.row.lineId === next.row.lineId &&
-    prev.row.lineStatus === next.row.lineStatus &&
-    prev.handlersRef.current.isCancellingLine === next.handlersRef.current.isCancellingLine &&
-    prev.handlersRef.current.isUncancellingLine === next.handlersRef.current.isUncancellingLine
-));
+}
