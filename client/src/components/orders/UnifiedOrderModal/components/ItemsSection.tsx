@@ -88,11 +88,14 @@ function LineItem({
   onToggleSelection?: () => void;
 }) {
   const [isEditingPrice, setIsEditingPrice] = useState(false);
+  const [isEditingQty, setIsEditingQty] = useState(false);
   const [editPrice, setEditPrice] = useState(line.unitPrice.toString());
+  const [editQty, setEditQty] = useState(line.qty.toString());
   const isCancelled = line.lineStatus === 'cancelled';
   const isPending = line.lineStatus === 'pending';
   const isShipMode = mode === 'ship';
   const canSelect = isShipMode && line.lineStatus === 'packed';
+  const canEdit = mode === 'edit' && isPending && !isCancelled;
 
   const statusConfig = LINE_STATUS_CONFIG[line.lineStatus] || LINE_STATUS_CONFIG.pending;
   const statusBarColor = LINE_STATUS_BAR_COLORS[line.lineStatus] || 'bg-slate-300';
@@ -110,6 +113,14 @@ function LineItem({
       onUpdateLine(line.id, { unitPrice: newPrice });
     }
     setIsEditingPrice(false);
+  };
+
+  const handleSaveQty = () => {
+    const newQty = parseInt(editQty, 10);
+    if (!isNaN(newQty) && newQty >= 1 && onUpdateLine) {
+      onUpdateLine(line.id, { qty: newQty });
+    }
+    setIsEditingQty(false);
   };
 
   const lineTotal = financialInfo?.lineTotal ?? (line.qty * line.unitPrice);
@@ -172,30 +183,58 @@ function LineItem({
                     MRP: {formatCurrency(financialInfo.mrp * line.qty)}
                   </div>
                 )}
-                {/* Current unit price */}
-                <div className="flex items-baseline justify-end gap-1.5">
-                  <span className="text-xs text-slate-500">{line.qty} ×</span>
-                  {mode === 'edit' && isPending && !isCancelled ? (
-                    isEditingPrice ? (
-                      <input
-                        type="number"
-                        value={editPrice}
-                        onChange={(e) => setEditPrice(e.target.value)}
-                        onBlur={handleSavePrice}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSavePrice()}
-                        className="w-20 px-2 py-1 text-sm text-right border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
-                        autoFocus
-                      />
-                    ) : (
-                      <button
-                        onClick={() => setIsEditingPrice(true)}
-                        className="text-sm font-medium text-slate-700 hover:text-sky-600 transition-colors"
-                      >
-                        {formatCurrency(financialInfo.finalPrice)}
-                      </button>
-                    )
+                {/* Qty × Price - Editable in edit mode */}
+                <div className="flex items-center justify-end gap-1.5">
+                  {canEdit ? (
+                    <>
+                      {/* Editable Qty */}
+                      {isEditingQty ? (
+                        <input
+                          type="number"
+                          value={editQty}
+                          onChange={(e) => setEditQty(e.target.value)}
+                          onBlur={handleSaveQty}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveQty()}
+                          className="w-12 px-1 py-0.5 text-xs text-center border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          autoFocus
+                          min={1}
+                        />
+                      ) : (
+                        <button
+                          onClick={() => { setEditQty(line.qty.toString()); setIsEditingQty(true); }}
+                          className="text-xs text-slate-500 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          title="Click to edit quantity"
+                        >
+                          {line.qty}
+                        </button>
+                      )}
+                      <span className="text-xs text-slate-400">×</span>
+                      {/* Editable Price */}
+                      {isEditingPrice ? (
+                        <input
+                          type="number"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          onBlur={handleSavePrice}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSavePrice()}
+                          className="w-20 px-2 py-0.5 text-sm text-right border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          onClick={() => { setEditPrice(line.unitPrice.toString()); setIsEditingPrice(true); }}
+                          className="text-sm font-medium text-slate-700 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          title="Click to edit price"
+                        >
+                          {formatCurrency(financialInfo.finalPrice)}
+                        </button>
+                      )}
+                    </>
                   ) : (
-                    <span className="text-sm font-medium text-slate-700">{formatCurrency(financialInfo.finalPrice)}</span>
+                    <>
+                      <span className="text-xs text-slate-500">{line.qty} ×</span>
+                      <span className="text-sm font-medium text-slate-700">{formatCurrency(financialInfo.finalPrice)}</span>
+                    </>
                   )}
                 </div>
                 {/* Discount amount */}
@@ -221,30 +260,58 @@ function LineItem({
               </>
             ) : (
               <>
-                {/* Fallback for no financial info */}
-                <div className="flex items-baseline justify-end gap-1.5">
-                  <span className="text-xs text-slate-500">{line.qty} ×</span>
-                  {mode === 'edit' && isPending && !isCancelled ? (
-                    isEditingPrice ? (
-                      <input
-                        type="number"
-                        value={editPrice}
-                        onChange={(e) => setEditPrice(e.target.value)}
-                        onBlur={handleSavePrice}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSavePrice()}
-                        className="w-20 px-2 py-1 text-sm text-right border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
-                        autoFocus
-                      />
-                    ) : (
-                      <button
-                        onClick={() => setIsEditingPrice(true)}
-                        className="text-sm font-medium text-slate-700 hover:text-sky-600 transition-colors"
-                      >
-                        {formatCurrency(line.unitPrice)}
-                      </button>
-                    )
+                {/* Fallback for no financial info - Qty × Price editable */}
+                <div className="flex items-center justify-end gap-1.5">
+                  {canEdit ? (
+                    <>
+                      {/* Editable Qty */}
+                      {isEditingQty ? (
+                        <input
+                          type="number"
+                          value={editQty}
+                          onChange={(e) => setEditQty(e.target.value)}
+                          onBlur={handleSaveQty}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveQty()}
+                          className="w-12 px-1 py-0.5 text-xs text-center border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          autoFocus
+                          min={1}
+                        />
+                      ) : (
+                        <button
+                          onClick={() => { setEditQty(line.qty.toString()); setIsEditingQty(true); }}
+                          className="text-xs text-slate-500 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          title="Click to edit quantity"
+                        >
+                          {line.qty}
+                        </button>
+                      )}
+                      <span className="text-xs text-slate-400">×</span>
+                      {/* Editable Price */}
+                      {isEditingPrice ? (
+                        <input
+                          type="number"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          onBlur={handleSavePrice}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSavePrice()}
+                          className="w-20 px-2 py-0.5 text-sm text-right border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          onClick={() => { setEditPrice(line.unitPrice.toString()); setIsEditingPrice(true); }}
+                          className="text-sm font-medium text-slate-700 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          title="Click to edit price"
+                        >
+                          {formatCurrency(line.unitPrice)}
+                        </button>
+                      )}
+                    </>
                   ) : (
-                    <span className="text-sm font-medium text-slate-700">{formatCurrency(line.unitPrice)}</span>
+                    <>
+                      <span className="text-xs text-slate-500">{line.qty} ×</span>
+                      <span className="text-sm font-medium text-slate-700">{formatCurrency(line.unitPrice)}</span>
+                    </>
                   )}
                 </div>
                 <p className={`text-sm font-semibold mt-0.5 ${isCancelled ? 'text-slate-400' : 'text-slate-800'}`}>
