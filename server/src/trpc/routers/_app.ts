@@ -6,6 +6,7 @@
  * - auth: Authentication and user management
  * - customers: Customer management and statistics
  * - inventory: Inventory tracking and transactions
+ * - inventoryReconciliation: Physical count reconciliation
  * - orders: Order management
  * - products: Product catalog (products, variations, SKUs)
  * - returns: Return request management
@@ -15,6 +16,7 @@ import { router, publicProcedure } from '../index.js';
 import { authRouter } from './auth.js';
 import { customersRouter } from './customers.js';
 import { inventoryRouter } from './inventory.js';
+import { inventoryReconciliationRouter } from './inventoryReconciliation.js';
 import { ordersRouter } from './orders.js';
 import { paymentsRouter } from './payments.js';
 import { productsRouter } from './products.js';
@@ -32,6 +34,7 @@ export const appRouter = router({
     auth: authRouter,
     customers: customersRouter,
     inventory: inventoryRouter,
+    inventoryReconciliation: inventoryReconciliationRouter,
     orders: ordersRouter,
     payments: paymentsRouter,
     products: productsRouter,
