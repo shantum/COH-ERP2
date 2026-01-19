@@ -69,7 +69,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 id: 'expander',
                 header: '',
-                size: 40,
+                size: 28,
                 cell: ({ row }) => {
                     if (!row.original.children?.length) return null;
                     return (
@@ -78,12 +78,12 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                 e.stopPropagation();
                                 row.toggleExpanded();
                             }}
-                            className="p-1 rounded hover:bg-gray-100"
+                            className="p-0.5 rounded hover:bg-gray-100"
                         >
                             {row.getIsExpanded() ? (
-                                <ChevronDown size={16} className="text-gray-500" />
+                                <ChevronDown size={14} className="text-gray-500" />
                             ) : (
-                                <ChevronRight size={16} className="text-gray-500" />
+                                <ChevronRight size={14} className="text-gray-500" />
                             )}
                         </button>
                     );
@@ -92,9 +92,9 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 id: 'image',
                 header: '',
-                size: 50,
+                size: 40,
                 cell: ({ row }) => (
-                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <div className="w-7 h-7 rounded overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
                         {row.original.imageUrl ? (
                             <img
                                 src={row.original.imageUrl}
@@ -102,7 +102,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                 className="w-full h-full object-cover"
                             />
                         ) : (
-                            <ImageIcon size={16} className="text-gray-300" />
+                            <ImageIcon size={12} className="text-gray-300" />
                         )}
                     </div>
                 ),
@@ -110,14 +110,14 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'name',
                 header: 'Product',
-                size: 200,
+                size: 220,
                 cell: ({ row }) => (
-                    <div className="min-w-0">
-                        <div className="font-medium text-gray-900 truncate">
+                    <div className="min-w-0 leading-tight">
+                        <div className="text-xs font-medium text-gray-900 truncate">
                             {row.original.name}
                         </div>
                         {row.original.styleCode && (
-                            <div className="text-xs text-gray-500 font-mono">
+                            <div className="text-[10px] text-gray-400 font-mono truncate">
                                 {row.original.styleCode}
                             </div>
                         )}
@@ -127,19 +127,19 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'category',
                 header: 'Category',
-                size: 100,
+                size: 70,
                 cell: ({ row }) => (
-                    <Badge variant="secondary" className="capitalize text-xs">
+                    <span className="text-[11px] text-gray-600 capitalize">
                         {row.original.category || '-'}
-                    </Badge>
+                    </span>
                 ),
             },
             {
                 accessorKey: 'productType',
                 header: 'Type',
-                size: 80,
+                size: 50,
                 cell: ({ row }) => (
-                    <span className="capitalize text-sm text-muted-foreground">
+                    <span className="capitalize text-[11px] text-gray-500">
                         {row.original.productType || '-'}
                     </span>
                 ),
@@ -147,9 +147,9 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'gender',
                 header: 'Gender',
-                size: 70,
+                size: 55,
                 cell: ({ row }) => (
-                    <span className="capitalize text-sm text-muted-foreground">
+                    <span className="capitalize text-[11px] text-gray-500">
                         {row.original.gender || '-'}
                     </span>
                 ),
@@ -157,11 +157,11 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'fabricTypeName',
                 header: 'Fabric Type',
-                size: 100,
+                size: 80,
                 cell: ({ row }) => (
-                    <span className="text-sm">
+                    <span className="text-[11px]">
                         {row.original.fabricTypeName || (
-                            <span className="text-red-500 text-xs">Not set</span>
+                            <span className="text-red-500 text-[10px]">Not set</span>
                         )}
                     </span>
                 ),
@@ -169,21 +169,21 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 id: 'colorSwatches',
                 header: 'Colors',
-                size: 140,
+                size: 100,
                 cell: ({ row }) => {
                     const variations = row.original.children || [];
-                    if (variations.length === 0) return <span className="text-gray-400 text-xs">-</span>;
+                    if (variations.length === 0) return <span className="text-gray-400 text-[10px]">-</span>;
 
-                    // Show variation thumbnails (max 5)
-                    const visibleVariations = variations.slice(0, 5);
-                    const remaining = variations.length - 5;
+                    // Show variation thumbnails (max 4)
+                    const visibleVariations = variations.slice(0, 4);
+                    const remaining = variations.length - 4;
 
                     return (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-0.5">
                             {visibleVariations.map((v) => (
                                 <div
                                     key={v.id}
-                                    className="w-6 h-6 rounded-md border border-gray-200 flex-shrink-0 overflow-hidden bg-gray-100"
+                                    className="w-5 h-5 rounded border border-gray-200 flex-shrink-0 overflow-hidden bg-gray-100"
                                     title={v.colorName || v.name}
                                 >
                                     {v.imageUrl ? (
@@ -198,14 +198,14 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                             style={{ backgroundColor: v.colorHex }}
                                         />
                                     ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-[8px] text-gray-400">
+                                        <div className="w-full h-full flex items-center justify-center text-[7px] text-gray-400">
                                             {(v.colorName || '?')[0]}
                                         </div>
                                     )}
                                 </div>
                             ))}
                             {remaining > 0 && (
-                                <span className="text-xs text-gray-500 ml-0.5">+{remaining}</span>
+                                <span className="text-[10px] text-gray-500 ml-0.5">+{remaining}</span>
                             )}
                         </div>
                     );
@@ -214,24 +214,24 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 id: 'fabrics',
                 header: 'Fabrics',
-                size: 150,
+                size: 100,
                 cell: ({ row }) => {
                     const variations = row.original.children || [];
-                    if (variations.length === 0) return <span className="text-gray-400 text-xs">-</span>;
+                    if (variations.length === 0) return <span className="text-gray-400 text-[10px]">-</span>;
 
                     // Get unique fabric names
                     const fabrics = [...new Set(variations.map(v => v.fabricName).filter(Boolean))];
-                    if (fabrics.length === 0) return <span className="text-red-500 text-xs">Not set</span>;
+                    if (fabrics.length === 0) return <span className="text-red-500 text-[10px]">Not set</span>;
 
                     return (
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-0.5">
                             {fabrics.slice(0, 2).map((fabric, i) => (
-                                <Badge key={i} variant="outline" className="text-xs truncate max-w-[70px]">
+                                <span key={i} className="text-[10px] text-gray-600 truncate max-w-[60px] bg-gray-100 px-1 py-0.5 rounded">
                                     {fabric}
-                                </Badge>
+                                </span>
                             ))}
                             {fabrics.length > 2 && (
-                                <span className="text-xs text-gray-500">+{fabrics.length - 2}</span>
+                                <span className="text-[10px] text-gray-500">+{fabrics.length - 2}</span>
                             )}
                         </div>
                     );
@@ -240,11 +240,11 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'skuCount',
                 header: 'SKUs',
-                size: 70,
+                size: 50,
                 cell: ({ row }) => (
-                    <div className="flex items-center gap-1.5">
-                        <Box size={14} className="text-blue-500" />
-                        <span className="font-medium tabular-nums">
+                    <div className="flex items-center gap-1">
+                        <Box size={11} className="text-blue-500" />
+                        <span className="text-xs font-medium tabular-nums">
                             {row.original.skuCount || 0}
                         </span>
                     </div>
@@ -253,9 +253,9 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'avgMrp',
                 header: 'Avg MRP',
-                size: 90,
+                size: 70,
                 cell: ({ row }) => (
-                    <span className="tabular-nums text-sm">
+                    <span className="tabular-nums text-xs">
                         {row.original.avgMrp ? `₹${Math.round(row.original.avgMrp).toLocaleString()}` : '-'}
                     </span>
                 ),
@@ -263,12 +263,12 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 accessorKey: 'totalStock',
                 header: 'Stock',
-                size: 80,
+                size: 50,
                 cell: ({ row }) => {
                     const stock = row.original.totalStock || 0;
                     return (
                         <span
-                            className={`font-semibold tabular-nums ${
+                            className={`text-xs font-semibold tabular-nums ${
                                 stock === 0
                                     ? 'text-red-600'
                                     : stock < 10
@@ -284,30 +284,30 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 id: 'status',
                 header: 'Status',
-                size: 110,
+                size: 55,
                 cell: ({ row }) => {
                     const stock = row.original.totalStock || 0;
                     const skuCount = row.original.skuCount || 0;
 
                     if (stock === 0) {
                         return (
-                            <Badge variant="destructive" className="gap-1 text-xs">
-                                <XCircle size={10} />
+                            <Badge variant="destructive" className="gap-0.5 text-[10px] px-1.5 py-0 h-5">
+                                <XCircle size={9} />
                                 Out
                             </Badge>
                         );
                     }
                     if (skuCount > 0 && stock < skuCount * 5) {
                         return (
-                            <Badge variant="warning" className="gap-1 text-xs">
-                                <AlertTriangle size={10} />
+                            <Badge variant="warning" className="gap-0.5 text-[10px] px-1.5 py-0 h-5">
+                                <AlertTriangle size={9} />
                                 Low
                             </Badge>
                         );
                     }
                     return (
-                        <Badge variant="success" className="gap-1 text-xs">
-                            <CheckCircle size={10} />
+                        <Badge variant="success" className="gap-0.5 text-[10px] px-1.5 py-0 h-5">
+                            <CheckCircle size={9} />
                             OK
                         </Badge>
                     );
@@ -316,38 +316,38 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
             {
                 id: 'actions',
                 header: '',
-                size: 100,
+                size: 75,
                 cell: ({ row }) => (
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-0.5">
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 onViewProduct?.(row.original);
                             }}
-                            className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                            className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
                             title="View Details"
                         >
-                            <Eye size={14} />
+                            <Eye size={13} />
                         </button>
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 onEditProduct?.(row.original);
                             }}
-                            className="p-1.5 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
+                            className="p-1 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
                             title="Edit Product"
                         >
-                            <Edit size={14} />
+                            <Edit size={13} />
                         </button>
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
                                 onEditBom?.(row.original);
                             }}
-                            className="p-1.5 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
+                            className="p-1 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
                             title="Edit BOM"
                         >
-                            <GitBranch size={14} />
+                            <GitBranch size={13} />
                         </button>
                     </div>
                 ),
@@ -372,23 +372,23 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
         <div className="flex flex-col h-full">
             {/* Summary Stats */}
             {summary && (
-                <div className="flex items-center gap-4 px-1 flex-wrap mb-4 flex-shrink-0">
-                    <div className="flex items-center gap-2 text-sm">
-                        <Package size={16} className="text-gray-400" />
+                <div className="flex items-center gap-3 px-1 flex-wrap mb-2 flex-shrink-0">
+                    <div className="flex items-center gap-1.5 text-xs">
+                        <Package size={13} className="text-gray-400" />
                         <span className="text-gray-600">{summary.products} Products</span>
                     </div>
-                    <div className="w-px h-4 bg-gray-200" />
-                    <div className="flex items-center gap-2 text-sm">
-                        <Layers size={16} className="text-purple-400" />
+                    <div className="w-px h-3 bg-gray-200" />
+                    <div className="flex items-center gap-1.5 text-xs">
+                        <Layers size={13} className="text-purple-400" />
                         <span className="text-gray-600">{summary.variations} Colors</span>
                     </div>
-                    <div className="w-px h-4 bg-gray-200" />
-                    <div className="flex items-center gap-2 text-sm">
-                        <Box size={16} className="text-blue-400" />
+                    <div className="w-px h-3 bg-gray-200" />
+                    <div className="flex items-center gap-1.5 text-xs">
+                        <Box size={13} className="text-blue-400" />
                         <span className="text-gray-600">{summary.skus} SKUs</span>
                     </div>
-                    <div className="w-px h-4 bg-gray-200" />
-                    <div className="flex items-center gap-2 text-sm">
+                    <div className="w-px h-3 bg-gray-200" />
+                    <div className="flex items-center gap-1.5 text-xs">
                         <span className="font-semibold text-green-600">
                             {summary.totalStock.toLocaleString()}
                         </span>
@@ -408,7 +408,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                         <TableHead
                                             key={header.id}
                                             style={{ width: header.column.getSize() }}
-                                            className="text-xs font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap bg-gray-50"
+                                            className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap bg-gray-50 py-1.5 px-2 h-7"
                                         >
                                             {header.isPlaceholder
                                                 ? null
@@ -421,10 +421,10 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                         <TableBody>
                             {isLoading ? (
                                 <TableRow>
-                                    <TableCell colSpan={columns.length} className="h-24 text-center">
+                                    <TableCell colSpan={columns.length} className="h-16 text-center">
                                         <div className="flex items-center justify-center gap-2">
-                                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                                            <span className="text-muted-foreground">Loading products...</span>
+                                            <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                                            <span className="text-muted-foreground text-xs">Loading products...</span>
                                         </div>
                                     </TableCell>
                                 </TableRow>
@@ -437,7 +437,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                             onClick={() => row.toggleExpanded()}
                                         >
                                             {row.getVisibleCells().map((cell) => (
-                                                <TableCell key={cell.id} className="py-2">
+                                                <TableCell key={cell.id} className="py-1 px-2">
                                                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                                 </TableCell>
                                             ))}
@@ -447,7 +447,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                         {row.getIsExpanded() && row.original.children && (
                                             <TableRow className="bg-gray-50/50">
                                                 <TableCell colSpan={columns.length} className="p-0">
-                                                    <div className="py-3 px-4 ml-10">
+                                                    <div className="py-1.5 px-2 ml-8">
                                                         <VariationsTable
                                                             variations={row.original.children}
                                                             onViewVariation={onViewProduct}
@@ -474,24 +474,24 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
 
             {/* Pagination Controls - Always visible at bottom */}
             {products.length > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 border rounded-md bg-gray-50/50 mt-4 flex-shrink-0">
-                    <div className="text-sm text-muted-foreground">
+                <div className="flex items-center justify-between px-3 py-2 border rounded bg-gray-50/50 mt-2 flex-shrink-0">
+                    <div className="text-xs text-muted-foreground">
                         Showing {Math.min(pagination.pageIndex * PAGE_SIZE + 1, products.length)} to{' '}
                         {Math.min((pagination.pageIndex + 1) * PAGE_SIZE, products.length)} of{' '}
                         {products.length} products
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={() => table.previousPage()}
                             disabled={!table.getCanPreviousPage()}
-                            className="gap-1"
+                            className="gap-0.5 h-7 px-2 text-xs"
                         >
-                            <ChevronLeft size={16} />
+                            <ChevronLeft size={14} />
                             Previous
                         </Button>
-                        <div className="flex items-center gap-1 text-sm">
+                        <div className="flex items-center gap-1 text-xs">
                             <span className="text-muted-foreground">Page</span>
                             <span className="font-medium">{pagination.pageIndex + 1}</span>
                             <span className="text-muted-foreground">of</span>
@@ -502,10 +502,10 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                             size="sm"
                             onClick={() => table.nextPage()}
                             disabled={!table.getCanNextPage()}
-                            className="gap-1"
+                            className="gap-0.5 h-7 px-2 text-xs"
                         >
                             Next
-                            <ChevronRight size={16} />
+                            <ChevronRight size={14} />
                         </Button>
                     </div>
                 </div>
@@ -532,20 +532,20 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
     };
 
     return (
-        <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
+        <div className="border rounded bg-white overflow-hidden shadow-sm">
+            <table className="w-full text-xs">
                 <thead className="bg-purple-50/70 border-b">
                     <tr>
-                        <th className="w-8 px-2 py-2"></th>
-                        <th className="w-10 px-2 py-2"></th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-purple-700 uppercase">Color</th>
-                        <th className="text-left px-3 py-2 text-xs font-semibold text-purple-700 uppercase">Fabric</th>
-                        <th className="text-center px-3 py-2 text-xs font-semibold text-purple-700 uppercase">Lining</th>
-                        <th className="text-right px-3 py-2 text-xs font-semibold text-purple-700 uppercase">SKUs</th>
-                        <th className="text-right px-3 py-2 text-xs font-semibold text-purple-700 uppercase">Avg MRP</th>
-                        <th className="text-right px-3 py-2 text-xs font-semibold text-purple-700 uppercase">Stock</th>
-                        <th className="text-center px-3 py-2 text-xs font-semibold text-purple-700 uppercase">Status</th>
-                        <th className="w-16 px-2 py-2"></th>
+                        <th className="w-6 px-1 py-1"></th>
+                        <th className="w-7 px-1 py-1"></th>
+                        <th className="text-left px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">Color</th>
+                        <th className="text-left px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">Fabric</th>
+                        <th className="text-center px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">Lining</th>
+                        <th className="text-right px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">SKUs</th>
+                        <th className="text-right px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">Avg MRP</th>
+                        <th className="text-right px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">Stock</th>
+                        <th className="text-center px-2 py-1 text-[10px] font-semibold text-purple-700 uppercase">Status</th>
+                        <th className="w-14 px-1 py-1"></th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -555,19 +555,19 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                                 className="hover:bg-purple-50/30 cursor-pointer"
                                 onClick={() => toggleVariation(variation.id)}
                             >
-                                <td className="px-2 py-2">
+                                <td className="px-1 py-1">
                                     {variation.children?.length ? (
                                         <button className="p-0.5 rounded hover:bg-purple-100">
                                             {expandedVariations[variation.id] ? (
-                                                <ChevronDown size={14} className="text-purple-500" />
+                                                <ChevronDown size={12} className="text-purple-500" />
                                             ) : (
-                                                <ChevronRight size={14} className="text-purple-500" />
+                                                <ChevronRight size={12} className="text-purple-500" />
                                             )}
                                         </button>
                                     ) : null}
                                 </td>
-                                <td className="px-2 py-2">
-                                    <div className="w-8 h-8 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
+                                <td className="px-1 py-1">
+                                    <div className="w-6 h-6 rounded overflow-hidden bg-gray-100 flex items-center justify-center">
                                         {variation.imageUrl ? (
                                             <img
                                                 src={variation.imageUrl}
@@ -580,40 +580,40 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                                                 style={{ backgroundColor: variation.colorHex }}
                                             />
                                         ) : (
-                                            <ImageIcon size={12} className="text-gray-300" />
+                                            <ImageIcon size={10} className="text-gray-300" />
                                         )}
                                     </div>
                                 </td>
-                                <td className="px-3 py-2">
-                                    <div className="flex items-center gap-2">
+                                <td className="px-2 py-1">
+                                    <div className="flex items-center gap-1.5">
                                         {variation.colorHex && (
                                             <span
-                                                className="w-3 h-3 rounded-full border border-gray-200 flex-shrink-0"
+                                                className="w-2.5 h-2.5 rounded-full border border-gray-200 flex-shrink-0"
                                                 style={{ backgroundColor: variation.colorHex }}
                                             />
                                         )}
-                                        <span className="font-medium text-gray-900">
+                                        <span className="font-medium text-gray-900 text-xs">
                                             {variation.colorName || variation.name}
                                         </span>
                                     </div>
                                 </td>
-                                <td className="px-3 py-2 text-gray-600">
-                                    {variation.fabricName || <span className="text-red-500 text-xs">Not set</span>}
+                                <td className="px-2 py-1 text-gray-600 text-xs">
+                                    {variation.fabricName || <span className="text-red-500 text-[10px]">Not set</span>}
                                 </td>
-                                <td className="px-3 py-2 text-center">
+                                <td className="px-2 py-1 text-center">
                                     {variation.hasLining ? (
-                                        <Badge variant="success" className="text-xs">Yes</Badge>
+                                        <Badge variant="success" className="text-[10px] px-1 py-0 h-4">Yes</Badge>
                                     ) : (
-                                        <span className="text-gray-400 text-xs">No</span>
+                                        <span className="text-gray-400 text-[10px]">No</span>
                                     )}
                                 </td>
-                                <td className="px-3 py-2 text-right tabular-nums font-medium">
+                                <td className="px-2 py-1 text-right tabular-nums font-medium">
                                     {variation.children?.length || 0}
                                 </td>
-                                <td className="px-3 py-2 text-right tabular-nums">
+                                <td className="px-2 py-1 text-right tabular-nums">
                                     {variation.avgMrp ? `₹${Math.round(variation.avgMrp).toLocaleString()}` : '-'}
                                 </td>
-                                <td className="px-3 py-2 text-right">
+                                <td className="px-2 py-1 text-right">
                                     <span className={`tabular-nums font-semibold ${
                                         (variation.totalStock || 0) === 0 ? 'text-red-600' :
                                         (variation.totalStock || 0) < 5 ? 'text-amber-600' : 'text-green-600'
@@ -621,46 +621,46 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                                         {(variation.totalStock || 0).toLocaleString()}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2 text-center">
+                                <td className="px-2 py-1 text-center">
                                     {(variation.totalStock || 0) === 0 ? (
-                                        <Badge variant="destructive" className="text-xs">Out</Badge>
+                                        <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">Out</Badge>
                                     ) : (variation.totalStock || 0) < 5 ? (
-                                        <Badge variant="warning" className="text-xs">Low</Badge>
+                                        <Badge variant="warning" className="text-[10px] px-1 py-0 h-4">Low</Badge>
                                     ) : (
-                                        <Badge variant="success" className="text-xs">OK</Badge>
+                                        <Badge variant="success" className="text-[10px] px-1 py-0 h-4">OK</Badge>
                                     )}
                                 </td>
-                                <td className="px-2 py-2">
-                                    <div className="flex items-center gap-1">
+                                <td className="px-1 py-1">
+                                    <div className="flex items-center gap-0.5">
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onViewVariation?.(variation);
                                             }}
-                                            className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                                            className="p-0.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
                                             title="View"
                                         >
-                                            <Eye size={14} />
+                                            <Eye size={12} />
                                         </button>
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onEditVariation?.(variation);
                                             }}
-                                            className="p-1 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
+                                            className="p-0.5 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700"
                                             title="Edit Variation"
                                         >
-                                            <Edit size={14} />
+                                            <Edit size={12} />
                                         </button>
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onEditBom?.(variation);
                                             }}
-                                            className="p-1 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
+                                            className="p-0.5 rounded hover:bg-purple-100 text-purple-500 hover:text-purple-700"
                                             title="Edit BOM"
                                         >
-                                            <GitBranch size={14} />
+                                            <GitBranch size={12} />
                                         </button>
                                     </div>
                                 </td>
@@ -670,7 +670,7 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                             {expandedVariations[variation.id] && variation.children && (
                                 <tr>
                                     <td colSpan={10} className="p-0 bg-blue-50/30">
-                                        <div className="py-2 px-4 ml-8">
+                                        <div className="py-1 px-2 ml-6">
                                             <SkusTable skus={variation.children} />
                                         </div>
                                     </td>
@@ -698,30 +698,30 @@ function SkusTable({ skus }: SkusTableProps) {
     }, [skus]);
 
     return (
-        <div className="border rounded-lg bg-white overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
+        <div className="border rounded bg-white overflow-hidden shadow-sm">
+            <table className="w-full text-xs">
                 <thead className="bg-blue-50/70 border-b">
                     <tr>
-                        <th className="text-left px-3 py-1.5 text-xs font-semibold text-blue-700 uppercase w-16">Size</th>
-                        <th className="text-left px-3 py-1.5 text-xs font-semibold text-blue-700 uppercase">SKU Code</th>
-                        <th className="text-right px-3 py-1.5 text-xs font-semibold text-blue-700 uppercase w-24">MRP</th>
-                        <th className="text-right px-3 py-1.5 text-xs font-semibold text-blue-700 uppercase w-20">Stock</th>
-                        <th className="text-center px-3 py-1.5 text-xs font-semibold text-blue-700 uppercase w-20">Status</th>
+                        <th className="text-left px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-12">Size</th>
+                        <th className="text-left px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase">SKU Code</th>
+                        <th className="text-right px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-16">MRP</th>
+                        <th className="text-right px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-14">Stock</th>
+                        <th className="text-center px-2 py-1 text-[10px] font-semibold text-blue-700 uppercase w-14">Status</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                     {sortedSkus.map((sku) => (
                         <tr key={sku.id} className="hover:bg-blue-50/30">
-                            <td className="px-3 py-1.5 font-semibold text-gray-900">
+                            <td className="px-2 py-0.5 font-semibold text-gray-900">
                                 {sku.size}
                             </td>
-                            <td className="px-3 py-1.5 font-mono text-xs text-gray-600">
+                            <td className="px-2 py-0.5 font-mono text-[11px] text-gray-600">
                                 {sku.skuCode}
                             </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums font-medium">
+                            <td className="px-2 py-0.5 text-right tabular-nums font-medium">
                                 {sku.mrp ? `₹${sku.mrp.toLocaleString()}` : '-'}
                             </td>
-                            <td className="px-3 py-1.5 text-right">
+                            <td className="px-2 py-0.5 text-right">
                                 <span className={`tabular-nums font-semibold ${
                                     (sku.currentBalance || 0) === 0 ? 'text-red-600' :
                                     (sku.currentBalance || 0) < 3 ? 'text-amber-600' : 'text-green-600'
@@ -729,13 +729,13 @@ function SkusTable({ skus }: SkusTableProps) {
                                     {(sku.currentBalance || 0).toLocaleString()}
                                 </span>
                             </td>
-                            <td className="px-3 py-1.5 text-center">
+                            <td className="px-2 py-0.5 text-center">
                                 {(sku.currentBalance || 0) === 0 ? (
-                                    <Badge variant="destructive" className="text-xs">Out</Badge>
+                                    <Badge variant="destructive" className="text-[10px] px-1 py-0 h-4">Out</Badge>
                                 ) : (sku.currentBalance || 0) < 3 ? (
-                                    <Badge variant="warning" className="text-xs">Low</Badge>
+                                    <Badge variant="warning" className="text-[10px] px-1 py-0 h-4">Low</Badge>
                                 ) : (
-                                    <Badge variant="success" className="text-xs">OK</Badge>
+                                    <Badge variant="success" className="text-[10px] px-1 py-0 h-4">OK</Badge>
                                 )}
                             </td>
                         </tr>

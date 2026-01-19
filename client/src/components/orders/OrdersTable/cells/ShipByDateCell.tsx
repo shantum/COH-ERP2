@@ -2,12 +2,12 @@
  * ShipByDateCell - Editable ship-by date cell
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { Calendar } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
-export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
+export const ShipByDateCell = memo(function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
     if (!row.isFirstLine) return null;
 
     const { onUpdateShipByDate } = handlersRef.current;
@@ -82,6 +82,10 @@ export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
             {formatted}
         </span>
     );
-}
+}, (prev, next) => (
+    prev.row.isFirstLine === next.row.isFirstLine &&
+    prev.row.orderId === next.row.orderId &&
+    prev.row.shipByDate === next.row.shipByDate
+));
 
 interface ShipByDateCellProps extends CellProps {}

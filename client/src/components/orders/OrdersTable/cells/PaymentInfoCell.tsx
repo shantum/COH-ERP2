@@ -4,6 +4,7 @@
  * Line 2: COD/Prepaid
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 import { Tag } from 'lucide-react';
@@ -12,7 +13,7 @@ interface PaymentInfoCellProps {
     row: FlattenedOrderRow;
 }
 
-export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
+export const PaymentInfoCell = memo(function PaymentInfoCell({ row }: PaymentInfoCellProps) {
     if (!row.isFirstLine) return null;
 
     const paymentMethod = row.paymentMethod || '';
@@ -49,4 +50,9 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
             </span>
         </div>
     );
-}
+}, (prev, next) => (
+    prev.row.isFirstLine === next.row.isFirstLine &&
+    prev.row.totalAmount === next.row.totalAmount &&
+    prev.row.paymentMethod === next.row.paymentMethod &&
+    prev.row.discountCodes === next.row.discountCodes
+));

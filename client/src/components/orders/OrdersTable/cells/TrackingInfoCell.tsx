@@ -5,14 +5,14 @@
  * Edit: Click opens popover with form
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Package, Check, X } from 'lucide-react';
 import type { CellProps } from '../types';
 import { COURIER_OPTIONS } from '../constants';
 import { cn } from '../../../../lib/utils';
 
-export function TrackingInfoCell({ row, handlersRef }: CellProps) {
+export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
     const { onUpdateLineTracking } = handlersRef.current;
@@ -184,4 +184,8 @@ export function TrackingInfoCell({ row, handlersRef }: CellProps) {
             )}
         </>
     );
-}
+}, (prev, next) => (
+    prev.row.lineId === next.row.lineId &&
+    prev.row.lineAwbNumber === next.row.lineAwbNumber &&
+    prev.row.lineCourier === next.row.lineCourier
+));

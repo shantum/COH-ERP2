@@ -4,6 +4,7 @@
  * Line 2: City
  */
 
+import { memo } from 'react';
 import type { CellProps } from '../types';
 
 /**
@@ -15,7 +16,7 @@ function formatLtv(value: number): string {
     return `₹${value}`;
 }
 
-export function CustomerInfoCell({ row, handlersRef }: CellProps) {
+export const CustomerInfoCell = memo(function CustomerInfoCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
 
     const { onViewCustomer } = handlersRef.current;
@@ -63,4 +64,10 @@ export function CustomerInfoCell({ row, handlersRef }: CellProps) {
             </div>
         </div>
     );
-}
+}, (prev, next) => (
+    prev.row.isFirstLine === next.row.isFirstLine &&
+    prev.row.customerName === next.row.customerName &&
+    prev.row.city === next.row.city &&
+    prev.row.customerOrderCount === next.row.customerOrderCount &&
+    prev.row.customerLtv === next.row.customerLtv
+));

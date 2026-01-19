@@ -2,11 +2,11 @@
  * NotesCell - Inline editable notes for order lines
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { Pencil } from 'lucide-react';
 import type { CellProps } from '../types';
 
-export function NotesCell({ row, handlersRef }: CellProps) {
+export const NotesCell = memo(function NotesCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
     const { onUpdateLineNotes } = handlersRef.current;
@@ -91,4 +91,7 @@ export function NotesCell({ row, handlersRef }: CellProps) {
             <Pencil size={10} className="text-gray-300 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity" />
         </div>
     );
-}
+}, (prev, next) => (
+    prev.row.lineId === next.row.lineId &&
+    prev.row.lineNotes === next.row.lineNotes
+));

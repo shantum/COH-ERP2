@@ -93,9 +93,13 @@ export function OrdersTable({
         return saved ? JSON.parse(saved) : {};
     });
 
+    // Use ref to avoid recreating getHeaderName callback when customHeaders change
+    const customHeadersRef = useRef(customHeaders);
+    customHeadersRef.current = customHeaders;
+
     const getHeaderName = useCallback(
-        (colId: string) => customHeaders[colId] || DEFAULT_HEADERS[colId] || colId,
-        [customHeaders]
+        (colId: string) => customHeadersRef.current[colId] || DEFAULT_HEADERS[colId] || colId,
+        [] // No dependencies - uses ref for stable callback
     );
 
     const setCustomHeader = useCallback((colId: string, headerName: string) => {

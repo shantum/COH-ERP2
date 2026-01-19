@@ -3,12 +3,13 @@
  * Light checkbox style - thin border, subtle colors
  */
 
+import { memo } from 'react';
 import { X } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 import { CheckboxSpinner } from './CheckboxSpinner';
 
-export function CancelLineCell({ row, handlersRef }: CellProps) {
+export const CancelLineCell = memo(function CancelLineCell({ row, handlersRef }: CellProps) {
     if (!row || !row.lineId) return null;
 
     const { isCancellingLine, isUncancellingLine, onCancelLine, onUncancelLine } = handlersRef.current;
@@ -57,4 +58,9 @@ export function CancelLineCell({ row, handlersRef }: CellProps) {
             {isToggling ? <CheckboxSpinner color="red" /> : null}
         </button>
     );
-}
+}, (prev, next) => (
+    prev.row.lineId === next.row.lineId &&
+    prev.row.lineStatus === next.row.lineStatus &&
+    prev.handlersRef.current.isCancellingLine === next.handlersRef.current.isCancellingLine &&
+    prev.handlersRef.current.isUncancellingLine === next.handlersRef.current.isUncancellingLine
+));
