@@ -13,6 +13,7 @@ interface ProductionDatePopoverProps {
     onSelectDate: (date: string) => void;
     onClear: () => void;
     hasExistingBatch: boolean;
+    variant?: 'pending' | 'allocated';
 }
 
 export function ProductionDatePopover({
@@ -21,6 +22,7 @@ export function ProductionDatePopover({
     onSelectDate,
     onClear,
     hasExistingBatch,
+    variant = 'pending',
 }: ProductionDatePopoverProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
@@ -105,27 +107,31 @@ export function ProductionDatePopover({
     ];
 
     return (
-        <div className="inline-block">
+        <div className="flex items-center">
             <button
                 ref={buttonRef}
                 onClick={handleOpen}
-                className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors ${
+                className={`text-xs w-[82px] py-1 rounded-md flex items-center justify-center gap-1 transition-colors ${
                     currentDate
                         ? isLocked(currentDate)
                             ? 'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200'
-                            : 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200'
-                        : 'text-amber-600/80 hover:text-amber-700 hover:bg-amber-50 border border-dashed border-amber-300 hover:border-amber-400'
+                            : variant === 'allocated'
+                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-emerald-200'
+                                : 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200'
+                        : 'text-amber-600 hover:text-amber-700 hover:bg-amber-50 border border-dashed border-amber-300 hover:border-amber-400'
                 }`}
                 title={currentDate ? `Production: ${formatDisplayDate(currentDate)}` : 'Set production date'}
             >
-                <Calendar size={10} />
                 {currentDate ? (
-                    <span className="flex flex-col items-start leading-tight">
-                        <span className="font-medium">{formatDisplayDate(currentDate)}</span>
+                    <span className="flex flex-col items-center leading-tight">
+                        <span className="font-medium text-[11px]">{formatDisplayDate(currentDate)}</span>
                         <span className="text-[9px] opacity-75">{getRelativeDay(currentDate)}</span>
                     </span>
                 ) : (
-                    <span className="text-[10px] font-medium">Production</span>
+                    <>
+                        <Calendar size={12} />
+                        <span className="text-[11px]">Production</span>
+                    </>
                 )}
             </button>
 

@@ -1,6 +1,6 @@
 /**
  * Fulfillment Columns - TanStack Table column definitions
- * Columns: allocate, production, notes, pick, pack, ship, cancelLine
+ * Columns: workflow, production, notes, cancelLine
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
@@ -8,25 +8,32 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
-    AllocateCell,
-    PickCell,
-    PackCell,
-    ShipCell,
     CancelLineCell,
+    PickPackCell,
     ProductionCell,
     NotesCell,
+    WorkflowCell,
 } from '../cells';
 
 export function buildFulfillmentColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrderRow>[] {
     const { getHeaderName, handlersRef, isDateLocked } = ctx;
 
     return [
-        // Allocate
+        // Combined Workflow (A → P → K → S)
         {
-            id: 'allocate',
-            header: getHeaderName('allocate'),
-            size: DEFAULT_COLUMN_WIDTHS.allocate,
-            cell: ({ row }) => <AllocateCell row={row.original} handlersRef={handlersRef} />,
+            id: 'workflow',
+            header: getHeaderName('workflow'),
+            size: DEFAULT_COLUMN_WIDTHS.workflow,
+            cell: ({ row }) => <WorkflowCell row={row.original} handlersRef={handlersRef} />,
+            enableSorting: false,
+        },
+
+        // Pick & Pack
+        {
+            id: 'pickPack',
+            header: getHeaderName('pickPack'),
+            size: DEFAULT_COLUMN_WIDTHS.pickPack,
+            cell: ({ row }) => <PickPackCell row={row.original} handlersRef={handlersRef} />,
             enableSorting: false,
         },
 
@@ -51,33 +58,6 @@ export function buildFulfillmentColumns(ctx: OrdersTableContext): ColumnDef<Flat
             header: getHeaderName('notes'),
             size: DEFAULT_COLUMN_WIDTHS.notes,
             cell: ({ row }) => <NotesCell row={row.original} handlersRef={handlersRef} />,
-            enableSorting: false,
-        },
-
-        // Pick
-        {
-            id: 'pick',
-            header: getHeaderName('pick'),
-            size: DEFAULT_COLUMN_WIDTHS.pick,
-            cell: ({ row }) => <PickCell row={row.original} handlersRef={handlersRef} />,
-            enableSorting: false,
-        },
-
-        // Pack
-        {
-            id: 'pack',
-            header: getHeaderName('pack'),
-            size: DEFAULT_COLUMN_WIDTHS.pack,
-            cell: ({ row }) => <PackCell row={row.original} handlersRef={handlersRef} />,
-            enableSorting: false,
-        },
-
-        // Ship
-        {
-            id: 'ship',
-            header: getHeaderName('ship'),
-            size: DEFAULT_COLUMN_WIDTHS.ship,
-            cell: ({ row }) => <ShipCell row={row.original} handlersRef={handlersRef} />,
             enableSorting: false,
         },
 

@@ -26,6 +26,8 @@ interface UpdateLineBody {
     qty?: number;
     unitPrice?: number;
     notes?: string;
+    awbNumber?: string;
+    courier?: string;
 }
 
 interface AddLineBody {
@@ -171,7 +173,7 @@ router.put(
     authenticateToken,
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
         const lineId = getParamString(req.params.lineId);
-        const { qty, unitPrice, notes } = req.body as UpdateLineBody;
+        const { qty, unitPrice, notes, awbNumber, courier } = req.body as UpdateLineBody;
         const line = await req.prisma.orderLine.findUnique({
             where: { id: lineId },
             include: { order: true },
@@ -195,8 +197,10 @@ router.put(
         if (qty !== undefined) updateData.qty = qty;
         if (unitPrice !== undefined) updateData.unitPrice = unitPrice;
         if (notes !== undefined) updateData.notes = notes;
+        if (awbNumber !== undefined) updateData.awbNumber = awbNumber || null;
+        if (courier !== undefined) updateData.courier = courier || null;
 
-        // If only updating notes, simple update without transaction
+        // If only updating simple fields (notes, awbNumber, courier), no transaction needed
         if (!hasQtyOrPrice) {
             const updated = await req.prisma.orderLine.update({
                 where: { id: lineId },

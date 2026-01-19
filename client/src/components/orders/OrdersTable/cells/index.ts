@@ -6,13 +6,12 @@
 export { CheckboxSpinner } from './CheckboxSpinner';
 
 // Fulfillment action cells
-export { AllocateCell } from './AllocateCell';
-export { PickCell } from './PickCell';
-export { PackCell } from './PackCell';
-export { ShipCell } from './ShipCell';
+export { AssignStockCell } from './AssignStockCell';
 export { CancelLineCell } from './CancelLineCell';
+export { PickPackCell } from './PickPackCell';
 export { ProductionCell } from './ProductionCell';
 export { ProductionDatePopover } from './ProductionDatePopover';
+export { WorkflowCell } from './WorkflowCell';
 
 // Order info cells
 export { OrderCell } from './OrderCell';
@@ -41,7 +40,6 @@ export { QtyStockCell } from './QtyStockCell';
 export { NotesCell } from './NotesCell';
 
 // Tracking cells
-export { AwbCell } from './AwbCell';
-export { CourierCell } from './CourierCell';
+export { TrackingInfoCell } from './TrackingInfoCell';
 export { TrackingStatusCell } from './TrackingStatusCell';
 export { ShopifyTrackingCell } from './ShopifyTrackingCell';

@@ -57,7 +57,7 @@ export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
                 title="Set ship by date"
             >
                 <Calendar size={10} />
-                <span className="text-[10px] italic">Set date</span>
+                <span className="text-[10px] italic">Ship by</span>
             </button>
         );
     }

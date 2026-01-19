@@ -557,6 +557,17 @@ export const ORDER_UNIFIED_SELECT = {
                                     imageUrl: true,
                                 },
                             },
+                            fabric: {
+                                select: {
+                                    colorHex: true,
+                                    colours: {
+                                        select: {
+                                            colourName: true,
+                                            colourHex: true,
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -780,6 +791,10 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                     colorHex: string | null;
                     imageUrl: string | null;
                     product: { id: string; name: string; imageUrl: string | null } | null;
+                    fabric: {
+                        colorHex: string | null;
+                        colours: { colourName: string; colourHex: string | null }[];
+                    } | null;
                 } | null;
             } | null;
             productionBatch: {
@@ -939,7 +954,15 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 orderTrackingStatus: (order.trackingStatus as string) || null,
                 productName: sku?.variation?.product?.name || '-',
                 colorName: sku?.variation?.colorName || '-',
-                colorHex: sku?.variation?.colorHex || null,
+                colorHex: (() => {
+                    // Priority: FabricColour (by matching name) > Fabric.colorHex > Variation.colorHex
+                    const variationColorName = sku?.variation?.colorName?.toLowerCase().trim();
+                    const fabricColours = sku?.variation?.fabric?.colours || [];
+                    const matchingColour = fabricColours.find(
+                        (c) => c.colourName?.toLowerCase().trim() === variationColorName
+                    );
+                    return matchingColour?.colourHex || sku?.variation?.fabric?.colorHex || sku?.variation?.colorHex || null;
+                })(),
                 imageUrl: sku?.variation?.imageUrl || sku?.variation?.product?.imageUrl || null,
                 size: sku?.size || '-',
                 skuCode: sku?.skuCode || '-',
@@ -1040,6 +1063,17 @@ export const LINE_SSE_SELECT = {
                             imageUrl: true,
                         },
                     },
+                    fabric: {
+                        select: {
+                            colorHex: true,
+                            colours: {
+                                select: {
+                                    colourName: true,
+                                    colourHex: true,
+                                },
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -1133,7 +1167,13 @@ export function flattenLineForSSE(
     // Build SKU display strings
     const productName = sku?.variation?.product?.name || '-';
     const colorName = sku?.variation?.colorName || '-';
-    const colorHex = sku?.variation?.colorHex || null;
+    // Priority: FabricColour (by matching name) > Fabric.colorHex > Variation.colorHex
+    const variationColorNameLower = sku?.variation?.colorName?.toLowerCase().trim();
+    const fabricColours = sku?.variation?.fabric?.colours || [];
+    const matchingColour = fabricColours.find(
+        (c: { colourName: string; colourHex: string | null }) => c.colourName?.toLowerCase().trim() === variationColorNameLower
+    );
+    const colorHex = matchingColour?.colourHex || sku?.variation?.fabric?.colorHex || sku?.variation?.colorHex || null;
     const imageUrl = sku?.variation?.imageUrl || sku?.variation?.product?.imageUrl || null;
     const skuCode = sku?.skuCode || '-';
     const size = sku?.size || '-';

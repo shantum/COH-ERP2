@@ -1,6 +1,6 @@
 /**
  * Tracking Columns - TanStack Table column definitions
- * Columns: shopifyTracking (combined: status + AWB + courier), awb, courier, trackingStatus
+ * Columns: shopifyTracking, trackingInfo (AWB + courier combined), trackingStatus
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
@@ -8,8 +8,7 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
-    AwbCell,
-    CourierCell,
+    TrackingInfoCell,
     TrackingStatusCell,
     ShopifyTrackingCell,
 } from '../cells';
@@ -18,7 +17,7 @@ export function buildTrackingColumns(ctx: OrdersTableContext): ColumnDef<Flatten
     const { getHeaderName, handlersRef } = ctx;
 
     return [
-        // Shopify Tracking (combined: status + AWB + courier)
+        // Shopify Tracking (combined: status + AWB + courier from Shopify)
         {
             id: 'shopifyTracking',
             header: getHeaderName('shopifyTracking'),
@@ -27,25 +26,16 @@ export function buildTrackingColumns(ctx: OrdersTableContext): ColumnDef<Flatten
             enableSorting: true,
         },
 
-        // AWB (editable)
+        // ERP Tracking Info (AWB + Courier combined, editable)
         {
-            id: 'awb',
-            header: getHeaderName('awb'),
-            size: DEFAULT_COLUMN_WIDTHS.awb,
-            cell: ({ row }) => <AwbCell row={row.original} handlersRef={handlersRef} />,
+            id: 'trackingInfo',
+            header: getHeaderName('trackingInfo'),
+            size: DEFAULT_COLUMN_WIDTHS.trackingInfo,
+            cell: ({ row }) => <TrackingInfoCell row={row.original} handlersRef={handlersRef} />,
             enableSorting: true,
         },
 
-        // Courier (editable dropdown)
-        {
-            id: 'courier',
-            header: getHeaderName('courier'),
-            size: DEFAULT_COLUMN_WIDTHS.courier,
-            cell: ({ row }) => <CourierCell row={row.original} handlersRef={handlersRef} />,
-            enableSorting: true,
-        },
-
-        // Tracking Status
+        // Tracking Status (from iThink)
         {
             id: 'trackingStatus',
             header: getHeaderName('trackingStatus'),

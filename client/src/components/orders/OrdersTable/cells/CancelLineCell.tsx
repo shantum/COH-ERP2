@@ -11,10 +11,10 @@ import { CheckboxSpinner } from './CheckboxSpinner';
 export function CancelLineCell({ row, handlersRef }: CellProps) {
     if (!row || !row.lineId) return null;
 
-    const { allocatingLines, onCancelLine, onUncancelLine } = handlersRef.current;
+    const { isCancellingLine, isUncancellingLine, onCancelLine, onUncancelLine } = handlersRef.current;
 
     const isCancelled = row.lineStatus === 'cancelled';
-    const isToggling = allocatingLines.has(row.lineId);
+    const isToggling = isCancellingLine || isUncancellingLine;
 
     // Cancelled - checked with X
     if (isCancelled) {

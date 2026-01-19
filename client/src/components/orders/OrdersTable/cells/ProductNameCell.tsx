@@ -2,8 +2,9 @@
  * ProductNameCell - Displays product thumbnail, name, SKU, color (with swatch), and size
  */
 
+import { useState } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
-import { Package } from 'lucide-react';
+import { Package, Check } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
 
 interface ProductNameCellProps {
@@ -166,9 +167,26 @@ export function ProductNameCell({ row }: ProductNameCellProps) {
     const isLight = colorHex ? isLightColor(colorHex) : false;
 
     const fullName = [productName, colorName, size, skuCode].filter(Boolean).join(' / ');
+    const [copied, setCopied] = useState(false);
+
+    const handleCopySku = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (skuCode) {
+            navigator.clipboard.writeText(skuCode);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        }
+    };
 
     return (
-        <div className="flex items-center gap-2 py-0.5" title={fullName}>
+        <div
+            className={cn(
+                'flex items-center gap-2 py-0.5 cursor-pointer -mx-1 px-1 rounded transition-colors',
+                copied ? 'bg-emerald-50' : 'hover:bg-gray-50'
+            )}
+            title={skuCode ? `Click to copy: ${skuCode}` : fullName}
+            onClick={handleCopySku}
+        >
             {/* Thumbnail */}
             <div className="w-7 h-7 rounded bg-gray-100 flex-shrink-0 overflow-hidden">
                 {imageUrl ? (
@@ -187,46 +205,39 @@ export function ProductNameCell({ row }: ProductNameCellProps) {
 
             {/* Product info */}
             <div className="flex flex-col justify-center leading-tight min-w-0">
-                {/* Line 1: Product name + Size badge */}
-                <div className="flex items-center gap-1.5">
+                {/* Line 1: Product name | Size */}
+                <div className="flex items-center gap-1">
                     <span className="font-medium text-gray-900 truncate">
                         {productName}
                     </span>
                     {size && size !== '-' && (
-                        <span
-                            className={cn(
-                                'text-[10px] font-bold px-1.5 py-0 rounded shrink-0',
-                                getSizeBadgeClasses(size)
-                            )}
-                        >
-                            {size}
-                        </span>
+                        <>
+                            <span className="text-gray-300">|</span>
+                            <span className="text-gray-600 shrink-0">{size}</span>
+                        </>
                     )}
                 </div>
-                {/* Line 2: Color swatch + color name + SKU */}
-                <div className="flex items-center gap-1 mt-0.5 text-[10px]">
+                {/* Line 2: Color name + SKU */}
+                <div className="flex items-center gap-1 mt-0.5 text-[11px]">
                     {colorName && colorName !== '-' && (
-                        <>
-                            {/* Small color dot */}
-                            <span
-                                className={cn(
-                                    'w-2 h-2 rounded-full shrink-0',
-                                    isLight ? 'border border-gray-300' : ''
-                                )}
-                                style={{ backgroundColor: colorHex || '#9ca3af' }}
-                            />
-                            {/* Color name in gray (cleaner) */}
-                            <span className="text-gray-500 truncate">
-                                {colorName}
-                            </span>
-                        </>
+                        <span className="font-medium truncate px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600">
+                            {colorName}
+                        </span>
                     )}
                     {colorName && colorName !== '-' && skuCode && (
                         <span className="text-gray-300">·</span>
                     )}
                     {skuCode && (
-                        <span className="font-mono text-gray-400 truncate">
-                            {skuCode}
+                        <span className={cn(
+                            'font-mono truncate transition-colors',
+                            copied ? 'text-emerald-600' : 'text-gray-400'
+                        )}>
+                            {copied ? (
+                                <span className="flex items-center gap-0.5">
+                                    <Check size={10} />
+                                    Copied
+                                </span>
+                            ) : skuCode}
                         </span>
                     )}
                 </div>
