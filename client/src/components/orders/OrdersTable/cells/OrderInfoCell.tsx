@@ -1,39 +1,35 @@
 /**
- * OrderInfoCell - Combined display of order number and smart date
- * Line 1: Order number (clickable)
- * Line 2: Smart date (relative for recent, date for older)
+ * OrderInfoCell - Order number + date/time display
+ * Layout: Date & relative time (left) | Order number (right, bold)
  */
 
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
 /**
- * Smart date formatting - shows relative time for recent, date for older
+ * Format date and relative time for two-line display
  */
-function formatSmartDate(date: Date): { text: string; urgency: 'low' | 'medium' | 'high' } {
+function formatDateTime(date: Date): { dateStr: string; relativeStr: string; isOld: boolean } {
     const now = Date.now();
     const diffMs = now - date.getTime();
     const diffMins = Math.floor(diffMs / (1000 * 60));
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const isOld = diffDays >= 3;
 
-    // Determine urgency based on days
-    const urgency: 'low' | 'medium' | 'high' =
-        diffDays > 5 ? 'high' :
-        diffDays >= 3 ? 'medium' : 'low';
+    const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
-    // Recent: relative time | Older: date
+    // Relative time
+    let relativeStr: string;
     if (diffMins < 60) {
-        return { text: `${diffMins}m ago`, urgency };
+        relativeStr = `${diffMins}m ago`;
     } else if (diffHours < 24) {
-        return { text: `${diffHours}h ago`, urgency };
-    } else if (diffDays < 7) {
-        return { text: `${diffDays}d ago`, urgency };
+        relativeStr = `${diffHours}h ago`;
     } else {
-        // Older than a week: show date
-        const formatted = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        return { text: formatted, urgency };
+        relativeStr = `${diffDays}d ago`;
     }
+
+    return { dateStr, relativeStr, isOld };
 }
 
 export function OrderInfoCell({ row, handlersRef }: CellProps) {
@@ -42,35 +38,33 @@ export function OrderInfoCell({ row, handlersRef }: CellProps) {
     const { onViewOrder } = handlersRef.current;
 
     const date = new Date(row.orderDate);
-    const { text: dateText, urgency } = formatSmartDate(date);
-
-    // Color based on urgency (only for older orders)
-    const dateColor = urgency === 'high'
-        ? 'text-red-600 font-medium'
-        : urgency === 'medium'
-            ? 'text-amber-600'
-            : 'text-gray-400';
+    const { dateStr, relativeStr, isOld } = formatDateTime(date);
 
     return (
-        <div className="flex flex-col justify-center leading-tight py-0.5">
-            {/* Line 1: Order number */}
+        <div className="flex items-center gap-2 py-1">
+            {/* Date/Time - two lines */}
+            <div
+                className={cn(
+                    'shrink-0 w-12 flex flex-col text-right',
+                    isOld ? 'text-amber-600' : 'text-gray-400'
+                )}
+                title={date.toLocaleString('en-IN')}
+            >
+                <span className="text-[11px] leading-tight">{dateStr}</span>
+                <span className="text-[10px] leading-tight">{relativeStr}</span>
+            </div>
+
+            {/* Order number */}
             <button
                 onClick={(e) => {
                     e.stopPropagation();
                     onViewOrder(row.orderId);
                 }}
-                className="text-blue-600 hover:text-blue-800 hover:underline font-medium text-left"
+                className="text-gray-800 hover:text-blue-600 hover:underline font-bold text-base"
                 title={`View order ${row.orderNumber}`}
             >
                 {row.orderNumber}
             </button>
-            {/* Line 2: Smart date */}
-            <span
-                className={cn('text-[10px] mt-0.5', dateColor)}
-                title={date.toLocaleString('en-IN')}
-            >
-                {dateText}
-            </span>
         </div>
     );
 }

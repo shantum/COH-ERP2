@@ -82,26 +82,24 @@ function arrayToVisibility(columns: string[]): VisibilityState {
 }
 
 // Migration: map old column IDs to new ones
-// v3: All order/customer/payment info merged into single 'order' column
+// v7: 'order' split into orderInfo + customerInfo + paymentInfo
 const COLUMN_MIGRATIONS: Record<string, string> = {
-    // v3: orderCustomer + paymentInfo → order
-    'orderCustomer': 'order',
-    'paymentInfo': 'order',
-    // v2: orderInfo + customerInfo → order
-    'orderInfo': 'order',
-    'customerInfo': 'order',
-    // v1: old granular columns → order
-    'orderDate': 'order',
-    'orderAge': 'order',
-    'orderNumber': 'order',
-    'customerName': 'order',
-    'city': 'order',
-    'customerOrderCount': 'order',
-    'customerLtv': 'order',
-    'paymentMethod': 'order',
-    'orderValue': 'order',
-    'discountCode': 'order',
-    'rtoHistory': 'order',
+    // v7: old combined 'order' → orderInfo (primary)
+    'order': 'orderInfo',
+    // v3: orderCustomer → customerInfo
+    'orderCustomer': 'customerInfo',
+    // v1: old granular columns → appropriate new column
+    'orderDate': 'orderInfo',
+    'orderAge': 'orderInfo',
+    'orderNumber': 'orderInfo',
+    'customerName': 'customerInfo',
+    'city': 'customerInfo',
+    'customerOrderCount': 'customerInfo',
+    'customerLtv': 'customerInfo',
+    'paymentMethod': 'paymentInfo',
+    'orderValue': 'paymentInfo',
+    'discountCode': 'paymentInfo',
+    'rtoHistory': 'paymentInfo',
     // Other migrations
     'skuCode': 'productName',
     'shopifyStatus': 'shopifyTracking',
@@ -109,13 +107,27 @@ const COLUMN_MIGRATIONS: Record<string, string> = {
     'shopifyCourier': 'shopifyTracking',
     // v4: skuStock merged into qty
     'skuStock': 'qty',
+    // v5: allocate, pick, pack, ship merged into workflow
+    'allocate': 'workflow',
+    'pick': 'workflow',
+    'pack': 'workflow',
+    'ship': 'workflow',
+    // v6: awb + courier merged into trackingInfo
+    'awb': 'trackingInfo',
+    'courier': 'trackingInfo',
 };
+
+// Special migration: old 'order' column expands to three new columns
+const ORDER_EXPANSION = ['orderInfo', 'customerInfo', 'paymentInfo'];
 
 // Migrate old column IDs to new ones
 function migrateColumns(columns: string[]): string[] {
     const migrated = new Set<string>();
     for (const col of columns) {
-        if (COLUMN_MIGRATIONS[col]) {
+        // Special case: 'order' expands to three columns
+        if (col === 'order') {
+            ORDER_EXPANSION.forEach(c => migrated.add(c));
+        } else if (COLUMN_MIGRATIONS[col]) {
             migrated.add(COLUMN_MIGRATIONS[col]);
         } else if ((ALL_COLUMN_IDS as readonly string[]).includes(col)) {
             migrated.add(col);
@@ -130,10 +142,20 @@ function migrateColumnOrder(order: string[]): string[] {
     const seen = new Set<string>();
 
     for (const col of order) {
-        const mappedCol = COLUMN_MIGRATIONS[col] || col;
-        if ((ALL_COLUMN_IDS as readonly string[]).includes(mappedCol) && !seen.has(mappedCol)) {
-            validOrder.push(mappedCol);
-            seen.add(mappedCol);
+        // Special case: 'order' expands to three columns in order
+        if (col === 'order') {
+            ORDER_EXPANSION.forEach(c => {
+                if (!seen.has(c)) {
+                    validOrder.push(c);
+                    seen.add(c);
+                }
+            });
+        } else {
+            const mappedCol = COLUMN_MIGRATIONS[col] || col;
+            if ((ALL_COLUMN_IDS as readonly string[]).includes(mappedCol) && !seen.has(mappedCol)) {
+                validOrder.push(mappedCol);
+                seen.add(mappedCol);
+            }
         }
     }
 

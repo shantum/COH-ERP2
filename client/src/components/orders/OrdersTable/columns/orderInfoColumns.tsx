@@ -1,6 +1,6 @@
 /**
  * Order Info Columns - TanStack Table column definitions
- * Columns: order (combined order + customer + payment), shipByDate
+ * Columns: orderInfo, customerInfo, paymentInfo, shipByDate
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
@@ -8,7 +8,9 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
-    OrderCell,
+    OrderInfoCell,
+    CustomerInfoCell,
+    PaymentInfoCell,
     ShipByDateCell,
 } from '../cells';
 
@@ -16,18 +18,42 @@ export function buildOrderInfoColumns(ctx: OrdersTableContext): ColumnDef<Flatte
     const { getHeaderName, handlersRef } = ctx;
 
     return [
-        // Combined Order + Customer + Payment
+        // Order Number + Date/Time
         {
-            id: 'order',
-            header: getHeaderName('order'),
-            size: DEFAULT_COLUMN_WIDTHS.order,
-            cell: ({ row }) => <OrderCell row={row.original} handlersRef={handlersRef} />,
+            id: 'orderInfo',
+            header: getHeaderName('orderInfo'),
+            size: DEFAULT_COLUMN_WIDTHS.orderInfo,
+            cell: ({ row }) => <OrderInfoCell row={row.original} handlersRef={handlersRef} />,
             enableSorting: true,
             sortingFn: (a, b) => {
                 const dateA = new Date(a.original.orderDate).getTime();
                 const dateB = new Date(b.original.orderDate).getTime();
                 return dateA - dateB;
             },
+        },
+
+        // Customer Name, City, Orders, LTV
+        {
+            id: 'customerInfo',
+            header: getHeaderName('customerInfo'),
+            size: DEFAULT_COLUMN_WIDTHS.customerInfo,
+            cell: ({ row }) => <CustomerInfoCell row={row.original} handlersRef={handlersRef} />,
+            enableSorting: true,
+            sortingFn: (a, b) => {
+                const nameA = a.original.customerName || '';
+                const nameB = b.original.customerName || '';
+                return nameA.localeCompare(nameB);
+            },
+        },
+
+        // Order Value, Payment Method, Discount Code
+        {
+            id: 'paymentInfo',
+            header: getHeaderName('paymentInfo'),
+            size: DEFAULT_COLUMN_WIDTHS.paymentInfo,
+            cell: ({ row }) => <PaymentInfoCell row={row.original} />,
+            enableSorting: true,
+            sortingFn: (a, b) => (a.original.totalAmount || 0) - (b.original.totalAmount || 0),
         },
 
         // Ship By Date

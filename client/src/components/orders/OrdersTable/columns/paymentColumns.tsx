@@ -1,28 +1,18 @@
 /**
  * Payment Columns - TanStack Table column definitions
- * Columns: paymentInfo (combined), tags, customerNotes, customerTags
+ * Columns: tags, customerNotes, customerTags
+ * Note: paymentInfo column is now in orderInfoColumns.tsx
  */
 
 import type { ColumnDef } from '@tanstack/react-table';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
-import { PaymentInfoCell } from '../cells';
 
 export function buildPaymentColumns(ctx: OrdersTableContext): ColumnDef<FlattenedOrderRow>[] {
     const { getHeaderName } = ctx;
 
     return [
-        // Payment Info (combined: payment method, order value, discount, RTO risk)
-        {
-            id: 'paymentInfo',
-            header: getHeaderName('paymentInfo'),
-            size: DEFAULT_COLUMN_WIDTHS.paymentInfo,
-            cell: ({ row }) => <PaymentInfoCell row={row.original} />,
-            enableSorting: true,
-            sortingFn: (a, b) => (a.original.totalAmount || 0) - (b.original.totalAmount || 0),
-        },
-
         // Tags
         {
             id: 'tags',
@@ -67,14 +57,16 @@ export function buildPaymentColumns(ctx: OrdersTableContext): ColumnDef<Flattene
             size: DEFAULT_COLUMN_WIDTHS.customerTags,
             cell: ({ row }) => {
                 if (!row.original.isFirstLine) return null;
-                const rawTags = row.original.customerTags;
+                const rawTags = row.original.customerTags as string | string[] | null | undefined;
                 if (!rawTags) return <span className="text-gray-300">-</span>;
                 // Handle both string and array formats
-                const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(',').map(t => t.trim()).filter(Boolean);
+                const tags: string[] = Array.isArray(rawTags)
+                    ? rawTags
+                    : rawTags.split(',').map((t: string) => t.trim()).filter(Boolean);
                 if (tags.length === 0) return <span className="text-gray-300">-</span>;
                 return (
                     <div className="flex flex-wrap gap-0.5">
-                        {tags.slice(0, 2).map((tag, i) => (
+                        {tags.slice(0, 2).map((tag: string, i: number) => (
                             <span key={i} className="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]">
                                 {tag}
                             </span>
