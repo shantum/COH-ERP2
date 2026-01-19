@@ -9,13 +9,6 @@ const shortDateFormatter = new Intl.DateTimeFormat('en-IN', {
     month: 'short'
 });
 
-const fullDateTimeFormatter = new Intl.DateTimeFormat('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-});
-
 /**
  * Format date as "DD Mon" (e.g., "15 Jan")
  */
