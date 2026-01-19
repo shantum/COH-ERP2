@@ -7,7 +7,7 @@
 3. **Living memory.** Update this file with learnings/mistakes as you work.
 4. **Document as you go.** Comment undocumented code when you encounter it.
 5. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
-6. **Commit early, commit often.** Always commit your changes. Small, frequent commits.
+6. **Commit early, commit often.** Always commit your changes. Small, frequent commits. **ALWAYS run `cd client && npx tsc --noEmit` before committing to catch TypeScript errors.**
 7. **Separate config from code.** Magic numbers, thresholds, mappings → `/config/`. Code should read config, not contain it.
 8. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
 9. **Build for the long term.** Write code your future self will thank you for. Maintainability over cleverness.
@@ -55,7 +55,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 15. **Shopify fulfillment**: syncs tracking data ONLY; ERP is source of truth for `shipped` status—never auto-ship from webhooks
 16. **Tracking sync**: excludes terminal statuses (`delivered`, `rto_delivered`) to avoid wasting API calls on unchangeable data
 17. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
-18. **TypeScript checks**: use `npx tsc --noEmit --force` to bypass incremental build cache; plain `tsc --noEmit` may miss errors due to `.tsbuildinfo` caching
+18. **TypeScript checks BEFORE committing**: ALWAYS run `cd client && npx tsc --noEmit` before every commit. This is NON-NEGOTIABLE. Delete `.tsbuildinfo` if you suspect caching issues. Never push code with TypeScript errors.
 19. **TanStack Table trees**: use `getSubRows` for hierarchy, never mutate `children` directly; expansion state separate from data
 20. **Fabric hierarchy**: Database enforces Material→Fabric→Colour consistency; colours MUST have fabricId, fabrics MUST have materialId
 21. **Inheritance pattern**: Fabric colours inherit cost/lead/minOrder from parent fabric if not explicitly set (priority: colour → fabric → null)
