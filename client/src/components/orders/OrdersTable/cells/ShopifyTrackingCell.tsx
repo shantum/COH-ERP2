@@ -57,7 +57,7 @@ function getFulfillmentState(status: string | null | undefined, awb: string | nu
 }
 
 const stateConfig: Record<FulfillmentState, { label: string; labelClass: string }> = {
-    unfulfilled: { label: 'Unfulfilled', labelClass: 'text-amber-600' },
+    unfulfilled: { label: 'Unfulfilled', labelClass: 'text-slate-400' },
     fulfilled: { label: 'Fulfilled', labelClass: 'text-emerald-600' },
     in_transit: { label: 'In Transit', labelClass: 'text-blue-600' },
     delivered: { label: 'Delivered', labelClass: 'text-emerald-600' },
@@ -71,15 +71,15 @@ export function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
     const courier = row.shopifyCourier;
     const status = row.shopifyStatus;
 
-    const state = getFulfillmentState(status, awb);
+    const state = getFulfillmentState(status, awb ?? null);
     const config = stateConfig[state];
 
-    // Unfulfilled - minimal display
+    // Unfulfilled - minimal display, greyed out
     if (state === 'unfulfilled') {
         return (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 opacity-40">
                 <ShopifyIcon />
-                <span className={cn('text-[11px]', config.labelClass)}>
+                <span className="text-[11px] text-slate-500">
                     {config.label}
                 </span>
             </div>

@@ -218,7 +218,7 @@ export interface FlattenedOrderRow {
     lineShippedAt: string | null;
     lineDeliveredAt: string | null;
     lineTrackingStatus: string | null;
-    lineLastTrackingUpdate: string | null;
+    lineLastTrackingUpdate?: string | null;
     lineAwbNumber?: string | null;
     lineCourier?: string | null;
 

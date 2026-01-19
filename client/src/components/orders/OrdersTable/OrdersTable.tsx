@@ -198,6 +198,9 @@ export function OrdersTable({
     // Scroll container ref
     const parentRef = useRef<HTMLDivElement>(null);
 
+    // Container width for auto-sizing columns
+    const [containerWidth, setContainerWidth] = useState(0);
+
     // Update scroll position for indicators
     const handleScroll = useCallback(() => {
         const el = parentRef.current;
@@ -208,6 +211,22 @@ export function OrdersTable({
             xMax: Math.max(1, el.scrollWidth - el.clientWidth),
             yMax: Math.max(1, el.scrollHeight - el.clientHeight),
         });
+    }, []);
+
+    // Track container width for auto-sizing
+    useEffect(() => {
+        const el = parentRef.current;
+        if (!el) return;
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                // Account for scrollbar width (~8px) and margins
+                setContainerWidth(entry.contentRect.width - 16);
+            }
+        });
+
+        resizeObserver.observe(el);
+        return () => resizeObserver.disconnect();
     }, []);
 
     // Initialize scroll position on mount
@@ -259,7 +278,16 @@ export function OrdersTable({
         : 0;
 
     // Calculate total table width based on visible columns
-    const tableWidth = table.getVisibleLeafColumns().reduce((sum, col) => sum + col.getSize(), 0);
+    const baseTableWidth = table.getVisibleLeafColumns().reduce((sum, col) => sum + col.getSize(), 0);
+
+    // Scale columns to fill container width (only scale up, not down)
+    const scaleFactor = containerWidth > baseTableWidth ? containerWidth / baseTableWidth : 1;
+    const tableWidth = Math.max(baseTableWidth * scaleFactor, 900);
+
+    // Get scaled column width
+    const getScaledColumnWidth = useCallback((col: any) => {
+        return Math.round(col.getSize() * scaleFactor);
+    }, [scaleFactor]);
 
     // Calculate scroll indicator positions
     const verticalThumbHeight = Math.max(20, (1 / Math.max(1, totalHeight / (parentRef.current?.clientHeight || 400))) * 100);
@@ -311,17 +339,17 @@ export function OrdersTable({
                     <table
                         className="border-collapse"
                         style={{
-                            width: Math.max(tableWidth, 900),
+                            width: tableWidth,
                             minWidth: '900px',
                             tableLayout: 'fixed',
                             marginRight: '8px',
                             marginBottom: '8px',
                         }}
                     >
-                        {/* Define column widths once via colgroup */}
+                        {/* Define column widths once via colgroup - scaled to fill container */}
                         <colgroup>
                             {table.getVisibleLeafColumns().map((column) => (
-                                <col key={column.id} style={{ width: column.getSize() }} />
+                                <col key={column.id} style={{ width: getScaledColumnWidth(column) }} />
                             ))}
                         </colgroup>
                         {/* Sticky header */}

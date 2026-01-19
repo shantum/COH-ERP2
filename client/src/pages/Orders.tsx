@@ -774,7 +774,7 @@ export default function Orders() {
                     {/* Left: Record count */}
                     <div className="text-[10px] text-gray-500">
                         {pagination && pagination.total > 0
-                            ? `${((activePage - 1) * (pagination.pageSize || pagination.limit || 100)) + 1}–${Math.min(activePage * (pagination.pageSize || pagination.limit || 100), pagination.total)} of ${pagination.total}`
+                            ? `${((activePage - 1) * ('pageSize' in pagination ? pagination.pageSize : pagination.limit)) + 1}–${Math.min(activePage * ('pageSize' in pagination ? pagination.pageSize : pagination.limit), pagination.total)} of ${pagination.total}`
                             : '0 orders'
                         }
                         {isSearchMode && debouncedSearch && (
