@@ -36,8 +36,6 @@ export interface CustomerSearchProps {
   onCancel: () => void;
   /** Initial search query value */
   initialQuery?: string;
-  /** Visual variant - 'default' uses gray tones, 'slate' uses slate tones */
-  variant?: 'default' | 'slate';
   /** Whether to show customer tags in results */
   showTags?: boolean;
   /** Placeholder text for the search input */
@@ -62,7 +60,6 @@ export function CustomerSearch({
   onSelect,
   onCancel,
   initialQuery = '',
-  variant = 'default',
   showTags = false,
   placeholder = 'Search by name, email, or phone...',
   className = '',

@@ -512,7 +512,7 @@ export function CreateOrderModal({
                                     const isSelected = orderForm.channel === ch.id && !orderForm.isExchange;
 
                                     // Channel-specific colors (pastel palette)
-                                    const colorClasses = {
+                                    const colorMap: Record<string, string> = {
                                         offline: isSelected
                                             ? 'bg-slate-700 text-white border-slate-700'
                                             : 'hover:bg-slate-50 hover:border-slate-300',
@@ -525,7 +525,8 @@ export function CreateOrderModal({
                                         ajio: isSelected
                                             ? 'bg-violet-400 text-white border-violet-400'
                                             : 'hover:bg-violet-50 hover:border-violet-200',
-                                    }[name] || (isSelected
+                                    };
+                                    const colorClasses = colorMap[name] || (isSelected
                                         ? 'bg-primary text-primary-foreground border-primary'
                                         : 'hover:bg-muted');
 
