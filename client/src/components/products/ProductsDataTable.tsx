@@ -112,8 +112,8 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 header: 'Product',
                 size: 220,
                 cell: ({ row }) => (
-                    <div className="min-w-0 leading-tight">
-                        <div className="text-xs font-medium text-gray-900 truncate">
+                    <div className="min-w-0 overflow-hidden">
+                        <div className="text-xs font-medium text-gray-900 truncate" title={row.original.name}>
                             {row.original.name}
                         </div>
                         {row.original.styleCode && (
@@ -129,7 +129,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 header: 'Category',
                 size: 70,
                 cell: ({ row }) => (
-                    <span className="text-[11px] text-gray-600 capitalize">
+                    <span className="text-[11px] text-gray-600 capitalize truncate block">
                         {row.original.category || '-'}
                     </span>
                 ),
@@ -139,7 +139,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 header: 'Type',
                 size: 50,
                 cell: ({ row }) => (
-                    <span className="capitalize text-[11px] text-gray-500">
+                    <span className="capitalize text-[11px] text-gray-500 truncate block">
                         {row.original.productType || '-'}
                     </span>
                 ),
@@ -149,7 +149,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 header: 'Gender',
                 size: 55,
                 cell: ({ row }) => (
-                    <span className="capitalize text-[11px] text-gray-500">
+                    <span className="capitalize text-[11px] text-gray-500 truncate block">
                         {row.original.gender || '-'}
                     </span>
                 ),
@@ -159,7 +159,7 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                 header: 'Fabric Type',
                 size: 80,
                 cell: ({ row }) => (
-                    <span className="text-[11px]">
+                    <span className="text-[11px] truncate block">
                         {row.original.fabricTypeName || (
                             <span className="text-red-500 text-[10px]">Not set</span>
                         )}
@@ -224,14 +224,12 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                     if (fabrics.length === 0) return <span className="text-red-500 text-[10px]">Not set</span>;
 
                     return (
-                        <div className="flex flex-wrap gap-0.5">
-                            {fabrics.slice(0, 2).map((fabric, i) => (
-                                <span key={i} className="text-[10px] text-gray-600 truncate max-w-[60px] bg-gray-100 px-1 py-0.5 rounded">
-                                    {fabric}
-                                </span>
-                            ))}
-                            {fabrics.length > 2 && (
-                                <span className="text-[10px] text-gray-500">+{fabrics.length - 2}</span>
+                        <div className="flex items-center gap-0.5 overflow-hidden">
+                            <span className="text-[10px] text-gray-600 truncate bg-gray-100 px-1 py-0.5 rounded">
+                                {fabrics[0]}
+                            </span>
+                            {fabrics.length > 1 && (
+                                <span className="text-[10px] text-gray-500 shrink-0">+{fabrics.length - 1}</span>
                             )}
                         </div>
                     );
@@ -433,11 +431,11 @@ export function ProductsDataTable({ onViewProduct, onEditBom, onEditProduct, sea
                                     <Fragment key={row.id}>
                                         {/* Product Row */}
                                         <TableRow
-                                            className="cursor-pointer hover:bg-gray-50"
+                                            className="cursor-pointer hover:bg-gray-50 h-9"
                                             onClick={() => row.toggleExpanded()}
                                         >
                                             {row.getVisibleCells().map((cell) => (
-                                                <TableCell key={cell.id} className="py-1 px-2">
+                                                <TableCell key={cell.id} className="py-1 px-2 overflow-hidden">
                                                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                                 </TableCell>
                                             ))}
@@ -552,7 +550,7 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                     {variations.map((variation) => (
                         <Fragment key={variation.id}>
                             <tr
-                                className="hover:bg-purple-50/30 cursor-pointer"
+                                className="hover:bg-purple-50/30 cursor-pointer h-8"
                                 onClick={() => toggleVariation(variation.id)}
                             >
                                 <td className="px-1 py-1">
@@ -584,7 +582,7 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                                         )}
                                     </div>
                                 </td>
-                                <td className="px-2 py-1">
+                                <td className="px-2 py-1 overflow-hidden">
                                     <div className="flex items-center gap-1.5">
                                         {variation.colorHex && (
                                             <span
@@ -592,13 +590,13 @@ function VariationsTable({ variations, onViewVariation, onEditBom, onEditVariati
                                                 style={{ backgroundColor: variation.colorHex }}
                                             />
                                         )}
-                                        <span className="font-medium text-gray-900 text-xs">
+                                        <span className="font-medium text-gray-900 text-xs truncate">
                                             {variation.colorName || variation.name}
                                         </span>
                                     </div>
                                 </td>
-                                <td className="px-2 py-1 text-gray-600 text-xs">
-                                    {variation.fabricName || <span className="text-red-500 text-[10px]">Not set</span>}
+                                <td className="px-2 py-1 text-gray-600 text-xs overflow-hidden">
+                                    <span className="truncate block">{variation.fabricName || <span className="text-red-500 text-[10px]">Not set</span>}</span>
                                 </td>
                                 <td className="px-2 py-1 text-center">
                                     {variation.hasLining ? (
