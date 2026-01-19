@@ -511,6 +511,9 @@ model Order {
   // Performance: Tracking and COD views
   @@index([trackingStatus, isArchived]) // RTO view filtering
   @@index([paymentMethod, trackingStatus, codRemittedAt]) // COD pending view
+  // Performance: 3-way view filtering and customer payment tracking
+  @@index([status, terminalStatus, isArchived]) // 3-way view filter
+  @@index([customerId, paymentStatus]) // Customer payment tracking
 }
 
 // ============================================
@@ -598,6 +601,10 @@ model OrderLine {
   // Performance: Line queries with SKU
   @@index([lineStatus, skuId]) // Status + SKU lookups for inventory
   @@index([skuId, lineStatus]) // SKU-first queries
+  // Performance: View filtering and allocation queries
+  @@index([orderId, lineStatus, shippedAt]) // View filtering with date
+  @@index([awbNumber, courier]) // Tracking batch lookups
+  @@index([lineStatus, allocatedAt]) // Analytics and allocation tracking
 }
 
 model ReturnRequest {

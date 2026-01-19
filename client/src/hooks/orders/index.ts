@@ -24,6 +24,7 @@ export { useOrderLineMutations } from './useOrderLineMutations';
 export { useOrderReleaseMutations } from './useOrderReleaseMutations';
 export { useProductionBatchMutations } from './useProductionBatchMutations';
 export { useOrderInvalidation } from './orderMutationUtils';
+export { useLineStatus, getLineStatusFlags } from './useLineStatus';
 
 // Re-export types
 export type { UseOrderCrudMutationsOptions } from './useOrderCrudMutations';
@@ -32,6 +33,7 @@ export type { UseOrderShipMutationsOptions } from './useOrderShipMutations';
 export type { UseOrderWorkflowMutationsOptions } from './useOrderWorkflowMutations';
 export type { UseOrderStatusMutationsOptions } from './useOrderStatusMutations';
 export type { MutationOptions, PAGE_SIZE } from './orderMutationUtils';
+export type { LineStatusFlags } from './useLineStatus';
 
 // Re-export optimistic update helpers for direct use
 export {
@@ -46,4 +48,5 @@ export type {
     OrdersQueryInput,
     OrdersListData,
     OptimisticUpdateContext,
+    ShipData,
 } from './optimisticUpdateHelpers';

@@ -1,35 +1,47 @@
 /**
  * Optimistic Update Helpers for Orders
  *
- * REFACTORED: This file now re-exports from modular files in ./optimistic/
- * This maintains backward compatibility for existing imports.
+ * Provides utilities for optimistic UI updates that instantly reflect changes
+ * while background revalidation ensures data consistency.
  *
- * The implementation has been split into:
- * - optimistic/types.ts: Type definitions and constants
- * - optimistic/inventoryHelpers.ts: Inventory delta calculations
- * - optimistic/cacheTargeting.ts: Query input builders and row access helpers
- * - optimistic/statusUpdateHelpers.ts: Optimistic update transformation functions
+ * Key concepts:
+ * - Optimistic updates show changes immediately without waiting for server
+ * - On error, we rollback to previous state
+ * - onSettled always revalidates in background for consistency
  *
- * New code should import directly from './optimistic' or the specific submodule.
+ * Split into modules:
+ * - types.ts: Type definitions and constants
+ * - inventoryHelpers.ts: Inventory delta calculations
+ * - cacheTargeting.ts: Query input builders and row access helpers
+ * - statusUpdateHelpers.ts: Optimistic update transformation functions
  */
 
-// Re-export everything from the modular structure
+// Types and constants
 export {
-    // Types and constants
     PAGE_SIZE,
     type OrdersQueryInput,
     type OrdersListData,
     type OptimisticUpdateContext,
     type ShipData,
-    // Inventory helpers
+} from './types';
+
+// Inventory helpers
+export {
     calculateInventoryDelta,
     hasAllocatedInventory,
-    // Cache targeting
+} from './inventoryHelpers';
+
+// Cache targeting
+export {
     getOrdersQueryInput,
     getRowByLineId,
     getRowsByLineIds,
     getRowsByOrderId,
     getRowByBatchId,
+} from './cacheTargeting';
+
+// Status update helpers
+export {
     // Line status updates
     optimisticLineStatusUpdate,
     optimisticBatchLineStatusUpdate,
@@ -51,4 +63,4 @@ export {
     optimisticCreateBatch,
     optimisticUpdateBatch,
     optimisticDeleteBatch,
-} from './optimistic';
+} from './statusUpdateHelpers';

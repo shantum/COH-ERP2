@@ -27,7 +27,7 @@ import {
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
 import { updateCustomerTier, incrementCustomerOrderCount, decrementCustomerOrderCount } from '../../utils/tierUtils.js';
 import {
-    calculateInventoryBalance,
+    calculateAllInventoryBalances,
     TXN_TYPE,
     TXN_REASON,
     releaseReservedInventory,
@@ -412,9 +412,13 @@ const allocate = protectedProcedure
             const allocatableLineIds: string[] = [];
             const timestamp = new Date();
 
+            // Batch fetch all inventory balances in a single query (O(1) instead of O(N))
+            const skuIdsToCheck = Array.from(skuRequirements.keys());
+            const balancesMap = await calculateAllInventoryBalances(tx, skuIdsToCheck, { allowNegative: true });
+
             // Check balance for each SKU and prepare transactions
             for (const [skuId, { lines: skuLines, totalQty }] of Array.from(skuRequirements.entries())) {
-                const balance = await calculateInventoryBalance(tx, skuId);
+                const balance = balancesMap.get(skuId) || { availableBalance: 0 };
 
                 if (balance.availableBalance < totalQty) {
                     for (const line of skuLines) {

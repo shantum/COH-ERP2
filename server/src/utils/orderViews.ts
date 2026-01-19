@@ -136,7 +136,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         },
         orderBy: { orderDate: 'desc' }, // Newest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution', 'daysInTransit'],
-        defaultLimit: 10000,
+        defaultLimit: 500, // Active management view - larger page for workflow
     },
 
     /**
@@ -164,7 +164,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         },
         orderBy: { orderDate: 'desc' },
         enrichment: ['daysInTransit', 'trackingStatus', 'shopifyTracking', 'customerStats', 'daysSinceDelivery', 'rtoStatus'],
-        defaultLimit: 2000,
+        defaultLimit: 100, // Historical view - smaller page for reference
     },
 
     rto: {
@@ -215,7 +215,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         },
         orderBy: { orderDate: 'desc' },
         enrichment: ['customerStats'],
-        defaultLimit: 200,
+        defaultLimit: 100, // Historical view - smaller page for reference
         // Flag indicating this is a line-level view
         isLineView: true,
     },
@@ -253,7 +253,7 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         },
         orderBy: { orderDate: 'asc' }, // FIFO - oldest first
         enrichment: ['fulfillmentStage', 'lineStatusCounts', 'customerStats', 'addressResolution', 'daysInTransit'],
-        defaultLimit: 10000,
+        defaultLimit: 500, // Active management view - larger page for workflow
     },
 
     /**
