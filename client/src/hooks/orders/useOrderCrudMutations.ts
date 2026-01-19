@@ -1,12 +1,12 @@
 /**
  * Order CRUD mutations
  * Handles creating, updating, deleting orders and notes
+ * Uses tRPC for all operations
  */
 
-import { useMutation } from '@tanstack/react-query';
-import { ordersApi } from '../../services/api';
+import { useMemo } from 'react';
 import { trpc } from '../../services/trpc';
-import { useOrderInvalidation, viewToTrpcInput } from './orderMutationUtils';
+import { useOrderInvalidation } from './orderMutationUtils';
 
 export interface UseOrderCrudMutationsOptions {
     onCreateSuccess?: () => void;
@@ -18,8 +18,8 @@ export interface UseOrderCrudMutationsOptions {
 export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}) {
     const { invalidateOpenOrders, invalidateAll } = useOrderInvalidation();
     const trpcUtils = trpc.useUtils();
-    const queryInput = viewToTrpcInput.open;
 
+    // Create order (already tRPC)
     const createOrder = trpc.orders.create.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
@@ -30,79 +30,107 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         }
     });
 
-    const deleteOrder = useMutation({
-        mutationFn: (id: string) => ordersApi.delete(id),
+    // Delete order via tRPC
+    const deleteOrderMutation = trpc.orders.deleteOrder.useMutation({
         onSuccess: () => {
             invalidateAll();
             options.onDeleteSuccess?.();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete order')
+        onError: (err) => alert(err.message || 'Failed to delete order')
     });
 
-    const updateOrder = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => ordersApi.update(id, data),
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const deleteOrder = useMemo(() => ({
+        mutate: (id: string) => deleteOrderMutation.mutate({ orderId: id }),
+        mutateAsync: (id: string) => deleteOrderMutation.mutateAsync({ orderId: id }),
+        isPending: deleteOrderMutation.isPending,
+        isError: deleteOrderMutation.isError,
+        error: deleteOrderMutation.error,
+    }), [deleteOrderMutation.isPending, deleteOrderMutation.isError, deleteOrderMutation.error]);
+
+    // Update order via tRPC
+    const updateOrderMutation = trpc.orders.updateOrder.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             options.onEditSuccess?.();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update order')
+        onError: (err) => alert(err.message || 'Failed to update order')
     });
 
-    const updateOrderNotes = useMutation({
-        mutationFn: ({ id, notes }: { id: string; notes: string }) =>
-            ordersApi.update(id, { internalNotes: notes }),
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const updateOrder = useMemo(() => ({
+        mutate: ({ id, data }: { id: string; data: { customerName?: string; customerEmail?: string | null; customerPhone?: string | null; shippingAddress?: string | null; internalNotes?: string | null; shipByDate?: string | null; isExchange?: boolean } }) =>
+            updateOrderMutation.mutate({ orderId: id, ...data }),
+        mutateAsync: ({ id, data }: { id: string; data: { customerName?: string; customerEmail?: string | null; customerPhone?: string | null; shippingAddress?: string | null; internalNotes?: string | null; shipByDate?: string | null; isExchange?: boolean } }) =>
+            updateOrderMutation.mutateAsync({ orderId: id, ...data }),
+        isPending: updateOrderMutation.isPending,
+        isError: updateOrderMutation.isError,
+        error: updateOrderMutation.error,
+    }), [updateOrderMutation.isPending, updateOrderMutation.isError, updateOrderMutation.error]);
+
+    // Update order notes via tRPC
+    const updateOrderNotesMutation = trpc.orders.updateOrder.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             options.onNotesSuccess?.();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update notes')
+        onError: (err) => alert(err.message || 'Failed to update notes')
     });
 
-    const updateLineNotes = useMutation({
-        mutationFn: ({ lineId, notes }: { lineId: string; notes: string }) =>
-            ordersApi.updateLine(lineId, { notes }),
-        onMutate: async ({ lineId, notes }) => {
-            // Cancel any outgoing refetches
-            await trpcUtils.orders.list.cancel(queryInput);
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const updateOrderNotes = useMemo(() => ({
+        mutate: ({ id, notes }: { id: string; notes: string }) =>
+            updateOrderNotesMutation.mutate({ orderId: id, internalNotes: notes }),
+        mutateAsync: ({ id, notes }: { id: string; notes: string }) =>
+            updateOrderNotesMutation.mutateAsync({ orderId: id, internalNotes: notes }),
+        isPending: updateOrderNotesMutation.isPending,
+        isError: updateOrderNotesMutation.isError,
+        error: updateOrderNotesMutation.error,
+    }), [updateOrderNotesMutation.isPending, updateOrderNotesMutation.isError, updateOrderNotesMutation.error]);
 
-            // Snapshot the previous value
-            const previousData = trpcUtils.orders.list.getData(queryInput);
-
-            // Optimistically update the cache
-            trpcUtils.orders.list.setData(queryInput, (old: any) => {
-                if (!old?.rows) return old;
-                return {
-                    ...old,
-                    rows: old.rows.map((row: any) =>
-                        row.lineId === lineId ? { ...row, lineNotes: notes } : row
-                    ),
-                };
-            });
-
-            return { previousData, queryInput };
-        },
+    // Update line notes via tRPC
+    const updateLineNotesMutation = trpc.orders.updateLine.useMutation({
         onSuccess: () => {
-            // Don't invalidate - optimistic update is sufficient
+            // Simple: invalidate current view's cache, let it refetch
+            trpcUtils.orders.list.invalidate();
             options.onNotesSuccess?.();
         },
-        onError: (err: any, _variables, context) => {
-            // Rollback on error
-            if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
-            }
-            invalidateOpenOrders();
-            alert(err.response?.data?.error || 'Failed to update line notes');
+        onError: (err) => {
+            alert(err.message || 'Failed to update line notes');
         }
     });
 
-    const updateShipByDate = useMutation({
-        mutationFn: ({ orderId, date }: { orderId: string; date: string | null }) =>
-            ordersApi.update(orderId, { shipByDate: date }),
-        onSuccess: () => invalidateOpenOrders(),
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update ship by date');
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const updateLineNotes = useMemo(() => ({
+        mutate: ({ lineId, notes }: { lineId: string; notes: string }) =>
+            updateLineNotesMutation.mutate({ lineId, notes }),
+        mutateAsync: ({ lineId, notes }: { lineId: string; notes: string }) =>
+            updateLineNotesMutation.mutateAsync({ lineId, notes }),
+        isPending: updateLineNotesMutation.isPending,
+        isError: updateLineNotesMutation.isError,
+        error: updateLineNotesMutation.error,
+    }), [updateLineNotesMutation.isPending, updateLineNotesMutation.isError, updateLineNotesMutation.error]);
+
+    // Update ship by date via tRPC
+    const updateShipByDateMutation = trpc.orders.updateOrder.useMutation({
+        onSuccess: () => {
+            trpcUtils.orders.list.invalidate();
+        },
+        onError: (err) => {
+            alert(err.message || 'Failed to update ship by date');
         }
     });
+
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const updateShipByDate = useMemo(() => ({
+        mutate: ({ orderId, date }: { orderId: string; date: string | null }) =>
+            updateShipByDateMutation.mutate({ orderId, shipByDate: date }),
+        mutateAsync: ({ orderId, date }: { orderId: string; date: string | null }) =>
+            updateShipByDateMutation.mutateAsync({ orderId, shipByDate: date }),
+        isPending: updateShipByDateMutation.isPending,
+        isError: updateShipByDateMutation.isError,
+        error: updateShipByDateMutation.error,
+    }), [updateShipByDateMutation.isPending, updateShipByDateMutation.isError, updateShipByDateMutation.error]);
 
     return {
         createOrder,

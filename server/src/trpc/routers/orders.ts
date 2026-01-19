@@ -12,8 +12,9 @@
 
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import type { Prisma } from '@prisma/client';
 import { router, protectedProcedure } from '../index.js';
-import { CreateOrderSchema } from '@coh/shared';
+import { CreateOrderSchema, UpdateOrderSchema } from '@coh/shared';
 import {
     buildViewWhereClause,
     enrichOrdersForView,
@@ -25,12 +26,14 @@ import {
     flattenLineForSSE,
 } from '../../utils/orderViews.js';
 import { findOrCreateCustomerByContact } from '../../utils/customerUtils.js';
-import { updateCustomerTier, incrementCustomerOrderCount, decrementCustomerOrderCount } from '../../utils/tierUtils.js';
+import { updateCustomerTier, incrementCustomerOrderCount, decrementCustomerOrderCount, adjustCustomerLtv } from '../../utils/tierUtils.js';
 import {
     calculateAllInventoryBalances,
     TXN_TYPE,
     TXN_REASON,
     releaseReservedInventory,
+    createCustomSku,
+    removeCustomization,
 } from '../../utils/queryPatterns.js';
 import {
     isValidTransition,
@@ -39,12 +42,14 @@ import {
     hasAllocatedInventory,
     type LineStatus,
 } from '../../utils/orderStateMachine.js';
-import { shipOrderLines } from '../../services/shipOrderService.js';
+import { shipOrderLines, shipOrder } from '../../services/shipOrderService.js';
 import { adminShipOrderLines, isAdminShipEnabled } from '../../services/adminShipService.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
 import { deferredExecutor } from '../../services/deferredExecutor.js';
 import { enforceRulesInTrpc } from '../../rules/index.js';
+import { recomputeOrderStatus } from '../../utils/orderStatus.js';
+import { orderLogger } from '../../utils/logger.js';
 
 // ============================================
 // LIST ORDERS PROCEDURE
@@ -1734,6 +1739,1219 @@ const receiveRto = protectedProcedure
     });
 
 // ============================================
+// CANCEL LINE PROCEDURE
+// ============================================
+
+/**
+ * Cancel a single order line
+ * Releases inventory if allocated
+ */
+const cancelLine = protectedProcedure
+    .input(z.object({ lineId: z.string().uuid('Invalid line ID') }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId } = input;
+
+        // Single query to get line with minimal fields
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: {
+                id: true,
+                lineStatus: true,
+                skuId: true,
+                qty: true,
+                unitPrice: true,
+                orderId: true,
+                order: { select: { customerId: true } },
+            },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Soft return for already cancelled (idempotent)
+        if (line.lineStatus === 'cancelled') {
+            return { lineId, lineStatus: 'cancelled' };
+        }
+
+        // Enforce cancel line rules using rules engine (checks shipped status)
+        await enforceRulesInTrpc('cancelLine', ctx, {
+            data: { line },
+            phase: 'pre',
+        });
+
+        // If allocated, reverse inventory
+        if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
+            const txn = await ctx.prisma.inventoryTransaction.findFirst({
+                where: { referenceId: lineId, txnType: TXN_TYPE.OUTWARD, reason: TXN_REASON.ORDER_ALLOCATION },
+                select: { id: true, skuId: true },
+            });
+            if (txn) {
+                await ctx.prisma.inventoryTransaction.delete({ where: { id: txn.id } });
+                inventoryBalanceCache.invalidate([txn.skuId]);
+            }
+        }
+
+        // Update line status
+        await ctx.prisma.orderLine.update({
+            where: { id: lineId },
+            data: { lineStatus: 'cancelled' },
+        });
+
+        // Background: adjust LTV (fire and forget)
+        const customerId = line.order?.customerId;
+        const lineAmount = line.qty * line.unitPrice;
+        const orderId = line.orderId;
+        const userId = ctx.user.id;
+
+        deferredExecutor.enqueue(async () => {
+            if (customerId) {
+                adjustCustomerLtv(ctx.prisma, customerId, -lineAmount).catch(() => {});
+            }
+
+            // Broadcast SSE update to other users
+            broadcastOrderUpdate({
+                type: 'line_status',
+                view: 'open',
+                lineId,
+                orderId,
+                changes: { lineStatus: 'cancelled' },
+            }, userId);
+        });
+
+        return { lineId, lineStatus: 'cancelled' };
+    });
+
+// ============================================
+// UNCANCEL LINE PROCEDURE
+// ============================================
+
+/**
+ * Restore a cancelled order line to pending
+ */
+const uncancelLine = protectedProcedure
+    .input(z.object({ lineId: z.string().uuid('Invalid line ID') }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId } = input;
+
+        // Single query with minimal fields
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: {
+                id: true,
+                lineStatus: true,
+                qty: true,
+                unitPrice: true,
+                orderId: true,
+                order: { select: { customerId: true } },
+            },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Soft return for not cancelled (idempotent)
+        if (line.lineStatus !== 'cancelled') {
+            return { lineId, lineStatus: line.lineStatus };
+        }
+
+        // Enforce uncancel line rules using rules engine
+        await enforceRulesInTrpc('uncancelLine', ctx, {
+            data: { line },
+            phase: 'pre',
+        });
+
+        // Update line status
+        await ctx.prisma.orderLine.update({
+            where: { id: lineId },
+            data: { lineStatus: 'pending' },
+        });
+
+        // Background: adjust LTV (fire and forget)
+        const customerId = line.order?.customerId;
+        const lineAmount = line.qty * line.unitPrice;
+        const orderId = line.orderId;
+        const userId = ctx.user.id;
+
+        deferredExecutor.enqueue(async () => {
+            if (customerId) {
+                adjustCustomerLtv(ctx.prisma, customerId, lineAmount).catch(() => {});
+            }
+
+            // Broadcast SSE update to other users
+            broadcastOrderUpdate({
+                type: 'line_status',
+                view: 'open',
+                lineId,
+                orderId,
+                changes: { lineStatus: 'pending' },
+            }, userId);
+        });
+
+        return { lineId, lineStatus: 'pending' };
+    });
+
+// ============================================
+// UPDATE LINE PROCEDURE
+// ============================================
+
+/**
+ * Update order line (change qty, unitPrice, notes, or tracking)
+ */
+const updateLine = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+        qty: z.number().int().positive().optional(),
+        unitPrice: z.number().nonnegative().optional(),
+        notes: z.string().optional(),
+        awbNumber: z.string().optional(),
+        courier: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId, qty, unitPrice, notes, awbNumber, courier } = input;
+
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            include: { order: true },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Enforce rules for line editing
+        const hasQtyOrPrice = qty !== undefined || unitPrice !== undefined;
+        await enforceRulesInTrpc('editLine', ctx, {
+            data: {
+                line: { id: line.id, lineStatus: line.lineStatus },
+                hasQtyOrPriceChange: hasQtyOrPrice,
+            },
+            phase: 'pre',
+        });
+
+        const updateData: Prisma.OrderLineUpdateInput = {};
+        if (qty !== undefined) updateData.qty = qty;
+        if (unitPrice !== undefined) updateData.unitPrice = unitPrice;
+        if (notes !== undefined) updateData.notes = notes;
+        if (awbNumber !== undefined) updateData.awbNumber = awbNumber || null;
+        if (courier !== undefined) updateData.courier = courier || null;
+
+        // If only updating simple fields (notes, awbNumber, courier), no transaction needed
+        if (!hasQtyOrPrice) {
+            const updated = await ctx.prisma.orderLine.update({
+                where: { id: lineId },
+                data: updateData,
+            });
+            return updated;
+        }
+
+        // qty/unitPrice changes need transaction to update order total
+        await ctx.prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: updateData,
+            });
+
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId: line.orderId },
+            });
+            const newTotal = allLines.reduce((sum, l) => {
+                const lineQty = l.id === lineId ? (qty ?? l.qty) : l.qty;
+                const linePrice = l.id === lineId ? (unitPrice ?? l.unitPrice) : l.unitPrice;
+                return sum + lineQty * linePrice;
+            }, 0);
+            await tx.order.update({
+                where: { id: line.orderId },
+                data: { totalAmount: newTotal },
+            });
+        });
+
+        const updated = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+        });
+
+        return updated;
+    });
+
+// ============================================
+// ADD LINE PROCEDURE
+// ============================================
+
+/**
+ * Add a new line to an existing order
+ */
+const addLine = protectedProcedure
+    .input(z.object({
+        orderId: z.string().uuid('Invalid order ID'),
+        skuId: z.string().uuid('Invalid SKU ID'),
+        qty: z.number().int().positive(),
+        unitPrice: z.number().nonnegative(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderId, skuId, qty, unitPrice } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        // Enforce rules for adding lines
+        await enforceRulesInTrpc('addLine', ctx, {
+            data: { order: { id: order.id, status: order.status } },
+            phase: 'pre',
+        });
+
+        const result = await ctx.prisma.$transaction(async (tx) => {
+            const newLine = await tx.orderLine.create({
+                data: {
+                    orderId,
+                    skuId,
+                    qty,
+                    unitPrice,
+                    lineStatus: 'pending',
+                },
+            });
+
+            const allLines = await tx.orderLine.findMany({
+                where: { orderId },
+            });
+            const newTotal = allLines.reduce((sum, l) => sum + l.qty * l.unitPrice, 0);
+            await tx.order.update({
+                where: { id: orderId },
+                data: { totalAmount: newTotal },
+            });
+
+            return newLine;
+        });
+
+        const updated = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: {
+                orderLines: {
+                    include: {
+                        sku: { include: { variation: { include: { product: true } } } },
+                    },
+                },
+            },
+        });
+
+        return updated;
+    });
+
+// ============================================
+// UPDATE ORDER PROCEDURE
+// ============================================
+
+/**
+ * Update order details (customer info, notes, shipByDate, etc.)
+ */
+const updateOrder = protectedProcedure
+    .input(z.object({
+        orderId: z.string().uuid('Invalid order ID'),
+        customerName: z.string().optional(),
+        customerEmail: z.string().email().nullable().optional(),
+        customerPhone: z.string().nullable().optional(),
+        shippingAddress: z.string().nullable().optional(),
+        internalNotes: z.string().nullable().optional(),
+        shipByDate: z.string().nullable().optional(),
+        isExchange: z.boolean().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const {
+            orderId,
+            customerName,
+            customerEmail,
+            customerPhone,
+            shippingAddress,
+            internalNotes,
+            shipByDate,
+            isExchange,
+        } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        const updateData: Prisma.OrderUpdateInput = {};
+        if (customerName !== undefined) updateData.customerName = customerName;
+        if (customerEmail !== undefined) updateData.customerEmail = customerEmail;
+        if (customerPhone !== undefined) updateData.customerPhone = customerPhone;
+        if (shippingAddress !== undefined) updateData.shippingAddress = shippingAddress;
+        if (internalNotes !== undefined) updateData.internalNotes = internalNotes;
+        if (shipByDate !== undefined) updateData.shipByDate = shipByDate ? new Date(shipByDate) : null;
+        if (isExchange !== undefined) updateData.isExchange = isExchange;
+
+        const updated = await ctx.prisma.order.update({
+            where: { id: orderId },
+            data: updateData,
+            include: {
+                orderLines: {
+                    include: {
+                        sku: { include: { variation: { include: { product: true } } } },
+                    },
+                },
+            },
+        });
+
+        return updated;
+    });
+
+// ============================================
+// DELETE ORDER PROCEDURE
+// ============================================
+
+/**
+ * Delete an order (only for manually created orders)
+ * Shopify orders cannot be deleted
+ */
+const deleteOrder = protectedProcedure
+    .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderId } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        if (order.shopifyOrderId && order.orderLines.length > 0) {
+            throw new TRPCError({
+                code: 'FORBIDDEN',
+                message: 'Cannot delete Shopify orders with line items. Use cancel instead.',
+            });
+        }
+
+        await ctx.prisma.$transaction(async (tx) => {
+            for (const line of order.orderLines) {
+                if (line.productionBatchId) {
+                    await tx.productionBatch.update({
+                        where: { id: line.productionBatchId },
+                        data: { sourceOrderLineId: null },
+                    });
+                }
+
+                if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
+                    await releaseReservedInventory(tx, line.id);
+                }
+            }
+
+            await tx.orderLine.deleteMany({ where: { orderId: order.id } });
+            await tx.order.delete({ where: { id: order.id } });
+        });
+
+        return { success: true, message: 'Order deleted successfully' };
+    });
+
+// ============================================
+// UNSHIP PROCEDURE
+// ============================================
+
+/**
+ * Unship an order - revert shipped order back to packed status
+ */
+const unship = protectedProcedure
+    .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderId } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        if (order.status !== 'shipped') {
+            throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: `Order must be shipped to unship (current: ${order.status})`,
+            });
+        }
+
+        await ctx.prisma.$transaction(async (tx) => {
+            // Re-check status inside transaction to prevent race condition
+            const currentOrder = await tx.order.findUnique({
+                where: { id: orderId },
+                select: { status: true },
+            });
+
+            if (!currentOrder) {
+                throw new TRPCError({
+                    code: 'NOT_FOUND',
+                    message: 'Order not found',
+                });
+            }
+
+            if (currentOrder.status !== 'shipped') {
+                throw new TRPCError({
+                    code: 'CONFLICT',
+                    message: 'Order status changed by another request',
+                });
+            }
+
+            // Note: No inventory action needed on unship
+            // In the simplified model, OUTWARD is created at allocation and stays
+            // Unshipping only affects status/visibility, not inventory
+
+            await tx.order.update({
+                where: { id: orderId },
+                data: {
+                    status: 'open',
+                    releasedToShipped: false,
+                },
+            });
+
+            // Revert line statuses and clear tracking fields
+            await tx.orderLine.updateMany({
+                where: { orderId },
+                data: {
+                    lineStatus: 'packed',
+                    shippedAt: null,
+                    awbNumber: null,
+                    courier: null,
+                    trackingStatus: null,
+                },
+            });
+        });
+
+        const updated = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        // Broadcast SSE - use order_updated for unship operation
+        deferredExecutor.enqueue(async () => {
+            broadcastOrderUpdate({
+                type: 'order_updated',
+                orderId,
+                affectedViews: ['open', 'shipped'],
+                changes: { status: 'open', lineStatus: 'packed' },
+            }, ctx.user.id);
+        });
+
+        return updated;
+    });
+
+// ============================================
+// SHIP ORDER (ENTIRE ORDER) PROCEDURE
+// ============================================
+
+/**
+ * Ship an entire order (wrapper that ships all packed lines)
+ */
+const shipOrder_ = protectedProcedure
+    .input(z.object({
+        orderId: z.string().uuid('Invalid order ID'),
+        awbNumber: z.string().min(1, 'AWB number is required').trim()
+            .transform((val) => val.toUpperCase()),
+        courier: z.string().min(1, 'Courier is required').trim(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderId, awbNumber, courier } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        // Idempotency check - if already shipped, return success
+        if (order.status === 'shipped') {
+            return {
+                ...order,
+                message: 'Order is already shipped',
+            };
+        }
+
+        // Ship using the service
+        const result = await ctx.prisma.$transaction(async (tx) => {
+            return await shipOrder(tx, {
+                orderId,
+                awbNumber,
+                courier,
+                userId: ctx.user.id,
+            });
+        });
+
+        // Check for errors in the result
+        if (result.errors && result.errors.length > 0) {
+            const firstError = result.errors[0];
+
+            if (firstError.code === 'INVALID_STATUS') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: firstError.error,
+                });
+            } else if (firstError.code === 'DUPLICATE_AWB') {
+                throw new TRPCError({
+                    code: 'CONFLICT',
+                    message: firstError.error,
+                });
+            } else {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: firstError.error,
+                });
+            }
+        }
+
+        // Fetch updated order
+        const updated = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        // Defer SSE broadcast
+        if (result.shipped.length > 0) {
+            const shippedLineIds = result.shipped.map(l => l.lineId);
+            const userId = ctx.user.id;
+
+            deferredExecutor.enqueue(async () => {
+                broadcastOrderUpdate({
+                    type: 'order_shipped',
+                    orderId,
+                    lineIds: shippedLineIds,
+                    affectedViews: ['open', 'shipped'],
+                    changes: {
+                        lineStatus: 'shipped',
+                        awbNumber,
+                        courier,
+                        shippedAt: new Date().toISOString(),
+                    },
+                }, userId);
+            });
+        }
+
+        return updated;
+    });
+
+// ============================================
+// RELEASE OPERATIONS
+// ============================================
+
+/**
+ * Release shipped orders to the shipped view
+ * Shipped orders stay in open view until explicitly released
+ */
+const releaseToShipped = protectedProcedure
+    .input(z.object({
+        orderIds: z.array(z.string().uuid()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderIds } = input;
+
+        // Build where clause - either specific orders or all unreleased shipped orders
+        const whereClause: Prisma.OrderWhereInput = {
+            releasedToShipped: false,
+            // Only release orders where all non-cancelled lines are shipped
+            NOT: {
+                orderLines: {
+                    some: {
+                        lineStatus: { notIn: ['shipped', 'cancelled'] },
+                    },
+                },
+            },
+            // Must have at least one shipped line
+            orderLines: {
+                some: { lineStatus: 'shipped' },
+            },
+        };
+
+        if (orderIds && orderIds.length > 0) {
+            whereClause.id = { in: orderIds };
+        }
+
+        const result = await ctx.prisma.order.updateMany({
+            where: whereClause,
+            data: { releasedToShipped: true },
+        });
+
+        orderLogger.info({ orderIds, count: result.count }, 'Released orders to shipped');
+
+        return {
+            message: `Released ${result.count} orders to shipped view`,
+            count: result.count,
+        };
+    });
+
+/**
+ * Release cancelled orders to the cancelled view
+ * Cancelled orders stay in open view until explicitly released
+ */
+const releaseToCancelled = protectedProcedure
+    .input(z.object({
+        orderIds: z.array(z.string().uuid()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderIds } = input;
+
+        // Build where clause - either specific orders or all unreleased cancelled orders
+        const whereClause: Prisma.OrderWhereInput = {
+            releasedToCancelled: false,
+            // Only release orders where all lines are cancelled
+            NOT: {
+                orderLines: {
+                    some: {
+                        lineStatus: { not: 'cancelled' },
+                    },
+                },
+            },
+            // Must have at least one cancelled line
+            orderLines: {
+                some: { lineStatus: 'cancelled' },
+            },
+        };
+
+        if (orderIds && orderIds.length > 0) {
+            whereClause.id = { in: orderIds };
+        }
+
+        const result = await ctx.prisma.order.updateMany({
+            where: whereClause,
+            data: { releasedToCancelled: true },
+        });
+
+        orderLogger.info({ orderIds, count: result.count }, 'Released orders to cancelled');
+
+        return {
+            message: `Released ${result.count} orders to cancelled view`,
+            count: result.count,
+        };
+    });
+
+// ============================================
+// HOLD OPERATIONS
+// ============================================
+
+/**
+ * Hold entire order (blocks all lines from fulfillment)
+ */
+const holdOrder = protectedProcedure
+    .input(z.object({
+        orderId: z.string().uuid('Invalid order ID'),
+        reason: z.string().min(1, 'Reason is required'),
+        notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderId, reason, notes } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        // Enforce hold rules using rules engine
+        await enforceRulesInTrpc('holdOrder', ctx, {
+            data: { order, reason },
+            phase: 'pre',
+        });
+
+        const updated = await ctx.prisma.$transaction(async (tx) => {
+            await tx.order.update({
+                where: { id: orderId },
+                data: {
+                    isOnHold: true,
+                    holdReason: reason,
+                    holdNotes: notes || null,
+                    holdAt: new Date(),
+                },
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(orderId, tx);
+
+            return tx.order.findUnique({
+                where: { id: orderId },
+                include: { orderLines: true },
+            });
+        });
+
+        orderLogger.info({ orderNumber: order.orderNumber, reason }, 'Order placed on hold');
+        return updated;
+    });
+
+/**
+ * Release order from hold
+ */
+const releaseOrderHold = protectedProcedure
+    .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
+    .mutation(async ({ input, ctx }) => {
+        const { orderId } = input;
+
+        const order = await ctx.prisma.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
+
+        if (!order) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order not found',
+            });
+        }
+
+        // Enforce release rules using rules engine
+        await enforceRulesInTrpc('releaseOrderHold', ctx, {
+            data: { order },
+            phase: 'pre',
+        });
+
+        const updated = await ctx.prisma.$transaction(async (tx) => {
+            await tx.order.update({
+                where: { id: orderId },
+                data: {
+                    isOnHold: false,
+                    holdReason: null,
+                    holdNotes: null,
+                    holdAt: null,
+                },
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(orderId, tx);
+
+            return tx.order.findUnique({
+                where: { id: orderId },
+                include: { orderLines: true },
+            });
+        });
+
+        orderLogger.info({ orderNumber: order.orderNumber }, 'Order released from hold');
+        return updated;
+    });
+
+/**
+ * Hold a single order line
+ */
+const holdLine = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+        reason: z.string().min(1, 'Reason is required'),
+        notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId, reason, notes } = input;
+
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            include: { order: true },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Enforce hold line rules using rules engine
+        await enforceRulesInTrpc('holdLine', ctx, {
+            data: { line, order: line.order, reason },
+            phase: 'pre',
+        });
+
+        const updated = await ctx.prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    isOnHold: true,
+                    holdReason: reason,
+                    holdNotes: notes || null,
+                    holdAt: new Date(),
+                },
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(line.orderId, tx);
+
+            return tx.orderLine.findUnique({
+                where: { id: lineId },
+                include: { order: true },
+            });
+        });
+
+        orderLogger.info({ lineId, reason }, 'Line placed on hold');
+        return updated;
+    });
+
+/**
+ * Release a single order line from hold
+ */
+const releaseLineHold = protectedProcedure
+    .input(z.object({ lineId: z.string().uuid('Invalid line ID') }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId } = input;
+
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            include: { order: true },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Enforce release line rules using rules engine
+        await enforceRulesInTrpc('releaseLineHold', ctx, {
+            data: { line },
+            phase: 'pre',
+        });
+
+        const updated = await ctx.prisma.$transaction(async (tx) => {
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    isOnHold: false,
+                    holdReason: null,
+                    holdNotes: null,
+                    holdAt: null,
+                },
+            });
+
+            // Recompute order status
+            await recomputeOrderStatus(line.orderId, tx);
+
+            return tx.orderLine.findUnique({
+                where: { id: lineId },
+                include: { order: true },
+            });
+        });
+
+        orderLogger.info({ lineId }, 'Line released from hold');
+        return updated;
+    });
+
+// ============================================
+// CUSTOMIZATION OPERATIONS
+// ============================================
+
+/**
+ * Customize an order line - create custom SKU
+ */
+const customizeLine = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+        type: z.enum(['length', 'size', 'measurements', 'other']),
+        value: z.string().min(1, 'Value is required'),
+        notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId, type, value, notes } = input;
+
+        // Get order line to find the base SKU
+        const line = await ctx.prisma.orderLine.findUnique({
+            where: { id: lineId },
+            include: { sku: true, order: { select: { orderNumber: true, status: true } } },
+        });
+
+        if (!line) {
+            throw new TRPCError({
+                code: 'NOT_FOUND',
+                message: 'Order line not found',
+            });
+        }
+
+        // Use the current SKU as the base SKU
+        const baseSkuId = line.skuId;
+
+        try {
+            const result = await createCustomSku(
+                ctx.prisma,
+                baseSkuId,
+                { type, value, notes },
+                lineId,
+                ctx.user.id
+            );
+
+            // Access nested properties with type assertions
+            const orderLine = result.orderLine as { id: string; qty: number; order: { orderNumber: string } };
+            const customSku = result.customSku as {
+                id: string;
+                skuCode: string;
+                customizationType: string;
+                customizationValue: string;
+                customizationNotes: string | null;
+            };
+
+            orderLogger.info({
+                orderNumber: orderLine.order.orderNumber,
+                customSkuCode: customSku.skuCode,
+                lineId
+            }, 'Custom SKU created for order line');
+
+            return {
+                id: orderLine.id,
+                customSkuCode: customSku.skuCode,
+                customSkuId: customSku.id,
+                isCustomized: true,
+                isNonReturnable: true,
+                originalSkuCode: result.originalSkuCode,
+                qty: orderLine.qty,
+                customizationType: customSku.customizationType,
+                customizationValue: customSku.customizationValue,
+                customizationNotes: customSku.customizationNotes,
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            if (errorMessage === 'ORDER_LINE_NOT_FOUND') {
+                throw new TRPCError({
+                    code: 'NOT_FOUND',
+                    message: 'Order line not found',
+                });
+            }
+            if (errorMessage === 'LINE_NOT_PENDING') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: 'Cannot customize an allocated/picked/packed line. Unallocate first.',
+                });
+            }
+            if (errorMessage === 'ALREADY_CUSTOMIZED') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: 'Order line is already customized',
+                });
+            }
+            throw error;
+        }
+    });
+
+/**
+ * Remove customization from an order line
+ */
+const removeLineCustomization = protectedProcedure
+    .input(z.object({
+        lineId: z.string().uuid('Invalid line ID'),
+        force: z.boolean().optional().default(false),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { lineId, force } = input;
+
+        try {
+            const result = await removeCustomization(ctx.prisma, lineId, { force });
+
+            // Access nested properties with type assertions
+            const orderLine = result.orderLine as {
+                id: string;
+                order: { orderNumber: string };
+                sku: { id: string; skuCode: string };
+            };
+
+            orderLogger.info({
+                orderNumber: orderLine.order.orderNumber,
+                deletedCustomSkuCode: result.deletedCustomSkuCode,
+                lineId,
+                forcedCleanup: result.forcedCleanup,
+                deletedTransactions: result.deletedTransactions,
+                deletedBatches: result.deletedBatches
+            }, 'Custom SKU removed from order line');
+
+            return {
+                id: orderLine.id,
+                skuCode: orderLine.sku.skuCode,
+                skuId: orderLine.sku.id,
+                isCustomized: false,
+                deletedCustomSkuCode: result.deletedCustomSkuCode,
+                forcedCleanup: result.forcedCleanup,
+                deletedTransactions: result.deletedTransactions,
+                deletedBatches: result.deletedBatches,
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            if (errorMessage === 'ORDER_LINE_NOT_FOUND') {
+                throw new TRPCError({
+                    code: 'NOT_FOUND',
+                    message: 'Order line not found',
+                });
+            }
+            if (errorMessage === 'NOT_CUSTOMIZED') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: 'Order line is not customized',
+                });
+            }
+            if (errorMessage === 'CANNOT_UNDO_HAS_INVENTORY') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: 'Cannot undo customization - inventory transactions exist for custom SKU',
+                });
+            }
+            if (errorMessage === 'CANNOT_UNDO_HAS_PRODUCTION') {
+                throw new TRPCError({
+                    code: 'BAD_REQUEST',
+                    message: 'Cannot undo customization - production batch exists for custom SKU',
+                });
+            }
+            throw error;
+        }
+    });
+
+// ============================================
+// MIGRATE SHOPIFY FULFILLED
+// ============================================
+
+/**
+ * Migrate Shopify fulfilled orders
+ * One-click migration for orders fulfilled on Shopify
+ * Marks as shipped without inventory transactions
+ */
+const migrateShopifyFulfilled = protectedProcedure
+    .input(z.object({
+        limit: z.number().int().positive().max(500).optional().default(50),
+    }))
+    .mutation(async ({ input, ctx }) => {
+        const { limit } = input;
+
+        // Admin only for safety
+        if (ctx.user.role !== 'admin') {
+            throw new TRPCError({
+                code: 'FORBIDDEN',
+                message: 'Migration requires admin role',
+            });
+        }
+
+        // Only migrate OPEN orders (not delivered, archived, etc.)
+        const whereClause = {
+            status: 'open',
+            shopifyCache: {
+                fulfillmentStatus: 'fulfilled',
+                trackingNumber: { not: null },
+                trackingCompany: { not: null },
+            },
+        };
+
+        // Count total eligible first
+        const totalEligible = await ctx.prisma.order.count({ where: whereClause });
+
+        if (totalEligible === 0) {
+            return {
+                migrated: 0,
+                remaining: 0,
+                message: 'No eligible open orders found - migration complete!',
+            };
+        }
+
+        // Fetch batch of eligible orders (oldest first for consistent ordering)
+        const eligibleOrders = await ctx.prisma.order.findMany({
+            where: whereClause,
+            include: {
+                orderLines: { select: { id: true } },
+                shopifyCache: {
+                    select: { trackingNumber: true, trackingCompany: true },
+                },
+            },
+            orderBy: { orderDate: 'asc' },
+            take: limit,
+        });
+
+        interface MigrationResults {
+            migrated: Array<{ orderNumber: string; linesShipped: number }>;
+            skipped: Array<{ orderNumber: string; reason: string }>;
+            errors: Array<{ orderNumber: string; error: string }>;
+        }
+        const results: MigrationResults = { migrated: [], skipped: [], errors: [] };
+
+        for (const order of eligibleOrders) {
+            try {
+                const lineIds = order.orderLines.map(l => l.id);
+                const awb = order.shopifyCache?.trackingNumber || 'MANUAL';
+                const courier = order.shopifyCache?.trackingCompany || 'Manual';
+
+                // Each order gets its own transaction
+                const result = await ctx.prisma.$transaction(async (tx) => {
+                    return await shipOrderLines(tx, {
+                        orderLineIds: lineIds,
+                        awbNumber: awb,
+                        courier: courier,
+                        userId: ctx.user.id,
+                        skipStatusValidation: true,
+                        skipInventory: true,
+                    });
+                });
+
+                if (result.shipped.length > 0) {
+                    results.migrated.push({
+                        orderNumber: order.orderNumber,
+                        linesShipped: result.shipped.length,
+                    });
+                } else if (result.skipped.length > 0) {
+                    results.skipped.push({
+                        orderNumber: order.orderNumber,
+                        reason: result.skipped[0]?.reason || 'Already shipped',
+                    });
+                }
+            } catch (error) {
+                results.errors.push({
+                    orderNumber: order.orderNumber,
+                    error: (error as Error).message,
+                });
+            }
+        }
+
+        const remaining = totalEligible - results.migrated.length;
+
+        return {
+            migrated: results.migrated.length,
+            skipped: results.skipped.length,
+            remaining: remaining,
+            errors: results.errors.length > 0 ? results.errors : undefined,
+            message: remaining > 0
+                ? `Migrated ${results.migrated.length} orders. ${remaining} remaining - click again to continue.`
+                : `Migrated ${results.migrated.length} orders. Migration complete!`,
+        };
+    });
+
+// ============================================
 // EXPORT ROUTER
 // ============================================
 
@@ -1759,4 +2977,28 @@ export const ordersRouter = router({
     markDelivered,
     markRto,
     receiveRto,
+    // Line operations (new)
+    cancelLine,
+    uncancelLine,
+    updateLine,
+    addLine,
+    // Order CRUD
+    updateOrder,
+    deleteOrder,
+    // Ship/Unship
+    shipOrder: shipOrder_,
+    unship,
+    // Release operations
+    releaseToShipped,
+    releaseToCancelled,
+    // Hold operations
+    holdOrder,
+    releaseOrderHold,
+    holdLine,
+    releaseLineHold,
+    // Customization
+    customizeLine,
+    removeCustomization: removeLineCustomization,
+    // Migration
+    migrateShopifyFulfilled,
 });

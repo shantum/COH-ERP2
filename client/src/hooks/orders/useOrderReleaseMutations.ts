@@ -1,43 +1,71 @@
 /**
  * Order release mutations
  * Handles releasing orders to shipped/cancelled views and migration
+ * Uses tRPC for all operations
  */
 
-import { useMutation } from '@tanstack/react-query';
-import { ordersApi } from '../../services/api';
+import { useMemo } from 'react';
+import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
 
 export function useOrderReleaseMutations() {
     const { invalidateOpenOrders, invalidateShippedOrders, invalidateCancelledOrders } = useOrderInvalidation();
 
-    const releaseToShipped = useMutation({
-        mutationFn: (orderIds?: string[]) => ordersApi.releaseToShipped(orderIds),
+    // Release to shipped via tRPC
+    const releaseToShippedMutation = trpc.orders.releaseToShipped.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateShippedOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to release orders')
+        onError: (err) => alert(err.message || 'Failed to release orders')
     });
 
-    const releaseToCancelled = useMutation({
-        mutationFn: (orderIds?: string[]) => ordersApi.releaseToCancelled(orderIds),
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const releaseToShipped = useMemo(() => ({
+        mutate: (orderIds?: string[]) => releaseToShippedMutation.mutate({ orderIds }),
+        mutateAsync: (orderIds?: string[]) => releaseToShippedMutation.mutateAsync({ orderIds }),
+        isPending: releaseToShippedMutation.isPending,
+        isError: releaseToShippedMutation.isError,
+        error: releaseToShippedMutation.error,
+    }), [releaseToShippedMutation.isPending, releaseToShippedMutation.isError, releaseToShippedMutation.error]);
+
+    // Release to cancelled via tRPC
+    const releaseToCancelledMutation = trpc.orders.releaseToCancelled.useMutation({
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to release cancelled orders')
+        onError: (err) => alert(err.message || 'Failed to release cancelled orders')
     });
 
-    const migrateShopifyFulfilled = useMutation({
-        mutationFn: () => ordersApi.migrateShopifyFulfilled(),
-        onSuccess: (response: any) => {
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const releaseToCancelled = useMemo(() => ({
+        mutate: (orderIds?: string[]) => releaseToCancelledMutation.mutate({ orderIds }),
+        mutateAsync: (orderIds?: string[]) => releaseToCancelledMutation.mutateAsync({ orderIds }),
+        isPending: releaseToCancelledMutation.isPending,
+        isError: releaseToCancelledMutation.isError,
+        error: releaseToCancelledMutation.error,
+    }), [releaseToCancelledMutation.isPending, releaseToCancelledMutation.isError, releaseToCancelledMutation.error]);
+
+    // Migrate Shopify fulfilled orders via tRPC
+    const migrateShopifyFulfilledMutation = trpc.orders.migrateShopifyFulfilled.useMutation({
+        onSuccess: (data) => {
             invalidateOpenOrders();
             invalidateShippedOrders();
-            const { skipped, message } = response.data;
-            alert(message + (skipped > 0 ? ` (${skipped} already shipped)` : ''));
+            const { skipped, message } = data;
+            alert(message + (skipped && skipped > 0 ? ` (${skipped} already shipped)` : ''));
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to migrate fulfilled orders')
+        onError: (err) => alert(err.message || 'Failed to migrate fulfilled orders')
     });
+
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const migrateShopifyFulfilled = useMemo(() => ({
+        mutate: () => migrateShopifyFulfilledMutation.mutate({ limit: 50 }),
+        mutateAsync: () => migrateShopifyFulfilledMutation.mutateAsync({ limit: 50 }),
+        isPending: migrateShopifyFulfilledMutation.isPending,
+        isError: migrateShopifyFulfilledMutation.isError,
+        error: migrateShopifyFulfilledMutation.error,
+    }), [migrateShopifyFulfilledMutation.isPending, migrateShopifyFulfilledMutation.isError, migrateShopifyFulfilledMutation.error]);
 
     return {
         releaseToShipped,

@@ -8,8 +8,8 @@
  * 3. onSettled: Invalidate caches to confirm server state
  */
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ordersApi } from '../../services/api';
+import { useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
@@ -74,7 +74,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
     });
 
     // Wrapper to match existing API (id instead of orderId)
-    const cancelOrder = {
+    // Use useMemo to ensure isPending updates reactively
+    const cancelOrder = useMemo(() => ({
         mutate: ({ id, reason }: { id: string; reason?: string }) =>
             cancelOrderMutation.mutate({ orderId: id, reason }),
         mutateAsync: ({ id, reason }: { id: string; reason?: string }) =>
@@ -82,7 +83,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         isPending: cancelOrderMutation.isPending,
         isError: cancelOrderMutation.isError,
         error: cancelOrderMutation.error,
-    };
+    }), [cancelOrderMutation.isPending, cancelOrderMutation.isError, cancelOrderMutation.error]);
 
     // Uncancel order with optimistic update
     const uncancelOrderMutation = trpc.orders.uncancelOrder.useMutation({
@@ -115,18 +116,17 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         }
     });
 
-    const uncancelOrder = {
+    const uncancelOrder = useMemo(() => ({
         mutate: (id: string) => uncancelOrderMutation.mutate({ orderId: id }),
         mutateAsync: (id: string) => uncancelOrderMutation.mutateAsync({ orderId: id }),
         isPending: uncancelOrderMutation.isPending,
         isError: uncancelOrderMutation.isError,
         error: uncancelOrderMutation.error,
-    };
+    }), [uncancelOrderMutation.isPending, uncancelOrderMutation.isError, uncancelOrderMutation.error]);
 
-    // Cancel line with optimistic updates
-    const cancelLine = useMutation({
-        mutationFn: (lineId: string) => ordersApi.cancelLine(lineId),
-        onMutate: async (lineId: string) => {
+    // Cancel line with optimistic updates (tRPC)
+    const cancelLineMutation = trpc.orders.cancelLine.useMutation({
+        onMutate: async ({ lineId }) => {
             // Cancel inflight refetches
             await trpcUtils.orders.list.cancel(queryInput);
 
@@ -142,14 +142,14 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
-        onError: (err: any, _lineId, context) => {
+        onError: (err, _vars, context) => {
             // Rollback on error
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
-            alert(err.response?.data?.error || 'Failed to cancel line');
+            alert(err.message || 'Failed to cancel line');
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -157,10 +157,20 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         },
     });
 
-    // Uncancel line with optimistic updates
-    const uncancelLine = useMutation({
-        mutationFn: (lineId: string) => ordersApi.uncancelLine(lineId),
-        onMutate: async (lineId: string) => {
+    // Wrapper for easier usage - useMemo ensures isPending updates reactively
+    // Forward mutation options (onSuccess, onError, onSettled) to underlying mutation
+    const cancelLine = useMemo(() => ({
+        mutate: (lineId: string, options?: { onSuccess?: () => void; onError?: (err: unknown) => void; onSettled?: () => void }) =>
+            cancelLineMutation.mutate({ lineId }, options),
+        mutateAsync: (lineId: string) => cancelLineMutation.mutateAsync({ lineId }),
+        isPending: cancelLineMutation.isPending,
+        isError: cancelLineMutation.isError,
+        error: cancelLineMutation.error,
+    }), [cancelLineMutation.isPending, cancelLineMutation.isError, cancelLineMutation.error]);
+
+    // Uncancel line with optimistic updates (tRPC)
+    const uncancelLineMutation = trpc.orders.uncancelLine.useMutation({
+        onMutate: async ({ lineId }) => {
             await trpcUtils.orders.list.cancel(queryInput);
             const previousData = getCachedData();
 
@@ -173,13 +183,13 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
-        onError: (err: any, _lineId, context) => {
+        onError: (err, _vars, context) => {
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
-            alert(err.response?.data?.error || 'Failed to restore line');
+            alert(err.message || 'Failed to restore line');
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -187,6 +197,17 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
         },
     });
+
+    // Wrapper for easier usage - useMemo ensures isPending updates reactively
+    // Forward mutation options (onSuccess, onError, onSettled) to underlying mutation
+    const uncancelLine = useMemo(() => ({
+        mutate: (lineId: string, options?: { onSuccess?: () => void; onError?: (err: unknown) => void; onSettled?: () => void }) =>
+            uncancelLineMutation.mutate({ lineId }, options),
+        mutateAsync: (lineId: string) => uncancelLineMutation.mutateAsync({ lineId }),
+        isPending: uncancelLineMutation.isPending,
+        isError: uncancelLineMutation.isError,
+        error: uncancelLineMutation.error,
+    }), [uncancelLineMutation.isPending, uncancelLineMutation.isError, uncancelLineMutation.error]);
 
     return {
         cancelOrder,
