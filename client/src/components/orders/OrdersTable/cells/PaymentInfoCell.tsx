@@ -33,10 +33,9 @@ export function PaymentInfoCell({ row }: PaymentInfoCellProps) {
                     ₹{Math.round(orderValue).toLocaleString('en-IN')}
                 </span>
                 {discountCode && (
-                    <Tag
-                        className="w-3.5 h-3.5 text-purple-500"
-                        title={discountCode}
-                    />
+                    <span title={discountCode}>
+                        <Tag className="w-3.5 h-3.5 text-purple-500" />
+                    </span>
                 )}
             </div>
             {/* Line 2: Payment method */}
