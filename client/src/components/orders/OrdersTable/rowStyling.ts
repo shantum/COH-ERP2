@@ -1,29 +1,33 @@
 /**
  * Row styling utilities for OrdersTable (Tailwind version)
  * Provides getRowClassName function for TanStack Table rows
+ *
+ * Uses green gradient to match workflow progression:
+ * Allocated (light) → Picked → Packed → Shipped (dark)
  */
 
 import type { FlattenedOrderRow } from '../../../utils/orderHelpers';
 
 /**
  * Line status to Tailwind class mappings
+ * Muted green gradient: light → medium as workflow progresses
  */
 const LINE_STATUS_CLASSES = {
-    shipped: 'bg-green-200 line-through border-l-4 border-l-green-500',
-    packed: 'bg-blue-100 border-l-4 border-l-blue-500',
-    picked: 'bg-teal-100 border-l-4 border-l-teal-500',
-    allocated: 'bg-purple-100 border-l-4 border-l-purple-500',
-    cancelled: 'bg-gray-100 text-gray-400 line-through opacity-60',
+    allocated: 'bg-emerald-50/50 border-l-4 border-l-emerald-200',
+    picked: 'bg-emerald-50 border-l-4 border-l-emerald-300',
+    packed: 'bg-emerald-100/70 border-l-4 border-l-emerald-400',
+    shipped: 'bg-emerald-100 line-through border-l-4 border-l-emerald-500',
+    cancelled: 'bg-gray-50 text-gray-400 line-through opacity-60',
 } as const;
 
 /**
  * Pending substate to Tailwind class mappings
  */
 const PENDING_SUBSTATE_CLASSES = {
-    customized: 'bg-orange-50 border-l-4 border-l-orange-500',
-    withStock: 'bg-green-50 border-l-4 border-l-green-300',
-    inProduction: 'bg-amber-100 border-l-4 border-l-amber-500',
-    blocked: 'bg-gray-50 text-gray-500 border-l-4 border-l-gray-300',
+    customized: 'bg-orange-50/50 border-l-4 border-l-orange-300',
+    withStock: 'bg-teal-50/50 border-l-4 border-l-teal-200',
+    inProduction: 'bg-amber-50/50 border-l-4 border-l-amber-300',
+    blocked: 'bg-white text-slate-500 border-l-4 border-l-slate-200',
 } as const;
 
 /**
@@ -88,11 +92,11 @@ export function getCellClassName(status: string | null | undefined): string {
         case 'shipped':
             return 'text-green-700';
         case 'packed':
-            return 'text-blue-700';
+            return 'text-green-600';
         case 'picked':
-            return 'text-teal-700';
+            return 'text-green-500';
         case 'allocated':
-            return 'text-purple-700';
+            return 'text-green-500';
         case 'cancelled':
             return 'text-gray-400 line-through';
         default:
@@ -104,13 +108,13 @@ export function getCellClassName(status: string | null | undefined): string {
  * Status legend items for display
  */
 export const STATUS_LEGEND_ITEMS = [
-    { color: 'bg-gray-50', border: 'border-gray-300', label: 'Pending (no stock)', desc: 'Waiting for inventory' },
-    { color: 'bg-amber-100', border: 'border-amber-500', label: 'In Production', desc: 'Has production date set' },
-    { color: 'bg-green-50', border: 'border-green-300', label: 'Ready to Allocate', desc: 'Has stock available' },
-    { color: 'bg-purple-100', border: 'border-purple-500', label: 'Allocated', desc: 'Stock reserved' },
-    { color: 'bg-teal-100', border: 'border-teal-500', label: 'Picked', desc: 'Ready to pack' },
-    { color: 'bg-blue-100', border: 'border-blue-500', label: 'Packed', desc: 'Ready to ship - enter AWB' },
-    { color: 'bg-green-200', border: 'border-green-500', label: 'Marked Shipped', desc: 'Pending batch process' },
+    { color: 'bg-white', border: 'border-slate-200', label: 'Pending (no stock)', desc: 'Waiting for inventory' },
+    { color: 'bg-amber-50/50', border: 'border-amber-300', label: 'In Production', desc: 'Has production date set' },
+    { color: 'bg-teal-50/50', border: 'border-teal-200', label: 'Ready to Allocate', desc: 'Has stock available' },
+    { color: 'bg-emerald-50/50', border: 'border-emerald-200', label: 'Allocated', desc: 'Stock reserved' },
+    { color: 'bg-emerald-50', border: 'border-emerald-300', label: 'Picked', desc: 'Ready to pack' },
+    { color: 'bg-emerald-100/70', border: 'border-emerald-400', label: 'Packed', desc: 'Ready to ship' },
+    { color: 'bg-emerald-100', border: 'border-emerald-500', label: 'Shipped', desc: 'Awaiting tracking' },
 ] as const;
 
 /**

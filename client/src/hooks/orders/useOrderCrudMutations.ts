@@ -6,7 +6,7 @@
 import { useMutation } from '@tanstack/react-query';
 import { ordersApi } from '../../services/api';
 import { trpc } from '../../services/trpc';
-import { useOrderInvalidation } from './orderMutationUtils';
+import { useOrderInvalidation, viewToTrpcInput } from './orderMutationUtils';
 
 export interface UseOrderCrudMutationsOptions {
     onCreateSuccess?: () => void;
@@ -17,6 +17,8 @@ export interface UseOrderCrudMutationsOptions {
 
 export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}) {
     const { invalidateOpenOrders, invalidateAll } = useOrderInvalidation();
+    const trpcUtils = trpc.useUtils();
+    const queryInput = viewToTrpcInput.open;
 
     const createOrder = trpc.orders.create.useMutation({
         onSuccess: () => {
@@ -59,11 +61,36 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
     const updateLineNotes = useMutation({
         mutationFn: ({ lineId, notes }: { lineId: string; notes: string }) =>
             ordersApi.updateLine(lineId, { notes }),
+        onMutate: async ({ lineId, notes }) => {
+            // Cancel any outgoing refetches
+            await trpcUtils.orders.list.cancel(queryInput);
+
+            // Snapshot the previous value
+            const previousData = trpcUtils.orders.list.getData(queryInput);
+
+            // Optimistically update the cache
+            trpcUtils.orders.list.setData(queryInput, (old: any) => {
+                if (!old?.rows) return old;
+                return {
+                    ...old,
+                    rows: old.rows.map((row: any) =>
+                        row.lineId === lineId ? { ...row, lineNotes: notes } : row
+                    ),
+                };
+            });
+
+            return { previousData, queryInput };
+        },
         onSuccess: () => {
-            invalidateOpenOrders();
+            // Don't invalidate - optimistic update is sufficient
             options.onNotesSuccess?.();
         },
-        onError: (err: any) => {
+        onError: (err: any, _variables, context) => {
+            // Rollback on error
+            if (context?.previousData) {
+                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+            }
+            invalidateOpenOrders();
             alert(err.response?.data?.error || 'Failed to update line notes');
         }
     });

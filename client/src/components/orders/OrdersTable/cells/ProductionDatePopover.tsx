@@ -72,6 +72,20 @@ export function ProductionDatePopover({
         return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
     };
 
+    const getRelativeDay = (dateStr: string) => {
+        const date = new Date(dateStr + 'T00:00:00');
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 0) return 'Today';
+        if (diffDays === 1) return 'Tomorrow';
+        if (diffDays === -1) return 'Yesterday';
+        if (diffDays > 1 && diffDays <= 7) return date.toLocaleDateString('en-IN', { weekday: 'short' });
+        if (diffDays < -1) return `${Math.abs(diffDays)}d ago`;
+        return `In ${diffDays}d`;
+    };
+
     const handleDateSelect = (date: string) => {
         if (isLocked(date)) {
             alert(`Production date ${date} is locked.`);
@@ -99,13 +113,20 @@ export function ProductionDatePopover({
                     currentDate
                         ? isLocked(currentDate)
                             ? 'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200'
-                            : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200'
-                        : 'text-gray-300 hover:text-amber-600 hover:bg-amber-50 border border-dashed border-gray-300 hover:border-amber-300'
+                            : 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200'
+                        : 'text-amber-600/80 hover:text-amber-700 hover:bg-amber-50 border border-dashed border-amber-300 hover:border-amber-400'
                 }`}
                 title={currentDate ? `Production: ${formatDisplayDate(currentDate)}` : 'Set production date'}
             >
                 <Calendar size={10} />
-                {currentDate ? formatDisplayDate(currentDate) : <span className="text-[10px] italic">Set date</span>}
+                {currentDate ? (
+                    <span className="flex flex-col items-start leading-tight">
+                        <span className="font-medium">{formatDisplayDate(currentDate)}</span>
+                        <span className="text-[9px] opacity-75">{getRelativeDay(currentDate)}</span>
+                    </span>
+                ) : (
+                    <span className="text-[10px] font-medium">Production</span>
+                )}
             </button>
 
             {isOpen && createPortal(
