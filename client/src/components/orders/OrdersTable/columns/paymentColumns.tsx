@@ -67,17 +67,20 @@ export function buildPaymentColumns(ctx: OrdersTableContext): ColumnDef<Flattene
             size: DEFAULT_COLUMN_WIDTHS.customerTags,
             cell: ({ row }) => {
                 if (!row.original.isFirstLine) return null;
-                const tags = row.original.customerTags;
-                if (!tags || tags.length === 0) return <span className="text-gray-300">-</span>;
+                const rawTags = row.original.customerTags;
+                if (!rawTags) return <span className="text-gray-300">-</span>;
+                // Handle both string and array formats
+                const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(',').map(t => t.trim()).filter(Boolean);
+                if (tags.length === 0) return <span className="text-gray-300">-</span>;
                 return (
                     <div className="flex flex-wrap gap-0.5">
                         {tags.slice(0, 2).map((tag, i) => (
-                            <span key={i} className="px-1 py-0.5 bg-gray-100 text-gray-600 rounded">
+                            <span key={i} className="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]">
                                 {tag}
                             </span>
                         ))}
                         {tags.length > 2 && (
-                            <span className="text-gray-400">+{tags.length - 2}</span>
+                            <span className="text-gray-400 text-[10px]">+{tags.length - 2}</span>
                         )}
                     </div>
                 );
