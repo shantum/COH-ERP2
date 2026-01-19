@@ -2,25 +2,21 @@
  * Constants for OrdersTable component
  */
 
-// All column IDs in display order (includes post-ship columns)
+// All column IDs in display order
 export const ALL_COLUMN_IDS = [
     'order', 'shipByDate',
     'tags', 'customerNotes', 'customerTags', 'productName', 'customize', 'qty', 'fabricBalance',
-    'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine',
-    'shopifyTracking', 'awb', 'courier', 'trackingStatus',
-    // Post-ship columns (for shipped/archived views)
-    'shippedAt', 'deliveredAt', 'deliveryDays', 'daysInTransit',
-    'rtoInitiatedAt', 'daysInRto', 'daysSinceDelivery', 'codRemittedAt',
-    'archivedAt', 'finalStatus',
+    'workflow', 'production', 'notes', 'cancelLine',
+    'shopifyTracking', 'trackingInfo', 'trackingStatus',
 ] as const;
 
 export type ColumnId = typeof ALL_COLUMN_IDS[number];
 
-// Columns shown by default
+// Columns shown by default in Open view
 export const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
-    'order', 'productName',
-    'qty', 'allocate', 'production', 'notes', 'pick', 'pack', 'ship', 'cancelLine',
-    'shopifyTracking', 'awb', 'courier', 'trackingStatus',
+    'order', 'shipByDate', 'tags', 'customerNotes', 'customerTags',
+    'productName', 'qty', 'workflow', 'production', 'notes', 'cancelLine',
+    'shopifyTracking', 'trackingInfo',
 ];
 
 // Default column headers
@@ -29,34 +25,18 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     shipByDate: 'Ship By',
     tags: 'Tags',
     customerNotes: 'Order Notes',
-    customerTags: 'Customer Tags',
+    customerTags: 'Cust Tags',
     productName: 'Product',
     customize: 'Custom',
     qty: 'Qty',
     fabricBalance: 'Fabric',
-    allocate: 'Alloc',
+    workflow: 'Workflow',
     production: 'Production',
     notes: 'Notes',
-    pick: 'Pick',
-    pack: 'Pack',
-    ship: 'Ship',
-    cancelLine: 'Cancel',
+    cancelLine: 'Cance',
     shopifyTracking: 'Shopify',
-    awb: 'AWB',
-    courier: 'Courier',
+    trackingInfo: 'COH AWB',
     trackingStatus: 'Tracking',
-    // Post-ship columns
-    shippedAt: 'Shipped',
-    deliveredAt: 'Delivered',
-    deliveryDays: 'Del Days',
-    daysInTransit: 'Transit',
-    rtoInitiatedAt: 'RTO Date',
-    daysInRto: 'RTO Days',
-    daysSinceDelivery: 'Since Del',
-    codRemittedAt: 'COD Remitted',
-    archivedAt: 'Archived',
-    finalStatus: 'Status',
-    actions: 'Actions',
 };
 
 // Common courier options
@@ -71,38 +51,24 @@ export const COURIER_OPTIONS = [
     'Other',
 ] as const;
 
-// Default column widths (compact for small screens)
+// Default column widths
 export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> = {
     order: 240,
-    shipByDate: 65,
-    tags: 80,
-    customerNotes: 120,
+    shipByDate: 70,
+    tags: 100,
+    customerNotes: 140,
     customerTags: 100,
-    productName: 220,
+    productName: 240,
     customize: 50,
-    qty: 40,
-    fabricBalance: 50,
-    allocate: 35,
-    production: 70,
-    notes: 100,
-    pick: 30,
-    pack: 30,
-    ship: 30,
-    cancelLine: 35,
-    shopifyTracking: 120,
-    awb: 100,
-    courier: 70,
+    qty: 45,
+    fabricBalance: 60,
+    workflow: 120,
+    production: 90,
+    notes: 120,
+    cancelLine: 40,
+    shopifyTracking: 100,
+    trackingInfo: 130,
     trackingStatus: 80,
-    shippedAt: 70,
-    deliveredAt: 70,
-    deliveryDays: 50,
-    daysInTransit: 50,
-    rtoInitiatedAt: 70,
-    daysInRto: 50,
-    daysSinceDelivery: 60,
-    codRemittedAt: 80,
-    archivedAt: 70,
-    finalStatus: 65,
 };
 
 // Row height for virtualization
