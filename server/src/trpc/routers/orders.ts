@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { Prisma } from '@prisma/client';
 import { router, protectedProcedure } from '../index.js';
-import { CreateOrderSchema, UpdateOrderSchema } from '@coh/shared';
+import { CreateOrderSchema } from '@coh/shared';
 import {
     buildViewWhereClause,
     enrichOrdersForView,
@@ -2017,8 +2017,8 @@ const addLine = protectedProcedure
             phase: 'pre',
         });
 
-        const result = await ctx.prisma.$transaction(async (tx) => {
-            const newLine = await tx.orderLine.create({
+        await ctx.prisma.$transaction(async (tx) => {
+            await tx.orderLine.create({
                 data: {
                     orderId,
                     skuId,
@@ -2036,8 +2036,6 @@ const addLine = protectedProcedure
                 where: { id: orderId },
                 data: { totalAmount: newTotal },
             });
-
-            return newLine;
         });
 
         const updated = await ctx.prisma.order.findUnique({

@@ -69,10 +69,10 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const customizeLine = useMemo(() => ({
-        mutate: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }) =>
-            customizeLineMutation.mutate({ lineId, type: data.type, value: data.value, notes: data.notes }),
-        mutateAsync: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }) =>
-            customizeLineMutation.mutateAsync({ lineId, type: data.type, value: data.value, notes: data.notes }),
+        mutate: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }, options?: Parameters<typeof customizeLineMutation.mutate>[1]) =>
+            customizeLineMutation.mutate({ lineId, type: data.type, value: data.value, notes: data.notes }, options),
+        mutateAsync: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }, options?: Parameters<typeof customizeLineMutation.mutateAsync>[1]) =>
+            customizeLineMutation.mutateAsync({ lineId, type: data.type, value: data.value, notes: data.notes }, options),
         isPending: customizeLineMutation.isPending,
         isError: customizeLineMutation.isError,
         error: customizeLineMutation.error,
@@ -105,10 +105,10 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const removeCustomization = useMemo(() => ({
-        mutate: ({ lineId, force = false }: { lineId: string; force?: boolean }) =>
-            removeCustomizationMutation.mutate({ lineId, force }),
-        mutateAsync: ({ lineId, force = false }: { lineId: string; force?: boolean }) =>
-            removeCustomizationMutation.mutateAsync({ lineId, force }),
+        mutate: ({ lineId, force = false }: { lineId: string; force?: boolean }, options?: Parameters<typeof removeCustomizationMutation.mutate>[1]) =>
+            removeCustomizationMutation.mutate({ lineId, force }, options),
+        mutateAsync: ({ lineId, force = false }: { lineId: string; force?: boolean }, options?: Parameters<typeof removeCustomizationMutation.mutateAsync>[1]) =>
+            removeCustomizationMutation.mutateAsync({ lineId, force }, options),
         isPending: removeCustomizationMutation.isPending,
         isError: removeCustomizationMutation.isError,
         error: removeCustomizationMutation.error,

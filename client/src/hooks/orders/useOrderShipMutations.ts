@@ -218,11 +218,12 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         error: unshipMutation.error,
     }), [unshipMutation.isPending, unshipMutation.isError, unshipMutation.error]);
 
-    // Mark single line as shipped with optimistic update (tRPC - uses setLineStatus)
-    const markShippedLineMutation = trpc.orders.setLineStatus.useMutation({
-        onMutate: async ({ lineId, status, awbNumber, courier }) => {
+    // Mark single line as shipped with optimistic update (tRPC - uses ship mutation)
+    const markShippedLineMutation = trpc.orders.ship.useMutation({
+        onMutate: async ({ lineIds, awbNumber, courier }) => {
             await trpcUtils.orders.list.cancel(queryInput);
             const previousData = getCachedData();
+            const lineId = lineIds[0];
 
             // Update line status to shipped
             trpcUtils.orders.list.setData(
@@ -236,10 +237,10 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
                             if (row.lineId !== lineId) return row;
                             return {
                                 ...row,
-                                lineStatus: status,
-                                ...(awbNumber && { awbNumber }),
-                                ...(courier && { courier }),
-                                lineShippedAt: status === 'shipped' ? new Date().toISOString() : null,
+                                lineStatus: 'shipped',
+                                awbNumber,
+                                courier,
+                                lineShippedAt: new Date().toISOString(),
                             };
                         }),
                         orders: old.orders.map((order: any) => ({
@@ -248,10 +249,10 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
                                 line.id === lineId
                                     ? {
                                         ...line,
-                                        lineStatus: status,
-                                        ...(awbNumber && { awbNumber }),
-                                        ...(courier && { courier }),
-                                        shippedAt: status === 'shipped' ? new Date().toISOString() : null,
+                                        lineStatus: 'shipped',
+                                        awbNumber,
+                                        courier,
+                                        shippedAt: new Date().toISOString(),
                                     }
                                     : line
                             ),
@@ -269,7 +270,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(err.message || 'Failed to update line status');
+            alert(err.message || 'Failed to ship line');
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -280,10 +281,10 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const markShippedLine = useMemo(() => ({
-        mutate: ({ lineId, data }: { lineId: string; data?: { awbNumber?: string; courier?: string } }) =>
-            markShippedLineMutation.mutate({ lineId, status: 'shipped', awbNumber: data?.awbNumber, courier: data?.courier }),
-        mutateAsync: ({ lineId, data }: { lineId: string; data?: { awbNumber?: string; courier?: string } }) =>
-            markShippedLineMutation.mutateAsync({ lineId, status: 'shipped', awbNumber: data?.awbNumber, courier: data?.courier }),
+        mutate: ({ lineId, data }: { lineId: string; data: { awbNumber: string; courier: string } }, options?: Parameters<typeof markShippedLineMutation.mutate>[1]) =>
+            markShippedLineMutation.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }, options),
+        mutateAsync: ({ lineId, data }: { lineId: string; data: { awbNumber: string; courier: string } }, options?: Parameters<typeof markShippedLineMutation.mutateAsync>[1]) =>
+            markShippedLineMutation.mutateAsync({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }, options),
         isPending: markShippedLineMutation.isPending,
         isError: markShippedLineMutation.isError,
         error: markShippedLineMutation.error,
@@ -318,8 +319,8 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const unmarkShippedLine = useMemo(() => ({
-        mutate: (lineId: string) => unmarkShippedLineMutation.mutate({ lineId, status: 'packed' }),
-        mutateAsync: (lineId: string) => unmarkShippedLineMutation.mutateAsync({ lineId, status: 'packed' }),
+        mutate: (lineId: string, options?: Parameters<typeof unmarkShippedLineMutation.mutate>[1]) => unmarkShippedLineMutation.mutate({ lineId, status: 'packed' }, options),
+        mutateAsync: (lineId: string, options?: Parameters<typeof unmarkShippedLineMutation.mutateAsync>[1]) => unmarkShippedLineMutation.mutateAsync({ lineId, status: 'packed' }, options),
         isPending: unmarkShippedLineMutation.isPending,
         isError: unmarkShippedLineMutation.isError,
         error: unmarkShippedLineMutation.error,
@@ -356,10 +357,10 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const updateLineTracking = useMemo(() => ({
-        mutate: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }) =>
-            updateLineTrackingMutation.mutate({ lineId, ...data }),
-        mutateAsync: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }) =>
-            updateLineTrackingMutation.mutateAsync({ lineId, ...data }),
+        mutate: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }, options?: Parameters<typeof updateLineTrackingMutation.mutate>[1]) =>
+            updateLineTrackingMutation.mutate({ lineId, ...data }, options),
+        mutateAsync: ({ lineId, data }: { lineId: string; data: { awbNumber?: string; courier?: string } }, options?: Parameters<typeof updateLineTrackingMutation.mutateAsync>[1]) =>
+            updateLineTrackingMutation.mutateAsync({ lineId, ...data }, options),
         isPending: updateLineTrackingMutation.isPending,
         isError: updateLineTrackingMutation.isError,
         error: updateLineTrackingMutation.error,

@@ -42,6 +42,8 @@ export interface CustomerSearchProps {
   placeholder?: string;
   /** Custom class name for the container */
   className?: string;
+  /** Visual variant for styling */
+  variant?: 'default' | 'slate';
 }
 
 /**

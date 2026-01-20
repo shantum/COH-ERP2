@@ -19,7 +19,7 @@
  *   - open: Default (fulfillment in progress)
  */
 
-import type { PrismaClient, Prisma, Order, OrderLine as PrismaOrderLine } from '@prisma/client';
+import type { PrismaClient, Order, OrderLine as PrismaOrderLine } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { isValidTransition } from './orderStateMachine.js';
 
