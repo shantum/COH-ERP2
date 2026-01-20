@@ -51,6 +51,8 @@ import remittanceRoutes from './routes/remittance.js';
 import catalogRoutes from './routes/catalog.js';
 import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
+import pulseRoutes from './routes/pulse.js';
+import { pulseBroadcaster } from './services/pulseBroadcaster.js';
 import materialsRoutes from './routes/materials.js';
 import bomRoutes from './routes/bom.js';
 import scheduledSync from './services/scheduledSync.js';
@@ -155,6 +157,7 @@ app.use('/api/remittance', remittanceRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/pincodes', pincodeRoutes);
 app.use('/api/events', sseRoutes);
+app.use('/api/pulse', pulseRoutes);
 app.use('/api/materials', materialsRoutes);
 app.use('/api/bom', bomRoutes);
 
@@ -295,6 +298,13 @@ app.listen(PORT, '0.0.0.0', async () => {
       cacheDumpWorker.stop();
     }, 5000);
   }
+
+  // Start Pulse broadcaster (Postgres NOTIFY → SSE)
+  // Always enabled - required for real-time UI updates
+  pulseBroadcaster.start();
+  shutdownCoordinator.register('pulseBroadcaster', async () => {
+    await pulseBroadcaster.shutdown();
+  }, 5000);
 
   shutdownCoordinator.register('prisma', async () => {
     await prisma.$disconnect();

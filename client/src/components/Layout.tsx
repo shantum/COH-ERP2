@@ -1,14 +1,18 @@
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, Scissors, ShoppingCart, Truck,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '../services/api';
 import type { LucideIcon } from 'lucide-react';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { Breadcrumbs } from './ui/Breadcrumbs';
+import { LiveIndicator } from './ui/LiveIndicator';
+import { useCompactMode } from '../hooks/useCompactMode';
 
 // Navigation structure with groups
 interface NavItem {
@@ -93,7 +97,12 @@ export default function Layout() {
     const { user, logout } = useAuth();
     const { hasPermission } = usePermissions();
     const navigate = useNavigate();
-    const location = useLocation();
+    const routerState = useRouterState();
+    const location = routerState.location;
+    const { isCompact: isCompactMode, toggle: toggleCompactMode } = useCompactMode();
+
+    // Auto-update document title based on current route
+    useDocumentTitle();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [collapsed, setCollapsed] = useState(() => {
         return localStorage.getItem('sidebar-collapsed') === 'true';
@@ -149,7 +158,7 @@ export default function Layout() {
 
     const handleLogout = () => {
         logout();
-        navigate('/login');
+        navigate({ to: '/login' });
     };
 
     const toggleCollapsed = () => {
@@ -238,27 +247,38 @@ export default function Layout() {
                                     {/* Group items */}
                                     {!isCollapsed && (
                                         <div className="space-y-0.5">
-                                            {filteredItems.map((item) => (
-                                                <NavLink
-                                                    key={item.to}
-                                                    to={item.to}
-                                                    onClick={() => setSidebarOpen(false)}
-                                                    className={({ isActive }) =>
-                                                        `flex items-center rounded-md text-sm transition-all duration-150 ${
+                                            {filteredItems.map((item) => {
+                                                // Parse URL to separate path and search params
+                                                const [path, queryString] = item.to.split('?');
+                                                const searchParams = queryString
+                                                    ? Object.fromEntries(new URLSearchParams(queryString))
+                                                    : undefined;
+
+                                                // Check if this link is active
+                                                const isActive = location.pathname === path ||
+                                                    (path !== '/' && location.pathname.startsWith(path));
+
+                                                return (
+                                                    <Link
+                                                        key={item.to}
+                                                        to={path as '/'}
+                                                        search={searchParams as Record<string, string>}
+                                                        onClick={() => setSidebarOpen(false)}
+                                                        className={`flex items-center rounded-md text-sm transition-all duration-150 ${
                                                             isCompact
                                                                 ? 'px-3 py-2 justify-center'
                                                                 : 'px-2.5 py-1.5'
                                                         } ${isActive
                                                             ? 'bg-primary-50 text-primary-700 font-medium'
                                                             : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                                                        }`
-                                                    }
-                                                    title={isCompact ? item.label : undefined}
-                                                >
-                                                    <item.icon size={18} className={isCompact ? '' : 'mr-2.5 flex-shrink-0'} />
-                                                    {!isCompact && <span className="truncate">{item.label}</span>}
-                                                </NavLink>
-                                            ))}
+                                                        }`}
+                                                        title={isCompact ? item.label : undefined}
+                                                    >
+                                                        <item.icon size={18} className={isCompact ? '' : 'mr-2.5 flex-shrink-0'} />
+                                                        {!isCompact && <span className="truncate">{item.label}</span>}
+                                                    </Link>
+                                                );
+                                            })}
                                         </div>
                                     )}
 
@@ -333,6 +353,21 @@ export default function Layout() {
                 collapsed ? 'lg:pl-16' : 'lg:pl-56'
             }`}>
                 <div className="p-4 md:p-6 lg:p-8">
+                    {/* Top bar with live indicator and compact mode toggle */}
+                    <div className="flex items-center justify-between mb-2">
+                        <Breadcrumbs />
+                        <div className="flex items-center gap-2">
+                            <LiveIndicator />
+                            <button
+                                onClick={toggleCompactMode}
+                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1.5"
+                                title={isCompactMode ? 'Switch to normal density' : 'Switch to compact density'}
+                            >
+                                {isCompactMode ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+                                <span className="text-xs hidden sm:inline">{isCompactMode ? 'Normal' : 'Compact'}</span>
+                            </button>
+                        </div>
+                    </div>
                     <Outlet />
                 </div>
             </main>
