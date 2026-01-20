@@ -991,17 +991,17 @@ const cancelOrder = protectedProcedure
                 phase: 'transaction',
             });
 
-            // Release inventory and unlink production batches for all lines
+            // Collect unique batch IDs before unlinking
+            const batchIds = [...new Set(
+                order.orderLines
+                    .filter(l => l.productionBatchId)
+                    .map(l => l.productionBatchId as string)
+            )];
+
+            // Release inventory for allocated lines
             for (const line of order.orderLines) {
                 if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
                     await releaseReservedInventory(tx, line.id);
-                }
-                // Unlink production batch if exists (same pattern as deleteOrder)
-                if (line.productionBatchId) {
-                    await tx.productionBatch.update({
-                        where: { id: line.productionBatchId },
-                        data: { sourceOrderLineId: null },
-                    });
                 }
             }
 
@@ -1010,6 +1010,31 @@ const cancelOrder = protectedProcedure
                 where: { orderId },
                 data: { lineStatus: 'cancelled', productionBatchId: null },
             });
+
+            // Handle production batches: delete orphaned planned batches, unlink others
+            for (const batchId of batchIds) {
+                // Check if any other lines still reference this batch
+                const otherLinesCount = await tx.orderLine.count({
+                    where: { productionBatchId: batchId },
+                });
+
+                // Get batch to check if deletable
+                const batch = await tx.productionBatch.findUnique({
+                    where: { id: batchId },
+                    select: { status: true, qtyCompleted: true },
+                });
+
+                if (otherLinesCount === 0 && batch?.status === 'planned' && batch.qtyCompleted === 0) {
+                    // Safe to delete: no other lines linked, no work started
+                    await tx.productionBatch.delete({ where: { id: batchId } });
+                } else {
+                    // Just clear the sourceOrderLineId reference
+                    await tx.productionBatch.update({
+                        where: { id: batchId },
+                        data: { sourceOrderLineId: null },
+                    });
+                }
+            }
 
             // Update order status
             await tx.order.update({
@@ -1803,19 +1828,36 @@ const cancelLine = protectedProcedure
             }
         }
 
-        // Unlink production batch if exists (same pattern as deleteOrder/cancelOrder)
-        if (line.productionBatchId) {
-            await ctx.prisma.productionBatch.update({
-                where: { id: line.productionBatchId },
-                data: { sourceOrderLineId: null },
-            });
-        }
-
-        // Update line status and clear production batch link
+        // Update line status and clear production batch link first
         await ctx.prisma.orderLine.update({
             where: { id: lineId },
             data: { lineStatus: 'cancelled', productionBatchId: null },
         });
+
+        // Handle production batch: delete if orphaned and planned, otherwise just unlink
+        if (line.productionBatchId) {
+            // Check if any other lines still reference this batch
+            const otherLinesCount = await ctx.prisma.orderLine.count({
+                where: { productionBatchId: line.productionBatchId },
+            });
+
+            // Get batch to check if deletable
+            const batch = await ctx.prisma.productionBatch.findUnique({
+                where: { id: line.productionBatchId },
+                select: { status: true, qtyCompleted: true },
+            });
+
+            if (otherLinesCount === 0 && batch?.status === 'planned' && batch.qtyCompleted === 0) {
+                // Safe to delete: no other lines linked, no work started
+                await ctx.prisma.productionBatch.delete({ where: { id: line.productionBatchId } });
+            } else {
+                // Just clear the sourceOrderLineId reference
+                await ctx.prisma.productionBatch.update({
+                    where: { id: line.productionBatchId },
+                    data: { sourceOrderLineId: null },
+                });
+            }
+        }
 
         // Background: adjust LTV (fire and forget)
         const customerId = line.order?.customerId;
