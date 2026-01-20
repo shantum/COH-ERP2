@@ -3,27 +3,26 @@
  * Customer management and statistics procedures
  *
  * Procedures:
- * - list: Query customers with search, tier filter, and pagination
- * - get: Get single customer with order count and recent orders
+ * - list: Query customers with search, tier filter, and pagination (Kysely)
+ * - get: Get single customer with order count and recent orders (Kysely)
  * - update: Update customer info (name, email, phone, tags)
- * - getStats: Get customer statistics (LTV, order count, RTO rate, tier)
+ * - getStats: Get customer statistics (LTV, order count, RTO rate, tier) (Kysely)
  */
 
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
+import type { CustomerTier } from '../../utils/tierUtils.js';
 import {
-    getTierThresholds,
-    calculateTier,
-    calculateLTV,
-    type CustomerTier,
-    type OrderForLTV,
-} from '../../utils/tierUtils.js';
-import type { Prisma } from '@prisma/client';
+    listCustomersKysely,
+    getCustomerKysely,
+    getCustomerStatsKysely,
+} from '../../db/queries/index.js';
 
 /**
  * List customers with optional search, tier filter, and pagination
  * Search supports multi-word queries across name, email, and phone
+ * Uses Kysely for high-performance queries with denormalized fields
  */
 const list = protectedProcedure
     .input(
@@ -34,138 +33,26 @@ const list = protectedProcedure
             offset: z.number().min(0).default(0),
         })
     )
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
         const { search, tier, limit, offset } = input;
 
-        // Get tier thresholds for calculation
-        const thresholds = await getTierThresholds(ctx.prisma);
-
-        // Build where clause
-        const where: Prisma.CustomerWhereInput = {};
-
-        if (search) {
-            // Support multi-word search: all words must match across name/email/phone
-            const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-
-            if (words.length === 1) {
-                where.OR = [
-                    { email: { contains: words[0], mode: 'insensitive' } },
-                    { firstName: { contains: words[0], mode: 'insensitive' } },
-                    { lastName: { contains: words[0], mode: 'insensitive' } },
-                    { phone: { contains: words[0], mode: 'insensitive' } },
-                ];
-            } else {
-                where.AND = words.map((word) => ({
-                    OR: [
-                        { email: { contains: word, mode: 'insensitive' } },
-                        { firstName: { contains: word, mode: 'insensitive' } },
-                        { lastName: { contains: word, mode: 'insensitive' } },
-                        { phone: { contains: word, mode: 'insensitive' } },
-                    ],
-                }));
-            }
-        }
-
-        // Get customers with order data for metrics
-        const customers = await ctx.prisma.customer.findMany({
-            where,
-            select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                phone: true,
-                tier: true,
-                createdAt: true,
-                orders: {
-                    select: {
-                        id: true,
-                        totalAmount: true,
-                        status: true,
-                        orderDate: true,
-                        customerPhone: true,
-                    },
-                },
-                _count: {
-                    select: { orders: true },
-                },
-            },
-            orderBy: { createdAt: 'desc' },
-            take: limit,
-            skip: offset,
+        // Use Kysely query with denormalized ltv/orderCount/tier fields
+        return listCustomersKysely({
+            search,
+            tier: tier as CustomerTier | undefined,
+            limit,
+            offset,
         });
-
-        // Enrich with calculated metrics
-        const enriched = customers.map((customer) => {
-            const validOrders = customer.orders.filter((o) => o.status !== 'cancelled');
-            const lifetimeValue = calculateLTV(validOrders as OrderForLTV[]);
-            const totalOrders = validOrders.length;
-
-            // Calculate or use stored tier
-            const calculatedTier = calculateTier(lifetimeValue, thresholds);
-            const customerTier: CustomerTier = (customer.tier as CustomerTier) || calculatedTier;
-
-            // Get phone from customer or fallback to order
-            const phone =
-                customer.phone ||
-                customer.orders.find((o) => o.customerPhone)?.customerPhone ||
-                null;
-
-            return {
-                id: customer.id,
-                email: customer.email,
-                firstName: customer.firstName,
-                lastName: customer.lastName,
-                phone,
-                totalOrders,
-                lifetimeValue,
-                customerTier,
-                createdAt: customer.createdAt,
-            };
-        });
-
-        // Filter by tier if specified (post-query since tier may be calculated)
-        const result = tier ? enriched.filter((c) => c.customerTier === tier) : enriched;
-
-        // Get total count for pagination
-        const totalCount = await ctx.prisma.customer.count({ where });
-
-        return {
-            customers: result,
-            pagination: {
-                total: totalCount,
-                limit,
-                offset,
-                hasMore: offset + limit < totalCount,
-            },
-        };
     });
 
 /**
  * Get single customer by ID with order count and recent orders
+ * Uses Kysely for high-performance queries
  */
 const get = protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input, ctx }) => {
-        const customer = await ctx.prisma.customer.findUnique({
-            where: { id: input.id },
-            include: {
-                orders: {
-                    select: {
-                        id: true,
-                        orderNumber: true,
-                        totalAmount: true,
-                        status: true,
-                        orderDate: true,
-                    },
-                    orderBy: { orderDate: 'desc' },
-                    take: 10, // Recent orders only
-                },
-                _count: {
-                    select: { orders: true },
-                },
-            },
-        });
+    .query(async ({ input }) => {
+        const customer = await getCustomerKysely(input.id);
 
         if (!customer) {
             throw new TRPCError({
@@ -174,19 +61,7 @@ const get = protectedProcedure
             });
         }
 
-        return {
-            id: customer.id,
-            email: customer.email,
-            firstName: customer.firstName,
-            lastName: customer.lastName,
-            phone: customer.phone,
-            tier: customer.tier,
-            tags: customer.tags,
-            createdAt: customer.createdAt,
-            updatedAt: customer.updatedAt,
-            ordersCount: customer._count.orders,
-            recentOrders: customer.orders,
-        };
+        return customer;
     });
 
 /**
@@ -269,88 +144,21 @@ const update = protectedProcedure
 
 /**
  * Get customer statistics (LTV, order count, RTO rate, tier)
+ * Uses Kysely with denormalized fields for fast lookup
  */
 const getStats = protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input, ctx }) => {
-        const customer = await ctx.prisma.customer.findUnique({
-            where: { id: input.id },
-            select: {
-                id: true,
-                tier: true,
-                orders: {
-                    select: {
-                        id: true,
-                        totalAmount: true,
-                        status: true,
-                        orderDate: true,
-                        trackingStatus: true,
-                        paymentMethod: true,
-                    },
-                },
-                returnRequests: {
-                    select: {
-                        id: true,
-                        requestType: true,
-                    },
-                },
-            },
-        });
+    .query(async ({ input }) => {
+        const stats = await getCustomerStatsKysely(input.id);
 
-        if (!customer) {
+        if (!stats) {
             throw new TRPCError({
                 code: 'NOT_FOUND',
                 message: 'Customer not found',
             });
         }
 
-        const thresholds = await getTierThresholds(ctx.prisma);
-
-        // Calculate metrics
-        const validOrders = customer.orders.filter((o) => o.status !== 'cancelled');
-        const lifetimeValue = calculateLTV(validOrders as OrderForLTV[]);
-        const orderCount = validOrders.length;
-        const avgOrderValue = orderCount > 0 ? lifetimeValue / orderCount : 0;
-
-        // RTO count (COD orders only - prepaid RTOs are refunded)
-        const rtoCount = customer.orders.filter(
-            (o) => o.trackingStatus?.startsWith('rto') && o.paymentMethod === 'COD'
-        ).length;
-
-        // RTO rate as percentage
-        const rtoRate = orderCount > 0 ? (rtoCount / orderCount) * 100 : 0;
-
-        // Return/exchange counts
-        const returns = customer.returnRequests.filter((r) => r.requestType === 'return').length;
-        const exchanges = customer.returnRequests.filter((r) => r.requestType === 'exchange').length;
-        const returnRate = orderCount > 0 ? (returns / orderCount) * 100 : 0;
-
-        // Calculate or use stored tier
-        const calculatedTier = calculateTier(lifetimeValue, thresholds);
-        const customerTier: CustomerTier = (customer.tier as CustomerTier) || calculatedTier;
-
-        // Order date stats
-        const sortedOrders = validOrders.sort(
-            (a, b) => new Date(a.orderDate).getTime() - new Date(b.orderDate).getTime()
-        );
-        const firstOrderDate = sortedOrders.length > 0 ? sortedOrders[0].orderDate : null;
-        const lastOrderDate =
-            sortedOrders.length > 0 ? sortedOrders[sortedOrders.length - 1].orderDate : null;
-
-        return {
-            customerId: customer.id,
-            lifetimeValue,
-            orderCount,
-            avgOrderValue: Math.round(avgOrderValue),
-            rtoCount,
-            rtoRate: parseFloat(rtoRate.toFixed(1)),
-            returns,
-            exchanges,
-            returnRate: parseFloat(returnRate.toFixed(1)),
-            tier: customerTier,
-            firstOrderDate,
-            lastOrderDate,
-        };
+        return stats;
     });
 
 /**

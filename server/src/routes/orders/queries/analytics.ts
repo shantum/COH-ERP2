@@ -6,6 +6,16 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { orderLogger } from '../../../utils/logger.js';
+import {
+    todayStartIST,
+    yesterdayStartIST,
+    daysAgoStartIST,
+    thisMonthStartIST,
+    lastMonthStartIST,
+    lastMonthEndIST,
+    sameTimeYesterdayIST,
+    sameTimeLastMonthIST,
+} from '../../../utils/dateHelpers.js';
 
 const router: Router = Router();
 
@@ -106,39 +116,34 @@ router.get('/analytics', async (req: Request, res: Response) => {
         }) as AnalyticsOrder[];
 
         // Get orders for revenue calculations across multiple time periods
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        // All date boundaries use IST (UTC+5:30) for consistency with Indian business hours
+        const todayStart = todayStartIST();
 
-        // Current periods
-        const yesterdayStart = new Date(todayStart);
-        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-        const last7DaysStart = new Date(todayStart);
-        last7DaysStart.setDate(last7DaysStart.getDate() - 7);
-        const last30DaysStart = new Date(todayStart);
-        last30DaysStart.setDate(last30DaysStart.getDate() - 30);
-        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+        // Current periods (IST)
+        const yesterdayStart = yesterdayStartIST();
+        const last7DaysStart = daysAgoStartIST(7);
+        const last30DaysStart = daysAgoStartIST(30);
+        const thisMonthStart = thisMonthStartIST();
+        const lastMonthStart = lastMonthStartIST();
+        const lastMonthEnd = lastMonthEndIST();
 
-        // Comparison periods
-        const dayBeforeYesterdayStart = new Date(todayStart);
-        dayBeforeYesterdayStart.setDate(dayBeforeYesterdayStart.getDate() - 2);
-        const prior7DaysStart = new Date(todayStart);
-        prior7DaysStart.setDate(prior7DaysStart.getDate() - 14);
-        const prior7DaysEnd = new Date(todayStart);
-        prior7DaysEnd.setDate(prior7DaysEnd.getDate() - 7);
-        const prior30DaysStart = new Date(todayStart);
-        prior30DaysStart.setDate(prior30DaysStart.getDate() - 60);
-        const prior30DaysEnd = new Date(todayStart);
-        prior30DaysEnd.setDate(prior30DaysEnd.getDate() - 30);
-        const monthBeforeLastStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        // Comparison periods (IST)
+        const dayBeforeYesterdayStart = daysAgoStartIST(2);
+        const prior7DaysStart = daysAgoStartIST(14);
+        const prior7DaysEnd = daysAgoStartIST(7);
+        const prior30DaysStart = daysAgoStartIST(60);
+        const prior30DaysEnd = daysAgoStartIST(30);
+        // For month-before-last, use IST-aware calculation
+        const monthBeforeLastStart = (() => {
+            const ist = new Date(Date.now() + (5 * 60 + 30) * 60 * 1000);
+            const first = new Date(ist.getFullYear(), ist.getMonth() - 2, 1);
+            return new Date(first.getTime() - (5 * 60 + 30) * 60 * 1000);
+        })();
         const monthBeforeLastEnd = lastMonthStart;
 
         // For same-time comparisons
-        const yesterdaySameTime = new Date(now);
-        yesterdaySameTime.setDate(yesterdaySameTime.getDate() - 1);
-        const lastMonthSameDateTime = new Date(now);
-        lastMonthSameDateTime.setMonth(lastMonthSameDateTime.getMonth() - 1);
+        const yesterdaySameTime = sameTimeYesterdayIST();
+        const lastMonthSameDateTime = sameTimeLastMonthIST();
 
         // Get ALL orders from 60+ days ago for all comparisons
         const recentOrders = await req.prisma.order.findMany({

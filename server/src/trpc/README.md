@@ -4,12 +4,17 @@
 
 tRPC v11 is set up alongside the existing Express REST API for gradual migration. The infrastructure is fully functional and type-safe.
 
-## Current Status
+## Current Status (Updated Jan 2026)
 
 ✅ Base infrastructure (`trpc/index.ts`)
 ✅ Auth router with 3 procedures (`trpc/routers/auth.ts`)
 ✅ App router (`trpc/routers/_app.ts`)
+✅ **Orders router with 30+ procedures** (3,000 lines - fully migrated)
+✅ **Inventory router** (fully migrated)
+✅ **Production router** (fully migrated)
+✅ Products, Customers, Returns routers
 ✅ TypeScript compilation passes
+✅ **Client fully migrated** to use tRPC for all order/inventory/production operations
 
 ## Architecture
 
@@ -22,28 +27,11 @@ trpc/
 └── README.md            # This file
 ```
 
-## Mounting tRPC in Express (TODO)
+## Mounting tRPC in Express
 
-To enable tRPC endpoints, add the following to `server/src/index.js` after the `authenticateToken` middleware setup:
+✅ **Already configured** - tRPC is mounted at `/trpc` in `server/src/index.js`
 
-```typescript
-import * as trpcExpress from '@trpc/server/adapters/express';
-import { appRouter } from './trpc/routers/_app.js';
-import { createContext } from './trpc/index.js';
-import { authenticateToken } from './middleware/auth.js';
-
-// Mount tRPC with optional authentication
-// authenticateToken will populate req.user and req.userPermissions
-// which are used by createContext
-app.use(
-    '/trpc',
-    authenticateToken, // Optional: Remove this line for unauthenticated procedures
-    trpcExpress.createExpressMiddleware({
-        router: appRouter,
-        createContext,
-    })
-);
-```
+The tRPC endpoint uses the `authenticateToken` middleware which populates `req.user` and `req.userPermissions`, making them available in the tRPC context.
 
 ## Auth Router Procedures
 
@@ -97,11 +85,15 @@ const result = await trpc.auth.login.mutate({ email: '...', password: '...' });
 
 ## Migration Strategy
 
-The tRPC setup uses a **hybrid approach**:
-1. Express REST API remains primary
-2. New features can be built with tRPC
-3. Existing endpoints can be gradually migrated
-4. Both systems share the same database (Prisma) and authentication middleware
+The tRPC migration is **mostly complete** (Jan 2026):
+1. ✅ Orders: Fully migrated (30+ procedures)
+2. ✅ Inventory: Fully migrated
+3. ✅ Production: Fully migrated
+4. ✅ Products/Materials: Query endpoints migrated
+5. ⏳ Remaining: Shipments page still uses Express (archive/unarchive operations)
+6. Express REST API handles: Webhooks, tracking sync, legacy endpoints
+
+Both systems share the same database (Prisma) and authentication middleware.
 
 ## Future Routers
 

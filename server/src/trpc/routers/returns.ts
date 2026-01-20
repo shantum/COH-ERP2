@@ -16,6 +16,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
+import { listReturnsKysely, getReturnKysely } from '../../db/queries/index.js';
 
 /**
  * Valid return statuses
@@ -71,7 +72,7 @@ const itemConditionSchema = z.enum(['good', 'damaged']);
 const processingActionSchema = z.enum(['restock', 'dispose']);
 
 /**
- * List procedure
+ * List procedure (Kysely)
  * Query returns with optional status filter and pagination
  */
 const list = protectedProcedure
@@ -82,145 +83,20 @@ const list = protectedProcedure
             limit: z.number().min(1).max(100).default(20),
         }).optional()
     )
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
         const { status, page = 1, limit = 20 } = input ?? {};
-        const skip = (page - 1) * limit;
 
-        // Build where clause
-        const where: { status?: ReturnStatus } = {};
-        if (status) {
-            where.status = status;
-        }
-
-        // Get returns with order and line info
-        const [returns, total] = await Promise.all([
-            ctx.prisma.returnRequest.findMany({
-                where,
-                include: {
-                    originalOrder: {
-                        select: {
-                            id: true,
-                            orderNumber: true,
-                            orderDate: true,
-                        },
-                    },
-                    lines: {
-                        include: {
-                            sku: {
-                                include: {
-                                    variation: {
-                                        include: {
-                                            product: {
-                                                select: {
-                                                    id: true,
-                                                    name: true,
-                                                },
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    customer: {
-                        select: {
-                            id: true,
-                            firstName: true,
-                            lastName: true,
-                            email: true,
-                        },
-                    },
-                },
-                orderBy: { createdAt: 'desc' },
-                skip,
-                take: limit,
-            }),
-            ctx.prisma.returnRequest.count({ where }),
-        ]);
-
-        return {
-            items: returns,
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-            },
-        };
+        return listReturnsKysely({ status, page, limit });
     });
 
 /**
- * Get procedure
+ * Get procedure (Kysely)
  * Query single return by ID with full details
  */
 const get = protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input, ctx }) => {
-        const returnRequest = await ctx.prisma.returnRequest.findUnique({
-            where: { id: input.id },
-            include: {
-                originalOrder: {
-                    select: {
-                        id: true,
-                        orderNumber: true,
-                        orderDate: true,
-                        totalAmount: true,
-                        shippingAddress: true,
-                    },
-                },
-                exchangeOrder: {
-                    select: {
-                        id: true,
-                        orderNumber: true,
-                        orderDate: true,
-                    },
-                },
-                customer: {
-                    select: {
-                        id: true,
-                        firstName: true,
-                        lastName: true,
-                        email: true,
-                        phone: true,
-                    },
-                },
-                lines: {
-                    include: {
-                        sku: {
-                            include: {
-                                variation: {
-                                    include: {
-                                        product: {
-                                            select: {
-                                                id: true,
-                                                name: true,
-                                                imageUrl: true,
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                        exchangeSku: {
-                            select: {
-                                id: true,
-                                skuCode: true,
-                                size: true,
-                            },
-                        },
-                    },
-                },
-                shipping: true,
-                statusHistory: {
-                    include: {
-                        changedBy: {
-                            select: { name: true },
-                        },
-                    },
-                    orderBy: { createdAt: 'asc' },
-                },
-            },
-        });
+    .query(async ({ input }) => {
+        const returnRequest = await getReturnKysely(input.id);
 
         if (!returnRequest) {
             throw new TRPCError({

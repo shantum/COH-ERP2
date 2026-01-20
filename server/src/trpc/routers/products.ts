@@ -3,7 +3,7 @@
  * Product catalog queries for products, variations, and SKUs
  *
  * Procedures:
- * - list: Protected query to list products with search, category filter, and pagination
+ * - list: Protected query to list products with search, category filter, and pagination (Kysely)
  * - get: Protected query to get single product by ID with full details
  * - getVariation: Protected query to get single variation by ID with SKUs
  * - getSku: Protected query to get single SKU by ID with variation and product info
@@ -13,23 +13,12 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
 import type { Prisma } from '@prisma/client';
+import { listProductsKysely } from '../../db/queries/index.js';
 
 // ============================================
 // PRISMA INCLUDE CONFIGURATIONS
+// (Used for get/getVariation/getSku - list uses Kysely)
 // ============================================
-
-/**
- * Include configuration for product list with variations and SKUs
- */
-const productListInclude = {
-    fabricType: true,
-    variations: {
-        include: {
-            fabric: true,
-            skus: true,
-        },
-    },
-} satisfies Prisma.ProductInclude;
 
 /**
  * Include configuration for single product with full details
@@ -87,6 +76,7 @@ const skuDetailInclude = {
 /**
  * List products with optional search, category filter, and pagination
  * Includes variations and SKUs for each product
+ * Uses Kysely for high-performance queries
  */
 const list = protectedProcedure
     .input(
@@ -98,38 +88,17 @@ const list = protectedProcedure
             limit: z.number().int().min(1).max(1000).default(50),
         }).optional()
     )
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
         const { search, category, isActive, page = 1, limit = 50 } = input ?? {};
 
-        // Build where clause
-        const where: Prisma.ProductWhereInput = {};
-        if (category) where.category = category;
-        if (isActive !== undefined) where.isActive = isActive;
-        if (search) {
-            where.name = { contains: search, mode: 'insensitive' };
-        }
-
-        // Get total count for pagination
-        const total = await ctx.prisma.product.count({ where });
-
-        // Get paginated products
-        const products = await ctx.prisma.product.findMany({
-            where,
-            include: productListInclude,
-            orderBy: { createdAt: 'desc' },
-            skip: (page - 1) * limit,
-            take: limit,
+        // Use Kysely query
+        return listProductsKysely({
+            search,
+            category,
+            isActive,
+            page,
+            limit,
         });
-
-        return {
-            products,
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-            },
-        };
     });
 
 /**

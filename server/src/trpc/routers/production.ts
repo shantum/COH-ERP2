@@ -37,6 +37,13 @@ import {
 import { broadcastOrderUpdate } from '../../routes/sse.js';
 import { deferredExecutor } from '../../services/deferredExecutor.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
+import {
+    getTailorsKysely,
+    getBatchesKysely,
+    getBatchOrderLinesKysely,
+    getCapacityKysely,
+    getPendingBySkuKysely,
+} from '../../db/queries/index.js';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -271,12 +278,9 @@ const pendingBySkuInput = z.object({
 // PROCEDURES
 // ============================================
 
-// Get all tailors
-const getTailors = protectedProcedure.query(async ({ ctx }) => {
-    return ctx.prisma.tailor.findMany({
-        where: { isActive: true },
-        orderBy: { name: 'asc' }
-    });
+// Get all tailors (Kysely)
+const getTailors = protectedProcedure.query(async () => {
+    return getTailorsKysely();
 });
 
 // Create tailor
@@ -292,45 +296,72 @@ const createTailor = protectedProcedure
         });
     });
 
-// Get all production batches
+// Get all production batches (Kysely)
 const getBatches = protectedProcedure
     .input(batchListInput)
-    .query(async ({ input, ctx }) => {
-        const where: Record<string, unknown> = {};
-        if (input.status) where.status = input.status;
-        if (input.tailorId) where.tailorId = input.tailorId;
-        if (input.startDate || input.endDate) {
-            where.batchDate = {} as Record<string, Date>;
-            if (input.startDate) (where.batchDate as Record<string, Date>).gte = new Date(input.startDate);
-            if (input.endDate) (where.batchDate as Record<string, Date>).lte = new Date(input.endDate);
-        }
-        if (input.customOnly) {
-            where.sku = { isCustomSku: true };
-        }
-
-        const batches = await ctx.prisma.productionBatch.findMany({
-            where,
-            include: {
-                tailor: true,
-                sku: { include: { variation: { include: { product: true, fabric: true } } } },
-                orderLines: {
-                    include: {
-                        order: {
-                            select: { id: true, orderNumber: true, customerName: true }
-                        }
-                    }
-                }
-            },
-            orderBy: { batchDate: 'desc' },
+    .query(async ({ input }) => {
+        // Fetch batches using Kysely
+        const batches = await getBatchesKysely({
+            status: input.status,
+            tailorId: input.tailorId,
+            startDate: input.startDate,
+            endDate: input.endDate,
+            customOnly: input.customOnly,
         });
 
+        // Fetch order lines for all batches
+        const batchIds = batches.map((b) => b.id);
+        const orderLines = await getBatchOrderLinesKysely(batchIds);
+
+        // Build orderLines lookup by batch ID
+        const orderLinesByBatch = new Map<string, typeof orderLines>();
+        for (const line of orderLines) {
+            const list = orderLinesByBatch.get(line.batchId) || [];
+            list.push(line);
+            orderLinesByBatch.set(line.batchId, list);
+        }
+
         // Enrich batches with customization display info and sample info
-        return batches.map((batch: any) => {
-            const isCustom = batch.sku?.isCustomSku || false;
+        return batches.map((batch) => {
+            const isCustom = batch.isCustomSku || false;
             const isSample = !batch.skuId && batch.sampleCode;
+            const batchOrderLines = orderLinesByBatch.get(batch.id) || [];
+            const linkedOrder = batchOrderLines[0] || null;
 
             return {
                 ...batch,
+                tailor: batch.tailorId ? { id: batch.tailorId, name: batch.tailorName } : null,
+                sku: batch.skuId
+                    ? {
+                          id: batch.skuId,
+                          skuCode: batch.skuCode,
+                          size: batch.skuSize,
+                          isCustomSku: batch.isCustomSku,
+                          customizationType: batch.customizationType,
+                          customizationValue: batch.customizationValue,
+                          customizationNotes: batch.customizationNotes,
+                          variation: {
+                              id: batch.variationId,
+                              colorName: batch.colorName,
+                              fabricId: batch.fabricId,
+                              product: {
+                                  id: batch.productId,
+                                  name: batch.productName,
+                              },
+                              fabric: batch.fabricId
+                                  ? { id: batch.fabricId, name: batch.fabricName }
+                                  : null,
+                          },
+                      }
+                    : null,
+                orderLines: batchOrderLines.map((ol) => ({
+                    id: ol.orderLineId,
+                    order: {
+                        id: ol.orderId,
+                        orderNumber: ol.orderNumber,
+                        customerName: ol.customerName,
+                    },
+                })),
                 isCustomSku: isCustom,
                 isSampleBatch: isSample,
                 ...(isSample && {
@@ -338,18 +369,24 @@ const getBatches = protectedProcedure
                         sampleCode: batch.sampleCode,
                         sampleName: batch.sampleName,
                         sampleColour: batch.sampleColour,
-                        sampleSize: batch.sampleSize
-                    }
+                        sampleSize: batch.sampleSize,
+                    },
                 }),
-                ...(isCustom && batch.sku && {
+                ...(isCustom && batch.skuId && {
                     customization: {
-                        type: batch.sku.customizationType || null,
-                        value: batch.sku.customizationValue || null,
-                        notes: batch.sku.customizationNotes || null,
+                        type: batch.customizationType || null,
+                        value: batch.customizationValue || null,
+                        notes: batch.customizationNotes || null,
                         sourceOrderLineId: batch.sourceOrderLineId,
-                        linkedOrder: batch.orderLines?.[0]?.order || null
-                    }
-                })
+                        linkedOrder: linkedOrder
+                            ? {
+                                  id: linkedOrder.orderId,
+                                  orderNumber: linkedOrder.orderNumber,
+                                  customerName: linkedOrder.customerName,
+                              }
+                            : null,
+                    },
+                }),
             };
         });
     });
@@ -919,39 +956,11 @@ const unlockDate = protectedProcedure
         return { success: true, lockedDates };
     });
 
-// Capacity dashboard
+// Capacity dashboard (Kysely)
 const getCapacity = protectedProcedure
     .input(capacityInput)
-    .query(async ({ input, ctx }) => {
-        const targetDate = input.date ? new Date(input.date) : new Date();
-        const startOfDay = new Date(targetDate);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(targetDate);
-        endOfDay.setHours(23, 59, 59, 999);
-
-        const tailors = await ctx.prisma.tailor.findMany({ where: { isActive: true } });
-        const batches = await ctx.prisma.productionBatch.findMany({
-            where: { batchDate: { gte: startOfDay, lte: endOfDay }, status: { not: 'cancelled' } },
-            include: { sku: { include: { variation: { include: { product: true } } } } },
-        }) as any[];
-
-        return tailors.map((tailor) => {
-            const tailorBatches = batches.filter((b) => b.tailorId === tailor.id);
-            const allocatedMins = tailorBatches.reduce((sum, b) => {
-                const timePer = b.sku?.variation?.product?.baseProductionTimeMins || 0;
-                return sum + (timePer * b.qtyPlanned);
-            }, 0);
-
-            return {
-                tailorId: tailor.id,
-                tailorName: tailor.name,
-                dailyCapacityMins: tailor.dailyCapacityMins,
-                allocatedMins,
-                availableMins: Math.max(0, tailor.dailyCapacityMins - allocatedMins),
-                utilizationPct: ((allocatedMins / tailor.dailyCapacityMins) * 100).toFixed(0),
-                batches: tailorBatches,
-            };
-        });
+    .query(async ({ input }) => {
+        return getCapacityKysely({ date: input.date });
     });
 
 // Get production requirements from open orders
@@ -1098,36 +1107,11 @@ const getRequirements = protectedProcedure.query(async ({ ctx }) => {
     };
 });
 
-// Get pending production batches for a SKU
+// Get pending production batches for a SKU (Kysely)
 const getPendingBySku = protectedProcedure
     .input(pendingBySkuInput)
-    .query(async ({ input, ctx }) => {
-        const batches = await ctx.prisma.productionBatch.findMany({
-            where: {
-                skuId: input.skuId,
-                status: { in: ['planned', 'in_progress'] },
-            },
-            include: {
-                tailor: { select: { id: true, name: true } },
-            },
-            orderBy: { batchDate: 'asc' },
-        });
-
-        const pendingBatches = batches.map(batch => ({
-            id: batch.id,
-            batchCode: batch.batchCode,
-            batchDate: batch.batchDate,
-            qtyPlanned: batch.qtyPlanned,
-            qtyCompleted: batch.qtyCompleted,
-            qtyPending: batch.qtyPlanned - batch.qtyCompleted,
-            status: batch.status,
-            tailor: batch.tailor,
-        }));
-
-        return {
-            batches: pendingBatches,
-            totalPending: pendingBatches.reduce((sum, b) => sum + b.qtyPending, 0)
-        };
+    .query(async ({ input }) => {
+        return getPendingBySkuKysely(input.skuId);
     });
 
 // ============================================

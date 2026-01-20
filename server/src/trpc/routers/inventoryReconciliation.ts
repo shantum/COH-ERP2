@@ -18,13 +18,18 @@ import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../index.js';
 import { calculateAllInventoryBalances } from '../../utils/queryPatterns.js';
 import { reconciliationLogger } from '../../utils/logger.js';
+import {
+    getReconciliationHistoryKysely,
+    getReconciliationByIdKysely,
+    getSkusForReconciliationKysely,
+} from '../../db/queries/index.js';
 
 // ============================================
 // QUERIES
 // ============================================
 
 /**
- * Get history of past reconciliations
+ * Get history of past reconciliations (Kysely)
  */
 const getHistory = protectedProcedure
     .input(
@@ -32,28 +37,12 @@ const getHistory = protectedProcedure
             limit: z.number().int().positive().optional().default(10),
         })
     )
-    .query(async ({ input, ctx }) => {
-        const { limit } = input;
-
-        const reconciliations = await ctx.prisma.inventoryReconciliation.findMany({
-            include: { items: true },
-            orderBy: { createdAt: 'desc' },
-            take: limit,
-        });
-
-        return reconciliations.map(r => ({
-            id: r.id,
-            date: r.reconcileDate,
-            status: r.status,
-            itemsCount: r.items.length,
-            adjustments: r.items.filter(i => i.variance !== 0 && i.variance !== null).length,
-            createdBy: r.createdBy,
-            createdAt: r.createdAt,
-        }));
+    .query(async ({ input }) => {
+        return getReconciliationHistoryKysely(input.limit);
     });
 
 /**
- * Get a specific reconciliation with items
+ * Get a specific reconciliation with items (Kysely)
  */
 const getById = protectedProcedure
     .input(
@@ -61,47 +50,14 @@ const getById = protectedProcedure
             id: z.string().min(1),
         })
     )
-    .query(async ({ input, ctx }) => {
-        const { id } = input;
-
-        const reconciliation = await ctx.prisma.inventoryReconciliation.findUnique({
-            where: { id },
-            include: {
-                items: {
-                    include: {
-                        sku: {
-                            include: {
-                                variation: { include: { product: true } },
-                            },
-                        },
-                    },
-                },
-            },
-        });
+    .query(async ({ input }) => {
+        const reconciliation = await getReconciliationByIdKysely(input.id);
 
         if (!reconciliation) {
             throw new TRPCError({ code: 'NOT_FOUND', message: 'Reconciliation not found' });
         }
 
-        return {
-            id: reconciliation.id,
-            status: reconciliation.status,
-            notes: reconciliation.notes,
-            createdAt: reconciliation.createdAt,
-            items: reconciliation.items.map(item => ({
-                id: item.id,
-                skuId: item.skuId,
-                skuCode: item.sku.skuCode,
-                productName: item.sku.variation?.product?.name || '',
-                colorName: item.sku.variation?.colorName || '',
-                size: item.sku.size,
-                systemQty: item.systemQty,
-                physicalQty: item.physicalQty,
-                variance: item.variance,
-                adjustmentReason: item.adjustmentReason,
-                notes: item.notes,
-            })),
-        };
+        return reconciliation;
     });
 
 // ============================================
@@ -113,19 +69,8 @@ const getById = protectedProcedure
  */
 const start = protectedProcedure
     .mutation(async ({ ctx }) => {
-        // Get all active, non-custom SKUs
-        const skus = await ctx.prisma.sku.findMany({
-            where: {
-                isActive: true,
-                isCustomSku: false,
-            },
-            include: {
-                variation: {
-                    include: { product: true },
-                },
-            },
-            orderBy: { skuCode: 'asc' },
-        });
+        // Get all active, non-custom SKUs (Kysely)
+        const skus = await getSkusForReconciliationKysely();
 
         // Calculate all balances efficiently in one query
         const balanceMap = await calculateAllInventoryBalances(

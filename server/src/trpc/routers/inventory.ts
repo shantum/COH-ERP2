@@ -29,6 +29,7 @@ import {
 } from '../../utils/queryPatterns.js';
 import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
+import { listInventorySkusKysely } from '../../db/queries/index.js';
 
 // ============================================
 // SHARED TYPES
@@ -133,6 +134,7 @@ const getBalances = protectedProcedure
 
 /**
  * Get balances for all active SKUs with filtering
+ * Uses Kysely for high-performance SKU metadata fetch
  */
 const getAllBalances = protectedProcedure
     .input(
@@ -147,55 +149,38 @@ const getAllBalances = protectedProcedure
     .query(async ({ input, ctx }) => {
         const { includeCustomSkus, belowTarget, search, limit, offset } = input;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const skuWhere: any = {
-            isActive: true,
-            ...(includeCustomSkus ? {} : { isCustomSku: false }),
-            ...(search && {
-                OR: [
-                    { skuCode: { contains: search, mode: 'insensitive' } },
-                    { variation: { product: { name: { contains: search, mode: 'insensitive' } } } }
-                ]
-            })
-        };
-
-        const skus = await ctx.prisma.sku.findMany({
-            where: skuWhere,
-            include: {
-                variation: {
-                    include: {
-                        product: true,
-                        fabric: true,
-                    },
-                },
-                shopifyInventoryCache: true,
-            },
+        // Use Kysely for SKU metadata fetch (JOINs SKU/Variation/Product/Fabric)
+        const skus = await listInventorySkusKysely({
+            includeCustomSkus,
+            search,
         });
 
-        const skuIds = skus.map(sku => sku.id);
+        // Get balances from cache (already optimized with groupBy)
+        const skuIds = skus.map(sku => sku.skuId);
         const balanceMap = await inventoryBalanceCache.get(ctx.prisma, skuIds);
 
+        // Map SKU metadata with balances
         const balances = skus.map((sku) => {
-            const balance = balanceMap.get(sku.id) || {
+            const balance = balanceMap.get(sku.skuId) || {
                 totalInward: 0,
                 totalOutward: 0,
                 currentBalance: 0,
                 availableBalance: 0
             };
 
-            const imageUrl = sku.variation.imageUrl || sku.variation.product.imageUrl || null;
+            const imageUrl = sku.variationImageUrl || sku.productImageUrl || null;
 
             return {
-                skuId: sku.id,
+                skuId: sku.skuId,
                 skuCode: sku.skuCode,
-                productId: sku.variation.product.id,
-                productName: sku.variation.product.name,
-                productType: sku.variation.product.productType,
-                gender: sku.variation.product.gender,
-                colorName: sku.variation.colorName,
-                variationId: sku.variation.id,
+                productId: sku.productId,
+                productName: sku.productName,
+                productType: sku.productType,
+                gender: sku.gender,
+                colorName: sku.colorName,
+                variationId: sku.variationId,
                 size: sku.size,
-                category: sku.variation.product.category,
+                category: sku.category,
                 imageUrl,
                 currentBalance: balance.currentBalance,
                 reservedBalance: 0,
@@ -205,7 +190,7 @@ const getAllBalances = protectedProcedure
                 targetStockQty: sku.targetStockQty,
                 status: balance.availableBalance < (sku.targetStockQty || 0) ? 'below_target' : 'ok',
                 mrp: sku.mrp,
-                shopifyQty: sku.shopifyInventoryCache?.availableQty ?? null,
+                shopifyQty: sku.shopifyAvailableQty ?? null,
                 isCustomSku: sku.isCustomSku || false,
             };
         });
