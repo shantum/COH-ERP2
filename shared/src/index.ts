@@ -2,7 +2,7 @@
  * @coh/shared - Shared types and schemas for COH ERP
  *
  * This package contains TypeScript types, Zod validation schemas,
- * and validator functions that are shared between the server and client packages.
+ * validator functions, and database queries shared between server and client.
  */
 
 // Re-export all types
@@ -17,3 +17,7 @@ export * from './schemas/materials.js';
 
 // Re-export all validators
 export * from './validators/index.js';
+
+// NOTE: Database module (Kysely) is NOT exported from main entry point
+// because it contains Node.js-only code (pg driver).
+// Server code should import directly: import { createKysely } from '@coh/shared/database'

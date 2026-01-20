@@ -14,11 +14,17 @@ import logger from './utils/logger.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import prisma from './lib/prisma.js';
 import initDb from './init-db.js';
+import { createKysely } from '@coh/shared/database';
+
+// Initialize shared Kysely instance for potential use by Server Functions
+// Both Express and TanStack Start can share the same query code
+createKysely(process.env.DATABASE_URL);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,9 +120,12 @@ app.use('/api/auth/register', authLimiter);
 app.use(cors({
     origin: process.env.NODE_ENV === 'production'
         ? process.env.CORS_ORIGIN || true  // Allow same origin in production
-        : true, // Allow all origins in development
+        : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174', 'http://localhost:3000', 'http://127.0.0.1:3000'], // Explicit origins for cookie auth in dev
     credentials: true,
 }));
+
+// Cookie parser for auth_token cookie
+app.use(cookieParser());
 
 // Capture raw body for webhook signature verification
 app.use('/api/webhooks', express.json({

@@ -10,6 +10,9 @@
  * Views: open, shipped, cancelled (3 views)
  * Shipped view has sub-filters: all, rto, cod_pending (server-side filtering)
  * Pagination: 250 orders per page
+ *
+ * Migration: Supports both tRPC and Server Function paths via feature flag.
+ * When USE_SERVER_FUNCTIONS.ordersList is true, uses TanStack Start Server Function.
  */
 
 import { useMemo, useEffect } from 'react';
@@ -17,6 +20,22 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
+import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
+
+// Server Function types only - actual function loaded dynamically if enabled
+// This prevents @tanstack/react-start from being bundled in SPA mode
+type GetOrdersResponse = {
+    rows: any[];
+    view: string;
+    hasInventory: boolean;
+    pagination: {
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+        hasMore: boolean;
+    };
+};
 
 // Poll intervals - SSE connection determines frequency
 // When SSE connected: longer intervals (fallback only)
@@ -78,16 +97,46 @@ export function useUnifiedOrdersData({
 
     // ==========================================
     // MAIN ORDER QUERY - Fetches current view with pagination
+    // Supports both tRPC (legacy) and Server Function (new) paths
     // ==========================================
 
-    const ordersQuery = trpc.orders.list.useQuery(
-        {
-            view: currentView,
-            page,
-            limit: getPageSize(currentView),
-            // Pass shipped filter for server-side filtering (rto, cod_pending)
-            ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
+    // Build query params (shared between tRPC and Server Function)
+    const queryParams = useMemo(() => ({
+        view: currentView,
+        page,
+        limit: getPageSize(currentView),
+        // Pass shipped filter for server-side filtering (rto, cod_pending)
+        ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
+    }), [currentView, page, shippedFilter]);
+
+    // Server Function path - DISABLED for SPA mode
+    // Server Functions require TanStack Start SSR mode to work
+    // When enabled, this would use direct DB access via Server Function
+    const serverFnQuery = useQuery<GetOrdersResponse>({
+        queryKey: ['orders', 'list', 'server-fn', queryParams],
+        queryFn: async () => {
+            // Dynamic import to avoid bundling @tanstack/react-start in SPA mode
+            const { getOrders } = await import('../server/functions/orders');
+            return getOrders({ data: queryParams });
         },
+        staleTime: STALE_TIME,
+        gcTime: GC_TIME,
+        refetchOnWindowFocus: false,
+        refetchIntervalInBackground: false,
+        placeholderData: (prev) => prev,
+        refetchInterval: () => {
+            if (typeof document !== 'undefined' && !document.hasFocus()) {
+                return false;
+            }
+            return pollInterval;
+        },
+        // Only enable when Server Function flag is on (disabled for SPA)
+        enabled: USE_SERVER_FUNCTIONS.ordersList,
+    });
+
+    // tRPC path - uses tRPC React hooks (legacy)
+    const trpcQuery = trpc.orders.list.useQuery(
+        queryParams,
         {
             staleTime: STALE_TIME,
             gcTime: GC_TIME,  // Keep cached data for 5 min for instant display
@@ -102,8 +151,13 @@ export function useUnifiedOrdersData({
                 }
                 return pollInterval;
             },
+            // Only enable when Server Function flag is off
+            enabled: !USE_SERVER_FUNCTIONS.ordersList,
         }
     );
+
+    // Select active query based on feature flag
+    const ordersQuery = USE_SERVER_FUNCTIONS.ordersList ? serverFnQuery : trpcQuery;
 
     // ==========================================
     // HYBRID LOADING: Prefetch adjacent pages and related views
@@ -179,20 +233,18 @@ export function useUnifiedOrdersData({
     // Check if server already included inventory in the response
     const hasInventoryFromServer = ordersQuery.data?.hasInventory ?? false;
 
-    // Extract unique SKU IDs from orders for targeted inventory balance fetch
-    // Only needed if server didn't include inventory
+    // Extract unique SKU IDs from rows for targeted inventory balance fetch
+    // Only needed if server didn't include inventory (Server Function always includes it)
     const orderSkuIds = useMemo(() => {
         if (hasInventoryFromServer) return [];  // Skip if server included inventory
-        const orders = ordersQuery.data?.orders;
-        if (!orders) return [];
+        // Extract SKU IDs directly from rows (works for both tRPC and Server Function)
+        const dataRows = ordersQuery.data?.rows || [];
         const skuSet = new Set<string>();
-        orders.forEach((order: any) => {
-            order.orderLines?.forEach((line: any) => {
-                if (line.skuId) skuSet.add(line.skuId);
-            });
+        dataRows.forEach((row: any) => {
+            if (row.skuId) skuSet.add(row.skuId);
         });
         return Array.from(skuSet);
-    }, [ordersQuery.data, hasInventoryFromServer]);
+    }, [ordersQuery.data?.rows, hasInventoryFromServer]);
 
     // Inventory balance for SKUs in current orders
     // Skip this query if server already included inventory (saves round-trip)
@@ -243,11 +295,17 @@ export function useUnifiedOrdersData({
     const rows = ordersQuery.data?.rows || [];
     const pagination = ordersQuery.data?.pagination;
 
-    // Derive orders from rows when server returns empty orders array (Kysely path)
+    // Derive orders from rows when server returns empty orders array (Kysely/Server Function path)
     // Groups rows by orderId and extracts the order reference from each unique order
+    // Note: Server Function returns only `rows`, not `orders` - we always derive from rows
     const orders = useMemo(() => {
-        const serverOrders = ordersQuery.data?.orders;
-        // If server provided orders, use them
+        // For Server Function path, always derive from rows
+        // For tRPC path, check if orders array is provided
+        const serverOrders = USE_SERVER_FUNCTIONS.ordersList
+            ? undefined
+            : (ordersQuery.data as any)?.orders;
+
+        // If server provided orders (tRPC path), use them
         if (serverOrders && serverOrders.length > 0) {
             return serverOrders;
         }
@@ -270,7 +328,7 @@ export function useUnifiedOrdersData({
             }
         }
         return Array.from(orderMap.values());
-    }, [ordersQuery.data?.orders, rows]);
+    }, [ordersQuery.data, rows]);
 
     return {
         // Pre-flattened rows from server (primary data source)

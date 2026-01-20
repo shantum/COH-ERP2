@@ -396,6 +396,9 @@ export function useOrderSSE({
     }, [trpcUtils]);
 
     const connect = useCallback(() => {
+        // Skip during SSR (no window/EventSource available)
+        if (typeof window === 'undefined') return;
+
         // Don't connect if disabled
         if (!enabled) return;
 

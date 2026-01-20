@@ -24,6 +24,9 @@ export function TRPCProvider({ children, queryClient }: TRPCProviderProps) {
 
     // Listen for auth:unauthorized events (matches api.ts interceptor pattern)
     useEffect(() => {
+        // Only add listener on client
+        if (typeof window === 'undefined') return;
+
         const handleUnauthorized = () => {
             // Clear React Query cache on logout
             queryClient.clear();

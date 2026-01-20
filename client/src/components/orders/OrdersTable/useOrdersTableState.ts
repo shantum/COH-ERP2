@@ -169,54 +169,51 @@ function migrateColumnOrder(order: string[]): string[] {
     return validOrder;
 }
 
+// SSR-safe localStorage access
+function getFromLocalStorage<T>(key: string, fallback: T): T {
+    if (typeof window === 'undefined') return fallback;
+    try {
+        const saved = localStorage.getItem(key);
+        if (saved) return JSON.parse(saved);
+    } catch {
+        // Ignore parse errors
+    }
+    return fallback;
+}
+
 export function useOrdersTableState(): UseOrdersTableStateReturn {
     // Default visibility state
     const defaultVisibility = useMemo(() => getDefaultVisibility(), []);
 
-    // Column visibility state
+    // Column visibility state - SSR-safe initialization
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
-        const saved = localStorage.getItem(VISIBILITY_KEY);
+        if (typeof window === 'undefined') return getDefaultVisibility();
+        const saved = getFromLocalStorage<VisibilityState | null>(VISIBILITY_KEY, null);
         if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                // Migrate old visibility state
-                const visibleCols = Object.entries(parsed)
-                    .filter(([, visible]) => visible)
-                    .map(([id]) => id);
-                const migratedCols = migrateColumns(visibleCols);
-                return arrayToVisibility(migratedCols);
-            } catch {
-                return defaultVisibility;
-            }
+            // Migrate old visibility state
+            const visibleCols = Object.entries(saved)
+                .filter(([, visible]) => visible)
+                .map(([id]) => id);
+            const migratedCols = migrateColumns(visibleCols);
+            return arrayToVisibility(migratedCols);
         }
-        return defaultVisibility;
+        return getDefaultVisibility();
     });
 
-    // Column order state
+    // Column order state - SSR-safe initialization
     const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() => {
-        const saved = localStorage.getItem(ORDER_KEY);
+        if (typeof window === 'undefined') return [...ALL_COLUMN_IDS];
+        const saved = getFromLocalStorage<string[] | null>(ORDER_KEY, null);
         if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                return migrateColumnOrder(parsed);
-            } catch {
-                return [...ALL_COLUMN_IDS];
-            }
+            return migrateColumnOrder(saved);
         }
         return [...ALL_COLUMN_IDS];
     });
 
-    // Column sizing state
+    // Column sizing state - SSR-safe initialization
     const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
-        const saved = localStorage.getItem(SIZING_KEY);
-        if (saved) {
-            try {
-                return JSON.parse(saved);
-            } catch {
-                return DEFAULT_COLUMN_WIDTHS;
-            }
-        }
-        return DEFAULT_COLUMN_WIDTHS;
+        if (typeof window === 'undefined') return DEFAULT_COLUMN_WIDTHS as ColumnSizingState;
+        return getFromLocalStorage<ColumnSizingState>(SIZING_KEY, DEFAULT_COLUMN_WIDTHS as ColumnSizingState);
     });
 
     // Debounce timer for width changes
@@ -268,10 +265,12 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
                         columnOrder: migratedOrder,
                     });
 
-                    // Persist migrated values to localStorage
-                    localStorage.setItem(VISIBILITY_KEY, JSON.stringify(arrayToVisibility(migratedVisible)));
-                    localStorage.setItem(ORDER_KEY, JSON.stringify(migratedOrder));
-                    if (userPrefs.columnWidths) localStorage.setItem(SIZING_KEY, JSON.stringify(userPrefs.columnWidths));
+                    // Persist migrated values to localStorage (SSR-safe)
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem(VISIBILITY_KEY, JSON.stringify(arrayToVisibility(migratedVisible)));
+                        localStorage.setItem(ORDER_KEY, JSON.stringify(migratedOrder));
+                        if (userPrefs.columnWidths) localStorage.setItem(SIZING_KEY, JSON.stringify(userPrefs.columnWidths));
+                    }
                 } else if (adminPrefs && adminPrefs.visibleColumns?.length > 0) {
                     const migratedVisible = migrateColumns(adminPrefs.visibleColumns);
                     const migratedOrder = adminPrefs.columnOrder?.length > 0
@@ -284,9 +283,12 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
                         setColumnSizing(adminPrefs.columnWidths);
                     }
 
-                    localStorage.setItem(VISIBILITY_KEY, JSON.stringify(arrayToVisibility(migratedVisible)));
-                    localStorage.setItem(ORDER_KEY, JSON.stringify(migratedOrder));
-                    if (adminPrefs.columnWidths) localStorage.setItem(SIZING_KEY, JSON.stringify(adminPrefs.columnWidths));
+                    // Persist migrated values to localStorage (SSR-safe)
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem(VISIBILITY_KEY, JSON.stringify(arrayToVisibility(migratedVisible)));
+                        localStorage.setItem(ORDER_KEY, JSON.stringify(migratedOrder));
+                        if (adminPrefs.columnWidths) localStorage.setItem(SIZING_KEY, JSON.stringify(adminPrefs.columnWidths));
+                    }
                 }
             } catch (error) {
                 console.error('Failed to fetch grid preferences:', error);
@@ -449,16 +451,21 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
         }
     }, [isManager, columnVisibility, columnOrder, columnSizing]);
 
-    // Persist to localStorage
+    // Persist to localStorage (SSR-safe)
     useEffect(() => {
-        localStorage.setItem(VISIBILITY_KEY, JSON.stringify(columnVisibility));
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(VISIBILITY_KEY, JSON.stringify(columnVisibility));
+        }
     }, [columnVisibility]);
 
     useEffect(() => {
-        localStorage.setItem(ORDER_KEY, JSON.stringify(columnOrder));
+        if (typeof window !== 'undefined') {
+            localStorage.setItem(ORDER_KEY, JSON.stringify(columnOrder));
+        }
     }, [columnOrder]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
         if (sizingSaveTimer.current) {
             clearTimeout(sizingSaveTimer.current);
         }

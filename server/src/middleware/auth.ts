@@ -5,6 +5,7 @@ import { validateTokenVersion, getUserPermissions } from './permissions.js';
 
 /**
  * Middleware to authenticate JWT token
+ * Supports both Authorization header and HttpOnly cookie
  * Attaches user and permissions to request
  */
 export const authenticateToken = async (
@@ -13,7 +14,8 @@ export const authenticateToken = async (
     next: NextFunction
 ): Promise<void> => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    // Check both Authorization header AND auth_token cookie
+    const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
 
     if (!token) {
         res.status(401).json({ error: 'Access token required' });
@@ -63,7 +65,8 @@ export const requireAdmin = async (
     next: NextFunction
 ): Promise<void> => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    // Check both Authorization header AND auth_token cookie
+    const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
 
     if (!token) {
         res.status(401).json({ error: 'Access token required' });
@@ -113,6 +116,7 @@ export const requireAdmin = async (
 /**
  * Optional authentication middleware
  * Attaches user if token is valid, continues without auth otherwise
+ * Supports both Authorization header and HttpOnly cookie
  */
 export const optionalAuth = async (
     req: Request,
@@ -120,7 +124,8 @@ export const optionalAuth = async (
     next: NextFunction
 ): Promise<void> => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    // Check both Authorization header AND auth_token cookie
+    const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
 
     if (token) {
         try {

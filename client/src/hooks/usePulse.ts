@@ -63,6 +63,9 @@ export function usePulse(enabled = true) {
     }, [queryClient]);
 
     const connect = useCallback(() => {
+        // Skip during SSR (no window/EventSource available)
+        if (typeof window === 'undefined') return;
+
         if (!enabled) return;
 
         const token = localStorage.getItem('token');

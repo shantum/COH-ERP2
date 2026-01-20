@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "preinstall": "cd ../shared && npm install",
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "vite dev",
+    "dev:spa": "vite --config vite.spa.config.ts",
+    "build": "vite build --config vite.spa.config.ts",
+    "build:ssr": "vite build",
+    "start": "node .output/server/index.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "playwright test",
@@ -38,6 +41,7 @@
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@tanstack/react-query": "^5.90.16",
     "@tanstack/react-router": "^1.153.2",
+    "@tanstack/react-start": "^1.154.0",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.18",
     "@tanstack/router-devtools": "^1.153.2",
@@ -49,6 +53,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -57,12 +62,15 @@
     "sonner": "^2.0.7",
     "superjson": "^2.2.2",
     "tailwind-merge": "^3.4.0",
+    "vinxi": "^0.5.11",
+    "vite-tsconfig-paths": "^6.0.4",
     "zod": "^4.3.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.57.0",
     "@tailwindcss/forms": "^0.5.11",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
@@ -76,6 +84,6 @@
     "tailwindcss": "^3.4.19",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^5.4.21"
+    "vite": "^7.3.1"
   }
 }

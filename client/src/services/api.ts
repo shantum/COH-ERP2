@@ -33,23 +33,27 @@ const api = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
+    // Enable cookies for all requests (auth_token HttpOnly cookie)
+    withCredentials: true,
 });
 
-// Add auth token to requests
+// Add auth token to requests (SSR-safe)
 api.interceptors.request.use((config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+    if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
     }
     return config;
 });
 
 // Handle auth errors - dispatch event instead of forcing page reload
-// This allows React Router to handle navigation properly
+// This allows React Router to handle navigation properly (SSR-safe)
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
+        if (typeof window !== 'undefined' && error.response?.status === 401) {
             localStorage.removeItem('token');
             // Dispatch custom event for React app to handle via Router
             window.dispatchEvent(new CustomEvent('auth:unauthorized'));
@@ -65,6 +69,7 @@ export const authApi = {
     me: () => api.get('/auth/me'),
     changePassword: (data: { currentPassword: string; newPassword: string }) =>
         api.post('/auth/change-password', data),
+    logout: () => api.post('/auth/logout'),
 };
 
 // Products

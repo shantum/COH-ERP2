@@ -10,13 +10,19 @@
 export const DEBOUNCE_MS = 1500;
 
 // Maps database tables to TanStack Query keys to invalidate
+// Note: During tRPC → Server Functions migration, both key patterns are listed
+// to ensure SSE invalidation works for both code paths
 export const TABLE_INVALIDATION_MAP: Record<string, string[][]> = {
     // Orders domain
+    // - ['orders'] → tRPC orders.list (legacy)
+    // - ['orders', 'list'] → Server Function getOrders (new)
     Order: [
-        ['orders'],         // tRPC orders.list
+        ['orders'],          // tRPC orders.list (legacy)
+        ['orders', 'list'],  // Server Function key (new)
     ],
     OrderLine: [
-        ['orders'],
+        ['orders'],          // tRPC (legacy)
+        ['orders', 'list'],  // Server Function (new)
     ],
 
     // Materials domain

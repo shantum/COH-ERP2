@@ -105,15 +105,17 @@ export default function Layout() {
     useDocumentTitle();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [collapsed, setCollapsed] = useState(() => {
+        if (typeof window === 'undefined') return false;
         return localStorage.getItem('sidebar-collapsed') === 'true';
     });
     const [isHovering, setIsHovering] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+        if (typeof window === 'undefined') return {};
         const saved = localStorage.getItem('sidebar-collapsed-groups');
         return saved ? JSON.parse(saved) : {};
     });
 
-    // Fetch admin-configured sidebar order
+    // Fetch admin-configured sidebar order (client-only to avoid SSR 401)
     const { data: sidebarOrder } = useQuery({
         queryKey: ['sidebarOrder'],
         queryFn: async () => {
@@ -121,6 +123,7 @@ export default function Layout() {
             return res.data;
         },
         staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+        enabled: typeof window !== 'undefined', // Skip during SSR
     });
 
     // Reorder navGroups based on saved order

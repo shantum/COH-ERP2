@@ -154,6 +154,15 @@ router.post(
             }
         }
 
+        // Set auth token as HttpOnly cookie for Server Functions
+        res.cookie('auth_token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            path: '/',
+        });
+
         res.json({
             user: {
                 id: user.id,
@@ -166,8 +175,18 @@ router.post(
             },
             // Include effective permissions (role + overrides) for frontend authorization
             permissions: Array.from(rolePermissions),
+            // Still return token in response for backward compatibility (tRPC still needs it during migration)
             token,
         });
+    })
+);
+
+// Logout - clear auth cookie
+router.post(
+    '/logout',
+    asyncHandler(async (_req: Request, res: Response) => {
+        res.clearCookie('auth_token', { path: '/' });
+        res.json({ success: true });
     })
 );
 

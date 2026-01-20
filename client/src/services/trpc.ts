@@ -25,8 +25,10 @@ export const trpc = createTRPCReact<AppRouter>();
 /**
  * Get auth token from localStorage
  * Matches existing Axios interceptor pattern in api.ts
+ * Returns null during SSR (no localStorage available)
  */
 const getAuthToken = () => {
+    if (typeof window === 'undefined') return null;
     return localStorage.getItem('token');
 };
 

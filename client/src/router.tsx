@@ -1,41 +1,47 @@
 /**
- * Router Configuration - TanStack Router
+ * Router Configuration for TanStack Start
  *
- * This file creates the router instance using the route tree
- * defined in routeTree.gen.ts.
+ * Creates the router instance with context for authentication,
+ * QueryClient, and tRPC. Used by both client and server entries.
  */
 
 import { createRouter } from '@tanstack/react-router';
+import { QueryClient } from '@tanstack/react-query';
 import { routeTree } from './routeTree.gen';
 import type { RouterContext } from './routerContext';
-import { addBreadcrumb } from './utils/breadcrumbTracker';
 
-// Create router instance
+// Shared QueryClient instance
+export const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            staleTime: 30000,
+            retry: 1,
+        },
+    },
+});
+
+// Create router instance (used by TanStack Start and SPA fallback)
 export const router = createRouter({
     routeTree,
-    // Preload on hover/focus for instant navigation
-    defaultPreload: 'intent',
-    // How long preloaded route data is considered fresh (prevents loader spam on rapid hovering)
-    // Set to match shortest query staleTime (30s) to align with TanStack Query cache
-    defaultPreloadStaleTime: 30 * 1000,
     context: {
-        queryClient: undefined!,
-        trpc: undefined!,
-        auth: undefined!,
+        queryClient,
+        trpc: undefined as any, // Set at runtime via RouterProvider
+        auth: {
+            user: null,
+            isAuthenticated: false,
+            isLoading: true,
+        },
     } satisfies RouterContext,
+    defaultPreload: 'intent',
+    scrollRestoration: true,
 });
 
-// Track navigation events for debugging and error reporting
-router.subscribe('onBeforeLoad', ({ toLocation }) => {
-    addBreadcrumb('navigation', {
-        pathname: toLocation.pathname,
-        search: toLocation.search,
-    });
-});
-
-// Register router for type safety
-declare module '@tanstack/react-router' {
-    interface Register {
-        router: typeof router;
-    }
+/**
+ * Creates and returns the router instance
+ * Called by TanStack Start on both client and server
+ */
+export async function getRouter() {
+    return router;
 }
+
+export type AppRouter = typeof router;
