@@ -405,7 +405,8 @@ router.get('/inward-history', authenticateToken, asyncHandler(async (req: Reques
     // Create Map for O(1) batch lookups (use first match per SKU since ordered by date desc)
     const batchMap = new Map<string, string | null>();
     for (const batch of batches) {
-        if (!batchMap.has(batch.skuId)) {
+        // Skip sample batches (null skuId)
+        if (batch.skuId && !batchMap.has(batch.skuId)) {
             batchMap.set(batch.skuId, batch.batchCode);
         }
     }

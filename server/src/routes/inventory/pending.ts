@@ -971,7 +971,8 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
         });
 
     } else if (source === 'production') {
-        const baseWhere = { status: { in: ['planned', 'in_progress'] } };
+        // Filter out sample batches (null skuId) - they don't belong in inventory pending queue
+        const baseWhere = { status: { in: ['planned', 'in_progress'] }, skuId: { not: null } };
 
         const searchWhere = searchLower ? {
             OR: [
@@ -1006,7 +1007,7 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
             const sku = b.sku as SkuWithRelations;
             return {
                 id: b.id,
-                skuId: b.skuId,
+                skuId: b.skuId!, // Asserted non-null due to skuId: { not: null } filter in baseWhere
                 skuCode: sku.skuCode,
                 productName: sku.variation.product.name,
                 colorName: sku.variation.colorName,
