@@ -193,7 +193,7 @@ export async function listOrdersKysely(params: OrdersListParams) {
             // Order fields (lean selection per Directive 3)
             'Order.id as orderId',
             'Order.orderNumber',
-            sql<string>`"Order"."orderDate"::text`.as('orderDate'),
+            sql<string>`to_char("Order"."orderDate" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('orderDate'),
             sql<string>`"Order"."shipByDate"::text`.as('shipByDate'),
             'Order.customerName',
             'Order.customerEmail',
@@ -212,10 +212,10 @@ export async function listOrdersKysely(params: OrdersListParams) {
             'Order.isOnHold',
             'Order.awbNumber as orderAwbNumber',
             'Order.courier as orderCourier',
-            sql<string>`"Order"."shippedAt"::text`.as('orderShippedAt'),
+            sql<string>`to_char("Order"."shippedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('orderShippedAt'),
             'Order.trackingStatus as orderTrackingStatus',
-            sql<string>`"Order"."codRemittedAt"::text`.as('codRemittedAt'),
-            sql<string>`"Order"."archivedAt"::text`.as('archivedAt'),
+            sql<string>`to_char("Order"."codRemittedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('codRemittedAt'),
+            sql<string>`to_char("Order"."archivedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('archivedAt'),
 
             // Customer fields (stats for tier display)
             'Customer.tags as customerTags',
@@ -258,8 +258,8 @@ export async function listOrdersKysely(params: OrdersListParams) {
                         'lineNotes', COALESCE(ol.notes, ''),
                         'lineAwbNumber', ol."awbNumber",
                         'lineCourier', ol.courier,
-                        'lineShippedAt', ol."shippedAt"::text,
-                        'lineDeliveredAt', ol."deliveredAt"::text,
+                        'lineShippedAt', to_char(ol."shippedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                        'lineDeliveredAt', to_char(ol."deliveredAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
                         'lineTrackingStatus', ol."trackingStatus",
                         'isCustomized', ol."isCustomized",
                         'productionBatchId', ol."productionBatchId",
