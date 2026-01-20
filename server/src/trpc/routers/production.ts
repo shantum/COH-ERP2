@@ -42,7 +42,7 @@ import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 // ============================================
 
 type BatchStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled';
-type BatchPriority = 'low' | 'normal' | 'high' | 'urgent';
+type BatchPriority = 'low' | 'normal' | 'high' | 'urgent' | 'order_fulfillment';
 
 interface BatchData {
     batchDate: Date;
@@ -235,7 +235,7 @@ const createBatchInput = z.object({
     sampleColour: z.string().optional(),
     sampleSize: z.string().optional(),
     qtyPlanned: z.number().positive(),
-    priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+    priority: z.enum(['low', 'normal', 'high', 'urgent', 'order_fulfillment']).optional(),
     sourceOrderLineId: z.string().optional(),
     notes: z.string().optional(),
 });
@@ -245,7 +245,7 @@ const updateBatchInput = z.object({
     batchDate: z.string().optional(),
     qtyPlanned: z.number().positive().optional(),
     tailorId: z.string().optional(),
-    priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+    priority: z.enum(['low', 'normal', 'high', 'urgent', 'order_fulfillment']).optional(),
     notes: z.string().optional(),
 });
 
