@@ -1,28 +1,55 @@
 /**
  * NotesCell - Inline editable notes for order lines
- * Expandable on click when text is truncated
+ *
+ * Features:
+ * - Debounced auto-save (500ms) while typing
+ * - Zod validation before sending to server
+ * - Optimistic UI (no flicker)
+ * - onBlur immediate save (no debounce wait)
+ * - Expandable on click when text is truncated
  */
 
-import { useState, useRef, useEffect } from 'react';
-import { Pencil, FileText, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Pencil, FileText, ChevronDown, Loader2 } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
+import { useDebouncedAutoSave } from '../../../../hooks/useDebouncedAutoSave';
+import { UpdateLineNotesSchema } from '@coh/shared';
 
 export function NotesCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
-    const { onUpdateLineNotes } = handlersRef.current;
+    const { onUpdateLineNotes, onSettled } = handlersRef.current;
+    const lineId = row.lineId;
+
+    // Debounced auto-save hook with Zod validation
+    // Saves after 500ms of no typing, or immediately on blur
+    const {
+        value,
+        setValue,
+        handleBlur,
+        isSaving,
+        error,
+        isDirty,
+    } = useDebouncedAutoSave({
+        initialValue: row.lineNotes || '',
+        schema: UpdateLineNotesSchema,
+        mutationFn: async (payload) => {
+            // Call the parent's mutation handler
+            await onUpdateLineNotes(payload.lineId, payload.notes || '');
+        },
+        buildPayload: (notes) => ({ lineId, notes: notes || null }),
+        // CRITICAL: onSettled ensures UI/DB sync by refetching data
+        onSettled: () => onSettled?.(),
+        debounceMs: 500,
+        saveOnBlur: true,
+    });
+
     const [isEditing, setIsEditing] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [isTruncated, setIsTruncated] = useState(false);
-    const [value, setValue] = useState(row.lineNotes || '');
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const textRef = useRef<HTMLSpanElement>(null);
-
-    // Update local value when row changes
-    useEffect(() => {
-        setValue(row.lineNotes || '');
-    }, [row.lineNotes]);
 
     // Check if text is truncated
     useEffect(() => {
@@ -55,22 +82,22 @@ export function NotesCell({ row, handlersRef }: CellProps) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isExpanded]);
 
-    const handleSave = () => {
-        if (value !== row.lineNotes) {
-            onUpdateLineNotes(row.lineId!, value);
-        }
+    const handleSave = useCallback(() => {
+        // Trigger immediate save via onBlur
+        handleBlur();
         setIsEditing(false);
-    };
+    }, [handleBlur]);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSave();
         } else if (e.key === 'Escape') {
+            // Reset to original value (from server)
             setValue(row.lineNotes || '');
             setIsEditing(false);
         }
-    };
+    }, [handleSave, setValue, row.lineNotes]);
 
     const handleNoteClick = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -97,18 +124,37 @@ export function NotesCell({ row, handlersRef }: CellProps) {
                     onChange={(e) => setValue(e.target.value)}
                     onBlur={handleSave}
                     onKeyDown={handleKeyDown}
-                    className="w-full min-h-[60px] px-2 py-1 border border-blue-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white text-xs resize-none"
+                    className={cn(
+                        'w-full min-h-[60px] px-2 py-1 border rounded focus:outline-none focus:ring-1 bg-white text-xs resize-none',
+                        error
+                            ? 'border-red-300 focus:ring-red-400'
+                            : 'border-blue-300 focus:ring-blue-400'
+                    )}
                     placeholder="Add note..."
                     rows={3}
                 />
-                <div className="text-[9px] text-gray-400 mt-0.5">
-                    Enter to save · Shift+Enter for new line · Esc to cancel
+                <div className="flex items-center justify-between mt-0.5">
+                    <span className="text-[9px] text-gray-400">
+                        {isSaving ? (
+                            <span className="flex items-center gap-1 text-blue-500">
+                                <Loader2 size={10} className="animate-spin" />
+                                Saving...
+                            </span>
+                        ) : isDirty ? (
+                            'Auto-saving...'
+                        ) : (
+                            'Enter to save · Shift+Enter for new line · Esc to cancel'
+                        )}
+                    </span>
+                    {error && (
+                        <span className="text-[9px] text-red-500">{error}</span>
+                    )}
                 </div>
             </div>
         );
     }
 
-    // Use local value for instant feedback after save
+    // Use hook's value for optimistic UI (instant feedback after save)
     const notes = value;
 
     if (!notes) {

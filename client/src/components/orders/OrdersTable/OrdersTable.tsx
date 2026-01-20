@@ -53,6 +53,7 @@ export function OrdersTable({
     onForceShipLine,
     onTrack,
     onMarkCodRemitted,
+    onSettled,
     allocatingLines,
     isCancellingOrder,
     isCancellingLine,
@@ -147,6 +148,7 @@ export function OrdersTable({
         onViewOrder,
         onViewCustomer,
         onUpdateShipByDate,
+        onSettled,
     });
 
     // Update ref every render
@@ -181,6 +183,7 @@ export function OrdersTable({
         onViewOrder,
         onViewCustomer,
         onUpdateShipByDate,
+        onSettled,
     };
 
     // Build column context

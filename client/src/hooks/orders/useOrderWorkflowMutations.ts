@@ -15,6 +15,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError } from '../../utils/toast';
 import type { MutationOptions } from './orderMutationUtils';
 import {
     getOrdersQueryInput,
@@ -85,12 +86,12 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
 
-            // Show error alert for insufficient stock
+            // Show error toast for insufficient stock
             const errorMsg = err.message || '';
             if (errorMsg.includes('Insufficient stock')) {
-                alert(errorMsg);
+                showError('Insufficient stock', { description: errorMsg });
             } else if (!errorMsg.includes('pending') && !errorMsg.includes('allocated')) {
-                alert(errorMsg || 'Failed to allocate');
+                showError('Failed to allocate', { description: errorMsg });
             }
         },
         onSettled: () => {
@@ -130,7 +131,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
 
             const msg = err.message || 'Failed to update line status';
             if (!msg.includes('Cannot transition')) {
-                alert(msg);
+                showError('Failed to update line status', { description: msg });
             }
         },
         onSettled: () => {

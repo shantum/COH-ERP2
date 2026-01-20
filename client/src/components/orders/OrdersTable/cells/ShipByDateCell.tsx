@@ -1,19 +1,24 @@
 /**
  * ShipByDateCell - Editable ship-by date cell with popover date picker
+ *
+ * IMPORTANT: Uses same Zod schema as auto-save cells for consistent validation.
+ * Backend remains agnostic to whether data came from button-save or auto-save.
  */
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, X } from 'lucide-react';
+import { Calendar, X, AlertCircle } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
+import { UpdateShipByDateSchema } from '@coh/shared';
 
 export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
     if (!row.isFirstLine) return null;
 
-    const { onUpdateShipByDate } = handlersRef.current;
+    const { onUpdateShipByDate, onSettled } = handlersRef.current;
     const [isOpen, setIsOpen] = useState(false);
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+    const [validationError, setValidationError] = useState<string | null>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -110,21 +115,66 @@ export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
         return `In ${diffDays}d`;
     };
 
-    const handleDateSelect = (date: string) => {
+    const handleDateSelect = async (date: string) => {
+        // Validate using same Zod schema as auto-save cells
+        // This ensures backend remains agnostic to save method
+        const payload = {
+            orderId: row.orderId,
+            shipByDate: date,
+        };
+
+        const validation = UpdateShipByDateSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        setValidationError(null);
         // Update local state immediately for instant feedback
         setLocalDate(date);
-        if (onUpdateShipByDate) {
-            onUpdateShipByDate(row.orderId, date);
+
+        try {
+            if (onUpdateShipByDate) {
+                await onUpdateShipByDate(row.orderId, date);
+                // Call onSettled for UI/DB sync
+                onSettled?.();
+            }
+            setIsOpen(false);
+        } catch (error) {
+            setValidationError(error instanceof Error ? error.message : 'Save failed');
+            // Revert local state on error
+            setLocalDate(normalizeDate(row.shipByDate));
         }
-        setIsOpen(false);
     };
 
-    const handleClear = () => {
-        setLocalDate(null);
-        if (onUpdateShipByDate) {
-            onUpdateShipByDate(row.orderId, null);
+    const handleClear = async () => {
+        // Validate using same Zod schema as auto-save cells
+        const payload = {
+            orderId: row.orderId,
+            shipByDate: null,
+        };
+
+        const validation = UpdateShipByDateSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
         }
-        setIsOpen(false);
+
+        setValidationError(null);
+        setLocalDate(null);
+
+        try {
+            if (onUpdateShipByDate) {
+                await onUpdateShipByDate(row.orderId, null);
+                // Call onSettled for UI/DB sync
+                onSettled?.();
+            }
+            setIsOpen(false);
+        } catch (error) {
+            setValidationError(error instanceof Error ? error.message : 'Save failed');
+            // Revert local state on error
+            setLocalDate(normalizeDate(row.shipByDate));
+        }
     };
 
     // Check if past due (localDate is already normalized to YYYY-MM-DD string)
@@ -215,6 +265,14 @@ export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
                             }}
                         />
                     </div>
+
+                    {/* Validation error display */}
+                    {validationError && (
+                        <div className="flex items-center gap-1 text-[10px] text-red-500 pt-2 mt-2 border-t border-gray-100">
+                            <AlertCircle size={10} />
+                            <span>{validationError}</span>
+                        </div>
+                    )}
 
                     {/* Clear button */}
                     {localDate && (

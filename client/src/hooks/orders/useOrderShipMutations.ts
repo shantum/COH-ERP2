@@ -14,6 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError } from '../../utils/toast';
 import {
     getOrdersQueryInput,
     optimisticShipOrder,
@@ -76,9 +77,9 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
             const errorMsg = err.message || '';
             if (errorMsg.includes('validation')) {
-                alert(`Validation failed:\n${errorMsg}`);
+                showError('Validation failed', { description: errorMsg });
             } else {
-                alert(errorMsg || 'Failed to ship order');
+                showError('Failed to ship order', { description: errorMsg });
             }
         },
         onSettled: () => {
@@ -129,11 +130,11 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
             const errorMsg = err.message || '';
             if (errorMsg.includes('not packed')) {
-                alert(`Cannot ship: Some lines are not packed yet`);
+                showError('Cannot ship', { description: 'Some lines are not packed yet' });
             } else if (errorMsg.includes('validation')) {
-                alert(`Validation failed: ${errorMsg}`);
+                showError('Validation failed', { description: errorMsg });
             } else {
-                alert(errorMsg || 'Failed to ship lines');
+                showError('Failed to ship lines', { description: errorMsg });
             }
         },
         onSettled: () => {
@@ -170,7 +171,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(err.message || 'Failed to admin ship order');
+            showError('Failed to admin ship order', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -202,7 +203,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(err.message || 'Failed to unship order');
+            showError('Failed to unship order', { description: err.message });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it
@@ -270,7 +271,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(err.message || 'Failed to ship line');
+            showError('Failed to ship line', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -310,7 +311,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            alert(err.message || 'Failed to unship line');
+            showError('Failed to unship line', { description: err.message });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it

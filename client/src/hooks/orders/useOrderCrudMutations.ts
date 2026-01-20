@@ -7,6 +7,7 @@
 import { useMemo } from 'react';
 import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError } from '../../utils/toast';
 
 export interface UseOrderCrudMutationsOptions {
     onCreateSuccess?: () => void;
@@ -26,7 +27,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             options.onCreateSuccess?.();
         },
         onError: (err) => {
-            alert(err.message || 'Failed to create order');
+            showError('Failed to create order', { description: err.message });
         }
     });
 
@@ -36,7 +37,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             invalidateAll();
             options.onDeleteSuccess?.();
         },
-        onError: (err) => alert(err.message || 'Failed to delete order')
+        onError: (err) => showError('Failed to delete order', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -54,7 +55,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             invalidateOpenOrders();
             options.onEditSuccess?.();
         },
-        onError: (err) => alert(err.message || 'Failed to update order')
+        onError: (err) => showError('Failed to update order', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -74,7 +75,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             invalidateOpenOrders();
             options.onNotesSuccess?.();
         },
-        onError: (err) => alert(err.message || 'Failed to update notes')
+        onError: (err) => showError('Failed to update notes', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -96,7 +97,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             options.onNotesSuccess?.();
         },
         onError: (err) => {
-            alert(err.message || 'Failed to update line notes');
+            showError('Failed to update line notes', { description: err.message });
         }
     });
 
@@ -117,7 +118,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             trpcUtils.orders.list.invalidate();
         },
         onError: (err) => {
-            alert(err.message || 'Failed to update ship by date');
+            showError('Failed to update ship by date', { description: err.message });
         }
     });
 

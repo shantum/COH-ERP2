@@ -7,6 +7,7 @@
 import { useMemo } from 'react';
 import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError, showInfo } from '../../utils/toast';
 
 export interface UseOrderLineMutationsOptions {
     onEditSuccess?: () => void;
@@ -18,7 +19,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
     // Update line via tRPC
     const updateLineMutation = trpc.orders.updateLine.useMutation({
         onSuccess: () => invalidateOpenOrders(),
-        onError: (err) => alert(err.message || 'Failed to update line')
+        onError: (err) => showError('Failed to update line', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -38,7 +39,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
             invalidateOpenOrders();
             options.onEditSuccess?.();
         },
-        onError: (err) => alert(err.message || 'Failed to add line')
+        onError: (err) => showError('Failed to add line', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -58,11 +59,11 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         onError: (err) => {
             const errorMsg = err.message || '';
             if (errorMsg.includes('allocated') || errorMsg.includes('picked') || errorMsg.includes('packed')) {
-                alert('Cannot customize: Line is already allocated/picked/packed. Unallocate first.');
+                showError('Cannot customize', { description: 'Line is already allocated/picked/packed. Unallocate first.' });
             } else if (errorMsg.includes('already customized')) {
-                alert('This line is already customized.');
+                showError('Cannot customize', { description: 'This line is already customized.' });
             } else {
-                alert(errorMsg || 'Failed to customize line');
+                showError('Failed to customize line', { description: errorMsg });
             }
         }
     });
@@ -83,7 +84,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         onSuccess: (data) => {
             invalidateOpenOrders();
             if (data.forcedCleanup) {
-                alert(`Customization removed.\nCleared ${data.deletedTransactions} inventory transactions and ${data.deletedBatches} production batches.`);
+                showInfo('Customization removed', { description: `Cleared ${data.deletedTransactions} inventory transactions and ${data.deletedBatches} production batches.` });
             }
         },
         onError: (err, variables) => {
@@ -98,7 +99,7 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
                     removeCustomizationMutation.mutate({ lineId: variables.lineId, force: true });
                 }
             } else {
-                alert(errorMsg || 'Failed to remove customization');
+                showError('Failed to remove customization', { description: errorMsg });
             }
         }
     });

@@ -22,6 +22,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError } from '../../utils/toast';
 import {
     getOrdersQueryInput,
     optimisticMarkDelivered,
@@ -77,7 +78,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             // Invalidate after rollback to ensure consistency
             invalidateShippedOrders();
             invalidateCodPendingOrders();
-            alert(err.message || 'Failed to mark as delivered');
+            showError('Failed to mark as delivered', { description: err.message });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it
@@ -114,7 +115,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             // Invalidate after rollback to ensure consistency
             invalidateShippedOrders();
             invalidateRtoOrders();
-            alert(err.message || 'Failed to mark as RTO');
+            showError('Failed to mark as RTO', { description: err.message });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it
@@ -151,7 +152,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             // Invalidate after rollback to ensure consistency
             invalidateRtoOrders();
             invalidateOpenOrders();
-            alert(err.message || 'Failed to receive RTO');
+            showError('Failed to receive RTO', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance for RTO restore)
@@ -200,7 +201,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             }
             invalidateShippedOrders();
             invalidateCodPendingOrders();
-            alert(err.message || 'Failed to mark line as delivered');
+            showError('Failed to mark line as delivered', { description: err.message });
         },
         onSettled: () => {
             // SSE handles real-time updates
@@ -242,7 +243,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             }
             invalidateShippedOrders();
             invalidateRtoOrders();
-            alert(err.message || 'Failed to initiate RTO for line');
+            showError('Failed to initiate RTO for line', { description: err.message });
         },
         onSettled: () => {
             // SSE handles real-time updates
@@ -289,7 +290,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             }
             invalidateRtoOrders();
             invalidateOpenOrders();
-            alert(err.message || 'Failed to receive RTO for line');
+            showError('Failed to receive RTO for line', { description: err.message });
         },
         onSettled: () => {
             // Invalidate inventory balance since RTO restores stock

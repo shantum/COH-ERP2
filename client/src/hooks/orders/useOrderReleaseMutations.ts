@@ -7,6 +7,7 @@
 import { useMemo } from 'react';
 import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError, showSuccess } from '../../utils/toast';
 
 export function useOrderReleaseMutations() {
     const { invalidateOpenOrders, invalidateShippedOrders, invalidateCancelledOrders } = useOrderInvalidation();
@@ -17,7 +18,7 @@ export function useOrderReleaseMutations() {
             invalidateOpenOrders();
             invalidateShippedOrders();
         },
-        onError: (err) => alert(err.message || 'Failed to release orders')
+        onError: (err) => showError('Failed to release orders', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -35,7 +36,7 @@ export function useOrderReleaseMutations() {
             invalidateOpenOrders();
             invalidateCancelledOrders();
         },
-        onError: (err) => alert(err.message || 'Failed to release cancelled orders')
+        onError: (err) => showError('Failed to release cancelled orders', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -53,9 +54,9 @@ export function useOrderReleaseMutations() {
             invalidateOpenOrders();
             invalidateShippedOrders();
             const { skipped, message } = data;
-            alert(message + (skipped && skipped > 0 ? ` (${skipped} already shipped)` : ''));
+            showSuccess(message, { description: skipped && skipped > 0 ? `${skipped} already shipped` : undefined });
         },
-        onError: (err) => alert(err.message || 'Failed to migrate fulfilled orders')
+        onError: (err) => showError('Failed to migrate fulfilled orders', { description: err.message })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively

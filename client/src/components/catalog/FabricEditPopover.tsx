@@ -3,11 +3,18 @@
  *
  * Inline editor for fabric type (product-level) and fabric (variation-level).
  * Used in catalog grid columns.
+ *
+ * IMPORTANT: Uses same Zod schema pattern as other inline edit cells for consistent validation.
+ * Backend remains agnostic to save method (popover select vs form).
  */
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Pencil } from 'lucide-react';
+import { Pencil, AlertCircle } from 'lucide-react';
+import {
+    UpdateProductFabricTypeSchema,
+    UpdateVariationFabricSchema,
+} from '@coh/shared';
 
 export type ViewLevel = 'sku' | 'variation' | 'product' | 'consumption';
 
@@ -36,15 +43,17 @@ export function FabricEditPopover({
 }: FabricEditPopoverProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+    const [validationError, setValidationError] = useState<string | null>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
     const [filterFabricTypeId, setFilterFabricTypeId] = useState<string>('');
 
-    // Reset filter when popover opens
+    // Reset filter and validation error when popover opens
     useEffect(() => {
         if (isOpen) {
             const currentFabric = fabrics.find(f => f.id === row.fabricId);
             setFilterFabricTypeId(currentFabric?.fabricTypeId || '');
+            setValidationError(null);
         }
     }, [isOpen, row.fabricId, fabrics]);
 
@@ -104,6 +113,20 @@ export function FabricEditPopover({
     }, [fabrics, viewLevel, filterFabricTypeId, row.fabricTypeId]);
 
     const handleFabricTypeChange = (fabricTypeId: string) => {
+        // Validate using Zod schema - ensures consistency with backend expectations
+        const payload = {
+            productId: row.productId,
+            fabricTypeId: fabricTypeId || null,
+        };
+
+        const validation = UpdateProductFabricTypeSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        setValidationError(null);
+
         if (skuCountForProduct > 1) {
             if (!window.confirm(`Update fabric type for ${skuCountForProduct} SKUs?`)) return;
         }
@@ -113,6 +136,21 @@ export function FabricEditPopover({
 
     const handleFabricChange = (fabricId: string) => {
         if (!fabricId) return;
+
+        // Validate using Zod schema - ensures consistency with backend expectations
+        const payload = {
+            variationId: row.variationId,
+            fabricId: fabricId,
+        };
+
+        const validation = UpdateVariationFabricSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        setValidationError(null);
+
         if (skuCountForVariation > 1) {
             if (!window.confirm(`Update fabric for ${skuCountForVariation} SKUs?`)) return;
         }
@@ -238,6 +276,14 @@ export function FabricEditPopover({
                                 </p>
                             )}
                         </>
+                    )}
+
+                    {/* Validation error display */}
+                    {validationError && (
+                        <div className="flex items-center gap-1 text-[10px] text-red-500 mt-2 pt-2 border-t border-gray-100">
+                            <AlertCircle size={10} />
+                            <span>{validationError}</span>
+                        </div>
                     )}
                 </div>,
                 document.body

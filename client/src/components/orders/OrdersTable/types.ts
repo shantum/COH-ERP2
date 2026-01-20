@@ -78,6 +78,12 @@ export interface DynamicColumnHandlers {
     onViewOrder: (orderId: string) => void;
     onViewCustomer: (order: any) => void;
     onUpdateShipByDate?: (orderId: string, date: string | null) => void;
+
+    /**
+     * Callback after any inline edit mutation settles (success OR error).
+     * CRITICAL for UI/DB sync - use this to invalidate queries and refetch data.
+     */
+    onSettled?: () => void;
 }
 
 /**
@@ -148,6 +154,11 @@ export interface OrdersTableProps {
     onTrack?: (awbNumber: string, orderNumber: string) => void;
     onMarkCodRemitted?: (orderId: string) => void;
     onMarkRtoReceived?: (orderId: string) => void;
+    /**
+     * Callback after any inline edit mutation settles.
+     * CRITICAL for UI/DB sync - invalidates queries to refetch data.
+     */
+    onSettled?: () => void;
     // Loading states
     allocatingLines: Set<string>;
     isCancellingOrder: boolean;

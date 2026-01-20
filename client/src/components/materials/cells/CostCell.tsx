@@ -1,12 +1,27 @@
 /**
- * CostCell - Editable cost field with inheritance indicator
+ * CostCell, LeadTimeCell, MinOrderCell - Editable material property cells
  *
- * Shows effective cost (own or inherited from fabric).
- * Click to edit. Shows ↑ indicator for inherited values.
+ * Features:
+ * - Inline editing with click-to-edit pattern
+ * - Shows inheritance indicator (↑) for values inherited from parent fabric
+ * - Zod validation before save (same schemas used consistently across app)
+ *
+ * IMPORTANT: Uses same Zod schema pattern as Orders cells for consistent validation.
+ * Backend remains agnostic to save method (inline edit vs form).
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { AlertCircle } from 'lucide-react';
 import type { MaterialNode } from '../types';
+import {
+    UpdateMaterialCostSchema,
+    UpdateMaterialLeadTimeSchema,
+    UpdateMaterialMinOrderSchema,
+} from '@coh/shared';
+
+// ============================================
+// COST CELL
+// ============================================
 
 interface CostCellProps {
     node: MaterialNode;
@@ -17,6 +32,7 @@ interface CostCellProps {
 export function CostCell({ node, onSave, disabled }: CostCellProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState('');
+    const [validationError, setValidationError] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const effectiveCost = node.effectiveCostPerUnit ?? node.costPerUnit ?? node.inheritedCostPerUnit;
@@ -32,19 +48,50 @@ export function CostCell({ node, onSave, disabled }: CostCellProps) {
     const handleStartEdit = () => {
         if (disabled) return;
         setEditValue(effectiveCost?.toString() || '');
+        setValidationError(null);
         setIsEditing(true);
     };
 
     const handleSave = () => {
-        setIsEditing(false);
         const trimmed = editValue.trim();
+
+        // No change - just close
         if (trimmed === '' || trimmed === (effectiveCost?.toString() || '')) {
-            return; // No change
+            setIsEditing(false);
+            setValidationError(null);
+            return;
         }
+
         const numValue = parseFloat(trimmed);
-        if (!isNaN(numValue) && numValue >= 0) {
-            onSave(numValue);
+        if (isNaN(numValue)) {
+            setValidationError('Please enter a valid number');
+            return;
         }
+
+        // Validate using Zod schema - ensures consistency with backend expectations
+        // Materials can be fabric or colour - use discriminated union
+        const nodeType = node.type as 'fabric' | 'colour';
+        if (nodeType !== 'fabric' && nodeType !== 'colour') {
+            setValidationError('Cannot edit cost for this item type');
+            return;
+        }
+
+        const payload = {
+            nodeType,
+            id: node.id,
+            costPerUnit: numValue,
+        };
+
+        const validation = UpdateMaterialCostSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        // Validation passed - save and close
+        setValidationError(null);
+        setIsEditing(false);
+        onSave(numValue);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -53,22 +100,38 @@ export function CostCell({ node, onSave, disabled }: CostCellProps) {
         } else if (e.key === 'Escape') {
             setIsEditing(false);
             setEditValue('');
+            setValidationError(null);
         }
     };
 
     if (isEditing) {
         return (
-            <input
-                ref={inputRef}
-                type="number"
-                min="0"
-                step="0.01"
-                className="w-full px-1 py-0.5 text-sm border rounded bg-white text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={handleSave}
-                onKeyDown={handleKeyDown}
-            />
+            <div className="relative">
+                <input
+                    ref={inputRef}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className={`w-full px-1 py-0.5 text-sm border rounded bg-white text-right focus:outline-none focus:ring-1 ${
+                        validationError
+                            ? 'border-red-300 focus:ring-red-400'
+                            : 'border-blue-300 focus:ring-blue-500'
+                    }`}
+                    value={editValue}
+                    onChange={(e) => {
+                        setEditValue(e.target.value);
+                        setValidationError(null);
+                    }}
+                    onBlur={handleSave}
+                    onKeyDown={handleKeyDown}
+                />
+                {validationError && (
+                    <div className="absolute top-full left-0 mt-0.5 flex items-center gap-1 text-[10px] text-red-500 bg-white px-1 rounded shadow-sm border border-red-100 z-10 whitespace-nowrap">
+                        <AlertCircle size={10} />
+                        <span>{validationError}</span>
+                    </div>
+                )}
+            </div>
         );
     }
 
@@ -97,9 +160,10 @@ export function CostCell({ node, onSave, disabled }: CostCellProps) {
     );
 }
 
-/**
- * LeadTimeCell - Similar to CostCell but for lead time
- */
+// ============================================
+// LEAD TIME CELL
+// ============================================
+
 interface LeadTimeCellProps {
     node: MaterialNode;
     onSave: (value: number | null) => void;
@@ -109,6 +173,7 @@ interface LeadTimeCellProps {
 export function LeadTimeCell({ node, onSave, disabled }: LeadTimeCellProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState('');
+    const [validationError, setValidationError] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const effectiveValue = node.effectiveLeadTimeDays ?? node.leadTimeDays ?? node.inheritedLeadTimeDays;
@@ -124,19 +189,49 @@ export function LeadTimeCell({ node, onSave, disabled }: LeadTimeCellProps) {
     const handleStartEdit = () => {
         if (disabled) return;
         setEditValue(effectiveValue?.toString() || '');
+        setValidationError(null);
         setIsEditing(true);
     };
 
     const handleSave = () => {
-        setIsEditing(false);
         const trimmed = editValue.trim();
+
+        // No change - just close
         if (trimmed === '' || trimmed === (effectiveValue?.toString() || '')) {
+            setIsEditing(false);
+            setValidationError(null);
             return;
         }
+
         const numValue = parseInt(trimmed);
-        if (!isNaN(numValue) && numValue >= 0) {
-            onSave(numValue);
+        if (isNaN(numValue)) {
+            setValidationError('Please enter a valid number');
+            return;
         }
+
+        // Validate using Zod schema
+        const nodeType = node.type as 'fabric' | 'colour';
+        if (nodeType !== 'fabric' && nodeType !== 'colour') {
+            setValidationError('Cannot edit lead time for this item type');
+            return;
+        }
+
+        const payload = {
+            nodeType,
+            id: node.id,
+            leadTimeDays: numValue,
+        };
+
+        const validation = UpdateMaterialLeadTimeSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        // Validation passed - save and close
+        setValidationError(null);
+        setIsEditing(false);
+        onSave(numValue);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -145,22 +240,38 @@ export function LeadTimeCell({ node, onSave, disabled }: LeadTimeCellProps) {
         } else if (e.key === 'Escape') {
             setIsEditing(false);
             setEditValue('');
+            setValidationError(null);
         }
     };
 
     if (isEditing) {
         return (
-            <input
-                ref={inputRef}
-                type="number"
-                min="0"
-                step="1"
-                className="w-full px-1 py-0.5 text-sm border rounded bg-white text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={handleSave}
-                onKeyDown={handleKeyDown}
-            />
+            <div className="relative">
+                <input
+                    ref={inputRef}
+                    type="number"
+                    min="0"
+                    step="1"
+                    className={`w-full px-1 py-0.5 text-sm border rounded bg-white text-right focus:outline-none focus:ring-1 ${
+                        validationError
+                            ? 'border-red-300 focus:ring-red-400'
+                            : 'border-blue-300 focus:ring-blue-500'
+                    }`}
+                    value={editValue}
+                    onChange={(e) => {
+                        setEditValue(e.target.value);
+                        setValidationError(null);
+                    }}
+                    onBlur={handleSave}
+                    onKeyDown={handleKeyDown}
+                />
+                {validationError && (
+                    <div className="absolute top-full left-0 mt-0.5 flex items-center gap-1 text-[10px] text-red-500 bg-white px-1 rounded shadow-sm border border-red-100 z-10 whitespace-nowrap">
+                        <AlertCircle size={10} />
+                        <span>{validationError}</span>
+                    </div>
+                )}
+            </div>
         );
     }
 
@@ -184,8 +295,12 @@ export function LeadTimeCell({ node, onSave, disabled }: LeadTimeCellProps) {
     );
 }
 
+// ============================================
+// MIN ORDER CELL
+// ============================================
+
 /**
- * MinOrderCell - Similar to CostCell but for minimum order quantity
+ * MinOrderCell - Editable minimum order quantity cell
  *
  * Shows correct unit based on construction type:
  * - Knit fabrics: kg
@@ -200,6 +315,7 @@ interface MinOrderCellProps {
 export function MinOrderCell({ node, onSave, disabled }: MinOrderCellProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState('');
+    const [validationError, setValidationError] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
     const effectiveValue = node.effectiveMinOrderQty ?? node.minOrderQty ?? node.inheritedMinOrderQty;
@@ -218,19 +334,49 @@ export function MinOrderCell({ node, onSave, disabled }: MinOrderCellProps) {
     const handleStartEdit = () => {
         if (disabled) return;
         setEditValue(effectiveValue?.toString() || '');
+        setValidationError(null);
         setIsEditing(true);
     };
 
     const handleSave = () => {
-        setIsEditing(false);
         const trimmed = editValue.trim();
+
+        // No change - just close
         if (trimmed === '' || trimmed === (effectiveValue?.toString() || '')) {
+            setIsEditing(false);
+            setValidationError(null);
             return;
         }
+
         const numValue = parseFloat(trimmed);
-        if (!isNaN(numValue) && numValue >= 0) {
-            onSave(numValue);
+        if (isNaN(numValue)) {
+            setValidationError('Please enter a valid number');
+            return;
         }
+
+        // Validate using Zod schema
+        const nodeType = node.type as 'fabric' | 'colour';
+        if (nodeType !== 'fabric' && nodeType !== 'colour') {
+            setValidationError('Cannot edit min order for this item type');
+            return;
+        }
+
+        const payload = {
+            nodeType,
+            id: node.id,
+            minOrderQty: numValue,
+        };
+
+        const validation = UpdateMaterialMinOrderSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        // Validation passed - save and close
+        setValidationError(null);
+        setIsEditing(false);
+        onSave(numValue);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -239,22 +385,38 @@ export function MinOrderCell({ node, onSave, disabled }: MinOrderCellProps) {
         } else if (e.key === 'Escape') {
             setIsEditing(false);
             setEditValue('');
+            setValidationError(null);
         }
     };
 
     if (isEditing) {
         return (
-            <input
-                ref={inputRef}
-                type="number"
-                min="0"
-                step="0.1"
-                className="w-full px-1 py-0.5 text-sm border rounded bg-white text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={handleSave}
-                onKeyDown={handleKeyDown}
-            />
+            <div className="relative">
+                <input
+                    ref={inputRef}
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    className={`w-full px-1 py-0.5 text-sm border rounded bg-white text-right focus:outline-none focus:ring-1 ${
+                        validationError
+                            ? 'border-red-300 focus:ring-red-400'
+                            : 'border-blue-300 focus:ring-blue-500'
+                    }`}
+                    value={editValue}
+                    onChange={(e) => {
+                        setEditValue(e.target.value);
+                        setValidationError(null);
+                    }}
+                    onBlur={handleSave}
+                    onKeyDown={handleKeyDown}
+                />
+                {validationError && (
+                    <div className="absolute top-full left-0 mt-0.5 flex items-center gap-1 text-[10px] text-red-500 bg-white px-1 rounded shadow-sm border border-red-100 z-10 whitespace-nowrap">
+                        <AlertCircle size={10} />
+                        <span>{validationError}</span>
+                    </div>
+                )}
+            </div>
         );
     }
 

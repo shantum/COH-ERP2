@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
+import { showError } from '../../utils/toast';
 import {
     getOrdersQueryInput,
     optimisticCancelLine,
@@ -65,7 +66,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateCancelledOrders();
-            alert(err.message || 'Failed to cancel order');
+            showError('Failed to cancel order', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -107,7 +108,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateCancelledOrders();
-            alert(err.message || 'Failed to restore order');
+            showError('Failed to restore order', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -149,7 +150,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
-            alert(err.message || 'Failed to cancel line');
+            showError('Failed to cancel line', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -189,7 +190,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
-            alert(err.message || 'Failed to restore line');
+            showError('Failed to restore line', { description: err.message });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)

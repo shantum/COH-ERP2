@@ -3,24 +3,29 @@
  *
  * Display: Compact pill showing AWB/courier
  * Edit: Click opens popover with form
+ *
+ * IMPORTANT: Uses same Zod schema as auto-save cells for consistent validation.
+ * Backend remains agnostic to whether data came from button-save or auto-save.
  */
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, X, Trash2 } from 'lucide-react';
+import { Check, X, Trash2, AlertCircle } from 'lucide-react';
 import cohLogo from '../../../../assets/COH-Square-Monkey-Logo.png';
 import type { CellProps } from '../types';
 import { COURIER_OPTIONS } from '../constants';
 import { cn } from '../../../../lib/utils';
+import { UpdateLineTrackingSchema } from '@coh/shared';
 
 export function TrackingInfoCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
-    const { onUpdateLineTracking } = handlersRef.current;
+    const { onUpdateLineTracking, onSettled } = handlersRef.current;
     const [isOpen, setIsOpen] = useState(false);
     const [awbValue, setAwbValue] = useState(row.lineAwbNumber || '');
     const [courierValue, setCourierValue] = useState(row.lineCourier || '');
     const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
+    const [validationError, setValidationError] = useState<string | null>(null);
     const buttonRef = useRef<HTMLButtonElement>(null);
     const popoverRef = useRef<HTMLDivElement>(null);
     const awbInputRef = useRef<HTMLInputElement>(null);
@@ -75,13 +80,35 @@ export function TrackingInfoCell({ row, handlersRef }: CellProps) {
         setIsOpen(true);
     };
 
-    const handleSave = () => {
-        // Always send current values - let backend handle no-op if unchanged
-        onUpdateLineTracking(row.lineId!, {
-            awbNumber: awbValue.trim() || undefined,
-            courier: courierValue || undefined,
-        });
-        setIsOpen(false);
+    const handleSave = async () => {
+        // Validate using same Zod schema as auto-save cells
+        // This ensures backend remains agnostic to save method
+        const payload = {
+            lineId: row.lineId!,
+            awbNumber: awbValue.trim() || null,
+            courier: courierValue || null,
+        };
+
+        const validation = UpdateLineTrackingSchema.safeParse(payload);
+        if (!validation.success) {
+            setValidationError(validation.error.issues[0]?.message || 'Validation failed');
+            return;
+        }
+
+        setValidationError(null);
+
+        // Call handler with validated data
+        try {
+            await onUpdateLineTracking(row.lineId!, {
+                awbNumber: awbValue.trim() || undefined,
+                courier: courierValue || undefined,
+            });
+            setIsOpen(false);
+            // Call onSettled for UI/DB sync
+            onSettled?.();
+        } catch (error) {
+            setValidationError(error instanceof Error ? error.message : 'Save failed');
+        }
     };
 
     const handleCancel = () => {
@@ -190,6 +217,12 @@ export function TrackingInfoCell({ row, handlersRef }: CellProps) {
                                 Cancel
                             </button>
                         </div>
+                        {validationError && (
+                            <div className="flex items-center gap-1 text-[10px] text-red-500 pt-1">
+                                <AlertCircle size={10} />
+                                <span>{validationError}</span>
+                            </div>
+                        )}
                         {(row.lineAwbNumber || row.lineCourier) && (
                             <button
                                 onClick={handleClear}
