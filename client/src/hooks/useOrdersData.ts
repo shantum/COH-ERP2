@@ -17,7 +17,7 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fabricsApi, productionApi, adminApi, customersApi } from '../services/api';
+import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 
@@ -140,12 +140,13 @@ export function useOrdersData({ activeTab, selectedCustomerId }: UseOrdersDataOp
         staleTime: 300000, // Channels rarely change (5 min cache)
     });
 
-    const lockedDatesQuery = useQuery({
-        queryKey: ['lockedProductionDates'],
-        queryFn: () => productionApi.getLockedDates().then(r => r.data),
-        staleTime: 60000, // Locked dates don't change rapidly
-        enabled: activeTab === 'open', // Only needed for Open tab (production date picker)
-    });
+    const lockedDatesQuery = trpc.production.getLockedDates.useQuery(
+        undefined,
+        {
+            staleTime: 60000, // Locked dates don't change rapidly
+            enabled: activeTab === 'open', // Only needed for Open tab (production date picker)
+        }
+    );
 
     // Customer detail query - only fetches when a customer is selected
     const customerDetailQuery = useQuery({

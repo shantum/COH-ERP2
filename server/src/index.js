@@ -37,7 +37,7 @@ import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
 import customerRoutes from './routes/customers.js';
 import returnRoutes from './routes/returns/index.js';
 import feedbackRoutes from './routes/feedback.js';
-import productionRoutes from './routes/production.js';
+// Production routes migrated to tRPC - see trpc/routers/production.ts
 import reportRoutes from './routes/reports.js';
 import salesAnalyticsRoutes from './routes/sales-analytics.js';
 import authRoutes from './routes/auth.js';
@@ -142,7 +142,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/returns', returnRoutes);
 app.use('/api/feedback', feedbackRoutes);
-app.use('/api/production', productionRoutes);
+// Production routes migrated to tRPC (/trpc/production.*)
 app.use('/api/reports', reportRoutes);
 app.use('/api/reports/sales-analytics', salesAnalyticsRoutes);
 app.use('/api', importExportRoutes);

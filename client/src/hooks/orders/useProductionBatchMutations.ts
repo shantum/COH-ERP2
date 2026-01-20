@@ -2,6 +2,8 @@
  * Production batch mutations with optimistic updates
  * Handles creating, updating, and deleting production batches
  *
+ * Uses tRPC for API calls with optimistic cache updates for the orders grid.
+ *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
  * 2. onError: Rollback to previous data + invalidate for consistency
@@ -9,7 +11,6 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { productionApi } from '../../services/api';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { trpc } from '../../services/trpc';
@@ -43,8 +44,24 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
         return trpcUtils.orders.list.getData(queryInput);
     };
 
+    // Create batch mutation using tRPC
+    const createBatchMutation = trpc.production.createBatch.useMutation();
+
     const createBatch = useMutation({
-        mutationFn: (data: any) => productionApi.createBatch(data),
+        mutationFn: async (data: {
+            batchDate?: string;
+            tailorId?: string;
+            skuId?: string;
+            sampleName?: string;
+            sampleColour?: string;
+            sampleSize?: string;
+            qtyPlanned: number;
+            priority?: 'low' | 'normal' | 'high' | 'urgent';
+            sourceOrderLineId?: string;
+            notes?: string;
+        }) => {
+            return createBatchMutation.mutateAsync(data);
+        },
         onMutate: async (data) => {
             // Cancel any outgoing refetches
             await trpcUtils.orders.list.cancel(queryInput);
@@ -60,7 +77,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             if (data.sourceOrderLineId) {
                 trpcUtils.orders.list.setData(
                     queryInput,
-                    (old: any) => optimisticCreateBatch(old, data.sourceOrderLineId, tempBatchId, batchDate) as any
+                    (old: any) => optimisticCreateBatch(old, data.sourceOrderLineId!, tempBatchId, batchDate) as any
                 );
             }
 
@@ -78,7 +95,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
         },
         onSuccess: (response, _data, context) => {
             // Replace temp ID with real ID in cache
-            if (context?.sourceOrderLineId && response.data?.id) {
+            if (context?.sourceOrderLineId && response?.id) {
                 trpcUtils.orders.list.setData(
                     queryInput,
                     (old: any) => {
@@ -89,7 +106,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
                                 if (row.productionBatchId === context.tempBatchId) {
                                     return {
                                         ...row,
-                                        productionBatchId: response.data.id,
+                                        productionBatchId: response.id,
                                     };
                                 }
                                 return row;
@@ -98,7 +115,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
                                 ...order,
                                 orderLines: order.orderLines?.map((line: any) =>
                                     line.productionBatchId === context.tempBatchId
-                                        ? { ...line, productionBatchId: response.data.id }
+                                        ? { ...line, productionBatchId: response.id }
                                         : line
                                 ),
                             })),
@@ -106,6 +123,11 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
                     }
                 );
             }
+
+            // Invalidate production queries
+            trpcUtils.production.getBatches.invalidate();
+            trpcUtils.production.getCapacity.invalidate();
+            trpcUtils.production.getRequirements.invalidate();
         },
         onError: (err: any, _data, context) => {
             // Rollback on error
@@ -114,7 +136,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             }
             // Force invalidate to ensure consistency
             invalidateOpenOrders();
-            alert(err.response?.data?.error || 'Failed to add to production');
+            alert(err.message || 'Failed to add to production');
         },
         onSettled: () => {
             // Invalidate related caches
@@ -123,13 +145,22 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
         },
     });
 
+    // Update batch mutation using tRPC
+    const updateBatchMutation = trpc.production.updateBatch.useMutation();
+
     const updateBatch = useMutation({
-        mutationFn: async ({ id, data }: { id: string; data: any }) => {
+        mutationFn: async ({ id, data }: { id: string; data: {
+            batchDate?: string;
+            qtyPlanned?: number;
+            tailorId?: string;
+            priority?: 'low' | 'normal' | 'high' | 'urgent';
+            notes?: string;
+        }}) => {
             // Skip API call for temp IDs (batch not yet created)
             if (id.startsWith('temp-')) {
-                return { data: { success: true, id, ...data } } as any;
+                return { success: true, id, ...data } as any;
             }
-            return productionApi.updateBatch(id, data);
+            return updateBatchMutation.mutateAsync({ id, ...data });
         },
         onMutate: async ({ id, data }) => {
             await trpcUtils.orders.list.cancel(queryInput);
@@ -139,18 +170,23 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
             if (data.batchDate) {
                 trpcUtils.orders.list.setData(
                     queryInput,
-                    (old: any) => optimisticUpdateBatch(old, id, data.batchDate) as any
+                    (old: any) => optimisticUpdateBatch(old, id, data.batchDate!) as any
                 );
             }
 
             return { previousData, queryInput } as OptimisticUpdateContext;
+        },
+        onSuccess: () => {
+            // Invalidate production queries
+            trpcUtils.production.getBatches.invalidate();
+            trpcUtils.production.getCapacity.invalidate();
         },
         onError: (err: any, _vars, context) => {
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
             invalidateOpenOrders();
-            alert(err.response?.data?.error || 'Failed to update batch');
+            alert(err.message || 'Failed to update batch');
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.fabric });
@@ -158,13 +194,16 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
         },
     });
 
+    // Delete batch mutation using tRPC
+    const deleteBatchMutation = trpc.production.deleteBatch.useMutation();
+
     const deleteBatch = useMutation({
         mutationFn: async (id: string) => {
             // Skip API call for temp IDs
             if (id.startsWith('temp-')) {
-                return { data: { success: true } } as any;
+                return { success: true } as any;
             }
-            return productionApi.deleteBatch(id);
+            return deleteBatchMutation.mutateAsync({ id });
         },
         onMutate: async (id) => {
             await trpcUtils.orders.list.cancel(queryInput);
@@ -186,12 +225,18 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
                 lineId: row?.lineId,
             } as OptimisticUpdateContext & { deletedBatchId: string; lineId?: string };
         },
+        onSuccess: () => {
+            // Invalidate production queries
+            trpcUtils.production.getBatches.invalidate();
+            trpcUtils.production.getCapacity.invalidate();
+            trpcUtils.production.getRequirements.invalidate();
+        },
         onError: (err: any, _id, context) => {
             if (context?.previousData) {
                 trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
             }
             invalidateOpenOrders();
-            alert(err.response?.data?.error || 'Failed to delete batch');
+            alert(err.message || 'Failed to delete batch');
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.fabric });

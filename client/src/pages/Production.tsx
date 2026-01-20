@@ -1,9 +1,8 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { productionApi } from '../services/api';
 import { useState, useMemo } from 'react';
 import { Plus, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, FlaskConical } from 'lucide-react';
 import { sortBySizeOrder } from '../constants/sizes';
 import { AddToPlanModal } from '../components/production/AddToPlanModal';
+import { trpc } from '../services/trpc';
 
 // Default date range for production batches (14 days past to 45 days future)
 const getDefaultDateRange = () => {
@@ -19,7 +18,7 @@ const getDefaultDateRange = () => {
 };
 
 export default function Production() {
-    const queryClient = useQueryClient();
+    const trpcUtils = trpc.useUtils();
 
     // UI state - declared first so queries can reference them
     const [tab, setTab] = useState<'schedule' | 'capacity' | 'tailors'>('schedule');
@@ -36,82 +35,80 @@ export default function Production() {
     // Memoize date range to prevent query key changes on every render
     const dateRange = useMemo(() => getDefaultDateRange(), []);
 
-    // Queries - some are lazy loaded based on UI state
-    const { data: batches, isLoading } = useQuery({
-        queryKey: ['productionBatches', dateRange.startDate, dateRange.endDate],
-        queryFn: () => productionApi.getBatches({ startDate: dateRange.startDate, endDate: dateRange.endDate }).then(r => r.data)
+    // Queries using tRPC - some are lazy loaded based on UI state
+    const { data: batches, isLoading } = trpc.production.getBatches.useQuery({
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate
     });
-    const { data: capacity } = useQuery({ queryKey: ['productionCapacity'], queryFn: () => productionApi.getCapacity().then(r => r.data) });
-    const { data: tailors } = useQuery({ queryKey: ['tailors'], queryFn: () => productionApi.getTailors().then(r => r.data) });
-    const { data: lockedDates } = useQuery({ queryKey: ['lockedProductionDates'], queryFn: () => productionApi.getLockedDates().then(r => r.data) });
-    const { data: requirements, isLoading: requirementsLoading } = useQuery({
-        queryKey: ['productionRequirements'],
-        queryFn: () => productionApi.getRequirements().then(r => r.data),
-        enabled: showPlanner, // Lazy load - only fetch when section is expanded
-    });
+    const { data: capacity } = trpc.production.getCapacity.useQuery({});
+    const { data: tailors } = trpc.production.getTailors.useQuery();
+    const { data: lockedDates } = trpc.production.getLockedDates.useQuery();
+    const { data: requirements, isLoading: requirementsLoading } = trpc.production.getRequirements.useQuery(
+        undefined,
+        { enabled: showPlanner } // Lazy load - only fetch when section is expanded
+    );
 
     const invalidateAll = () => {
-        queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
-        queryClient.invalidateQueries({ queryKey: ['productionCapacity'] });
-        queryClient.invalidateQueries({ queryKey: ['productionRequirements'] });
+        trpcUtils.production.getBatches.invalidate();
+        trpcUtils.production.getCapacity.invalidate();
+        trpcUtils.production.getRequirements.invalidate();
     };
 
     // Optimistic update helper for batch status changes
     const optimisticBatchUpdate = (batchId: string, updates: Partial<{ status: string; qtyCompleted: number }>) => {
-        const queryKey = ['productionBatches', dateRange.startDate, dateRange.endDate];
-        queryClient.setQueryData(queryKey, (old: any) => {
-            if (!old) return old;
-            return old.map((batch: any) =>
-                batch.id === batchId ? { ...batch, ...updates } : batch
-            );
-        });
+        trpcUtils.production.getBatches.setData(
+            { startDate: dateRange.startDate, endDate: dateRange.endDate },
+            (old: any) => {
+                if (!old) return old;
+                return old.map((batch: any) =>
+                    batch.id === batchId ? { ...batch, ...updates } : batch
+                );
+            }
+        );
     };
 
-    const completeBatch = useMutation({
-        mutationFn: ({ id, data }: any) => productionApi.completeBatch(id, data),
-        onMutate: async ({ id, data }) => {
-            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
-            optimisticBatchUpdate(id, { status: 'completed', qtyCompleted: data.qtyCompleted });
+    const completeBatch = trpc.production.completeBatch.useMutation({
+        onMutate: async ({ id, qtyCompleted: qty }) => {
+            await trpcUtils.production.getBatches.cancel();
+            optimisticBatchUpdate(id, { status: 'completed', qtyCompleted: qty });
         },
-        onSuccess: () => { invalidateAll(); setShowComplete(null); },
+        onSuccess: () => { invalidateAll(); setShowComplete(null); trpcUtils.inventory.getAllBalances.invalidate(); },
         onError: () => invalidateAll()
     });
 
-    const deleteBatch = useMutation({
-        mutationFn: (id: string) => productionApi.deleteBatch(id),
-        onMutate: async (id) => {
-            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
-            const queryKey = ['productionBatches', dateRange.startDate, dateRange.endDate];
-            queryClient.setQueryData(queryKey, (old: any) =>
-                old ? old.filter((batch: any) => batch.id !== id) : old
+    const deleteBatch = trpc.production.deleteBatch.useMutation({
+        onMutate: async ({ id }) => {
+            await trpcUtils.production.getBatches.cancel();
+            trpcUtils.production.getBatches.setData(
+                { startDate: dateRange.startDate, endDate: dateRange.endDate },
+                (old: any) => old ? old.filter((batch: any) => batch.id !== id) : old
             );
         },
         onSuccess: invalidateAll,
         onError: () => invalidateAll()
     });
 
-    const uncompleteBatch = useMutation({
-        mutationFn: (id: string) => productionApi.uncompleteBatch(id),
-        onMutate: async (id) => {
-            await queryClient.cancelQueries({ queryKey: ['productionBatches'] });
+    const uncompleteBatch = trpc.production.uncompleteBatch.useMutation({
+        onMutate: async ({ id }) => {
+            await trpcUtils.production.getBatches.cancel();
             // Backend resets to 'planned' status, not 'in_progress'
             optimisticBatchUpdate(id, { status: 'planned', qtyCompleted: 0 });
         },
-        onSuccess: invalidateAll,
+        onSuccess: () => { invalidateAll(); trpcUtils.inventory.getAllBalances.invalidate(); },
         onError: () => invalidateAll()
     });
-    const createBatch = useMutation({
-        mutationFn: (data: any) => productionApi.createBatch(data),
+
+    const createBatch = trpc.production.createBatch.useMutation({
         onSuccess: invalidateAll,
-        onError: (error: any) => { alert(error.response?.data?.error || 'Failed to add item'); }
+        onError: (error: any) => { alert(error.message || 'Failed to add item'); }
     });
-    const lockDate = useMutation({
-        mutationFn: (date: string) => productionApi.lockDate(date),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['lockedProductionDates'] }); }
+
+    const lockDate = trpc.production.lockDate.useMutation({
+        onSuccess: () => { trpcUtils.production.getLockedDates.invalidate(); }
     });
-    const unlockDate = useMutation({
-        mutationFn: (date: string) => productionApi.unlockDate(date),
-        onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['lockedProductionDates'] }); }
+
+    const unlockDate = trpc.production.unlockDate.useMutation({
+        onSuccess: () => { trpcUtils.production.getLockedDates.invalidate(); }
     });
 
     // Check if date is locked
@@ -579,7 +576,7 @@ export default function Production() {
                                     </span>
                                     {group.isLocked ? (
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); unlockDate.mutate(group.date); }}
+                                            onClick={(e) => { e.stopPropagation(); unlockDate.mutate({ date: group.date }); }}
                                             className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
                                             title="Unlock this date"
                                         >
@@ -595,7 +592,7 @@ export default function Production() {
                                                 <Plus size={14} />
                                             </button>
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); lockDate.mutate(group.date); }}
+                                                onClick={(e) => { e.stopPropagation(); lockDate.mutate({ date: group.date }); }}
                                                 className="text-xs text-gray-400 hover:text-red-500 flex items-center gap-1"
                                                 title="Lock this date"
                                             >
@@ -760,7 +757,7 @@ export default function Production() {
                                                         )}
                                                         {batch.status === 'planned' && !group.isLocked && (
                                                             <button
-                                                                onClick={() => deleteBatch.mutate(batch.id)}
+                                                                onClick={() => deleteBatch.mutate({ id: batch.id })}
                                                                 className="text-gray-400 hover:text-red-500"
                                                                 title="Delete"
                                                             >
@@ -770,7 +767,7 @@ export default function Production() {
                                                         {batch.status === 'completed' && !group.isLocked && (
                                                             <>
                                                                 <button
-                                                                    onClick={() => uncompleteBatch.mutate(batch.id)}
+                                                                    onClick={() => uncompleteBatch.mutate({ id: batch.id })}
                                                                     className="text-orange-500 hover:text-orange-700"
                                                                     title="Undo completion"
                                                                 >
@@ -779,9 +776,9 @@ export default function Production() {
                                                                 <button
                                                                     onClick={() => {
                                                                         if (confirm('Delete this completed batch? This will also reverse inventory changes.')) {
-                                                                            uncompleteBatch.mutate(batch.id, {
+                                                                            uncompleteBatch.mutate({ id: batch.id }, {
                                                                                 onSuccess: () => {
-                                                                                    deleteBatch.mutate(batch.id);
+                                                                                    deleteBatch.mutate({ id: batch.id });
                                                                                 }
                                                                             });
                                                                         }
@@ -928,7 +925,7 @@ export default function Production() {
                         <div className="flex gap-3">
                             <button type="button" onClick={() => setShowComplete(null)} className="btn-secondary flex-1 text-sm">Cancel</button>
                             <button
-                                onClick={() => completeBatch.mutate({ id: showComplete.id, data: { qtyCompleted } })}
+                                onClick={() => completeBatch.mutate({ id: showComplete.id, qtyCompleted })}
                                 className="btn-primary flex-1 text-sm"
                                 disabled={completeBatch.isPending || (isCustomSku && !customConfirmed)}
                             >

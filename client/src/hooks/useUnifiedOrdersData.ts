@@ -14,7 +14,7 @@
 
 import { useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fabricsApi, productionApi, adminApi, customersApi } from '../services/api';
+import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 
@@ -24,7 +24,7 @@ import { trpc } from '../services/trpc';
 const POLL_INTERVAL_ACTIVE = 5000;    // 5 seconds for 'open' view (no SSE)
 const POLL_INTERVAL_PASSIVE = 30000;  // 30 seconds for other views (no SSE)
 // Stale time prevents double-fetches when data is still fresh
-const STALE_TIME = 60000;  // 1 minute (increased since SSE handles updates)
+const STALE_TIME = 120000;  // 2 minutes (SSE handles real-time updates)
 // Cache retention time (5 minutes) - keeps stale data for instant display
 const GC_TIME = 5 * 60 * 1000;
 // Orders per page
@@ -91,7 +91,7 @@ export function useUnifiedOrdersData({
         {
             staleTime: STALE_TIME,
             gcTime: GC_TIME,  // Keep cached data for 5 min for instant display
-            refetchOnWindowFocus: true,   // Refetch when user returns to tab
+            refetchOnWindowFocus: false,  // SSE handles real-time updates, no need to refetch on focus
             refetchIntervalInBackground: false,  // No polling when tab hidden
             placeholderData: (prev) => prev,  // Show stale data immediately while fetching
             // Smart polling: only poll if document has focus
@@ -221,12 +221,13 @@ export function useUnifiedOrdersData({
     });
 
     // Locked production dates - only needed for Open view
-    const lockedDatesQuery = useQuery({
-        queryKey: ['lockedProductionDates'],
-        queryFn: () => productionApi.getLockedDates().then(r => r.data),
-        staleTime: 60000,
-        enabled: currentView === 'open',
-    });
+    const lockedDatesQuery = trpc.production.getLockedDates.useQuery(
+        undefined,
+        {
+            staleTime: 60000,
+            enabled: currentView === 'open',
+        }
+    );
 
     // Customer detail - only when selected
     const customerDetailQuery = useQuery({

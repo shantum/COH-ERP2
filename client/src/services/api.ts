@@ -21,10 +21,7 @@ import type {
     CreateCustomerData,
     InitiateReverseData,
     ResolveReturnData,
-    CreateTailorData,
-    CreateBatchData,
-    UpdateBatchData,
-    CompleteBatchData,
+    // Production types (CreateTailorData, CreateBatchData, etc.) moved to tRPC
 } from '../types';
 
 // In production, use relative URL; in development, use localhost
@@ -543,23 +540,9 @@ export const repackingApi = {
     }) => api.post('/repacking/write-offs', data),
 };
 
-// Production
-export const productionApi = {
-    getTailors: () => api.get('/production/tailors'),
-    createTailor: (data: CreateTailorData) => api.post('/production/tailors', data),
-    getBatches: (params?: Record<string, string>) => api.get('/production/batches', { params }),
-    createBatch: (data: CreateBatchData) => api.post('/production/batches', data),
-    updateBatch: (id: string, data: UpdateBatchData) => api.put(`/production/batches/${id}`, data),
-    deleteBatch: (id: string) => api.delete(`/production/batches/${id}`),
-    completeBatch: (id: string, data: CompleteBatchData) => api.post(`/production/batches/${id}/complete`, data),
-    uncompleteBatch: (id: string) => api.post(`/production/batches/${id}/uncomplete`),
-    getCapacity: (date?: string) => api.get('/production/capacity', { params: { date } }),
-    getLockedDates: () => api.get('/production/locked-dates'),
-    lockDate: (date: string) => api.post('/production/lock-date', { date }),
-    unlockDate: (date: string) => api.post('/production/unlock-date', { date }),
-    getRequirements: () => api.get('/production/requirements'),
-    getPendingBySku: (skuId: string) => api.get(`/production/pending-by-sku/${skuId}`),
-};
+// Production - MIGRATED TO tRPC
+// All production endpoints are now in server/src/trpc/routers/production.ts
+// Use trpc.production.* hooks from client/src/hooks/production/
 
 // Reports
 export const reportsApi = {

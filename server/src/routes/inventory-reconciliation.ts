@@ -1,21 +1,18 @@
 /**
- * Inventory Reconciliation Routes
+ * Inventory Reconciliation Routes (Express)
  *
- * Physical inventory count reconciliation workflow:
- * 1. Start count - creates reconciliation with all active SKUs + system balances
- * 2. Enter physical quantities (manual or CSV upload)
- * 3. Save progress
- * 4. Submit - creates InventoryTransaction for each variance
+ * CSV upload endpoint only - requires multer for multipart/form-data handling.
+ * All other reconciliation endpoints have been migrated to tRPC (inventoryReconciliation router).
+ *
+ * @see server/src/trpc/routers/inventoryReconciliation.ts for main CRUD operations
  */
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import type { Prisma } from '@prisma/client';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { authenticateToken } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { calculateAllInventoryBalances } from '../utils/queryPatterns.js';
 import { reconciliationLogger } from '../utils/logger.js';
 
 const router: Router = Router();
@@ -23,14 +20,6 @@ const router: Router = Router();
 // ============================================
 // TYPE DEFINITIONS
 // ============================================
-
-interface ReconciliationUpdateItem {
-    id: string;
-    physicalQty: number | null;
-    systemQty: number;
-    adjustmentReason?: string | null;
-    notes?: string | null;
-}
 
 interface CSVUploadResults {
     total: number;
@@ -49,32 +38,8 @@ interface CSVRecord {
 }
 
 // ============================================
-// PRISMA INCLUDE CONFIGURATIONS
+// MULTER CONFIGURATION
 // ============================================
-
-/**
- * Include configuration for reconciliation items with full SKU details
- */
-const reconciliationItemsInclude = {
-    items: {
-        include: {
-            sku: {
-                include: {
-                    variation: { include: { product: true } },
-                },
-            },
-        },
-    },
-} as const satisfies Prisma.InventoryReconciliationInclude;
-
-/**
- * Include configuration for reconciliation items with basic SKU
- */
-const reconciliationItemsBasicInclude = {
-    items: {
-        include: { sku: true },
-    },
-} as const satisfies Prisma.InventoryReconciliationInclude;
 
 // Configure multer for CSV upload
 const upload = multer({
@@ -90,355 +55,16 @@ const upload = multer({
 });
 
 // ============================================
-// RECONCILIATION ENDPOINTS
+// CSV UPLOAD ENDPOINT
 // ============================================
-
-/**
- * GET /reconciliation/history
- * Get history of past reconciliations
- */
-router.get('/reconciliation/history', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const { limit = 10 } = req.query;
-
-    const reconciliations = await req.prisma.inventoryReconciliation.findMany({
-        include: { items: true },
-        orderBy: { createdAt: 'desc' },
-        take: Number(limit),
-    });
-
-    const history = reconciliations.map(r => ({
-        id: r.id,
-        date: r.reconcileDate,
-        status: r.status,
-        itemsCount: r.items.length,
-        adjustments: r.items.filter(i => i.variance !== 0 && i.variance !== null).length,
-        createdBy: r.createdBy,
-        createdAt: r.createdAt,
-    }));
-
-    res.json(history);
-}));
-
-/**
- * POST /reconciliation/start
- * Start a new reconciliation with all active, non-custom SKUs
- */
-router.post('/reconciliation/start', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    // Get all active, non-custom SKUs
-    const skus = await req.prisma.sku.findMany({
-        where: {
-            isActive: true,
-            isCustomSku: false,
-        },
-        include: {
-            variation: {
-                include: { product: true },
-            },
-        },
-        orderBy: { skuCode: 'asc' },
-    });
-
-    // Calculate all balances efficiently in one query
-    const balanceMap = await calculateAllInventoryBalances(
-        req.prisma,
-        skus.map(s => s.id),
-        { excludeCustomSkus: true }
-    );
-
-    // Create reconciliation with items
-    const reconciliation = await req.prisma.inventoryReconciliation.create({
-        data: {
-            createdBy: req.user?.id || null,
-            items: {
-                create: skus.map(sku => ({
-                    skuId: sku.id,
-                    systemQty: balanceMap.get(sku.id)?.currentBalance || 0,
-                })),
-            },
-        },
-        include: reconciliationItemsInclude,
-    });
-
-    // Format response
-    const response = {
-        id: reconciliation.id,
-        status: reconciliation.status,
-        createdAt: reconciliation.createdAt,
-        items: reconciliation.items.map(item => ({
-            id: item.id,
-            skuId: item.skuId,
-            skuCode: item.sku.skuCode,
-            productName: item.sku.variation?.product?.name || '',
-            colorName: item.sku.variation?.colorName || '',
-            size: item.sku.size,
-            systemQty: item.systemQty,
-            physicalQty: item.physicalQty,
-            variance: item.variance,
-            adjustmentReason: item.adjustmentReason,
-            notes: item.notes,
-        })),
-    };
-
-    res.status(201).json(response);
-}));
-
-/**
- * GET /reconciliation/:id
- * Get a specific reconciliation with items
- */
-router.get('/reconciliation/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params.id as string;
-
-    const reconciliation = await req.prisma.inventoryReconciliation.findUnique({
-        where: { id },
-        include: reconciliationItemsInclude,
-    });
-
-    if (!reconciliation) {
-        return res.status(404).json({ error: 'Reconciliation not found' });
-    }
-
-    const response = {
-        id: reconciliation.id,
-        status: reconciliation.status,
-        notes: reconciliation.notes,
-        createdAt: reconciliation.createdAt,
-        items: reconciliation.items.map(item => ({
-            id: item.id,
-            skuId: item.skuId,
-            skuCode: item.sku.skuCode,
-            productName: item.sku.variation?.product?.name || '',
-            colorName: item.sku.variation?.colorName || '',
-            size: item.sku.size,
-            systemQty: item.systemQty,
-            physicalQty: item.physicalQty,
-            variance: item.variance,
-            adjustmentReason: item.adjustmentReason,
-            notes: item.notes,
-        })),
-    };
-
-    res.json(response);
-}));
-
-/**
- * PUT /reconciliation/:id
- * Update reconciliation items (physical quantities, reasons, notes)
- */
-router.put('/reconciliation/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params.id as string;
-    const { items } = req.body as { items: ReconciliationUpdateItem[] };
-
-    const reconciliation = await req.prisma.inventoryReconciliation.findUnique({
-        where: { id },
-    });
-
-    if (!reconciliation) {
-        return res.status(404).json({ error: 'Reconciliation not found' });
-    }
-
-    if (reconciliation.status !== 'draft') {
-        return res.status(400).json({ error: 'Cannot update submitted reconciliation' });
-    }
-
-    // Update each item
-    for (const item of items) {
-        const variance = item.physicalQty !== null && item.physicalQty !== undefined
-            ? item.physicalQty - item.systemQty
-            : null;
-
-        await req.prisma.inventoryReconciliationItem.update({
-            where: { id: item.id },
-            data: {
-                physicalQty: item.physicalQty,
-                variance,
-                adjustmentReason: item.adjustmentReason || null,
-                notes: item.notes || null,
-            },
-        });
-    }
-
-    // Return updated reconciliation
-    const updated = await req.prisma.inventoryReconciliation.findUnique({
-        where: { id },
-        include: reconciliationItemsInclude,
-    });
-
-    if (!updated) {
-        return res.status(404).json({ error: 'Reconciliation not found after update' });
-    }
-
-    res.json({
-        id: updated.id,
-        status: updated.status,
-        items: updated.items.map(item => ({
-            id: item.id,
-            skuId: item.skuId,
-            skuCode: item.sku.skuCode,
-            productName: item.sku.variation?.product?.name || '',
-            colorName: item.sku.variation?.colorName || '',
-            size: item.sku.size,
-            systemQty: item.systemQty,
-            physicalQty: item.physicalQty,
-            variance: item.variance,
-            adjustmentReason: item.adjustmentReason,
-            notes: item.notes,
-        })),
-    });
-}));
-
-/**
- * POST /reconciliation/:id/submit
- * Submit reconciliation and create adjustment transactions
- */
-router.post('/reconciliation/:id/submit', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params.id as string;
-
-    const reconciliation = await req.prisma.inventoryReconciliation.findUnique({
-        where: { id },
-        include: reconciliationItemsInclude,
-    });
-
-    if (!reconciliation) {
-        return res.status(404).json({ error: 'Reconciliation not found' });
-    }
-
-    if (reconciliation.status !== 'draft') {
-        return res.status(400).json({ error: 'Reconciliation already submitted' });
-    }
-
-    // Collect all items with variances for batch processing
-    const itemsToProcess: Array<{
-        itemId: string;
-        skuId: string;
-        skuCode: string;
-        txnType: 'inward' | 'outward';
-        qty: number;
-        reason: string;
-        notes: string;
-        adjustmentReason: string;
-    }> = [];
-
-    for (const item of reconciliation.items) {
-        if (item.variance === null || item.variance === 0) continue;
-
-        if (item.physicalQty === null) {
-            return res.status(400).json({
-                error: `Physical quantity not entered for ${item.sku.skuCode}`,
-            });
-        }
-
-        const adjustmentReason = item.adjustmentReason || 'count_adjustment';
-        const txnType = item.variance > 0 ? 'inward' : 'outward';
-        const qty = Math.abs(item.variance);
-
-        itemsToProcess.push({
-            itemId: item.id,
-            skuId: item.skuId,
-            skuCode: item.sku.skuCode,
-            txnType,
-            qty,
-            reason: `reconciliation_${adjustmentReason}`,
-            notes: item.notes || `Reconciliation adjustment: ${adjustmentReason}`,
-            adjustmentReason,
-        });
-    }
-
-    reconciliationLogger.info({ count: itemsToProcess.length }, 'Processing adjustments');
-
-    // Batch create all transactions in a single database transaction
-    const transactions: Array<{
-        skuId: string;
-        skuCode: string;
-        txnType: string;
-        qty: number;
-        reason: string;
-    }> = [];
-    const BATCH_SIZE = 100;
-
-    for (let i = 0; i < itemsToProcess.length; i += BATCH_SIZE) {
-        const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
-
-        await req.prisma.$transaction(async (tx) => {
-            for (const item of batch) {
-                const txn = await tx.inventoryTransaction.create({
-                    data: {
-                        skuId: item.skuId,
-                        txnType: item.txnType,
-                        qty: item.qty,
-                        reason: item.reason,
-                        referenceId: reconciliation.id,
-                        notes: item.notes,
-                        createdById: req.user!.id,
-                    },
-                });
-
-                // Link transaction to reconciliation item
-                await tx.inventoryReconciliationItem.update({
-                    where: { id: item.itemId },
-                    data: { txnId: txn.id },
-                });
-
-                transactions.push({
-                    skuId: item.skuId,
-                    skuCode: item.skuCode,
-                    txnType: item.txnType,
-                    qty: item.qty,
-                    reason: item.adjustmentReason,
-                });
-            }
-        }, { timeout: 60000 }); // 60 second timeout for batch
-
-        reconciliationLogger.debug({ batch: Math.floor(i / BATCH_SIZE) + 1, totalBatches: Math.ceil(itemsToProcess.length / BATCH_SIZE) }, 'Batch complete');
-    }
-
-    // Mark reconciliation as submitted
-    await req.prisma.inventoryReconciliation.update({
-        where: { id },
-        data: { status: 'submitted' },
-    });
-
-    reconciliationLogger.info({ count: transactions.length }, 'Reconciliation adjustments created');
-
-    res.json({
-        id: reconciliation.id,
-        status: 'submitted',
-        adjustmentsMade: transactions.length,
-        // Limit response size - only return first 50 transactions
-        transactions: transactions.slice(0, 50),
-    });
-}));
-
-/**
- * DELETE /reconciliation/:id
- * Delete a draft reconciliation
- */
-router.delete('/reconciliation/:id', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
-    const id = req.params.id as string;
-
-    const reconciliation = await req.prisma.inventoryReconciliation.findUnique({
-        where: { id },
-    });
-
-    if (!reconciliation) {
-        return res.status(404).json({ error: 'Reconciliation not found' });
-    }
-
-    if (reconciliation.status !== 'draft') {
-        return res.status(400).json({ error: 'Cannot delete submitted reconciliation' });
-    }
-
-    await req.prisma.inventoryReconciliation.delete({
-        where: { id },
-    });
-
-    res.json({ message: 'Reconciliation deleted' });
-}));
 
 /**
  * POST /reconciliation/:id/upload-csv
  * Upload CSV with physical counts to update reconciliation items
  * Expected format: SKU Code, Physical Qty
+ *
+ * This endpoint requires multer middleware for multipart/form-data handling,
+ * which is why it remains in Express rather than tRPC.
  */
 router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('file'), asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
@@ -450,7 +76,11 @@ router.post('/reconciliation/:id/upload-csv', authenticateToken, upload.single('
 
     const reconciliation = await req.prisma.inventoryReconciliation.findUnique({
         where: { id },
-        include: reconciliationItemsBasicInclude,
+        include: {
+            items: {
+                include: { sku: true },
+            },
+        },
     });
 
     if (!reconciliation) {

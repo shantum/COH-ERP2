@@ -1,6 +1,4 @@
 import { useState, useMemo } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { productionApi } from '@/services/api';
 import { trpc } from '@/services/trpc';
 import {
     Dialog,
@@ -28,7 +26,7 @@ export function AddToPlanModal({
     defaultDate,
     lockedDates = [],
 }: AddToPlanModalProps) {
-    const queryClient = useQueryClient();
+    const trpcUtils = trpc.useUtils();
     const today = new Date().toISOString().split('T')[0];
 
     // State
@@ -80,18 +78,17 @@ export function AddToPlanModal({
         return sku.variation?.imageUrl || sku.variation?.product?.imageUrl || null;
     };
 
-    // Create batch mutation
-    const createBatch = useMutation({
-        mutationFn: (data: any) => productionApi.createBatch(data),
+    // Create batch mutation using tRPC
+    const createBatch = trpc.production.createBatch.useMutation({
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
-            queryClient.invalidateQueries({ queryKey: ['productionCapacity'] });
-            queryClient.invalidateQueries({ queryKey: ['productionRequirements'] });
+            trpcUtils.production.getBatches.invalidate();
+            trpcUtils.production.getCapacity.invalidate();
+            trpcUtils.production.getRequirements.invalidate();
             resetForm();
             onOpenChange(false);
         },
         onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to add item');
+            alert(error.message || 'Failed to add item');
         }
     });
 

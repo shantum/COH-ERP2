@@ -8,6 +8,8 @@
  * - inventory: Inventory tracking and transactions
  * - inventoryReconciliation: Physical count reconciliation
  * - orders: Order management
+ * - payments: Payment tracking
+ * - production: Production batch management and capacity planning
  * - products: Product catalog (products, variations, SKUs)
  * - returns: Return request management
  */
@@ -19,6 +21,7 @@ import { inventoryRouter } from './inventory.js';
 import { inventoryReconciliationRouter } from './inventoryReconciliation.js';
 import { ordersRouter } from './orders.js';
 import { paymentsRouter } from './payments.js';
+import { productionRouter } from './production.js';
 import { productsRouter } from './products.js';
 import { returnsRouter } from './returns.js';
 
@@ -37,6 +40,7 @@ export const appRouter = router({
     inventoryReconciliation: inventoryReconciliationRouter,
     orders: ordersRouter,
     payments: paymentsRouter,
+    production: productionRouter,
     products: productsRouter,
     returns: returnsRouter,
 });
