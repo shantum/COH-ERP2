@@ -10,8 +10,9 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearch, useNavigate } from '@tanstack/react-router';
 import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2 } from 'lucide-react';
+import type { ProductsSearchParams } from '@coh/shared';
 
 import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
 import { DetailPanel } from '../components/products/DetailPanel';
@@ -24,14 +25,15 @@ import { FabricMappingView } from '../components/products/fabric-mapping';
 import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
 
 export default function Products() {
-    const [searchParams, setSearchParams] = useSearchParams();
+    const search = useSearch({ strict: false }) as ProductsSearchParams;
+    const navigate = useNavigate();
 
     // Active main tab from URL
-    const activeTab = (searchParams.get('tab') as ProductsTabType) || 'products';
+    const activeTab = (search.tab || 'products') as ProductsTabType;
 
     // Selected node ID and type from URL (for BOM tab)
-    const selectedId = searchParams.get('id');
-    const selectedType = searchParams.get('type') as ProductNodeType | null;
+    const selectedId = search.id ?? null;
+    const selectedType = (search.type ?? null) as ProductNodeType | null;
 
     // Selected node for detail panel (resolved from URL or user interaction)
     const [selectedNode, setSelectedNode] = useState<ProductTreeNode | null>(null);
@@ -70,52 +72,75 @@ export default function Products() {
 
     // Handle tab change
     const setActiveTab = useCallback((tab: ProductsTabType) => {
-        if (tab === 'products') {
-            setSearchParams({}, { replace: true });
-        } else {
-            setSearchParams({ tab }, { replace: true });
-        }
+        navigate({
+            to: '/products',
+            search: { ...search, tab, id: undefined, type: undefined } as any,
+            replace: true,
+        });
         // Clear selection when switching tabs
         setSelectedNode(null);
-    }, [setSearchParams]);
+    }, [navigate, search]);
 
     // Handle node selection in BOM tab - sync to URL
     const handleBomSelect = useCallback((node: ProductTreeNode | null) => {
         setSelectedNode(node);
         if (node) {
-            const newParams = new URLSearchParams(searchParams);
-            newParams.set('tab', 'bom');
-            newParams.set('id', node.id);
-            newParams.set('type', node.type);
-            setSearchParams(newParams, { replace: true });
+            navigate({
+                to: '/products',
+                search: {
+                    ...search,
+                    tab: 'bom' as const,
+                    id: node.id,
+                    type: node.type,
+                } as any,
+                replace: true,
+            });
         } else {
-            const newParams = new URLSearchParams(searchParams);
-            newParams.delete('id');
-            newParams.delete('type');
-            setSearchParams(newParams, { replace: true });
+            navigate({
+                to: '/products',
+                search: {
+                    ...search,
+                    id: undefined,
+                    type: undefined,
+                } as any,
+                replace: true,
+            });
         }
-    }, [searchParams, setSearchParams]);
+    }, [navigate, search]);
 
     // Handle close detail panel in BOM tab
     const handleCloseDetail = useCallback(() => {
         setSelectedNode(null);
-        const newParams = new URLSearchParams(searchParams);
-        newParams.delete('id');
-        newParams.delete('type');
-        setSearchParams(newParams, { replace: true });
-    }, [searchParams, setSearchParams]);
+        navigate({
+            to: '/products',
+            search: {
+                ...search,
+                id: undefined,
+                type: undefined,
+            } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
 
     // Handle view product from DataTable - switch to BOM tab and select
     const handleViewProduct = useCallback((product: ProductTreeNode) => {
         setSelectedNode(product);
-        setSearchParams({ tab: 'bom', id: product.id, type: product.type }, { replace: true });
-    }, [setSearchParams]);
+        navigate({
+            to: '/products',
+            search: { ...search, tab: 'bom' as const, id: product.id, type: product.type } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
 
     // Handle edit BOM from DataTable
     const handleEditBom = useCallback((product: ProductTreeNode) => {
         setSelectedNode(product);
-        setSearchParams({ tab: 'bom', id: product.id, type: product.type }, { replace: true });
-    }, [setSearchParams]);
+        navigate({
+            to: '/products',
+            search: { ...search, tab: 'bom' as const, id: product.id, type: product.type } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-4rem)]">

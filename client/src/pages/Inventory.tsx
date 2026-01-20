@@ -14,12 +14,13 @@
  * DATA SOURCE: tRPC inventory.getAllBalances + /reports/top-products
  */
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+import { useSearch, useNavigate } from '@tanstack/react-router';
 import { trpc } from '../services/trpc';
 import { reportsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -44,9 +45,23 @@ export default function Inventory() {
     const gridRef = useRef<AgGridReact>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // State
+    // URL state via TanStack Router
+    const search = useSearch({ from: '/_authenticated/inventory' });
+    const navigate = useNavigate();
+
+    // Stock filter from URL (URL-persisted for bookmarking/sharing)
+    const stockFilter = (search.stockFilter || 'all') as StockFilter;
+
+    const setStockFilter = useCallback((value: StockFilter) => {
+        navigate({
+            to: '/inventory',
+            search: { ...search, stockFilter: value === 'all' ? undefined : value } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
+
+    // Local state (not persisted to URL)
     const [searchInput, setSearchInput] = useState('');
-    const [stockFilter, setStockFilter] = useState<StockFilter>('all');
     const [demandDays, setDemandDays] = useState<DemandPeriod>(30);
     const [analyticsExpanded, setAnalyticsExpanded] = useState(false);
 

@@ -3,8 +3,10 @@ import { customersApi, ordersApi } from '../services/api';
 import { trpc } from '../services/trpc';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
+import { useSearch, useNavigate } from '@tanstack/react-router';
 import { UnifiedOrderModal } from '../components/orders';
 import type { Order } from '../types';
+import { useCustomersUrlModal } from '../hooks/useUrlModal';
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -59,14 +61,71 @@ const TIME_PERIOD_OPTIONS = [
 ];
 
 export default function Customers() {
-    const [tab, setTab] = useState<'all' | 'highValue' | 'atRisk' | 'returners'>('all');
-    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+    // URL state via TanStack Router
+    const urlSearch = useSearch({ from: '/_authenticated/customers' });
+    const navigate = useNavigate();
+
+    // URL-persisted state (enables bookmarking/sharing)
+    const tab = (urlSearch.tab || 'all') as 'all' | 'highValue' | 'atRisk' | 'returners';
+    const page = (urlSearch.page || 1) - 1; // Convert to 0-indexed
+    const topN = urlSearch.topN || 100;
+    const timePeriod = urlSearch.timePeriod || 'all';
+
+    const setTab = useCallback((value: 'all' | 'highValue' | 'atRisk' | 'returners') => {
+        navigate({
+            to: '/customers',
+            search: { ...urlSearch, tab: value === 'all' ? undefined : value, page: 1 } as any,
+            replace: true,
+        });
+    }, [navigate, urlSearch]);
+
+    const setPage = useCallback((value: number) => {
+        navigate({
+            to: '/customers',
+            search: { ...urlSearch, page: value + 1 } as any, // Convert to 1-indexed for URL
+            replace: true,
+        });
+    }, [navigate, urlSearch]);
+
+    const setTopN = useCallback((value: number) => {
+        navigate({
+            to: '/customers',
+            search: { ...urlSearch, topN: value === 100 ? undefined : value } as any,
+            replace: true,
+        });
+    }, [navigate, urlSearch]);
+
+    const setTimePeriod = useCallback((value: number | 'all') => {
+        navigate({
+            to: '/customers',
+            search: { ...urlSearch, timePeriod: value === 'all' ? undefined : value } as any,
+            replace: true,
+        });
+    }, [navigate, urlSearch]);
+
+    // URL-driven modal state (enables bookmarking/sharing modal links)
+    const {
+        modalType,
+        selectedId: selectedCustomerId,
+        openModal,
+        closeModal,
+    } = useCustomersUrlModal();
+
+    // Local state for modal order data (fetched when modal opens)
     const [modalOrder, setModalOrder] = useState<Order | null>(null);
-    const [search, setSearch] = useState('');
-    const [page, setPage] = useState(0);
-    const [topN, setTopN] = useState(100);
-    const [timePeriod, setTimePeriod] = useState<number | 'all'>('all');
+    const [search, setSearch] = useState(urlSearch.search || '');
     const debouncedSearch = useDebounce(search, 300);
+
+    // Sync search input to URL on change (debounced)
+    useEffect(() => {
+        if (debouncedSearch !== (urlSearch.search || '')) {
+            navigate({
+                to: '/customers',
+                search: { ...urlSearch, search: debouncedSearch || undefined, page: 1 } as any,
+                replace: true,
+            });
+        }
+    }, [debouncedSearch]);
 
     // Fetch customer's most recent order when selected
     const { data: customerOrderData, isLoading: isLoadingCustomerOrder } = trpc.customers.get.useQuery(
@@ -89,20 +148,17 @@ export default function Customers() {
         }
     }, [customerOrderData, modalOrder]);
 
-    // Handle customer row click
+    // Handle customer row click - now URL-driven for bookmarking/sharing
     const handleCustomerClick = useCallback((customerId: string) => {
-        setSelectedCustomerId(customerId);
+        openModal('view', customerId);
         setModalOrder(null); // Reset modal order to trigger fetch
-    }, []);
+    }, [openModal]);
 
-    // Close modal
+    // Close modal - removes modal params from URL
     const handleCloseModal = useCallback(() => {
-        setSelectedCustomerId(null);
+        closeModal();
         setModalOrder(null);
-    }, []);
-
-    // Reset page when search changes
-    useMemo(() => { setPage(0); }, [debouncedSearch]);
+    }, [closeModal]);
 
     // Server-side search and pagination (using tRPC)
     const { data: customersData, isLoading, isFetching } = trpc.customers.list.useQuery({
@@ -447,14 +503,14 @@ export default function Customers() {
                         <div className="flex gap-2">
                             <button
                                 className="btn btn-secondary text-sm"
-                                onClick={() => setPage(p => Math.max(0, p - 1))}
+                                onClick={() => setPage(Math.max(0, page - 1))}
                                 disabled={page === 0}
                             >
                                 Previous
                             </button>
                             <button
                                 className="btn btn-secondary text-sm"
-                                onClick={() => setPage(p => p + 1)}
+                                onClick={() => setPage(page + 1)}
                                 disabled={!hasMore}
                             >
                                 Next
@@ -465,7 +521,7 @@ export default function Customers() {
             </div>
 
             {/* Loading state while fetching customer order */}
-            {selectedCustomerId && !modalOrder && (
+            {modalType === 'view' && selectedCustomerId && !modalOrder && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={handleCloseModal} />
                     <div className="relative bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
@@ -492,8 +548,8 @@ export default function Customers() {
                 </div>
             )}
 
-            {/* Unified Order Modal - Customer Tab */}
-            {modalOrder && (
+            {/* Unified Order Modal - Customer Tab (URL-driven) */}
+            {modalType === 'view' && modalOrder && (
                 <UnifiedOrderModal
                     order={modalOrder}
                     initialMode="customer"

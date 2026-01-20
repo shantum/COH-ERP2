@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from '@tanstack/react-router';
 import { useAuth } from '../hooks/useAuth';
 
 export default function Login() {
@@ -17,7 +17,7 @@ export default function Login() {
 
         try {
             await login(email, password);
-            navigate('/');
+            navigate({ to: '/' });
         } catch (err: any) {
             setError(err.response?.data?.error || 'Login failed');
         } finally {

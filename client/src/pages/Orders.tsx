@@ -6,8 +6,9 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearch, useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import type { OrdersSearchParams } from '@coh/shared';
 import { Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
 
 // Custom hooks
@@ -17,6 +18,7 @@ import { useOrdersMutations } from '../hooks/useOrdersMutations';
 import { useOrderSSE } from '../hooks/useOrderSSE';
 import { useAuth } from '../hooks/useAuth';
 import { useDebounce } from '../hooks/useDebounce';
+import { useOrdersUrlModal, type OrderModalType } from '../hooks/useUrlModal';
 
 // Utilities
 import {
@@ -50,31 +52,38 @@ export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
 
-    // View and page state - persisted in URL
-    const [searchParams, setSearchParams] = useSearchParams();
-    const view = (searchParams.get('view') as OrderView) || 'open';
-    const page = parseInt(searchParams.get('page') || '1', 10);
+    // View and page state - persisted in URL via TanStack Router
+    const search = useSearch({ strict: false }) as OrdersSearchParams;
+    const navigate = useNavigate();
+    const view = (search.view || 'open') as OrderView;
+    const page = search.page || 1;
 
     const setView = useCallback((newView: OrderView) => {
-        setSearchParams(prev => {
-            const newParams = new URLSearchParams(prev);
-            newParams.set('view', newView);
-            newParams.set('page', '1'); // Reset to page 1 on view change
-            return newParams;
-        }, { replace: true });
-        // Reset shipped filter when leaving shipped view
-        if (newView !== 'shipped') {
-            setShippedFilter('all');
-        }
-    }, [setSearchParams]);
+        // Clear view-specific filters when changing views
+        // Open view filters: allocatedFilter, productionFilter
+        // Shipped view filters: shippedFilter
+        navigate({
+            to: '/orders',
+            search: {
+                ...search,
+                view: newView,
+                page: 1,
+                // Clear all view-specific filters when changing views
+                allocatedFilter: undefined,
+                productionFilter: undefined,
+                shippedFilter: undefined,
+            } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
 
     const setPage = useCallback((newPage: number) => {
-        setSearchParams(prev => {
-            const newParams = new URLSearchParams(prev);
-            newParams.set('page', String(newPage));
-            return newParams;
-        }, { replace: true });
-    }, [setSearchParams]);
+        navigate({
+            to: '/orders',
+            search: { ...search, page: newPage } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
 
     // Search state - when active, overrides view filtering
     const [searchInput, setSearchInput] = useState('');
@@ -82,16 +91,48 @@ export default function Orders() {
     const isSearchMode = debouncedSearch.length >= 2;
     const [searchPage, setSearchPage] = useState(1);
 
-    // Filter state (Open view only)
-    const [allocatedFilter, setAllocatedFilter] = useState<'' | 'yes' | 'no'>('');
-    const [productionFilter, setProductionFilter] = useState<'' | 'scheduled' | 'needs' | 'ready'>('');
-    // Filter state (Shipped view only) - for RTO and COD Pending sub-filters
-    const [shippedFilter, setShippedFilter] = useState<ShippedFilter>('all');
+    // Filter state - now URL-persisted via TanStack Router search params
+    // This enables bookmarking and sharing filtered views
+    const allocatedFilter = search.allocatedFilter || 'all';
+    const productionFilter = search.productionFilter || 'all';
+    const shippedFilter = (search.shippedFilter || 'all') as ShippedFilter;
 
-    // Modal state
-    const [showCreateOrder, setShowCreateOrder] = useState(false);
-    const [unifiedModalOrder, setUnifiedModalOrder] = useState<Order | null>(null);
-    const [unifiedModalMode, setUnifiedModalMode] = useState<'view' | 'edit' | 'ship' | 'customer'>('view');
+    const setAllocatedFilter = useCallback((value: 'all' | 'allocated' | 'pending') => {
+        navigate({
+            to: '/orders',
+            search: { ...search, allocatedFilter: value === 'all' ? undefined : value, page: 1 } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
+
+    const setProductionFilter = useCallback((value: 'all' | 'scheduled' | 'needs' | 'ready') => {
+        navigate({
+            to: '/orders',
+            search: { ...search, productionFilter: value === 'all' ? undefined : value, page: 1 } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
+
+    const setShippedFilter = useCallback((value: ShippedFilter) => {
+        navigate({
+            to: '/orders',
+            search: { ...search, shippedFilter: value === 'all' ? undefined : value, page: 1 } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
+
+    // URL-driven modal state (enables bookmarking/sharing modal links)
+    // Instead of useState, modal state is stored in URL search params
+    const {
+        modalType,
+        selectedId: modalOrderId,
+        openModal,
+        closeModal,
+    } = useOrdersUrlModal();
+
+    // Derive modal state from URL params
+    const showCreateOrder = modalType === 'create';
+    const unifiedModalMode = (modalType === 'view' || modalType === 'edit' || modalType === 'ship' || modalType === 'customer') ? modalType : 'view';
 
     // Track which lines are currently being processed (for loading spinners)
     const [processingLines, setProcessingLines] = useState<Set<string>>(new Set());
@@ -160,11 +201,18 @@ export default function Orders() {
     const activePage = isSearchMode ? searchPage : page;
     const setActivePage = isSearchMode ? setSearchPage : setPage;
 
-    // Modal handlers
+    // Find the order for the modal from the URL orderId param
+    // Must be placed after `orders` is defined from useUnifiedOrdersData
+    const unifiedModalOrder = useMemo(() => {
+        if (!modalOrderId || !orders) return null;
+        const found = orders.find((o: any) => o.id === modalOrderId);
+        return found ? (found as unknown as Order) : null;
+    }, [modalOrderId, orders]);
+
+    // Modal handlers - now URL-driven for bookmarking/sharing
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' | 'customer' = 'view') => {
-        setUnifiedModalOrder(order);
-        setUnifiedModalMode(mode);
-    }, []);
+        openModal(mode as OrderModalType, order.id);
+    }, [openModal]);
 
     // Handler for viewing customer profile from grid
     const handleViewCustomer = useCallback((order: Order) => {
@@ -189,10 +237,10 @@ export default function Orders() {
     // Mutations hook with optimistic update support
     // Pass currentView and page so mutations can target the correct cache
     const mutations = useOrdersMutations({
-        onShipSuccess: () => setUnifiedModalOrder(null),
-        onCreateSuccess: () => setShowCreateOrder(false),
-        onDeleteSuccess: () => setUnifiedModalOrder(null),
-        onEditSuccess: () => setUnifiedModalOrder(null),
+        onShipSuccess: () => closeModal(),
+        onCreateSuccess: () => closeModal(),
+        onDeleteSuccess: () => closeModal(),
+        onEditSuccess: () => closeModal(),
         currentView: view,
         page,
         shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
@@ -227,13 +275,13 @@ export default function Orders() {
 
         // Open view specific filters
         if (view === 'open') {
-            if (allocatedFilter === 'yes') {
+            if (allocatedFilter === 'allocated') {
                 rows = rows.filter(row =>
                     row.lineStatus === 'allocated' ||
                     row.lineStatus === 'picked' ||
                     row.lineStatus === 'packed'
                 );
-            } else if (allocatedFilter === 'no') {
+            } else if (allocatedFilter === 'pending') {
                 rows = rows.filter(row => row.lineStatus === 'pending');
             }
 
@@ -532,7 +580,8 @@ export default function Orders() {
         onCreateBatch: (data: any) => mutations.createBatch.mutate(data),
         onUpdateBatch: (id: string, data: any) => mutations.updateBatch.mutate({ id, data }),
         onDeleteBatch: (id: string) => mutations.deleteBatch.mutate(id),
-        onUpdateLineNotes: (lineId: string, notes: string) => mutations.updateLineNotes.mutate({ lineId, notes }),
+        // Use mutateAsync for debounced auto-save hook compatibility
+        onUpdateLineNotes: (lineId: string, notes: string) => mutations.updateLineNotes.mutateAsync({ lineId, notes }),
         onViewOrder: handleViewOrderById,
         onEditOrder: handleEditOrderUnified,
         onCancelOrder: (id: string, reason?: string) => mutations.cancelOrder.mutate({ id, reason }),
@@ -557,6 +606,8 @@ export default function Orders() {
         isUncancellingLine: mutations.uncancelLine.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
         isAdmin: user?.role === 'admin',
+        // CRITICAL: onSettled for UI/DB sync after inline edits
+        onSettled: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
     };
 
     // Grid component using TanStack Table
@@ -605,7 +656,7 @@ export default function Orders() {
                         placeholder="Search orders..."
                     />
                     <button
-                        onClick={() => setShowCreateOrder(true)}
+                        onClick={() => openModal('create')}
                         className="btn-primary flex items-center gap-1 text-[11px] px-2 py-1 whitespace-nowrap"
                     >
                         <Plus size={12} />
@@ -662,19 +713,19 @@ export default function Orders() {
                                     <>
                                         <select
                                             value={allocatedFilter}
-                                            onChange={(e) => setAllocatedFilter(e.target.value as typeof allocatedFilter)}
+                                            onChange={(e) => setAllocatedFilter(e.target.value as 'all' | 'allocated' | 'pending')}
                                             className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
                                         >
-                                            <option value="">All</option>
-                                            <option value="yes">Allocated</option>
-                                            <option value="no">Pending</option>
+                                            <option value="all">All</option>
+                                            <option value="allocated">Allocated</option>
+                                            <option value="pending">Pending</option>
                                         </select>
                                         <select
                                             value={productionFilter}
-                                            onChange={(e) => setProductionFilter(e.target.value as typeof productionFilter)}
+                                            onChange={(e) => setProductionFilter(e.target.value as 'all' | 'scheduled' | 'needs' | 'ready')}
                                             className="text-[10px] border border-gray-200 rounded px-1 py-0.5 bg-white"
                                         >
-                                            <option value="">All</option>
+                                            <option value="all">All</option>
                                             <option value="scheduled">Scheduled</option>
                                             <option value="needs">Needs prod</option>
                                             <option value="ready">Ready</option>
@@ -687,7 +738,7 @@ export default function Orders() {
                                         {(['all', 'rto', 'cod_pending'] as const).map((f) => (
                                             <button
                                                 key={f}
-                                                onClick={() => { setShippedFilter(f); setPage(1); }}
+                                                onClick={() => setShippedFilter(f)}
                                                 className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
                                                     shippedFilter === f
                                                         ? f === 'rto' ? 'bg-orange-600 text-white' : f === 'cod_pending' ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
@@ -820,7 +871,7 @@ export default function Orders() {
                     channels={channels || []}
                     inventoryBalance={inventoryBalance || []}
                     onCreate={(data) => mutations.createOrder.mutate(data)}
-                    onClose={() => setShowCreateOrder(false)}
+                    onClose={closeModal}
                     isCreating={mutations.createOrder.isPending}
                 />
             )}
@@ -845,9 +896,9 @@ export default function Orders() {
                 <UnifiedOrderModal
                     order={unifiedModalOrder}
                     initialMode={unifiedModalMode}
-                    onClose={() => setUnifiedModalOrder(null)}
+                    onClose={closeModal}
                     onSuccess={() => {
-                        setUnifiedModalOrder(null);
+                        closeModal();
                         queryClient.invalidateQueries({ queryKey: ['orders'] });
                     }}
                 />

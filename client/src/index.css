@@ -36,6 +36,15 @@
   --ring: 0 0% 3.9%;
   --radius: 0.5rem;
 
+  /* UI density tokens (default: normal mode) */
+  --table-row-height: 2.5rem;
+  --table-cell-padding: 0.5rem 0.75rem;
+  --font-size-base: 0.875rem;
+  --font-size-sm: 0.75rem;
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -55,6 +64,17 @@ body {
 
 #root {
   min-height: 100vh;
+}
+
+/* Compact mode overrides - toggled via useCompactMode hook */
+.compact-mode {
+  --table-row-height: 1.75rem;
+  --table-cell-padding: 0.25rem 0.5rem;
+  --font-size-base: 0.75rem;
+  --font-size-sm: 0.625rem;
+  --spacing-xs: 0.125rem;
+  --spacing-sm: 0.25rem;
+  --spacing-md: 0.5rem;
 }
 
 @layer components {

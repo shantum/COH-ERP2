@@ -11,7 +11,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from '@tanstack/react-router';
 import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
 import { ordersApi } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
@@ -85,8 +85,12 @@ export default function OrderSearch() {
 
     const handleSelectOrder = (orderId: string, tab: string) => {
         const mappedTab = tabMapping[tab] || 'open';
-        const page = (ordersPageTabs as string[]).includes(mappedTab) ? 'orders' : 'shipments';
-        navigate(`/${page}?tab=${mappedTab}&orderId=${orderId}`);
+        // Map tab to view for Orders page - open/cancelled stay, shipped tabs become shipped view
+        const view = (ordersPageTabs as string[]).includes(mappedTab as string) ? mappedTab : 'shipped';
+        navigate({
+            to: '/orders',
+            search: { view: view as 'open' | 'shipped' | 'cancelled', orderId } as any,
+        });
     };
 
     // Keyboard navigation: Enter to select first result

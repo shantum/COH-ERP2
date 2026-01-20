@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Plus, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, FlaskConical } from 'lucide-react';
+import { useSearch, useNavigate } from '@tanstack/react-router';
 import { sortBySizeOrder } from '../constants/sizes';
 import { AddToPlanModal } from '../components/production/AddToPlanModal';
 import { trpc } from '../services/trpc';
@@ -20,8 +21,22 @@ const getDefaultDateRange = () => {
 export default function Production() {
     const trpcUtils = trpc.useUtils();
 
-    // UI state - declared first so queries can reference them
-    const [tab, setTab] = useState<'schedule' | 'capacity' | 'tailors'>('schedule');
+    // URL state via TanStack Router
+    const search = useSearch({ from: '/_authenticated/production' });
+    const navigate = useNavigate();
+
+    // Tab from URL (URL-persisted for bookmarking/sharing)
+    const tab = (search.tab || 'schedule') as 'schedule' | 'capacity' | 'tailors';
+
+    const setTab = useCallback((value: 'schedule' | 'capacity' | 'tailors') => {
+        navigate({
+            to: '/production',
+            search: { ...search, tab: value === 'schedule' ? undefined : value } as any,
+            replace: true,
+        });
+    }, [navigate, search]);
+
+    // UI state - local only
     const [showPlanner, setShowPlanner] = useState(false); // Start collapsed for performance
     const [showComplete, setShowComplete] = useState<any>(null);
     const [qtyCompleted, setQtyCompleted] = useState(0);

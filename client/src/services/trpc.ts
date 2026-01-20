@@ -31,6 +31,15 @@ const getAuthToken = () => {
 };
 
 /**
+ * Generate a unique request ID for distributed tracing
+ * Format: timestamp(base36)-random(7 chars)
+ * Example: "m5x2k3-a1b2c3d"
+ */
+const generateRequestId = (): string => {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+};
+
+/**
  * Get base URL for tRPC endpoint
  * Matches existing API_BASE_URL logic in api.ts
  */
@@ -49,12 +58,14 @@ export const createTRPCClient = () => {
         links: [
             httpBatchLink({
                 url: getTRPCUrl(),
-                // Add auth token to every request
+                // Add auth token and request ID to every request
                 headers() {
                     const token = getAuthToken();
-                    return token ? {
-                        Authorization: `Bearer ${token}`,
-                    } : {};
+                    const requestId = generateRequestId();
+                    return {
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                        'x-request-id': requestId,
+                    };
                 },
                 // Use SuperJSON transformer to match server (supports Date, Map, Set, etc.)
                 transformer: superjson,

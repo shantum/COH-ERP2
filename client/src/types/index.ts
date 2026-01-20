@@ -117,6 +117,34 @@ export type {
  * These types are specific to the client UI and are not shared with the server.
  */
 
+// ============================================
+// AUTH TYPES
+// ============================================
+
+/**
+ * User object for authentication context
+ * Subset of full User type with auth-specific fields
+ */
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  roleId?: string;
+  roleName?: string;
+  permissions?: string[];
+  mustChangePassword?: boolean;
+}
+
+/**
+ * Authentication state for router context
+ */
+export interface AuthState {
+  user: AuthUser | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
+
 // Order grid row data - flattened structure for AG-Grid
 export interface OrderRowData {
   orderId: string;

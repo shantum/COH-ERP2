@@ -14,7 +14,7 @@
 
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useSearch, useNavigate } from '@tanstack/react-router';
 import { Layers, Scissors, Package, X } from 'lucide-react';
 
 import { materialsApi, fabricsApi } from '../services/api';
@@ -34,19 +34,20 @@ const SERVICE_CATEGORIES = ['printing', 'embroidery', 'washing', 'dyeing', 'plea
 
 export default function Materials() {
     const queryClient = useQueryClient();
-    const [searchParams, setSearchParams] = useSearchParams();
+    const search = useSearch({ strict: false }) as { tab?: TabType };
+    const navigate = useNavigate();
 
     // State from URL params (with defaults)
-    const activeTab = (searchParams.get('tab') as TabType) || 'materials';
+    const activeTab = (search.tab || 'materials') as TabType;
 
     // Handle tab change
     const setActiveTab = useCallback((tab: TabType) => {
         if (tab === 'materials') {
-            setSearchParams({}, { replace: true });
+            navigate({ to: '/materials', search: {} as Record<string, unknown>, replace: true });
         } else {
-            setSearchParams({ tab }, { replace: true });
+            navigate({ to: '/materials', search: { tab } as Record<string, unknown>, replace: true });
         }
-    }, [setSearchParams]);
+    }, [navigate]);
 
     // Modal states
     const [showAddTrim, setShowAddTrim] = useState(false);
