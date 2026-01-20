@@ -16,12 +16,7 @@ import type { Prisma } from '@prisma/client';
 import { router, protectedProcedure } from '../index.js';
 import { CreateOrderSchema } from '@coh/shared';
 import {
-    buildViewWhereClause,
-    enrichOrdersForView,
-    ORDER_UNIFIED_SELECT,
-    getValidViewNames,
     getViewConfig,
-    flattenOrdersToRows,
     LINE_SSE_SELECT,
     flattenLineForSSE,
 } from '../../utils/orderViews.js';
@@ -50,6 +45,7 @@ import { deferredExecutor } from '../../services/deferredExecutor.js';
 import { enforceRulesInTrpc } from '../../rules/index.js';
 import { recomputeOrderStatus } from '../../utils/orderStatus.js';
 import { orderLogger } from '../../utils/logger.js';
+import { listOrdersKysely, transformKyselyToRows, type ViewName } from '../../db/queries/index.js';
 
 // ============================================
 // LIST ORDERS PROCEDURE
@@ -75,62 +71,39 @@ const list = protectedProcedure
     .query(async ({ input, ctx }) => {
         const { view, page, limit, days, search, sortBy, shippedFilter } = input;
 
-        // Handle shipped view with sub-filters (rto, cod_pending)
-        // When shippedFilter is set, use that view's config instead
-        let effectiveView = view;
-        if (view === 'shipped' && shippedFilter) {
-            effectiveView = shippedFilter; // Use 'rto' or 'cod_pending' view config
-        }
-
-        // Validate view
-        const viewConfig = getViewConfig(effectiveView);
-        if (!viewConfig) {
+        // Validate view - must be one of the supported Kysely views
+        if (!['open', 'shipped', 'cancelled'].includes(view)) {
             throw new TRPCError({
                 code: 'BAD_REQUEST',
-                message: `Invalid view: ${effectiveView}. Valid views: ${getValidViewNames().join(', ')}`,
+                message: `Invalid view: ${view}. Valid views: open, shipped, cancelled`,
             });
         }
 
-        // Calculate offset from page
+        // Get view config for display name
+        const viewConfig = getViewConfig(view);
         const offset = (page - 1) * limit;
 
-        // Build WHERE clause using effective view config
-        const where = buildViewWhereClause(effectiveView, {
-            days: days?.toString(),
+        // ============================================
+        // KYSELY PATH (100% coverage)
+        // ============================================
+        const kyselyView = view as ViewName;
+        const kyselyShippedFilter = shippedFilter as 'rto' | 'cod_pending' | undefined;
+        const kyselySortBy = sortBy as 'orderDate' | 'archivedAt' | 'shippedAt' | 'createdAt' | undefined;
+
+        const { orders: kyselyOrders, totalCount } = await listOrdersKysely({
+            view: kyselyView,
+            page,
+            limit,
+            shippedFilter: kyselyShippedFilter,
             search,
+            days,
+            sortBy: kyselySortBy,
         });
 
-        // Determine sort order
-        let orderBy = viewConfig.orderBy;
-        if (sortBy) {
-            orderBy = { [sortBy]: 'desc' };
-        }
+        // Transform Kysely results to FlattenedOrderRow format
+        const rows = transformKyselyToRows(kyselyOrders);
 
-        // Execute query with pagination
-        const [totalCount, orders] = await Promise.all([
-            ctx.prisma.order.count({ where }),
-            ctx.prisma.order.findMany({
-                where,
-                select: ORDER_UNIFIED_SELECT,
-                orderBy,
-                take: limit,
-                skip: offset,
-            }),
-        ]);
-
-        // Apply view-specific enrichments
-        const enriched = await enrichOrdersForView(
-            ctx.prisma,
-            orders,
-            viewConfig.enrichment
-        );
-
-        // Pre-flatten orders into rows on server
-        // This eliminates client-side O(n) transformation on every fetch
-        const rows = flattenOrdersToRows(enriched);
-
-        // Batch fetch inventory balances for all SKUs in the response
-        // This eliminates client-side round-trip for inventory data
+        // Batch fetch inventory balances for all SKUs
         const skuIds = [...new Set(rows.map(r => r.skuId).filter((id): id is string => Boolean(id)))];
         let inventoryMap = new Map<string, { availableBalance: number }>();
 
@@ -141,7 +114,7 @@ const list = protectedProcedure
             );
         }
 
-        // Enrich rows with inventory stock (server-side)
+        // Enrich rows with inventory stock
         const rowsWithInventory = rows.map(row => {
             const balance = row.skuId ? inventoryMap.get(row.skuId) : null;
             return {
@@ -152,11 +125,11 @@ const list = protectedProcedure
 
         return {
             rows: rowsWithInventory,
-            // Keep orders for backwards compatibility during transition
-            orders: enriched,
+            // No enriched orders needed - rows contain all data
+            // Type as unknown[] to allow client-side cache updates
+            orders: [] as unknown[],
             view,
-            viewName: viewConfig.name,
-            // Flag to tell client inventory is included (skip separate fetch)
+            viewName: viewConfig?.name || view,
             hasInventory: true,
             pagination: {
                 total: totalCount,
@@ -164,7 +137,7 @@ const list = protectedProcedure
                 offset,
                 page,
                 totalPages: Math.ceil(totalCount / limit),
-                hasMore: offset + orders.length < totalCount,
+                hasMore: offset + rows.length < totalCount,
             },
         };
     });

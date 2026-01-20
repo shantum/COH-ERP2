@@ -1,21 +1,16 @@
 /**
- * Singleton PrismaClient instance
- * Prevents multiple connections during development hot-reloading
+ * Prisma Client Re-export
+ *
+ * This module re-exports the Prisma client from '../db' for backward compatibility.
+ * For Kysely queries, import `kysely` from '../db' directly.
+ *
+ * For new code, prefer importing directly from '../db':
+ *   import { prisma, kysely } from '../db';
  */
-import { PrismaClient } from '@prisma/client';
 
-const globalForPrisma = globalThis as unknown as {
-    prisma: PrismaClient | undefined;
-};
-
-const prisma =
-    globalForPrisma.prisma ??
-    new PrismaClient({
-        log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
-    });
-
-if (process.env.NODE_ENV !== 'production') {
-    globalForPrisma.prisma = prisma;
-}
+import { prisma } from '../db/index.js';
 
 export default prisma;
+
+// Re-export types for convenience
+export type { KyselyDB, DB } from '../db/index.js';

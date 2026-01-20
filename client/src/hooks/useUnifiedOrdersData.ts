@@ -240,9 +240,37 @@ export function useUnifiedOrdersData({
     // COMPUTED VALUES
     // ==========================================
 
-    const orders = ordersQuery.data?.orders || [];
     const rows = ordersQuery.data?.rows || [];
     const pagination = ordersQuery.data?.pagination;
+
+    // Derive orders from rows when server returns empty orders array (Kysely path)
+    // Groups rows by orderId and extracts the order reference from each unique order
+    const orders = useMemo(() => {
+        const serverOrders = ordersQuery.data?.orders;
+        // If server provided orders, use them
+        if (serverOrders && serverOrders.length > 0) {
+            return serverOrders;
+        }
+        // Otherwise derive from rows - each row has `order` with `orderLines`
+        if (rows.length === 0) return [];
+        const orderMap = new Map<string, any>();
+        for (const row of rows) {
+            if (!orderMap.has(row.orderId) && row.order) {
+                // Construct an order-like object from the row data
+                orderMap.set(row.orderId, {
+                    id: row.orderId,
+                    orderNumber: row.orderNumber,
+                    orderLines: row.order.orderLines || [],
+                    // Include other fields needed by client code
+                    status: row.orderStatus,
+                    isArchived: row.isArchived,
+                    releasedToShipped: row.releasedToShipped,
+                    releasedToCancelled: row.releasedToCancelled,
+                });
+            }
+        }
+        return Array.from(orderMap.values());
+    }, [ordersQuery.data?.orders, rows]);
 
     return {
         // Pre-flattened rows from server (primary data source)

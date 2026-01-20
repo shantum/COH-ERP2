@@ -2,6 +2,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
+generator kysely {
+  provider     = "prisma-kysely"
+  output       = "../src/db"
+  fileName     = "types.ts"
+  enumFileName = "enums.ts"
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -264,6 +271,7 @@ model FabricColour {
   @@unique([fabricId, colourName])
   @@index([fabricId])
   @@index([supplierId])
+  @@index([fabricId, isActive]) // Composite index for active colours per fabric
 }
 
 model Fabric {
@@ -345,6 +353,8 @@ model FabricTransaction {
   @@index([txnType])
   @@index([createdAt])
   @@index([fabricId, createdAt])
+  @@index([supplierId])  // FK index for supplier reports
+  @@index([createdById]) // FK index for user activity tracking
 }
 
 model FabricOrder {
@@ -537,6 +547,7 @@ model OrderPayment {
   @@index([orderId])
   @@index([recordedAt])
   @@index([orderId, recordedAt]) // Compound: payment history for order
+  @@index([recordedById])        // FK index for user lookups
 }
 
 model OrderLine {
@@ -671,6 +682,8 @@ model ReturnRequestLine {
   @@index([requestId])
   @@index([skuId])
   @@index([skuId, itemCondition])
+  @@index([originalOrderLineId]) // FK index for return processing
+  @@index([exchangeSkuId])       // FK index for exchange lookups
 }
 
 model ReplacementItem {
@@ -717,6 +730,7 @@ model ReturnStatusHistory {
   request     ReturnRequest @relation(fields: [requestId], references: [id])
 
   @@index([requestId])
+  @@index([changedById]) // FK index for audit queries
 }
 
 model Feedback {
@@ -746,6 +760,8 @@ model FeedbackRating {
   dimension  String
   score      Int
   feedback   Feedback @relation(fields: [feedbackId], references: [id])
+
+  @@index([feedbackId]) // FK index
 }
 
 model FeedbackContent {
@@ -766,6 +782,8 @@ model FeedbackMedia {
   url        String
   caption    String?
   feedback   Feedback @relation(fields: [feedbackId], references: [id])
+
+  @@index([feedbackId]) // FK index
 }
 
 model FeedbackProductLink {
@@ -776,6 +794,10 @@ model FeedbackProductLink {
   skuId       String?
   feedback    Feedback @relation(fields: [feedbackId], references: [id])
   sku         Sku?     @relation(fields: [skuId], references: [id])
+
+  @@index([feedbackId])  // FK index
+  @@index([productId])   // FK index for product lookup
+  @@index([variationId]) // FK index for variation lookup
 }
 
 model FeedbackTag {
@@ -783,6 +805,8 @@ model FeedbackTag {
   feedbackId String
   tag        String
   feedback   Feedback @relation(fields: [feedbackId], references: [id])
+
+  @@index([feedbackId]) // FK index
 }
 
 model Tailor {
