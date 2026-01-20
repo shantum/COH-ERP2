@@ -26,6 +26,7 @@ import { TRPCError } from '@trpc/server';
 import type { PrismaClient } from '@prisma/client';
 import { router, protectedProcedure } from '../index.js';
 import { getLockedDates, saveLockedDates } from '../../utils/productionUtils.js';
+import { hasPermission } from '../../middleware/permissions.js';
 import {
     calculateAllInventoryBalances,
     calculateFabricBalance,
@@ -358,7 +359,7 @@ const createBatch = protectedProcedure
     .input(createBatchInput)
     .mutation(async ({ input, ctx }) => {
         // Check permission
-        if (!ctx.userPermissions.includes('production:create')) {
+        if (!hasPermission(ctx.userPermissions, 'production:create')) {
             throw new TRPCError({
                 code: 'FORBIDDEN',
                 message: 'Missing production:create permission',
@@ -540,7 +541,7 @@ const deleteBatch = protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
         // Check permission
-        if (!ctx.userPermissions.includes('production:delete')) {
+        if (!hasPermission(ctx.userPermissions, 'production:delete')) {
             throw new TRPCError({
                 code: 'FORBIDDEN',
                 message: 'Missing production:delete permission',
@@ -611,7 +612,7 @@ const completeBatch = protectedProcedure
     .input(completeBatchInput)
     .mutation(async ({ input, ctx }) => {
         // Check permission
-        if (!ctx.userPermissions.includes('production:complete')) {
+        if (!hasPermission(ctx.userPermissions, 'production:complete')) {
             throw new TRPCError({
                 code: 'FORBIDDEN',
                 message: 'Missing production:complete permission',
@@ -781,7 +782,7 @@ const uncompleteBatch = protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input, ctx }) => {
         // Check permission
-        if (!ctx.userPermissions.includes('production:complete')) {
+        if (!hasPermission(ctx.userPermissions, 'production:complete')) {
             throw new TRPCError({
                 code: 'FORBIDDEN',
                 message: 'Missing production:complete permission',
