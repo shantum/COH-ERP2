@@ -991,17 +991,24 @@ const cancelOrder = protectedProcedure
                 phase: 'transaction',
             });
 
-            // Release inventory for allocated lines
+            // Release inventory and unlink production batches for all lines
             for (const line of order.orderLines) {
                 if (hasAllocatedInventory(line.lineStatus as LineStatus)) {
                     await releaseReservedInventory(tx, line.id);
                 }
+                // Unlink production batch if exists (same pattern as deleteOrder)
+                if (line.productionBatchId) {
+                    await tx.productionBatch.update({
+                        where: { id: line.productionBatchId },
+                        data: { sourceOrderLineId: null },
+                    });
+                }
             }
 
-            // Cancel all lines
+            // Cancel all lines (also clear productionBatchId)
             await tx.orderLine.updateMany({
                 where: { orderId },
-                data: { lineStatus: 'cancelled' },
+                data: { lineStatus: 'cancelled', productionBatchId: null },
             });
 
             // Update order status
@@ -1761,6 +1768,7 @@ const cancelLine = protectedProcedure
                 qty: true,
                 unitPrice: true,
                 orderId: true,
+                productionBatchId: true,
                 order: { select: { customerId: true } },
             },
         });
@@ -1795,10 +1803,18 @@ const cancelLine = protectedProcedure
             }
         }
 
-        // Update line status
+        // Unlink production batch if exists (same pattern as deleteOrder/cancelOrder)
+        if (line.productionBatchId) {
+            await ctx.prisma.productionBatch.update({
+                where: { id: line.productionBatchId },
+                data: { sourceOrderLineId: null },
+            });
+        }
+
+        // Update line status and clear production batch link
         await ctx.prisma.orderLine.update({
             where: { id: lineId },
-            data: { lineStatus: 'cancelled' },
+            data: { lineStatus: 'cancelled', productionBatchId: null },
         });
 
         // Background: adjust LTV (fire and forget)
