@@ -2,7 +2,7 @@
  * ProductNameCell - Displays product thumbnail, name, SKU, color (with swatch), and size
  */
 
-import { useState, memo } from 'react';
+import { useState } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { Package, Check } from 'lucide-react';
 import { cn } from '../../../../lib/utils';
@@ -11,7 +11,7 @@ interface ProductNameCellProps {
     row: FlattenedOrderRow;
 }
 
-export const ProductNameCell = memo(function ProductNameCell({ row }: ProductNameCellProps) {
+export function ProductNameCell({ row }: ProductNameCellProps) {
     const productName = row.productName || '-';
     const skuCode = row.skuCode || '';
     const colorName = row.colorName || '';
@@ -96,10 +96,4 @@ export const ProductNameCell = memo(function ProductNameCell({ row }: ProductNam
             </div>
         </div>
     );
-}, (prev, next) => (
-    prev.row.productName === next.row.productName &&
-    prev.row.skuCode === next.row.skuCode &&
-    prev.row.colorName === next.row.colorName &&
-    prev.row.size === next.row.size &&
-    prev.row.imageUrl === next.row.imageUrl
-));
+}

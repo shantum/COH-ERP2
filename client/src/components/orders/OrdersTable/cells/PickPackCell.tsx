@@ -3,7 +3,6 @@
  * Compact pill-style buttons matching table aesthetic
  */
 
-import { memo } from 'react';
 import { Square, CheckSquare, Loader2 } from 'lucide-react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { DynamicColumnHandlers } from '../types';
@@ -14,7 +13,7 @@ interface PickPackCellProps {
     handlersRef: React.MutableRefObject<DynamicColumnHandlers>;
 }
 
-export const PickPackCell = memo(function PickPackCell({ row, handlersRef }: PickPackCellProps) {
+export function PickPackCell({ row, handlersRef }: PickPackCellProps) {
     const status = row.lineStatus || 'pending';
     const lineId = row.lineId;
 
@@ -119,11 +118,7 @@ export const PickPackCell = memo(function PickPackCell({ row, handlersRef }: Pic
     }
 
     return null;
-}, (prev, next) => (
-    prev.row.lineId === next.row.lineId &&
-    prev.row.lineStatus === next.row.lineStatus &&
-    prev.handlersRef.current.allocatingLines === next.handlersRef.current.allocatingLines
-));
+}
 
 interface StepProps {
     label: string;

@@ -92,6 +92,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
 
   // Edit form state
   const [editForm, setEditForm] = useState<EditFormState>({
+    customerId: null,
     customerName: '',
     customerEmail: '',
     customerPhone: '',
@@ -164,6 +165,7 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
         '';
 
       setEditForm({
+        customerId: order.customerId || null,
         customerName: order.customerName || '',
         customerEmail,
         customerPhone,
@@ -208,11 +210,14 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
     }
   }, [order]);
 
+  // Use selected customer ID (from search) or fall back to order's customer ID
+  const activeCustomerId = editForm.customerId || order?.customerId;
+
   // Fetch past addresses when address picker is expanded
   const { data: pastAddressesData, isLoading: isLoadingAddresses } = useQuery({
-    queryKey: ['customer-addresses', order?.customerId],
-    queryFn: () => customersApi.getAddresses(order.customerId!),
-    enabled: expandedSections.addressPicker && !!order?.customerId,
+    queryKey: ['customer-addresses', activeCustomerId],
+    queryFn: () => customersApi.getAddresses(activeCustomerId!),
+    enabled: expandedSections.addressPicker && !!activeCustomerId,
     staleTime: 60 * 1000,
   });
 

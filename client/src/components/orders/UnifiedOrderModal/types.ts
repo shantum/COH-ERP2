@@ -34,6 +34,7 @@ export interface AddressData {
 }
 
 export interface EditFormState {
+  customerId: string | null;
   customerName: string;
   customerEmail: string;
   customerPhone: string;

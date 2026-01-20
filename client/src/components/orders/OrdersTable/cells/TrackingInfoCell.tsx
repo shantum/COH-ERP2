@@ -5,14 +5,15 @@
  * Edit: Click opens popover with form
  */
 
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Package, Check, X } from 'lucide-react';
+import { Check, X, Trash2 } from 'lucide-react';
+import cohLogo from '../../../../assets/COH-Square-Monkey-Logo.png';
 import type { CellProps } from '../types';
 import { COURIER_OPTIONS } from '../constants';
 import { cn } from '../../../../lib/utils';
 
-export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRef }: CellProps) {
+export function TrackingInfoCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
     const { onUpdateLineTracking } = handlersRef.current;
@@ -24,9 +25,8 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
     const popoverRef = useRef<HTMLDivElement>(null);
     const awbInputRef = useRef<HTMLInputElement>(null);
 
-    const currentAwb = row.lineAwbNumber || '';
-    const currentCourier = row.lineCourier || '';
-    const hasData = currentAwb || currentCourier;
+    // Use local state for display (instant feedback after save)
+    const hasData = awbValue || courierValue;
 
     // Update local values when row changes
     useEffect(() => {
@@ -85,8 +85,20 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
     };
 
     const handleCancel = () => {
-        setAwbValue(currentAwb);
-        setCourierValue(currentCourier);
+        setAwbValue(row.lineAwbNumber || '');
+        setCourierValue(row.lineCourier || '');
+        setIsOpen(false);
+    };
+
+    const handleClear = () => {
+        setAwbValue('');
+        setCourierValue('');
+        // Send empty string to clear - server converts '' to null
+        // (undefined gets stripped from JSON and won't update)
+        onUpdateLineTracking(row.lineId!, {
+            awbNumber: '',
+            courier: '',
+        });
         setIsOpen(false);
     };
 
@@ -111,11 +123,11 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
                 )}
                 title={hasData ? 'Click to edit tracking' : 'Add tracking info'}
             >
-                <Package size={12} className={hasData ? 'text-slate-500' : 'text-slate-300'} />
+                <img src={cohLogo} alt="COH" className={cn('w-3 h-3', hasData ? 'opacity-100' : 'opacity-40')} />
                 {hasData ? (
                     <span className="flex flex-col items-start leading-tight">
-                        <span className="font-medium text-[11px] truncate max-w-[80px]">{currentAwb}</span>
-                        <span className="text-[9px] text-slate-500">{currentCourier || 'No courier'}</span>
+                        <span className="font-medium text-[11px] truncate max-w-[80px]">{awbValue}</span>
+                        <span className="text-[9px] text-slate-500">{courierValue || 'No courier'}</span>
                     </span>
                 ) : (
                     <span className="text-[11px]">Add AWB</span>
@@ -178,14 +190,19 @@ export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRe
                                 Cancel
                             </button>
                         </div>
+                        {(row.lineAwbNumber || row.lineCourier) && (
+                            <button
+                                onClick={handleClear}
+                                className="w-full text-[10px] pt-2 text-slate-400 hover:text-red-500 flex items-center justify-center gap-1 transition-colors"
+                            >
+                                <Trash2 size={10} />
+                                Clear tracking data
+                            </button>
+                        )}
                     </div>
                 </div>,
                 document.body
             )}
         </>
     );
-}, (prev, next) => (
-    prev.row.lineId === next.row.lineId &&
-    prev.row.lineAwbNumber === next.row.lineAwbNumber &&
-    prev.row.lineCourier === next.row.lineCourier
-));
+}

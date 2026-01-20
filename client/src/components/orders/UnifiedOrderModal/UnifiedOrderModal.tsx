@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useCallback, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Save, Loader2 } from 'lucide-react';
 import type { Order } from '../../../types';
 import type { ModalMode } from './types';
@@ -40,8 +40,10 @@ export function UnifiedOrderModal({
   onClose,
   onSuccess,
 }: UnifiedOrderModalProps) {
+  const queryClient = useQueryClient();
   const [isSaving, setIsSaving] = useState(false);
   const [isShipping, setIsShipping] = useState(false);
+  const [updatingLineIds, setUpdatingLineIds] = useState<Set<string>>(new Set());
   // Track current order for navigation
   const [currentOrderId, setCurrentOrderId] = useState(initialOrder.id);
   // Keep track of last valid order for smooth transitions
@@ -321,13 +323,22 @@ export function UnifiedOrderModal({
 
   // Handle update line
   const handleUpdateLineWithMutation = useCallback(async (lineId: string, data: { qty?: number; unitPrice?: number }) => {
+    setUpdatingLineIds(prev => new Set(prev).add(lineId));
     try {
       await mutations.updateLine.mutateAsync({ lineId, data });
+      // Invalidate the individual order query to refresh modal data
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       handleUpdateLine(lineId, data);
     } catch (error) {
       console.error('Failed to update line:', error);
+    } finally {
+      setUpdatingLineIds(prev => {
+        const next = new Set(prev);
+        next.delete(lineId);
+        return next;
+      });
     }
-  }, [mutations, handleUpdateLine]);
+  }, [mutations, handleUpdateLine, queryClient, order.id]);
 
   // Handle cancel line
   const handleCancelLineWithMutation = useCallback(async (lineId: string) => {
@@ -434,6 +445,7 @@ export function UnifiedOrderModal({
                     categorizedLines={categorizedLines}
                     shipForm={shipForm}
                     isAddingProduct={isAddingProduct}
+                    updatingLineIds={updatingLineIds}
                     onSetAddingProduct={setIsAddingProduct}
                     onAddLine={handleAddLineWithMutation}
                     onUpdateLine={handleUpdateLineWithMutation}

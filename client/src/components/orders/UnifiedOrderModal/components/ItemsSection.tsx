@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { Package, Plus, X, RotateCcw, Square, CheckSquare, Tag, Truck, Percent, CreditCard } from 'lucide-react';
+import { Package, Plus, X, RotateCcw, Square, CheckSquare, Tag, Truck, Percent, CreditCard, Pencil, Loader2 } from 'lucide-react';
 import type { Order, OrderLine } from '../../../../types';
 import type { ModalMode, CategorizedLines, ShipFormState } from '../types';
 import { LINE_STATUS_CONFIG, LINE_STATUS_BAR_COLORS } from '../types';
@@ -41,6 +41,7 @@ interface ItemsSectionProps {
   categorizedLines: CategorizedLines;
   shipForm: ShipFormState;
   isAddingProduct: boolean;
+  updatingLineIds?: Set<string>;
   onSetAddingProduct: (value: boolean) => void;
   onUpdateLine?: (lineId: string, data: any) => void;
   onAddLine?: (data: { skuId: string; qty: number; unitPrice: number }) => void;
@@ -72,6 +73,7 @@ function LineItem({
   line,
   mode,
   isSelected,
+  isUpdating,
   financialInfo,
   onUpdateLine,
   onCancelLine,
@@ -81,6 +83,7 @@ function LineItem({
   line: OrderLine;
   mode: ModalMode;
   isSelected?: boolean;
+  isUpdating?: boolean;
   financialInfo?: LineFinancialInfo;
   onUpdateLine?: (lineId: string, data: any) => void;
   onCancelLine?: (lineId: string) => void;
@@ -185,7 +188,10 @@ function LineItem({
                 )}
                 {/* Qty × Price - Editable in edit mode */}
                 <div className="flex items-center justify-end gap-1.5">
-                  {canEdit ? (
+                  {isUpdating && (
+                    <Loader2 size={12} className="animate-spin text-sky-500 mr-1" />
+                  )}
+                  {canEdit && !isUpdating ? (
                     <>
                       {/* Editable Qty */}
                       {isEditingQty ? (
@@ -195,17 +201,18 @@ function LineItem({
                           onChange={(e) => setEditQty(e.target.value)}
                           onBlur={handleSaveQty}
                           onKeyDown={(e) => e.key === 'Enter' && handleSaveQty()}
-                          className="w-12 px-1 py-0.5 text-xs text-center border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          className="w-12 px-1 py-0.5 text-xs text-center border-2 border-sky-400 rounded bg-white focus:ring-2 focus:ring-sky-100 outline-none"
                           autoFocus
                           min={1}
                         />
                       ) : (
                         <button
                           onClick={() => { setEditQty(line.qty.toString()); setIsEditingQty(true); }}
-                          className="text-xs text-slate-500 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          className="group relative text-xs text-slate-600 border border-dashed border-slate-300 hover:border-sky-400 hover:text-sky-600 hover:bg-sky-50 px-2 py-0.5 rounded transition-all"
                           title="Click to edit quantity"
                         >
                           {line.qty}
+                          <Pencil size={10} className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 text-sky-500 bg-white rounded-full p-0.5 shadow-sm transition-opacity" />
                         </button>
                       )}
                       <span className="text-xs text-slate-400">×</span>
@@ -217,16 +224,17 @@ function LineItem({
                           onChange={(e) => setEditPrice(e.target.value)}
                           onBlur={handleSavePrice}
                           onKeyDown={(e) => e.key === 'Enter' && handleSavePrice()}
-                          className="w-20 px-2 py-0.5 text-sm text-right border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          className="w-20 px-2 py-0.5 text-sm text-right border-2 border-sky-400 rounded bg-white focus:ring-2 focus:ring-sky-100 outline-none"
                           autoFocus
                         />
                       ) : (
                         <button
                           onClick={() => { setEditPrice(line.unitPrice.toString()); setIsEditingPrice(true); }}
-                          className="text-sm font-medium text-slate-700 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          className="group relative text-sm font-medium text-slate-700 border border-dashed border-slate-300 hover:border-sky-400 hover:text-sky-600 hover:bg-sky-50 px-2 py-0.5 rounded transition-all"
                           title="Click to edit price"
                         >
                           {formatCurrency(financialInfo.finalPrice)}
+                          <Pencil size={10} className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 text-sky-500 bg-white rounded-full p-0.5 shadow-sm transition-opacity" />
                         </button>
                       )}
                     </>
@@ -262,7 +270,10 @@ function LineItem({
               <>
                 {/* Fallback for no financial info - Qty × Price editable */}
                 <div className="flex items-center justify-end gap-1.5">
-                  {canEdit ? (
+                  {isUpdating && (
+                    <Loader2 size={12} className="animate-spin text-sky-500 mr-1" />
+                  )}
+                  {canEdit && !isUpdating ? (
                     <>
                       {/* Editable Qty */}
                       {isEditingQty ? (
@@ -272,17 +283,18 @@ function LineItem({
                           onChange={(e) => setEditQty(e.target.value)}
                           onBlur={handleSaveQty}
                           onKeyDown={(e) => e.key === 'Enter' && handleSaveQty()}
-                          className="w-12 px-1 py-0.5 text-xs text-center border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          className="w-12 px-1 py-0.5 text-xs text-center border-2 border-sky-400 rounded bg-white focus:ring-2 focus:ring-sky-100 outline-none"
                           autoFocus
                           min={1}
                         />
                       ) : (
                         <button
                           onClick={() => { setEditQty(line.qty.toString()); setIsEditingQty(true); }}
-                          className="text-xs text-slate-500 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          className="group relative text-xs text-slate-600 border border-dashed border-slate-300 hover:border-sky-400 hover:text-sky-600 hover:bg-sky-50 px-2 py-0.5 rounded transition-all"
                           title="Click to edit quantity"
                         >
                           {line.qty}
+                          <Pencil size={10} className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 text-sky-500 bg-white rounded-full p-0.5 shadow-sm transition-opacity" />
                         </button>
                       )}
                       <span className="text-xs text-slate-400">×</span>
@@ -294,16 +306,17 @@ function LineItem({
                           onChange={(e) => setEditPrice(e.target.value)}
                           onBlur={handleSavePrice}
                           onKeyDown={(e) => e.key === 'Enter' && handleSavePrice()}
-                          className="w-20 px-2 py-0.5 text-sm text-right border border-slate-300 rounded focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none"
+                          className="w-20 px-2 py-0.5 text-sm text-right border-2 border-sky-400 rounded bg-white focus:ring-2 focus:ring-sky-100 outline-none"
                           autoFocus
                         />
                       ) : (
                         <button
                           onClick={() => { setEditPrice(line.unitPrice.toString()); setIsEditingPrice(true); }}
-                          className="text-sm font-medium text-slate-700 hover:text-sky-600 hover:bg-sky-50 px-1 py-0.5 rounded transition-colors"
+                          className="group relative text-sm font-medium text-slate-700 border border-dashed border-slate-300 hover:border-sky-400 hover:text-sky-600 hover:bg-sky-50 px-2 py-0.5 rounded transition-all"
                           title="Click to edit price"
                         >
                           {formatCurrency(line.unitPrice)}
+                          <Pencil size={10} className="absolute -right-1 -top-1 opacity-0 group-hover:opacity-100 text-sky-500 bg-white rounded-full p-0.5 shadow-sm transition-opacity" />
                         </button>
                       )}
                     </>
@@ -366,6 +379,7 @@ export function ItemsSection({
   categorizedLines,
   shipForm,
   isAddingProduct,
+  updatingLineIds,
   onSetAddingProduct,
   onUpdateLine,
   onAddLine,
@@ -575,6 +589,7 @@ export function ItemsSection({
               line={line}
               mode={mode}
               isSelected={selectedLineIds?.has(line.id)}
+              isUpdating={updatingLineIds?.has(line.id)}
               financialInfo={skuCode ? financialInfoBySku.get(skuCode) : undefined}
               onUpdateLine={onUpdateLine}
               onCancelLine={onCancelLine}
@@ -596,6 +611,7 @@ export function ItemsSection({
                     key={line.id}
                     line={line}
                     mode={mode}
+                    isUpdating={updatingLineIds?.has(line.id)}
                     financialInfo={skuCode ? financialInfoBySku.get(skuCode) : undefined}
                     onUncancelLine={onUncancelLine}
                   />

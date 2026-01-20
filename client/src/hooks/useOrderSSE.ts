@@ -217,10 +217,17 @@ export function useOrderSSE({
                 });
             }
 
-            // Handle inventory updates
-            if (data.type === 'inventory_updated' && data.skuId) {
-                trpcUtils.orders.list.invalidate({ view: currentViewRef.current });
-                console.log(`SSE: Invalidated orders cache for view '${currentViewRef.current}' after inventory update`);
+            // Handle inventory updates - update skuStock in-place instead of full refetch
+            if (data.type === 'inventory_updated' && data.skuId && data.changes) {
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
+                    const newRows = old.rows.map((row: any) =>
+                        row.skuId === data.skuId
+                            ? { ...row, skuStock: (data.changes as any).balance ?? row.skuStock }
+                            : row
+                    );
+                    return { ...old, rows: newRows };
+                });
             }
 
             // Handle order updates (cancel/uncancel/general updates)
@@ -253,15 +260,20 @@ export function useOrderSSE({
                 });
             }
 
-            // Handle order shipped
+            // Handle order shipped - remove from current view if it's 'open'
             if (data.type === 'order_shipped' && data.orderId) {
-                // Invalidate affected views
-                if (data.affectedViews?.includes('open')) {
-                    trpcUtils.orders.list.invalidate({ view: 'open' });
+                // Remove from open view cache (order moved to shipped)
+                if (currentViewRef.current === 'open') {
+                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                        if (!old) return old;
+                        return {
+                            ...old,
+                            rows: old.rows.filter((row: any) => row.orderId !== data.orderId),
+                            orders: old.orders.filter((order: any) => order.id !== data.orderId),
+                        };
+                    });
                 }
-                if (data.affectedViews?.includes('shipped')) {
-                    trpcUtils.orders.list.invalidate({ view: 'shipped' });
-                }
+                // Don't invalidate shipped view - it will refresh when user navigates to it
             }
 
             // Handle lines shipped
@@ -280,34 +292,71 @@ export function useOrderSSE({
                 });
             }
 
-            // Handle order delivered
-            if (data.type === 'order_delivered' && data.orderId) {
-                trpcUtils.orders.list.invalidate({ view: 'shipped' });
-                trpcUtils.orders.list.invalidate({ view: 'cod_pending' });
+            // Handle order delivered - update tracking status in current view
+            if (data.type === 'order_delivered' && data.orderId && data.changes) {
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
+                    const newRows = old.rows.map((row: any) =>
+                        row.orderId === data.orderId ? { ...row, ...data.changes } : row
+                    );
+                    return { ...old, rows: newRows };
+                });
             }
 
-            // Handle order RTO
-            if (data.type === 'order_rto' && data.orderId) {
-                trpcUtils.orders.list.invalidate({ view: 'shipped' });
-                trpcUtils.orders.list.invalidate({ view: 'rto' });
+            // Handle order RTO - update tracking status in current view
+            if (data.type === 'order_rto' && data.orderId && data.changes) {
+                trpcUtils.orders.list.setData(queryInput, (old) => {
+                    if (!old) return old;
+                    const newRows = old.rows.map((row: any) =>
+                        row.orderId === data.orderId ? { ...row, ...data.changes } : row
+                    );
+                    return { ...old, rows: newRows };
+                });
             }
 
-            // Handle order RTO received
+            // Handle order RTO received - remove from shipped/rto view
             if (data.type === 'order_rto_received' && data.orderId) {
-                trpcUtils.orders.list.invalidate({ view: 'rto' });
-                trpcUtils.orders.list.invalidate({ view: 'open' });
+                if (currentViewRef.current === 'shipped') {
+                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                        if (!old) return old;
+                        return {
+                            ...old,
+                            rows: old.rows.filter((row: any) => row.orderId !== data.orderId),
+                            orders: old.orders.filter((order: any) => order.id !== data.orderId),
+                        };
+                    });
+                }
+                // Don't invalidate open view - it will refresh when user navigates
             }
 
-            // Handle order cancelled
+            // Handle order cancelled - remove from open view
             if (data.type === 'order_cancelled' && data.orderId) {
-                trpcUtils.orders.list.invalidate({ view: 'open' });
-                trpcUtils.orders.list.invalidate({ view: 'cancelled' });
+                if (currentViewRef.current === 'open') {
+                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                        if (!old) return old;
+                        return {
+                            ...old,
+                            rows: old.rows.filter((row: any) => row.orderId !== data.orderId),
+                            orders: old.orders.filter((order: any) => order.id !== data.orderId),
+                        };
+                    });
+                }
+                // Don't invalidate cancelled view - it will refresh when user navigates
             }
 
-            // Handle order uncancelled
+            // Handle order uncancelled - remove from cancelled view
             if (data.type === 'order_uncancelled' && data.orderId) {
-                trpcUtils.orders.list.invalidate({ view: 'open' });
-                trpcUtils.orders.list.invalidate({ view: 'cancelled' });
+                if (currentViewRef.current === 'cancelled') {
+                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                        if (!old) return old;
+                        return {
+                            ...old,
+                            rows: old.rows.filter((row: any) => row.orderId !== data.orderId),
+                            orders: old.orders.filter((order: any) => order.id !== data.orderId),
+                        };
+                    });
+                }
+                // Don't invalidate open view - it will refresh when user navigates
             }
 
             // Handle production batch created/updated/deleted
