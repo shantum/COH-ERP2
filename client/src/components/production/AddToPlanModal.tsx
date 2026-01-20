@@ -141,7 +141,7 @@ export function AddToPlanModal({
             createBatch.mutate({
                 skuId,
                 qtyPlanned: qty,
-                priority: 'stock_replenishment',
+                priority: 'normal',
                 batchDate
             });
         } else {

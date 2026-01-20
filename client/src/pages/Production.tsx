@@ -352,7 +352,7 @@ export default function Production() {
         setExpandedDates(newSet);
     };
 
-    const dateGroups = groupBatchesByDate(batches);
+    const dateGroups = groupBatchesByDate(batches || []);
 
     // Expand today and tomorrow by default
     const today = new Date().toISOString().split('T')[0];
@@ -423,12 +423,12 @@ export default function Production() {
                                 <div className="flex justify-center p-6 bg-white">
                                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-red-400"></div>
                                 </div>
-                            ) : requirements?.requirements?.length === 0 ? (
+                            ) : requirements && requirements.requirements && requirements.requirements.length === 0 ? (
                                 <div className="flex items-center gap-3 px-4 py-3 bg-green-50">
                                     <CheckCircle size={20} className="text-green-500" />
                                     <span className="text-sm text-green-700">All caught up! No pending production requirements from open orders.</span>
                                 </div>
-                            ) : requirements?.requirements?.length > 0 ? (
+                            ) : requirements && requirements.requirements && requirements.requirements.length > 0 ? (
                             <div className="bg-white table-scroll-container">
                                 <table className="w-full text-sm" style={{ minWidth: '700px' }}>
                                         <thead className="bg-gray-50 text-left text-xs text-gray-500 uppercase">
