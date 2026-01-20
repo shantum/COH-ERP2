@@ -7,8 +7,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, Scissors, Package, Ban } from 'lucide-react';
 
+// Customization type options
+export type CustomizationType = 'length' | 'size' | 'measurements' | 'other';
+
 // Customization types available
-const CUSTOMIZATION_TYPES = [
+const CUSTOMIZATION_TYPES: { value: CustomizationType; label: string }[] = [
     { value: 'length', label: 'Length Adjustment' },
     { value: 'size', label: 'Size Modification' },
     { value: 'measurements', label: 'Custom Measurements' },
@@ -17,7 +20,7 @@ const CUSTOMIZATION_TYPES = [
 
 // Initial data for edit mode
 interface CustomizationInitialData {
-    type: string;
+    type: CustomizationType;
     value: string;
     notes?: string;
 }
@@ -25,7 +28,7 @@ interface CustomizationInitialData {
 interface CustomizationModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: (data: { type: string; value: string; notes?: string }) => void;
+    onConfirm: (data: { type: CustomizationType; value: string; notes?: string }) => void;
     lineData: {
         lineId: string;
         skuCode: string;
@@ -50,7 +53,7 @@ export function CustomizationModal({
     initialData,
     isEditMode = false,
 }: CustomizationModalProps) {
-    const [type, setType] = useState('length');
+    const [type, setType] = useState<CustomizationType>('length');
     const [value, setValue] = useState('');
     const [notes, setNotes] = useState('');
     const [confirmed, setConfirmed] = useState(false);
@@ -162,7 +165,7 @@ export function CustomizationModal({
                         </label>
                         <select
                             value={type}
-                            onChange={(e) => setType(e.target.value)}
+                            onChange={(e) => setType(e.target.value as CustomizationType)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                         >
                             {CUSTOMIZATION_TYPES.map((t) => (

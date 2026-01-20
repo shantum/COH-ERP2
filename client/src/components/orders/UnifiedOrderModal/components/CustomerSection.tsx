@@ -2,13 +2,14 @@
  * CustomerSection - Customer info and shipping address
  */
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, Check, Clock, CreditCard, ExternalLink } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, CreditCard, ExternalLink, Loader2, X } from 'lucide-react';
 import { customersApi } from '../../../../services/api';
 import { CustomerSearch } from '../../../common/CustomerSearch';
 import type { Order } from '../../../../types';
 import type { ModalMode, AddressData, EditFormState, OrderWithShopifyDetails } from '../types';
-import { formatAddressDisplay } from '../hooks/useUnifiedOrderModal';
+import { cn } from '@/lib/utils';
 
 interface CustomerSectionProps {
   order: Order;
@@ -44,6 +45,8 @@ export function CustomerSection({
   onViewCustomerProfile,
 }: CustomerSectionProps) {
   const isEditing = mode === 'edit';
+  // Auto-expand manual address form if no customer linked (no saved addresses to show)
+  const [isManualAddressOpen, setIsManualAddressOpen] = useState(!order.customerId && !editForm.customerId);
 
   // Fetch customer details for LTV and RTO info
   const { data: customerData, isLoading: isLoadingCustomer } = useQuery({
@@ -68,13 +71,34 @@ export function CustomerSection({
     const firstName = customer.firstName || '';
     const lastName = customer.lastName || '';
     const displayName = firstName || lastName ? `${firstName} ${lastName}`.trim() : customer.email?.split('@')[0] || '';
+    // Set the customer ID so we can fetch their saved addresses
+    if (customer.id) onEditFieldChange('customerId', customer.id);
     onEditFieldChange('customerName', displayName);
     if (customer.email) onEditFieldChange('customerEmail', customer.email);
     if (customer.phone) onEditFieldChange('customerPhone', customer.phone);
     onSetSearchingCustomer(false);
   };
 
+  // Use selected customer ID (from editForm) or fall back to order's customer ID
+  const activeCustomerId = editForm.customerId || order.customerId;
+
+  const handleClearAddress = () => {
+    // Clear all address fields
+    (['address1', 'address2', 'city', 'province', 'zip', 'country', 'phone', 'first_name', 'last_name', 'name'] as (keyof AddressData)[]).forEach(field => {
+      onAddressChange(field, '');
+    });
+    setIsManualAddressOpen(false);
+  };
+
   const hasAddressData = Object.values(addressForm).some(v => v && String(v).trim());
+
+  // Format address for compact display
+  const addressDisplay = [
+    addressForm.address1,
+    addressForm.city,
+    addressForm.province,
+    addressForm.zip,
+  ].filter(Boolean).join(', ');
 
   // Fallback: try to get address from various sources if addressForm is empty
   let displayAddress = addressForm;
@@ -283,106 +307,203 @@ export function CustomerSection({
 
       {/* Shipping Address (or Ship & Bill To if same) */}
       <div className="bg-gradient-to-br from-slate-50 to-white rounded-xl border border-slate-200/80 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-slate-100 rounded-lg">
-              <MapPin size={14} className="text-slate-500" />
-            </div>
-            <h3 className="text-sm font-semibold text-slate-700">
-              {/* Show "Ship & Bill To" if addresses are same or no billing address */}
-              {addressesMatch || !hasBillingAddress ? 'Ship & Bill To' : 'Shipping Address'}
-            </h3>
+        <div className="flex items-center gap-2 mb-3">
+          <div className="p-1.5 bg-slate-100 rounded-lg">
+            <MapPin size={14} className="text-slate-500" />
           </div>
-          {isEditing && order.customerId && (
-            <button
-              type="button"
-              onClick={onToggleAddressPicker}
-              className="text-xs text-sky-600 hover:text-sky-700 font-medium flex items-center gap-1"
-            >
-              <Clock size={12} />
-              Past addresses
-              {isAddressExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-          )}
+          <h3 className="text-sm font-semibold text-slate-700">
+            {/* Show "Ship & Bill To" if addresses are same or no billing address */}
+            {addressesMatch || !hasBillingAddress ? 'Ship & Bill To' : 'Shipping Address'}
+          </h3>
         </div>
 
         {isEditing ? (
-          <div className="space-y-3">
-            {/* Past addresses dropdown */}
-            {isAddressExpanded && (
-              <div className="p-3 bg-sky-50/50 rounded-lg border border-sky-100 mb-3">
-                <p className="text-xs font-medium text-sky-700 mb-2">Select from history:</p>
-                {isLoadingAddresses ? (
-                  <div className="flex items-center justify-center py-3">
-                    <div className="animate-spin w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full" />
-                  </div>
-                ) : pastAddresses.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-2">No past addresses found</p>
+          <div className="space-y-2">
+            {/* Address Toggle Button */}
+            <div className={cn(
+              'flex items-center gap-2 px-3 py-2 text-sm border rounded-lg transition-colors',
+              hasAddressData
+                ? 'border-green-200 bg-green-50 text-green-700'
+                : 'text-slate-500 hover:bg-slate-50'
+            )}>
+              <button
+                type="button"
+                onClick={onToggleAddressPicker}
+                className="flex-1 flex items-center gap-2 text-left min-w-0"
+              >
+                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                <span className="flex-1 truncate text-xs">
+                  {hasAddressData ? addressDisplay : 'Add shipping address...'}
+                </span>
+                {isAddressExpanded ? (
+                  <ChevronUp className="h-3.5 w-3.5 shrink-0" />
                 ) : (
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                    {pastAddresses.map((addr, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => onSelectPastAddress(addr)}
-                        className="w-full text-left px-3 py-2 text-xs text-slate-600 bg-white rounded-lg border border-slate-200 hover:border-sky-300 hover:bg-sky-50 transition-all flex items-start gap-2"
-                      >
-                        <Check size={12} className="text-sky-500 mt-0.5 shrink-0 opacity-0 group-hover:opacity-100" />
-                        <span className="line-clamp-2">{formatAddressDisplay(addr)}</span>
-                      </button>
-                    ))}
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                )}
+              </button>
+              {/* Clear address button */}
+              {hasAddressData && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleClearAddress();
+                  }}
+                  className="h-5 w-5 flex items-center justify-center rounded-full hover:bg-green-200 text-green-600 transition-colors"
+                  title="Clear address"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Expanded Address Panel */}
+            {isAddressExpanded && (
+              <div className="border rounded-lg overflow-hidden">
+                {/* Saved Addresses - only show if customer is linked */}
+                {activeCustomerId ? (
+                  <div className="p-3 bg-sky-50/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-slate-600">Saved Addresses</span>
+                      {isLoadingAddresses && (
+                        <Loader2 className="h-3 w-3 animate-spin text-slate-400" />
+                      )}
+                    </div>
+
+                    {isLoadingAddresses ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                        <span className="ml-2 text-xs text-slate-500">Loading addresses...</span>
+                      </div>
+                    ) : pastAddresses.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {pastAddresses.slice(0, 3).map((addr, idx) => {
+                          const isSelected = addr.address1 === addressForm.address1 && addr.zip === addressForm.zip;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => onSelectPastAddress(addr)}
+                              className={cn(
+                                'w-full text-left p-2.5 rounded-lg border transition-all text-xs',
+                                isSelected
+                                  ? 'bg-sky-50 border-sky-200 ring-1 ring-sky-200'
+                                  : 'bg-white border-slate-200 hover:bg-white hover:border-sky-300'
+                              )}
+                            >
+                              <div className="flex items-start gap-2">
+                                <MapPin className={cn(
+                                  'h-3.5 w-3.5 mt-0.5 shrink-0',
+                                  isSelected ? 'text-sky-500' : 'text-slate-400'
+                                )} />
+                                <div className="flex-1 min-w-0">
+                                  {(addr.first_name || addr.last_name || addr.name) && (
+                                    <p className="font-medium truncate text-slate-700">
+                                      {addr.name || [addr.first_name, addr.last_name].filter(Boolean).join(' ')}
+                                    </p>
+                                  )}
+                                  <p className="text-slate-500 truncate">
+                                    {[addr.address1, addr.city, addr.province, addr.zip].filter(Boolean).join(', ')}
+                                  </p>
+                                </div>
+                                {isSelected && (
+                                  <span className="text-[10px] text-sky-600 font-medium">Selected</span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 py-2 text-center">
+                        No saved addresses found
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50/50 border-b border-amber-100">
+                    <p className="text-xs text-amber-600 text-center">
+                      No customer linked - enter address manually
+                    </p>
                   </div>
                 )}
+
+                {/* Manual Entry Toggle */}
+                <div className="border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setIsManualAddressOpen(!isManualAddressOpen)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 transition-colors"
+                  >
+                    <span>Enter address manually</span>
+                    {isManualAddressOpen ? (
+                      <ChevronUp className="h-3 w-3" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3" />
+                    )}
+                  </button>
+
+                  {/* Manual Entry Form */}
+                  {isManualAddressOpen && (
+                    <div className="p-3 pt-0 space-y-2">
+                      <input
+                        type="text"
+                        value={addressForm.address1 || ''}
+                        onChange={(e) => onAddressChange('address1', e.target.value)}
+                        placeholder="Address line 1"
+                        className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                      />
+                      <input
+                        type="text"
+                        value={addressForm.address2 || ''}
+                        onChange={(e) => onAddressChange('address2', e.target.value)}
+                        placeholder="Address line 2"
+                        className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                      />
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          value={addressForm.city || ''}
+                          onChange={(e) => onAddressChange('city', e.target.value)}
+                          placeholder="City"
+                          className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                        />
+                        <input
+                          type="text"
+                          value={addressForm.province || ''}
+                          onChange={(e) => onAddressChange('province', e.target.value)}
+                          placeholder="State"
+                          className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                        />
+                        <input
+                          type="text"
+                          value={addressForm.zip || ''}
+                          onChange={(e) => onAddressChange('zip', e.target.value)}
+                          placeholder="ZIP"
+                          className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={addressForm.country || ''}
+                          onChange={(e) => onAddressChange('country', e.target.value)}
+                          placeholder="Country"
+                          className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                        />
+                        <input
+                          type="text"
+                          value={addressForm.phone || ''}
+                          onChange={(e) => onAddressChange('phone', e.target.value)}
+                          placeholder="Phone"
+                          className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-1 focus:ring-sky-100 outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-
-            {/* Address fields */}
-            <input
-              type="text"
-              value={addressForm.address1 || ''}
-              onChange={(e) => onAddressChange('address1', e.target.value)}
-              placeholder="Address line 1"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-            />
-            <input
-              type="text"
-              value={addressForm.address2 || ''}
-              onChange={(e) => onAddressChange('address2', e.target.value)}
-              placeholder="Address line 2"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="text"
-                value={addressForm.city || ''}
-                onChange={(e) => onAddressChange('city', e.target.value)}
-                placeholder="City"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-              />
-              <input
-                type="text"
-                value={addressForm.province || ''}
-                onChange={(e) => onAddressChange('province', e.target.value)}
-                placeholder="State"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="text"
-                value={addressForm.zip || ''}
-                onChange={(e) => onAddressChange('zip', e.target.value)}
-                placeholder="Pincode"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-              />
-              <input
-                type="text"
-                value={addressForm.country || ''}
-                onChange={(e) => onAddressChange('country', e.target.value)}
-                placeholder="Country"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition-all"
-              />
-            </div>
           </div>
         ) : hasDisplayAddress ? (
           <AddressDisplay address={displayAddress} />

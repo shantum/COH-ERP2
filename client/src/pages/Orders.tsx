@@ -32,6 +32,7 @@ import {
     UnifiedOrderModal,
     GlobalOrderSearch,
 } from '../components/orders';
+import type { CustomizationType } from '../components/orders';
 import type { Order } from '../types';
 
 // View configuration (3 views: Open, Shipped, Cancelled)
@@ -106,7 +107,7 @@ export default function Orders() {
     } | null>(null);
     const [isEditingCustomization, setIsEditingCustomization] = useState(false);
     const [customizationInitialData, setCustomizationInitialData] = useState<{
-        type: string;
+        type: CustomizationType;
         value: string;
         notes?: string;
     } | null>(null);
@@ -327,9 +328,14 @@ export default function Orders() {
     // Handlers with loading state tracking
     const handleMarkShippedLine = useCallback(
         (lineId: string, data?: { awbNumber?: string; courier?: string }) => {
+            // Shipping requires AWB and courier - if not provided, do nothing (UI should prompt)
+            if (!data?.awbNumber || !data?.courier) {
+                console.warn('Cannot ship without AWB number and courier');
+                return;
+            }
             startProcessing(lineId);
             mutations.markShippedLine.mutate(
-                { lineId, data },
+                { lineId, data: { awbNumber: data.awbNumber, courier: data.courier } },
                 { onSettled: () => stopProcessing(lineId) }
             );
         },
@@ -456,7 +462,7 @@ export default function Orders() {
             });
             setIsEditingCustomization(true);
             setCustomizationInitialData({
-                type: lineData.customizationType || 'length',
+                type: (lineData.customizationType as CustomizationType) || 'length',
                 value: lineData.customizationValue || '',
                 notes: lineData.customizationNotes || undefined,
             });
@@ -474,7 +480,7 @@ export default function Orders() {
     );
 
     const handleConfirmCustomization = useCallback(
-        (data: { type: string; value: string; notes?: string }) => {
+        (data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string }) => {
             if (!customizingLine) return;
 
             if (isEditingCustomization) {
