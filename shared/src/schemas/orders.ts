@@ -163,3 +163,68 @@ export const CustomizeLineSchema = z.object({
 });
 
 export type CustomizeLineInput = z.infer<typeof CustomizeLineSchema>;
+
+// ============================================
+// INLINE EDIT SCHEMAS (for table cell edits)
+// ============================================
+
+/**
+ * Update line notes schema
+ * Used for inline notes editing in orders table
+ */
+export const UpdateLineNotesSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    notes: z.string().max(1000, 'Notes cannot exceed 1000 characters').optional().nullable(),
+});
+export type UpdateLineNotesInput = z.infer<typeof UpdateLineNotesSchema>;
+
+/**
+ * Update line tracking schema
+ * Used for inline AWB/courier editing in orders table
+ */
+export const UpdateLineTrackingSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    awbNumber: awbSchema.optional().nullable(),
+    courier: z.string().trim().optional().nullable(),
+});
+export type UpdateLineTrackingInput = z.infer<typeof UpdateLineTrackingSchema>;
+
+/**
+ * Update ship by date schema
+ * Used for inline date editing in orders table
+ */
+export const UpdateShipByDateSchema = z.object({
+    orderId: z.string().uuid('Invalid order ID'),
+    shipByDate: z.string().optional().nullable(), // YYYY-MM-DD or ISO datetime
+});
+export type UpdateShipByDateInput = z.infer<typeof UpdateShipByDateSchema>;
+
+/**
+ * Update line quantity schema
+ * Used for inline quantity editing in order modals
+ */
+export const UpdateLineQuantitySchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    qty: z.number().int('Quantity must be an integer').positive('Quantity must be positive'),
+});
+export type UpdateLineQuantityInput = z.infer<typeof UpdateLineQuantitySchema>;
+
+/**
+ * Update line unit price schema
+ * Used for inline price editing in order modals
+ */
+export const UpdateLineUnitPriceSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    unitPrice: z.number().min(0, 'Unit price cannot be negative'),
+});
+export type UpdateLineUnitPriceInput = z.infer<typeof UpdateLineUnitPriceSchema>;
+
+/**
+ * Update order internal notes schema
+ * Used for order-level notes editing
+ */
+export const UpdateOrderNotesSchema = z.object({
+    orderId: z.string().uuid('Invalid order ID'),
+    internalNotes: z.string().max(2000, 'Notes cannot exceed 2000 characters').optional().nullable(),
+});
+export type UpdateOrderNotesInput = z.infer<typeof UpdateOrderNotesSchema>;

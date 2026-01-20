@@ -5,56 +5,14 @@
  * Order-specific schemas are in ./orders.ts
  */
 
-import { z } from 'zod';
+// Re-export common schemas (base schemas without circular dependencies)
+export * from './common.js';
 
-// Common validation schemas
-export const uuidSchema = z.string().uuid();
-
-export const dateStringSchema = z.string().datetime();
-
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
-});
-
-export const sortOrderSchema = z.enum(['asc', 'desc']);
-
-// Order status schema
-export const orderStatusSchema = z.enum([
-  'pending',
-  'allocated',
-  'picked',
-  'packed',
-  'shipped',
-  'delivered',
-  'cancelled',
-]);
-
-// Line status schema
-export const lineStatusSchema = z.enum([
-  'pending',
-  'allocated',
-  'picked',
-  'packed',
-  'shipped',
-  'delivered',
-  'cancelled',
-]);
-
-// Payment method schema
-export const paymentMethodSchema = z.enum(['cod', 'prepaid', 'credit']);
-
-// Customer tier schema
-export const customerTierSchema = z.enum(['new', 'bronze', 'silver', 'gold', 'platinum']);
-
-// Transaction type schema
-export const transactionTypeSchema = z.enum([
-  'inward',
-  'outward',
-  'adjustment',
-  'reserved',
-  'unreserved',
-]);
-
-// Re-export order schemas for convenience
+// Re-export domain schemas
 export * from './orders.js';
+export * from './production.js';
+export * from './returns.js';
+export * from './reconciliation.js';
+export * from './customers.js';
+export * from './inventory.js';
+export * from './products.js';
