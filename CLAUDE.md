@@ -7,11 +7,81 @@
 3. **Living memory.** Update this file with learnings/mistakes as you work.
 4. **Document as you go.** Comment undocumented code when you encounter it.
 5. **Use agents liberally.** Spawn sub-agents for parallel/complex work.
-6. **Commit early, commit often.** Always commit your changes. Small, frequent commits. **ALWAYS run `cd client && npx tsc -p tsconfig.app.json --noEmit` before committing to catch TypeScript errors.**
+6. **Commit early, commit often.** Always commit your changes. Small, frequent commits. **ALWAYS run `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit` before committing to catch TypeScript errors.**
 7. **Separate config from code.** Magic numbers, thresholds, mappings → `/config/`. Code should read config, not contain it.
 8. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
 9. **Build for the long term.** Write code your future self will thank you for. Maintainability over cleverness.
 10. **Type-safe by default.** Strict TypeScript, proper tRPC typing, Zod validation. No `any`, no shortcuts.
+
+## 🚧 MIGRATION IN PROGRESS: TanStack Start
+
+> **Active Migration**: Express + tRPC → TanStack Start
+> 
+> See [TANSTACK_START_MIGRATION_PLAN.md](./TANSTACK_START_MIGRATION_PLAN.md) for full details.
+
+### Migration Strategy: Hybrid Start
+
+| Component | Current | Target | Status |
+|-----------|---------|--------|--------|
+| Frontend Router | react-router-dom | TanStack Router | 🔄 In Progress |
+| Layouts | React components | TanStack `__root.tsx` | 🔄 In Progress |
+| Data Fetching | tRPC hooks | Route Loaders → TanStack Query | ⏳ Pending |
+| Mutations | tRPC mutations | Server Functions | ⏳ Pending |
+| Backend | Express + tRPC | TanStack Start Server | ⏳ Pending |
+| Real-time | SSE | SSE → TanStack Query invalidation | ⏳ Pending |
+
+**Key Insight**: tRPC stays running during migration. Call tRPC from TanStack Router pages:
+
+```typescript
+// app/routes/orders.tsx - tRPC works inside TanStack Router!
+function OrdersPage() {
+  const search = Route.useSearch();
+  const { data } = trpc.orders.list.useQuery({ view: search.view });
+  return <OrdersGrid orders={data?.rows} />;
+}
+```
+
+### Type Safety Philosophy
+
+> **⚠️ NON-NEGOTIABLE: Zod is the source of truth. Always.**
+> - Define schemas in Zod
+> - Infer types with `z.infer<>`
+> - Validate search params, Server Function inputs
+> - **NEVER write `interface` or `type` separately from the Zod schema**
+
+### TanStack Router Migration Rules
+
+#### Search Params & Type Safety
+- **No `any` or `Record<string, unknown>`** for search params. Every route with search state MUST have a Zod schema in `shared/src/schemas/searchParams.ts`
+- Use `z.coerce` for numbers and booleans to ensure robust URL state typing
+- Use `Route.useSearch()` instead of `window.location` or old `useSearchParams`. If you're manually parsing URL strings, update the route's `validateSearch` config instead
+
+#### File-Based Routing
+- **Strictly file-based routing** following TanStack Start pattern. Do NOT manually define route trees in a single large file—let the generator handle it from `client/src/routes/` directory structure
+- Register router for global type safety in `__root.tsx` or `router.tsx`:
+  ```typescript
+  declare module '@tanstack/react-router' {
+    interface Register { router: typeof router }
+  }
+  ```
+  This enables full jump-to-definition support for all routes
+
+#### Auth & beforeLoad Guards
+- All protected routes MUST be children of the `_authenticated` layout
+- Use `beforeLoad` hook for auth checks—do NOT use `useEffect` inside components for redirects. The router must block unauthorized access BEFORE component render
+- Handle `auth.isLoading` gracefully in `beforeLoad`—do NOT redirect to `/login` while auth status is still loading
+
+#### tRPC Integration (Phase 1)
+- tRPC hooks stay inside components for Phase 1
+- Ensure `RouterContext` correctly passes `queryClient` and `trpc` instance—this foundation enables Phase 2 Route Loaders without refactoring context
+
+#### Backwards Compatibility
+- **Non-negotiable**: Every old URL (`/catalog`, `/shipments`, etc.) must have a redirect file in `_redirects/` folder using TanStack `redirect()`. No 404s for existing bookmarks
+- Use `activeProps` on all `Link` components for sidebar styling—do NOT manually calculate active state via pathname string matching
+
+#### Code Quality
+- Avoid circular dependencies between `routerContext.ts` and `useAuth.tsx`. Move shared types to a dedicated types file
+- After creating/modifying routes, run `npx tsc --noEmit` in client directory. No broken link references or route tree errors accepted
 
 ## Quick Start
 
@@ -25,10 +95,15 @@ Login: `admin@coh.com` / `XOFiya@34`
 
 ## Stack
 
+### Current (During Migration)
 - **Backend**: Express + tRPC + Prisma + PostgreSQL
-- **Frontend**: React 19 + TanStack Query v5 + TanStack Table v8 + AG-Grid + Tailwind + shadcn/ui
-- **Integrations**: Shopify (orders), iThink Logistics (tracking)
-- **Testing**: Playwright (E2E) - `cd client && npx playwright test`
+- **Frontend**: React 19 + TanStack Router + TanStack Query v5 + AG-Grid + Tailwind + shadcn/ui
+- **Real-time**: SSE with TanStack Query invalidation
+
+### Target (Post-Migration)
+- **Full-stack**: TanStack Start + Prisma + PostgreSQL
+- **Data Flow**: Route Loaders → TanStack Query cache → SSE invalidation
+- **Validation**: Zod at all boundaries (search params, Server Function inputs)
 
 ### UI Components
 - **Use shadcn/ui components wherever possible** - buttons, dialogs, dropdowns, inputs, etc.
@@ -133,40 +208,32 @@ inventoryBalanceCache.invalidateAll(); // bulk ops
 - Server: `routes/sse.ts` | Client: `hooks/useOrderSSE.ts`
 - Auto-reconnect with 100-event replay buffer; prefer `invalidate()` over `setData()`
 
-## tRPC & API
+## Data Fetching & Mutations (During Migration)
 
-**Client uses tRPC.** Express handles webhooks & batch operations.
-
-### tRPC Quick Reference
+### Current Pattern (tRPC - Still Active)
 ```typescript
 import { trpc } from '@/services/trpc';
-
-// Query
-const { data, isLoading } = trpc.orders.list.useQuery({ view: 'open' });
-
-// Mutation
-const utils = trpc.useUtils();
-const mutation = trpc.orders.ship.useMutation({
-  onSuccess: () => utils.orders.list.invalidate(),
-});
-mutation.mutate({ orderLineIds, awbNumber, courier });
+const { data } = trpc.orders.list.useQuery({ view: 'open' });
+const mutation = trpc.orders.ship.useMutation();
 ```
 
-### tRPC Procedures (`server/src/trpc/routers/orders.ts`)
-- **Queries**: `list`, `get`
-- **Mutations**:
-  - Status: `setLineStatus`, `cancelOrder`, `uncancelOrder`
-  - Fulfillment: `allocate`, `ship`, `markPaid`
-  - Delivery (line-level): `markLineDelivered`, `markLineRto`, `receiveLineRto`
-  - Admin: `adminShip` (requires admin role + `ENABLE_ADMIN_SHIP=true`)
-
-### Client Mutation Hooks (`hooks/orders/`)
+### Target Pattern (TanStack Start)
 ```typescript
-const mutations = useOrdersMutations(); // Facade with optimistic updates
-mutations.pickLine.mutate(lineId);
+// Route loader (SSR)
+loader: async ({ search }) => getOrders({ data: search })
+
+// Component (hydrated from loader)
+const { data } = useQuery({
+  queryKey: ['orders', search],
+  queryFn: () => getOrders({ data: search }),
+  initialData: Route.useLoaderData(),
+});
 ```
 
-Focused hooks: `useOrderWorkflowMutations` (allocate/pick/pack), `useOrderShipMutations` (ship/adminShip), `useOrderCrudMutations`, `useOrderStatusMutations`, `useOrderDeliveryMutations` (line-level delivery/RTO), `useOrderLineMutations`, `useOrderReleaseMutations`
+### Real-time: SSE → TanStack Query
+1. SSE pushes signal-only pings: `{ type: 'ORDER_SHIPPED' }`
+2. Client calls `queryClient.invalidateQueries({ queryKey: ['orders'] })`
+3. TanStack Query refetches → UI updates
 
 ## Shopify Order Processor
 
@@ -388,4 +455,4 @@ Centralized config system in `/server/src/config/`:
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `c0a06fe` (2026-01-20)
+**Updated till commit:** `132bb72` (2026-01-20)
