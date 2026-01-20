@@ -1,19 +1,14 @@
 /**
  * Root Route Component - TanStack Router
  *
- * This component has two modes:
- * 1. SSR Mode (TanStack Start): Provides full provider hierarchy
- * 2. SPA Mode (via App.tsx): App.tsx handles providers, this just renders content
- *
- * Detection: Check if we're already inside a QueryClientProvider
+ * SPA Mode: Providers wrap the Outlet, index.html provides document structure
+ * SSR Mode: Use build:ssr which includes HeadContent/Scripts from TanStack Start
  */
 
 import { lazy, Suspense } from 'react';
 import {
     Outlet,
     createRootRouteWithContext,
-    HeadContent,
-    Scripts,
 } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
@@ -23,7 +18,7 @@ import { CommandPalette } from '../components/CommandPalette';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { AuthProvider } from '../hooks/useAuth';
 import { TRPCProvider } from '../providers/TRPCProvider';
-import appCss from '../index.css?url';
+import '../index.css';
 
 // Lazy load devtools for development only
 const TanStackRouterDevtools = import.meta.env.DEV
@@ -35,17 +30,6 @@ const TanStackRouterDevtools = import.meta.env.DEV
     : () => null;
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-    head: () => ({
-        meta: [
-            { charSet: 'utf-8' },
-            { name: 'viewport', content: 'width=device-width, initial-scale=1.0' },
-            { title: 'COH ERP' },
-        ],
-        links: [
-            { rel: 'icon', type: 'image/svg+xml', href: '/vite.svg' },
-            { rel: 'stylesheet', href: appCss },
-        ],
-    }),
     component: RootComponent,
     notFoundComponent: NotFoundComponent,
 });
@@ -65,39 +49,30 @@ function NotFoundComponent() {
 function RootComponent() {
     const { queryClient } = Route.useRouteContext();
 
-    // Full HTML document structure for SSR
-    // In SPA mode, this still works - browser ignores duplicate html/head/body
+    // SPA mode: Just providers and content, index.html provides document structure
     return (
-        <html lang="en">
-            <head>
-                <HeadContent />
-            </head>
-            <body>
-                <ErrorBoundary>
-                    <QueryClientProvider client={queryClient}>
-                        <TRPCProvider queryClient={queryClient}>
-                            <AuthProvider>
-                                <RouteLoadingBar />
-                                <CommandPalette />
-                                <Outlet />
-                            </AuthProvider>
-                        </TRPCProvider>
-                    </QueryClientProvider>
-                    <Toaster
-                        position="bottom-right"
-                        toastOptions={{
-                            className: 'text-sm',
-                        }}
-                    />
-                    {import.meta.env.DEV && (
-                        <Suspense fallback={null}>
-                            <TanStackRouterDevtools position="bottom-right" />
-                        </Suspense>
-                    )}
-                </ErrorBoundary>
-                <Scripts />
-            </body>
-        </html>
+        <ErrorBoundary>
+            <QueryClientProvider client={queryClient}>
+                <TRPCProvider queryClient={queryClient}>
+                    <AuthProvider>
+                        <RouteLoadingBar />
+                        <CommandPalette />
+                        <Outlet />
+                    </AuthProvider>
+                </TRPCProvider>
+            </QueryClientProvider>
+            <Toaster
+                position="bottom-right"
+                toastOptions={{
+                    className: 'text-sm',
+                }}
+            />
+            {import.meta.env.DEV && (
+                <Suspense fallback={null}>
+                    <TanStackRouterDevtools position="bottom-right" />
+                </Suspense>
+            )}
+        </ErrorBoundary>
     );
 }
 
