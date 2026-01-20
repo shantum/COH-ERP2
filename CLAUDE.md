@@ -388,4 +388,4 @@ Centralized config system in `/server/src/config/`:
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `784431c` (2026-01-17)
+**Updated till commit:** `c0a06fe` (2026-01-20)
