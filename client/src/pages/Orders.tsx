@@ -35,7 +35,42 @@ import {
     GlobalOrderSearch,
 } from '../components/orders';
 import type { CustomizationType } from '../components/orders';
-import type { Order } from '../types';
+import type { Order, OrderLine } from '../types';
+import type { OrdersSearchParams } from '@coh/shared';
+
+// Type for the derived order objects from useUnifiedOrdersData
+// These are constructed from rows, not full Order objects
+interface DerivedOrder {
+    id: string;
+    orderNumber: string;
+    orderLines?: OrderLine[];
+    status: string;
+    isArchived: boolean;
+    releasedToShipped: boolean;
+    releasedToCancelled: boolean;
+}
+
+// Batch callback data types
+interface CreateBatchData {
+    batchDate?: string;
+    tailorId?: string;
+    skuId?: string;
+    sampleName?: string;
+    sampleColour?: string;
+    sampleSize?: string;
+    qtyPlanned: number;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    sourceOrderLineId?: string;
+    notes?: string;
+}
+
+interface UpdateBatchData {
+    batchDate?: string;
+    qtyPlanned?: number;
+    tailorId?: string;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    notes?: string;
+}
 
 // View configuration (3 views: Open, Shipped, Cancelled)
 // RTO and COD Pending are now filter chips within Shipped view
@@ -76,7 +111,7 @@ export default function Orders() {
                 allocatedFilter: undefined,
                 productionFilter: undefined,
                 shippedFilter: undefined,
-            } as any,
+            } satisfies OrdersSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -84,7 +119,7 @@ export default function Orders() {
     const setPage = useCallback((newPage: number) => {
         navigate({
             to: '/orders',
-            search: { ...search, page: newPage } as any,
+            search: { ...search, page: newPage } satisfies OrdersSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -104,7 +139,7 @@ export default function Orders() {
     const setAllocatedFilter = useCallback((value: 'all' | 'allocated' | 'pending') => {
         navigate({
             to: '/orders',
-            search: { ...search, allocatedFilter: value === 'all' ? undefined : value, page: 1 } as any,
+            search: { ...search, allocatedFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -112,7 +147,7 @@ export default function Orders() {
     const setProductionFilter = useCallback((value: 'all' | 'scheduled' | 'needs' | 'ready') => {
         navigate({
             to: '/orders',
-            search: { ...search, productionFilter: value === 'all' ? undefined : value, page: 1 } as any,
+            search: { ...search, productionFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -120,7 +155,7 @@ export default function Orders() {
     const setShippedFilter = useCallback((value: ShippedFilter) => {
         navigate({
             to: '/orders',
-            search: { ...search, shippedFilter: value === 'all' ? undefined : value, page: 1 } as any,
+            search: { ...search, shippedFilter: value === 'all' ? undefined : value, page: 1 } satisfies OrdersSearchParams,
             replace: true,
         });
     }, [navigate, search]);
@@ -209,9 +244,11 @@ export default function Orders() {
 
     // Find the order for the modal from the URL orderId param
     // Must be placed after `orders` is defined from useUnifiedOrdersData
+    // Note: `orders` is DerivedOrder[] but modal expects full Order type
+    // The modal only needs core fields which DerivedOrder provides
     const unifiedModalOrder = useMemo(() => {
         if (!modalOrderId || !orders) return null;
-        const found = orders.find((o: any) => o.id === modalOrderId);
+        const found = (orders as DerivedOrder[]).find((o) => o.id === modalOrderId);
         return found ? (found as unknown as Order) : null;
     }, [modalOrderId, orders]);
 
@@ -226,7 +263,7 @@ export default function Orders() {
     }, [openUnifiedModal]);
 
     const handleViewOrderById = useCallback((orderId: string) => {
-        const order = orders?.find((o: any) => o.id === orderId);
+        const order = (orders as DerivedOrder[] | undefined)?.find((o) => o.id === orderId);
         if (order) {
             openUnifiedModal(order as unknown as Order, 'view');
         }
@@ -301,11 +338,12 @@ export default function Orders() {
                 );
             } else if (productionFilter === 'ready') {
                 rows = rows.filter(row => {
-                    const activeLines = row.order?.orderLines?.filter(
-                        (line: any) => line.lineStatus !== 'cancelled'
+                    const orderLines = row.order?.orderLines as OrderLine[] | undefined;
+                    const activeLines = orderLines?.filter(
+                        (line) => line.lineStatus !== 'cancelled'
                     ) || [];
                     return activeLines.length > 0 && activeLines.every(
-                        (line: any) =>
+                        (line) =>
                             line.lineStatus === 'allocated' ||
                             line.lineStatus === 'picked' ||
                             line.lineStatus === 'packed'
@@ -323,11 +361,11 @@ export default function Orders() {
     const releasableOrderCount = useMemo(() => {
         if (view !== 'open' || !orders) return 0;
         let count = 0;
-        for (const order of orders) {
-            const lines = order.orderLines || [];
-            const nonCancelledLines = lines.filter((l: any) => l.lineStatus !== 'cancelled');
+        for (const order of orders as DerivedOrder[]) {
+            const lines = (order.orderLines || []) as OrderLine[];
+            const nonCancelledLines = lines.filter((l) => l.lineStatus !== 'cancelled');
             if (nonCancelledLines.length === 0) continue;
-            const allShipped = nonCancelledLines.every((l: any) => l.lineStatus === 'shipped');
+            const allShipped = nonCancelledLines.every((l) => l.lineStatus === 'shipped');
             if (allShipped) count++;
         }
         return count;
@@ -337,10 +375,10 @@ export default function Orders() {
     const releasableCancelledCount = useMemo(() => {
         if (view !== 'open' || !orders) return 0;
         let count = 0;
-        for (const order of orders) {
-            const lines = order.orderLines || [];
+        for (const order of orders as DerivedOrder[]) {
+            const lines = (order.orderLines || []) as OrderLine[];
             if (lines.length === 0) continue;
-            const allCancelled = lines.every((l: any) => l.lineStatus === 'cancelled');
+            const allCancelled = lines.every((l) => l.lineStatus === 'cancelled');
             if (allCancelled) count++;
         }
         return count;
@@ -350,13 +388,14 @@ export default function Orders() {
     const pipelineCounts = useMemo(() => {
         if (view !== 'open' || !orders) return { pending: 0, allocated: 0, ready: 0 };
         let pending = 0, allocated = 0, ready = 0;
-        for (const order of orders) {
-            const lines = (order.orderLines || []).filter((l: any) => l.lineStatus !== 'cancelled');
+        for (const order of orders as DerivedOrder[]) {
+            const allLines = (order.orderLines || []) as OrderLine[];
+            const lines = allLines.filter((l) => l.lineStatus !== 'cancelled');
             if (lines.length === 0) continue;
-            const allAllocatedOrBetter = lines.every((l: any) =>
+            const allAllocatedOrBetter = lines.every((l) =>
                 ['allocated', 'picked', 'packed', 'shipped'].includes(l.lineStatus)
             );
-            const allPackedOrBetter = lines.every((l: any) =>
+            const allPackedOrBetter = lines.every((l) =>
                 ['packed', 'shipped'].includes(l.lineStatus)
             );
             if (allPackedOrBetter) ready++;
@@ -583,8 +622,8 @@ export default function Orders() {
         onUnmarkShippedLine: handleUnmarkShippedLine,
         onUpdateLineTracking: handleUpdateLineTracking,
         onShip: handleShipOrderUnified,
-        onCreateBatch: (data: any) => mutations.createBatch.mutate(data),
-        onUpdateBatch: (id: string, data: any) => mutations.updateBatch.mutate({ id, data }),
+        onCreateBatch: (data: CreateBatchData) => mutations.createBatch.mutate(data),
+        onUpdateBatch: (id: string, data: UpdateBatchData) => mutations.updateBatch.mutate({ id, data }),
         onDeleteBatch: (id: string) => mutations.deleteBatch.mutate(id),
         // Use mutateAsync for debounced auto-save hook compatibility
         onUpdateLineNotes: (lineId: string, notes: string) => mutations.updateLineNotes.mutateAsync({ lineId, notes }),

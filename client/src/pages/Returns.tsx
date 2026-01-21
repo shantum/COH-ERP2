@@ -14,6 +14,10 @@ import {
     getReturnsAnalyticsByProduct,
     getReturnsOrder,
     getReturnsBySkuCode,
+    type ActionQueueItem,
+    type ReturnRequest as ServerReturnRequest,
+    type ReturnLine as ServerReturnLine,
+    type ProductReturnAnalytics,
 } from '../server/functions/returns';
 import {
     createReturnRequest,
@@ -97,6 +101,13 @@ interface ReturnLine {
     };
 }
 
+/**
+ * Extended ReturnRequest type for client-side use.
+ *
+ * This extends the server response with additional UI-specific fields.
+ * Fields like ageDays, customerLtv, etc. are computed client-side or
+ * may not be present in all contexts.
+ */
 interface ReturnRequest {
     id: string;
     requestNumber: string;
@@ -138,6 +149,7 @@ interface ReturnRequest {
     lines: ReturnLine[];
     shipping: Array<{ awbNumber: string; courier: string; direction?: string; notes?: string }>;
     reverseShipping?: { courier: string; awbNumber: string } | null;
+    // Computed/enriched fields - may not always be present
     ageDays: number;
     customerLtv: number;
     customerOrderCount: number;
@@ -146,6 +158,48 @@ interface ReturnRequest {
 }
 
 // Use RepackingQueueItem from server functions
+
+/**
+ * OrderDetailView is the combined structure for the order detail modal.
+ * Contains the order info plus the flattened order lines.
+ */
+interface OrderDetailLine {
+    id: string;
+    lineStatus: string | null;
+    qty: number;
+    unitPrice: number;
+    notes: string | null;
+    awbNumber: string | null;
+    courier: string | null;
+    shippedAt: string | null;
+    deliveredAt: string | null;
+    trackingStatus: string | null;
+    isCustomized: boolean;
+    productionBatchId: string | null;
+    skuId: string;
+    sku?: {
+        skuCode: string;
+        size: string;
+        variation: {
+            colorName: string;
+            imageUrl: string | null;
+            product: {
+                name: string;
+                imageUrl: string | null;
+            };
+        };
+    };
+}
+
+interface OrderDetailView {
+    id: string;
+    orderNumber: string;
+    customerName?: string;
+    orderDate?: string;
+    status?: string;
+    totalAmount?: number;
+    orderLines: OrderDetailLine[];
+}
 
 interface SkuInfo {
     id: string;
@@ -192,6 +246,57 @@ type TabType = 'actions' | 'tickets' | 'receive' | 'queue' | 'analytics';
 // ============================================
 // HELPERS
 // ============================================
+
+/**
+ * Maps server ReturnRequest to local ReturnRequest format
+ * Computes missing fields like ageDays and maps returnLines -> lines
+ */
+const mapServerReturnRequest = (serverReq: ServerReturnRequest): ReturnRequest => {
+    // Compute age in days from createdAt
+    const createdDate = new Date(serverReq.createdAt);
+    const ageDays = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    return {
+        id: serverReq.id,
+        requestNumber: serverReq.requestNumber,
+        requestType: serverReq.requestType,
+        resolution: serverReq.resolution,
+        status: serverReq.status,
+        reasonCategory: serverReq.reasonCategory,
+        reasonDetails: serverReq.reasonDetails,
+        createdAt: serverReq.createdAt,
+        originalOrderId: serverReq.originalOrderId,
+        originalOrder: serverReq.originalOrder,
+        exchangeOrderId: serverReq.exchangeOrderId,
+        exchangeOrder: serverReq.exchangeOrder,
+        reverseInTransitAt: serverReq.reverseInTransitAt,
+        reverseReceived: serverReq.reverseReceived,
+        reverseReceivedAt: serverReq.reverseReceivedAt ?? null,
+        forwardShippedAt: undefined, // Not in server response
+        forwardDelivered: serverReq.forwardDelivered,
+        forwardDeliveredAt: serverReq.forwardDeliveredAt ?? null,
+        customerId: serverReq.customerId,
+        customer: serverReq.customerId ? {
+            id: serverReq.customerId,
+            name: serverReq.customerName,
+            firstName: serverReq.customerName.split(' ')[0] || '',
+            lastName: serverReq.customerName.split(' ').slice(1).join(' ') || '',
+            email: serverReq.customerEmail,
+        } : null,
+        lines: serverReq.returnLines.map((line: ServerReturnLine) => ({
+            ...line,
+            sku: {
+                ...line.sku,
+                barcode: null, // Server doesn't return barcode on sku
+            },
+        })),
+        shipping: [], // Not in server response
+        ageDays,
+        customerLtv: 0, // Would need separate fetch
+        customerOrderCount: 0, // Would need separate fetch
+        customerTier: 'bronze' as const, // Would need separate computation
+    };
+};
 
 const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return null;
@@ -295,7 +400,10 @@ export default function Returns() {
 
     const { data: returns = [], isLoading } = useQuery({
         queryKey: ['returns'],
-        queryFn: () => getReturnsAllFn(),
+        queryFn: async () => {
+            const serverData = await getReturnsAllFn();
+            return serverData.map(mapServerReturnRequest);
+        },
     });
 
     const { data: pendingTickets = [], isLoading: loadingTickets } = useQuery({
@@ -344,7 +452,7 @@ export default function Returns() {
 
     const { data: orderDetail, isLoading: loadingOrder } = useQuery({
         queryKey: ['order', selectedOrderId],
-        queryFn: async () => {
+        queryFn: async (): Promise<OrderDetailView | null> => {
             const response = await getOrdersFn({
                 data: {
                     view: 'open',
@@ -353,12 +461,43 @@ export default function Returns() {
             });
             // Extract first order from response
             if (response.rows.length > 0) {
-                const orderLines = response.rows.filter((line) => line.order.id === selectedOrderId!);
-                if (orderLines.length > 0) {
-                    const order = orderLines[0].order;
+                const flattenedLines = response.rows.filter((line) => line.order.id === selectedOrderId!);
+                if (flattenedLines.length > 0) {
+                    const firstRow = flattenedLines[0];
                     return {
-                        ...order,
-                        lines: orderLines,
+                        id: firstRow.order.id,
+                        orderNumber: firstRow.order.orderNumber,
+                        customerName: firstRow.customerName,
+                        orderDate: firstRow.orderDate,
+                        status: firstRow.orderStatus,
+                        totalAmount: firstRow.totalAmount ?? undefined,
+                        orderLines: flattenedLines.map((row) => ({
+                            id: row.lineId || '',
+                            lineStatus: row.lineStatus,
+                            qty: row.qty,
+                            unitPrice: row.unitPrice,
+                            notes: row.lineNotes,
+                            awbNumber: row.lineAwbNumber,
+                            courier: row.lineCourier,
+                            shippedAt: row.lineShippedAt,
+                            deliveredAt: row.lineDeliveredAt,
+                            trackingStatus: row.lineTrackingStatus,
+                            isCustomized: row.isCustomized,
+                            productionBatchId: row.productionBatchId,
+                            skuId: row.skuId || '',
+                            sku: {
+                                skuCode: row.skuCode,
+                                size: row.size,
+                                variation: {
+                                    colorName: row.colorName,
+                                    imageUrl: row.imageUrl,
+                                    product: {
+                                        name: row.productName,
+                                        imageUrl: row.imageUrl,
+                                    },
+                                },
+                            },
+                        })),
                     };
                 }
             }
@@ -373,13 +512,13 @@ export default function Returns() {
 
     // Action queue items
     const qcPendingCount = queueItems.length;
-    const exchangesReadyToShip = returns?.filter((r: any) =>
+    const exchangesReadyToShip = returns?.filter((r: ReturnRequest) =>
         (r.resolution?.startsWith('exchange') || r.requestType === 'exchange') &&
         r.reverseInTransitAt &&
         !r.forwardShippedAt &&
         !r.forwardDelivered
     ) || [];
-    const refundsPending = returns?.filter((r: any) =>
+    const refundsPending = returns?.filter((r: ReturnRequest) =>
         (r.resolution === 'refund' || r.requestType === 'return') &&
         r.status === 'received' &&
         !r.refundAmount
@@ -434,15 +573,40 @@ export default function Returns() {
 
     const searchMutation = useMutation({
         mutationFn: (code: string) => getReturnsBySkuCodeFn({ data: { code } }),
-        onSuccess: (returnRequest, code) => {
+        onSuccess: (returnRequest: ServerReturnRequest | null, code: string) => {
             if (returnRequest) {
-                // Found a matching return request
-                setMatchingTickets([returnRequest as any]);
-                setSelectedTicket(returnRequest as any);
+                // Map server response to local ReturnRequest type (returnLines -> lines)
+                const mappedRequest: ReturnRequest = {
+                    ...returnRequest,
+                    reverseReceivedAt: returnRequest.reverseReceivedAt ?? null,
+                    forwardDeliveredAt: returnRequest.forwardDeliveredAt ?? null,
+                    lines: returnRequest.returnLines.map((line: ServerReturnLine) => ({
+                        ...line,
+                        sku: {
+                            ...line.sku,
+                            barcode: null, // Server type doesn't have barcode on sku
+                        },
+                    })),
+                    shipping: [],
+                    ageDays: 0,
+                    customerLtv: 0,
+                    customerOrderCount: 0,
+                    customerTier: 'bronze' as const,
+                    customer: returnRequest.customerId ? {
+                        id: returnRequest.customerId,
+                        name: returnRequest.customerName,
+                        firstName: returnRequest.customerName.split(' ')[0] || '',
+                        lastName: returnRequest.customerName.split(' ').slice(1).join(' ') || '',
+                        email: returnRequest.customerEmail,
+                    } : null,
+                };
+
+                setMatchingTickets([mappedRequest]);
+                setSelectedTicket(mappedRequest);
 
                 // Find the line with this SKU
-                const matchingLine = (returnRequest as any).returnLines.find(
-                    (line: any) => line.sku.skuCode === code || line.sku.barcode === code
+                const matchingLine = mappedRequest.lines.find(
+                    (line: ReturnLine) => line.sku.skuCode === code || line.sku.barcode === code
                 );
                 setSelectedLine(matchingLine || null);
                 setError('');
@@ -452,7 +616,7 @@ export default function Returns() {
                 setScannedSku(null);
             }
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err?.message || 'Failed to search');
             setScannedSku(null);
             setMatchingTickets([]);
@@ -475,7 +639,7 @@ export default function Returns() {
             resetReceiveState();
             inputRef.current?.focus();
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err?.message || 'Failed to receive item');
         },
     });
@@ -501,7 +665,7 @@ export default function Returns() {
             setSuccessMessage('Item processed successfully');
             closeQcModal();
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err?.message || 'Failed to process item');
         },
     });
@@ -513,7 +677,7 @@ export default function Returns() {
             queryClient.invalidateQueries({ queryKey: ['repacking-history'] });
             setSuccessMessage('Item moved back to QC queue');
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err?.message || 'Failed to undo');
         },
     });
@@ -525,7 +689,7 @@ export default function Returns() {
             queryClient.invalidateQueries({ queryKey: ['returns', 'pending'] });
             setSuccessMessage('Item removed from QC queue');
         },
-        onError: (err: any) => {
+        onError: (err: Error) => {
             setError(err?.message || 'Failed to remove item');
         },
     });
@@ -746,32 +910,27 @@ export default function Returns() {
                                 <span className="text-xs font-normal text-gray-500">Reverse pickup confirmed</span>
                             </h3>
                             <div className="space-y-3">
-                                {(actionQueue?.actions?.shipReplacements || []).slice(0, 5).map((item: any) => (
+                                {(actionQueue?.actions?.shipReplacements || []).slice(0, 5).map((item: ActionQueueItem) => (
                                     <div key={item.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100">
                                         <div className="flex items-center gap-3">
                                             <div>
                                                 <div className="font-medium">{item.requestNumber}</div>
                                                 <div className="text-sm text-gray-600">
-                                                    {item.customer?.name} • Order #{item.originalOrder?.orderNumber}
+                                                    {item.customerName} • Order #{item.originalOrderNumber}
                                                 </div>
-                                                {item.reverseAwb && (
-                                                    <div className="text-xs text-gray-500">AWB: {item.reverseAwb}</div>
+                                                {item.exchangeOrderNumber && (
+                                                    <div className="text-xs text-gray-500">Exchange: {item.exchangeOrderNumber}</div>
                                                 )}
                                             </div>
-                                            <span className={`badge ${getResolutionBadge(item.resolution, 'exchange').color}`}>
-                                                {getResolutionBadge(item.resolution, 'exchange').label}
+                                            <span className={`badge ${getResolutionBadge(undefined, 'exchange').color}`}>
+                                                {getResolutionBadge(undefined, 'exchange').label}
                                             </span>
-                                            {item.valueDifference && item.valueDifference > 0 && (
-                                                <span className="text-sm text-purple-700 font-medium">
-                                                    +₹{item.valueDifference}
-                                                </span>
-                                            )}
                                         </div>
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => {
-                                                    const r = returns?.find((ret: any) => ret.id === item.id);
-                                                    if (r) setSelectedRequest(r as any);
+                                                    const r = returns?.find((ret: ReturnRequest) => ret.id === item.id);
+                                                    if (r) setSelectedRequest(r);
                                                 }}
                                                 className="btn-sm bg-blue-600 text-white hover:bg-blue-700"
                                             >
@@ -813,7 +972,7 @@ export default function Returns() {
                                 Process Refunds ({actionQueue?.actions?.processRefunds?.length || refundsPending.length} pending)
                             </h3>
                             <div className="space-y-3">
-                                {(actionQueue?.actions?.processRefunds || []).slice(0, 5).map((item: any) => (
+                                {(actionQueue?.actions?.processRefunds || []).slice(0, 5).map((item: ReturnRequest) => (
                                     <div key={item.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-100">
                                         <div className="flex items-center gap-3">
                                             <div>
@@ -823,18 +982,18 @@ export default function Returns() {
                                                 </div>
                                                 {item.lines && item.lines.length > 0 && (
                                                     <div className="text-xs text-gray-500">
-                                                        {item.lines.map((l: any) => `${l.skuCode} (${l.qty})`).join(', ')}
+                                                        {item.lines.map((l: ReturnLine) => `${l.sku.skuCode} (${l.qty})`).join(', ')}
                                                     </div>
                                                 )}
                                             </div>
                                             <span className="text-sm font-medium text-green-700">
-                                                ₹{item.returnValue || item.lines?.reduce((sum: number, l: any) => sum + ((l.mrp || 0) * (l.qty || 1)), 0) || 0}
+                                                ₹{item.returnValue || item.lines?.reduce((sum: number, l: ReturnLine) => sum + ((l.unitPrice || 0) * (l.qty || 1)), 0) || 0}
                                             </span>
                                         </div>
                                         <button
                                             onClick={() => {
-                                                const r = returns?.find((ret: any) => ret.id === item.id);
-                                                if (r) setSelectedRequest(r as any);
+                                                const r = returns?.find((ret: ReturnRequest) => ret.id === item.id);
+                                                if (r) setSelectedRequest(r);
                                             }}
                                             className="btn-sm bg-green-600 text-white hover:bg-green-700"
                                         >
@@ -878,11 +1037,11 @@ export default function Returns() {
                             </tr>
                         </thead>
                         <tbody>
-                            {returns?.map((r: any) => (
+                            {returns?.map((r: ReturnRequest) => (
                                 <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                                     <td className="table-cell">
                                         <button
-                                            onClick={() => setSelectedRequest(r as any)}
+                                            onClick={() => setSelectedRequest(r)}
                                             className="font-medium text-primary-600 hover:text-primary-800 hover:underline"
                                         >
                                             {r.requestNumber}
@@ -920,7 +1079,7 @@ export default function Returns() {
                                         )}
                                     </td>
                                     <td className="table-cell">
-                                        {r.lines?.slice(0, 1).map((l: any, i: number) => {
+                                        {r.lines?.slice(0, 1).map((l: ReturnLine, i: number) => {
                                             const imageUrl = l.sku?.variation?.imageUrl || l.sku?.variation?.product?.imageUrl;
                                             return (
                                                 <div key={i} className="flex items-center gap-2">
@@ -1073,7 +1232,7 @@ export default function Returns() {
                                         <p className="text-center py-8 text-gray-500">No pending tickets</p>
                                     ) : (
                                         <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                                            {pendingTickets?.map((ticket: any) => (
+                                            {pendingTickets?.map((ticket: ServerReturnRequest) => (
                                                 <div key={ticket.id} className="p-3 border border-gray-200 rounded-lg">
                                                     <div className="flex items-center justify-between mb-2">
                                                         <span className="font-semibold">{ticket.requestNumber}</span>
@@ -1082,10 +1241,10 @@ export default function Returns() {
                                                         </span>
                                                     </div>
                                                     <div className="text-sm text-gray-600">
-                                                        {ticket.customer?.name || ticket.originalOrder?.customerName}
+                                                        {ticket.customerName || ticket.originalOrder?.customerName}
                                                     </div>
                                                     <div className="text-xs text-gray-500 mt-1">
-                                                        {ticket.lines?.length} item{ticket.lines?.length > 1 ? 's' : ''}
+                                                        {ticket.returnLines?.length} item{ticket.returnLines?.length > 1 ? 's' : ''}
                                                     </div>
                                                 </div>
                                             ))}
@@ -1436,14 +1595,14 @@ export default function Returns() {
                             </tr>
                         </thead>
                         <tbody>
-                            {analytics?.filter((a: any) => a.sold > 0).map((a: any) => (
+                            {analytics?.filter((a: ProductReturnAnalytics) => a.totalQty > 0).map((a: ProductReturnAnalytics) => (
                                 <tr key={a.productId} className="border-b last:border-0">
-                                    <td className="table-cell font-medium">{a.name}</td>
-                                    <td className="table-cell text-right">{a.sold}</td>
-                                    <td className="table-cell text-right">{a.returned}</td>
-                                    <td className="table-cell text-right font-medium">{a.returnRate}%</td>
+                                    <td className="table-cell font-medium">{a.productName}</td>
+                                    <td className="table-cell text-right">-</td>
+                                    <td className="table-cell text-right">{a.returnCount}</td>
+                                    <td className="table-cell text-right font-medium">-</td>
                                     <td className="table-cell">
-                                        {parseFloat(a.returnRate) > 10 && (
+                                        {a.returnCount > 5 && (
                                             <AlertTriangle size={16} className="text-red-500" />
                                         )}
                                     </td>
@@ -1532,18 +1691,18 @@ export default function Returns() {
                             ) : (
                                 <div className="space-y-4">
                                     <div className="grid grid-cols-2 gap-4 text-sm">
-                                        <div><span className="text-gray-500">Customer:</span> <span className="ml-2 font-medium">{(orderDetail as any).customerName}</span></div>
-                                        <div><span className="text-gray-500">Date:</span> <span className="ml-2">{new Date((orderDetail as any).orderDate).toLocaleDateString()}</span></div>
-                                        <div><span className="text-gray-500">Status:</span> <span className="ml-2 capitalize">{(orderDetail as any).status}</span></div>
-                                        <div><span className="text-gray-500">Total:</span> <span className="ml-2 font-medium">₹{(orderDetail as any).totalAmount?.toLocaleString()}</span></div>
+                                        <div><span className="text-gray-500">Customer:</span> <span className="ml-2 font-medium">{orderDetail.customerName}</span></div>
+                                        <div><span className="text-gray-500">Date:</span> <span className="ml-2">{orderDetail.orderDate ? new Date(orderDetail.orderDate).toLocaleDateString() : '-'}</span></div>
+                                        <div><span className="text-gray-500">Status:</span> <span className="ml-2 capitalize">{orderDetail.status}</span></div>
+                                        <div><span className="text-gray-500">Total:</span> <span className="ml-2 font-medium">₹{orderDetail.totalAmount?.toLocaleString() ?? '-'}</span></div>
                                     </div>
                                     <div className="border-t pt-4">
                                         <h3 className="font-medium mb-3">Items</h3>
                                         <div className="space-y-2">
-                                            {orderDetail.orderLines?.map((line: any) => (
+                                            {orderDetail.orderLines?.map((line: OrderDetailLine) => (
                                                 <div key={line.id} className="flex items-center gap-3 p-2 bg-gray-50 rounded">
                                                     {(line.sku?.variation?.imageUrl || line.sku?.variation?.product?.imageUrl) && (
-                                                        <img src={line.sku.variation.imageUrl || line.sku.variation.product.imageUrl} alt="" className="w-12 h-12 object-cover rounded" />
+                                                        <img src={line.sku?.variation?.imageUrl || line.sku?.variation?.product?.imageUrl || ''} alt="" className="w-12 h-12 object-cover rounded" />
                                                     )}
                                                     <div className="flex-1 min-w-0">
                                                         <div className="font-medium text-sm">{line.sku?.variation?.product?.name}</div>
@@ -1686,8 +1845,8 @@ function NewReturnModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
             const orderData = await getReturnsOrderFn({ data: { orderNumber: orderNumber.trim() } });
             setOrder(orderData);
             setStep(2);
-        } catch (err: any) {
-            setError(err?.message || 'Order not found');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Order not found');
         } finally {
             setLoading(false);
         }
@@ -1710,7 +1869,7 @@ function NewReturnModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
             awbNumber?: string;
         }) => createReturnRequestFn({ data }),
         onSuccess: () => onSuccess(),
-        onError: (err: any) => setError(err?.message || 'Failed to create return request'),
+        onError: (err: Error) => setError(err?.message || 'Failed to create return request'),
     });
 
     const handleSubmit = () => {
@@ -1924,7 +2083,7 @@ function ReturnDetailModal({
             awbNumber?: string;
         }) => updateReturnRequestFn({ data: { id: request.id, ...data } }),
         onSuccess: () => onSuccess(),
-        onError: (err: any) => setError(err?.message || 'Failed to update'),
+        onError: (err: Error) => setError(err?.message || 'Failed to update'),
     });
 
     const markReverseReceivedMutation = useMutation({

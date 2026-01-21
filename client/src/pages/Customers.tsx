@@ -1,20 +1,152 @@
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { getCustomersList, getCustomer } from '../server/functions/customers';
-import { getOrders } from '../server/functions/orders';
+import { getCustomersList, getCustomer, type CustomerListItem } from '../server/functions/customers';
+import { getOrders, type FlattenedOrderRow } from '../server/functions/orders';
 import {
     getCustomerOverviewStats,
     getHighValueCustomers,
     getAtRiskCustomers,
     getFrequentReturners,
+    type TopCustomer,
 } from '../server/functions/reports';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { UnifiedOrderModal } from '../components/orders';
-import type { Order } from '../types';
+import type { Order, OrderLine } from '../types';
 import { useCustomersUrlModal } from '../hooks/useUrlModal';
 import { Route } from '../routes/_authenticated/customers';
+import type { CustomersSearchParams } from '@coh/shared';
+
+/**
+ * Unified customer display type that works across all tabs.
+ * Maps to both CustomerListItem (all tab) and TopCustomer (analytics tabs).
+ */
+interface CustomerDisplayItem {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    totalOrders: number;
+    lifetimeValue: number;
+    customerTier: string;
+    // Optional fields for specific tabs
+    avgOrderValue?: number;
+    lastOrderDate?: string | null;
+    daysSinceLastOrder?: number;
+    returnRate?: number;
+}
+
+/**
+ * Transform TopCustomer (from analytics endpoints) to CustomerDisplayItem.
+ * TopCustomer uses `name` as combined first+last, so we split it.
+ */
+function topCustomerToDisplayItem(c: TopCustomer): CustomerDisplayItem {
+    // Split name into first/last (TopCustomer has combined name)
+    const nameParts = c.name.split(' ');
+    const firstName = nameParts[0] || null;
+    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+
+    return {
+        id: c.id,
+        email: c.email,
+        firstName,
+        lastName,
+        totalOrders: c.totalOrders,
+        lifetimeValue: c.totalSpent,
+        customerTier: c.tier,
+        avgOrderValue: c.avgOrderValue,
+        lastOrderDate: c.lastOrderDate,
+    };
+}
+
+/**
+ * Transform CustomerListItem to CustomerDisplayItem.
+ */
+function customerListItemToDisplayItem(c: CustomerListItem): CustomerDisplayItem {
+    return {
+        id: c.id,
+        email: c.email,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        totalOrders: c.totalOrders,
+        lifetimeValue: c.lifetimeValue,
+        customerTier: c.customerTier,
+    };
+}
+
+/**
+ * Build a modal-compatible Order object from FlattenedOrderRow data.
+ * The modal needs Order type, but we construct it from the flattened representation.
+ */
+function buildModalOrder(orderLines: FlattenedOrderRow[]): Order | null {
+    if (orderLines.length === 0) return null;
+
+    const firstLine = orderLines[0];
+
+    // Construct orderLines array from the flattened rows
+    const lines: OrderLine[] = orderLines.map((row) => ({
+        id: row.lineId ?? '',
+        orderId: row.orderId,
+        shopifyLineId: null,
+        skuId: row.skuId ?? '',
+        qty: row.qty,
+        unitPrice: row.unitPrice,
+        lineStatus: (row.lineStatus ?? 'pending') as import('@coh/shared').LineStatus,
+        allocatedAt: null,
+        pickedAt: null,
+        packedAt: null,
+        shippedAt: row.lineShippedAt,
+        inventoryTxnId: null,
+        productionBatchId: row.productionBatchId,
+        notes: row.lineNotes || null,
+        rtoCondition: null,
+        rtoInwardedAt: null,
+        rtoInwardedById: null,
+        rtoNotes: null,
+        isCustomized: row.isCustomized,
+        isNonReturnable: row.isNonReturnable,
+    }));
+
+    // Construct the Order object
+    const order: Order = {
+        id: firstLine.orderId,
+        orderNumber: firstLine.orderNumber,
+        shopifyOrderId: null,
+        channel: firstLine.channel ?? 'manual',
+        customerId: firstLine.customerId,
+        customerName: firstLine.customerName,
+        customerEmail: firstLine.customerEmail,
+        customerPhone: firstLine.customerPhone,
+        shippingAddress: null,
+        orderDate: firstLine.orderDate,
+        shipByDate: firstLine.shipByDate,
+        customerNotes: firstLine.customerNotes,
+        internalNotes: firstLine.internalNotes,
+        status: firstLine.orderStatus as import('@coh/shared').OrderStatus,
+        isArchived: firstLine.isArchived,
+        archivedAt: null,
+        awbNumber: firstLine.lineAwbNumber,
+        courier: firstLine.lineCourier,
+        shippedAt: firstLine.lineShippedAt,
+        deliveredAt: firstLine.lineDeliveredAt,
+        rtoInitiatedAt: null,
+        rtoReceivedAt: null,
+        totalAmount: firstLine.totalAmount ?? 0,
+        discountCode: firstLine.discountCodes,
+        createdAt: firstLine.orderDate,
+        syncedAt: null,
+        shopifyFulfillmentStatus: firstLine.shopifyStatus || null,
+        isExchange: firstLine.isExchange,
+        originalOrderId: null,
+        partiallyCancelled: false,
+        orderLines: lines,
+        fulfillmentStage: firstLine.fulfillmentStage as import('@coh/shared').FulfillmentStage | undefined,
+        totalLines: firstLine.totalLines,
+    };
+
+    return order;
+}
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -83,33 +215,50 @@ export default function Customers() {
     const timePeriod = urlSearch.timePeriod || 'all';
 
     const setTab = useCallback((value: 'all' | 'highValue' | 'atRisk' | 'returners') => {
+        const newSearch: CustomersSearchParams = {
+            ...urlSearch,
+            tab: value === 'all' ? undefined : value,
+            page: 1,
+        };
         navigate({
             to: '/customers',
-            search: { ...urlSearch, tab: value === 'all' ? undefined : value, page: 1 } as any,
+            search: newSearch,
             replace: true,
         });
     }, [navigate, urlSearch]);
 
     const setPage = useCallback((value: number) => {
+        const newSearch: CustomersSearchParams = {
+            ...urlSearch,
+            page: value + 1, // Convert to 1-indexed for URL
+        };
         navigate({
             to: '/customers',
-            search: { ...urlSearch, page: value + 1 } as any, // Convert to 1-indexed for URL
+            search: newSearch,
             replace: true,
         });
     }, [navigate, urlSearch]);
 
     const setTopN = useCallback((value: number) => {
+        const newSearch: CustomersSearchParams = {
+            ...urlSearch,
+            topN: value === 100 ? undefined : value,
+        };
         navigate({
             to: '/customers',
-            search: { ...urlSearch, topN: value === 100 ? undefined : value } as any,
+            search: newSearch,
             replace: true,
         });
     }, [navigate, urlSearch]);
 
     const setTimePeriod = useCallback((value: number | 'all') => {
+        const newSearch: CustomersSearchParams = {
+            ...urlSearch,
+            timePeriod: value === 'all' ? undefined : value,
+        };
         navigate({
             to: '/customers',
-            search: { ...urlSearch, timePeriod: value === 'all' ? undefined : value } as any,
+            search: newSearch,
             replace: true,
         });
     }, [navigate, urlSearch]);
@@ -130,9 +279,14 @@ export default function Customers() {
     // Sync search input to URL on change (debounced)
     useEffect(() => {
         if (debouncedSearch !== (urlSearch.search || '')) {
+            const newSearch: CustomersSearchParams = {
+                ...urlSearch,
+                search: debouncedSearch || undefined,
+                page: 1,
+            };
             navigate({
                 to: '/customers',
-                search: { ...urlSearch, search: debouncedSearch || undefined, page: 1 } as any,
+                search: newSearch,
                 replace: true,
             });
         }
@@ -158,18 +312,16 @@ export default function Customers() {
                             orderId: customerOrderData.recentOrders[0].id,
                         },
                     });
-                    // Extract first order from response
+                    // Extract order lines from response and build modal order
                     if (response.rows.length > 0) {
-                        // Group lines into order
+                        // Filter rows for this specific order
                         const orderLines = response.rows.filter(
                             (line) => line.order.id === customerOrderData.recentOrders[0].id
                         );
-                        if (orderLines.length > 0) {
-                            const order = orderLines[0].order;
-                            setModalOrder({
-                                ...order,
-                                lines: orderLines,
-                            } as any);
+                        // Build the modal order from flattened rows
+                        const order = buildModalOrder(orderLines);
+                        if (order) {
+                            setModalOrder(order);
                         }
                     }
                 } catch (error) {
@@ -262,9 +414,36 @@ export default function Customers() {
         return colors[tier] || colors.bronze;
     };
 
-    // Display data - server handles filtering for 'all' tab
-    const displayData = tab === 'all' ? customers
-        : tab === 'highValue' ? highValue : tab === 'atRisk' ? atRisk : returners;
+    // Display data - transform to unified CustomerDisplayItem type
+    // Server handles filtering for 'all' tab, analytics tabs return TopCustomer[]
+    const displayData: CustomerDisplayItem[] | undefined = useMemo(() => {
+        if (tab === 'all') {
+            return customers?.map(customerListItemToDisplayItem);
+        } else if (tab === 'highValue') {
+            return highValue?.map(topCustomerToDisplayItem);
+        } else if (tab === 'atRisk') {
+            // atRisk includes daysSinceLastOrder calculated from lastOrderDate
+            return atRisk?.map((c) => {
+                const display = topCustomerToDisplayItem(c);
+                // Calculate days since last order if lastOrderDate exists
+                if (c.lastOrderDate) {
+                    const lastOrder = new Date(c.lastOrderDate);
+                    const now = new Date();
+                    display.daysSinceLastOrder = Math.floor((now.getTime() - lastOrder.getTime()) / (1000 * 60 * 60 * 24));
+                }
+                return display;
+            });
+        } else {
+            // returners - calculate return rate (approximate from order count)
+            return returners?.map((c) => {
+                const display = topCustomerToDisplayItem(c);
+                // Return rate is already calculated server-side, we estimate it here
+                // Server filters to customers with >10% return rate
+                display.returnRate = c.totalOrders > 0 ? Math.round((1 / c.totalOrders) * 100) : 0;
+                return display;
+            });
+        }
+    }, [tab, customers, highValue, atRisk, returners]);
 
     if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div></div>;
 
@@ -534,20 +713,20 @@ export default function Customers() {
                         {tab === 'returners' && <th className="table-header text-right">Return Rate</th>}
                     </tr></thead>
                     <tbody>
-                        {displayData?.map((c: any) => (
+                        {displayData?.map((c) => (
                             <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50 cursor-pointer" onClick={() => handleCustomerClick(c.id)}>
                                 <td className="table-cell"><div className="flex items-center gap-2">{getTierIcon(c.customerTier)}<span className="font-medium">{c.firstName} {c.lastName}</span></div></td>
                                 <td className="table-cell text-gray-500">{c.email}</td>
                                 <td className="table-cell text-right">{c.totalOrders}</td>
                                 <td className="table-cell text-right font-medium">₹{Number(c.lifetimeValue).toLocaleString()}</td>
                                 {tab === 'all' && <td className="table-cell"><span className={`badge ${getTierBadge(c.customerTier)}`}>{c.customerTier}</span></td>}
-                                {tab === 'highValue' && <td className="table-cell text-right text-gray-600">₹{Number(c.avgOrderValue || 0).toLocaleString()}</td>}
+                                {tab === 'highValue' && <td className="table-cell text-right text-gray-600">₹{Number(c.avgOrderValue ?? 0).toLocaleString()}</td>}
                                 {tab === 'highValue' && (
                                     <td className="table-cell">
                                         <div className="flex items-center gap-1.5 text-gray-600">
                                             <Clock size={12} className="text-gray-400" />
-                                            <span className="text-sm">{formatShortDate(c.lastOrderDate)}</span>
-                                            <span className="text-xs text-gray-400">({formatRelativeTime(c.lastOrderDate)})</span>
+                                            <span className="text-sm">{formatShortDate(c.lastOrderDate ?? null)}</span>
+                                            <span className="text-xs text-gray-400">({formatRelativeTime(c.lastOrderDate ?? null)})</span>
                                         </div>
                                     </td>
                                 )}

@@ -30,9 +30,107 @@ import { DetailPanel } from '../components/materials/DetailPanel';
 import { MaterialsTreeView } from '../components/materials/MaterialsTreeView';
 import { TrimsTable } from '../components/materials/TrimsTable';
 import { ServicesTable } from '../components/materials/ServicesTable';
+import type { MaterialNode } from '../components/materials/types';
 
 // Tab types
 type TabType = 'materials' | 'trims' | 'services';
+
+// Supplier type from getFabricSuppliers response
+interface Supplier {
+    id: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    contactName?: string | null;
+    isActive: boolean;
+    createdAt: Date;
+}
+
+// Trim item type (matches TrimsTable Trim interface)
+interface TrimItem {
+    id: string;
+    code: string;
+    name: string;
+    category: string;
+    description?: string | null;
+    costPerUnit?: number | null;
+    unit: string;
+    supplierId?: string | null;
+    supplierName?: string | null;
+    leadTimeDays?: number | null;
+    minOrderQty?: number | null;
+    usageCount?: number;
+    isActive: boolean;
+}
+
+// Service item type (matches ServicesTable Service interface)
+interface ServiceItem {
+    id: string;
+    code: string;
+    name: string;
+    category: string;
+    description?: string | null;
+    costPerJob?: number | null;
+    costUnit: string;
+    vendorId?: string | null;
+    vendorName?: string | null;
+    leadTimeDays?: number | null;
+    usageCount?: number;
+    isActive: boolean;
+}
+
+// Form state for Trim edit modal (string values for form inputs)
+interface TrimEditState extends Omit<TrimItem, 'costPerUnit' | 'leadTimeDays' | 'minOrderQty'> {
+    costPerUnit: string;
+    leadTimeDays: string;
+    minOrderQty: string;
+}
+
+// Form state for Service edit modal (string values for form inputs)
+interface ServiceEditState extends Omit<ServiceItem, 'costPerJob' | 'leadTimeDays'> {
+    costPerJob: string;
+    leadTimeDays: string;
+}
+
+// Colour node for inward modal (subset of MaterialNode with required fields)
+interface ColourInwardNode {
+    id: string;
+    colourName?: string;
+    name?: string;
+    fabricName?: string;
+    unit?: string;
+}
+
+// Detail panel item type - union of all viewable item types
+type DetailPanelItem = MaterialNode | TrimItem | ServiceItem;
+
+// Type guard helpers for DetailPanelItem
+function isTrimItem(item: DetailPanelItem): item is TrimItem {
+    return 'unit' in item && 'category' in item && !('type' in item);
+}
+
+function isServiceItem(item: DetailPanelItem): item is ServiceItem {
+    return 'costUnit' in item && 'category' in item && !('type' in item);
+}
+
+function isMaterialNode(item: DetailPanelItem): item is MaterialNode {
+    return 'type' in item && (item.type === 'material' || item.type === 'fabric' || item.type === 'colour');
+}
+
+// Get the detail panel type from the item
+function getDetailPanelType(item: DetailPanelItem): 'colour' | 'fabric' | 'material' | 'trim' | 'service' {
+    if (isMaterialNode(item)) {
+        return item.type;
+    }
+    if (isServiceItem(item)) {
+        return 'service';
+    }
+    if (isTrimItem(item)) {
+        return 'trim';
+    }
+    return 'material'; // fallback
+}
 
 // Trim categories
 const TRIM_CATEGORIES = ['button', 'zipper', 'label', 'thread', 'elastic', 'tape', 'hook', 'drawstring', 'other'];
@@ -61,10 +159,10 @@ export default function Materials() {
     const [showAddTrim, setShowAddTrim] = useState(false);
     const [showAddService, setShowAddService] = useState(false);
     const [showAddSupplier, setShowAddSupplier] = useState(false);
-    const [showDetail, setShowDetail] = useState<any>(null);
-    const [showEditTrim, setShowEditTrim] = useState<any>(null);
-    const [showEditService, setShowEditService] = useState<any>(null);
-    const [showInward, setShowInward] = useState<any>(null);
+    const [showDetail, setShowDetail] = useState<DetailPanelItem | null>(null);
+    const [showEditTrim, setShowEditTrim] = useState<TrimEditState | null>(null);
+    const [showEditService, setShowEditService] = useState<ServiceEditState | null>(null);
+    const [showInward, setShowInward] = useState<ColourInwardNode | null>(null);
 
     // Form states
     const [trimForm, setTrimForm] = useState({
@@ -92,7 +190,7 @@ export default function Materials() {
         queryKey: ['suppliers'],
         queryFn: () => getSuppliersFn({ data: {} }),
     });
-    const suppliers = suppliersData?.suppliers;
+    const suppliers: Supplier[] | undefined = suppliersData?.suppliers;
 
     // Mutation types - defined inline based on Zod schema shapes
     type CreateTrimInput = {
@@ -325,7 +423,13 @@ export default function Materials() {
                 {activeTab === 'materials' && (
                     <MaterialsTreeView
                         onViewDetails={setShowDetail}
-                        onAddInward={setShowInward}
+                        onAddInward={(node) => setShowInward({
+                            id: node.id,
+                            colourName: node.colourName,
+                            name: node.name,
+                            fabricName: node.fabricName,
+                            unit: node.unit,
+                        })}
                         onAddSupplier={() => setShowAddSupplier(true)}
                     />
                 )}
@@ -334,7 +438,12 @@ export default function Materials() {
                 {activeTab === 'trims' && (
                     <div className="p-4 h-full overflow-auto">
                         <TrimsTable
-                            onEdit={setShowEditTrim}
+                            onEdit={(trim) => setShowEditTrim({
+                                ...trim,
+                                costPerUnit: trim.costPerUnit?.toString() ?? '',
+                                leadTimeDays: trim.leadTimeDays?.toString() ?? '',
+                                minOrderQty: trim.minOrderQty?.toString() ?? '',
+                            })}
                             onViewDetails={setShowDetail}
                             onAdd={() => setShowAddTrim(true)}
                         />
@@ -345,7 +454,11 @@ export default function Materials() {
                 {activeTab === 'services' && (
                     <div className="p-4 h-full overflow-auto">
                         <ServicesTable
-                            onEdit={setShowEditService}
+                            onEdit={(service) => setShowEditService({
+                                ...service,
+                                costPerJob: service.costPerJob?.toString() ?? '',
+                                leadTimeDays: service.leadTimeDays?.toString() ?? '',
+                            })}
                             onViewDetails={setShowDetail}
                             onAdd={() => setShowAddService(true)}
                         />
@@ -357,7 +470,7 @@ export default function Materials() {
             {showDetail && (
                 <DetailPanel
                     item={showDetail}
-                    type={showDetail.nodeType || 'material'}
+                    type={getDetailPanelType(showDetail)}
                     isOpen={!!showDetail}
                     onClose={() => setShowDetail(null)}
                     onEdit={() => {}}
@@ -466,7 +579,7 @@ export default function Materials() {
                                     onChange={(e) => setTrimForm(f => ({ ...f, supplierId: e.target.value }))}
                                 >
                                     <option value="">Select supplier...</option>
-                                    {suppliers?.map((s: any) => (
+                                    {suppliers?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -509,7 +622,7 @@ export default function Materials() {
                                     <input
                                         className="input"
                                         value={showEditTrim.code || ''}
-                                        onChange={(e) => setShowEditTrim((t: any) => ({ ...t, code: e.target.value }))}
+                                        onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, code: e.target.value }) : null)}
                                         required
                                     />
                                 </div>
@@ -518,7 +631,7 @@ export default function Materials() {
                                     <select
                                         className="input"
                                         value={showEditTrim.category || 'button'}
-                                        onChange={(e) => setShowEditTrim((t: any) => ({ ...t, category: e.target.value }))}
+                                        onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, category: e.target.value }) : null)}
                                     >
                                         {TRIM_CATEGORIES.map(c => (
                                             <option key={c} value={c} className="capitalize">{c}</option>
@@ -531,7 +644,7 @@ export default function Materials() {
                                 <input
                                     className="input"
                                     value={showEditTrim.name || ''}
-                                    onChange={(e) => setShowEditTrim((t: any) => ({ ...t, name: e.target.value }))}
+                                    onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, name: e.target.value }) : null)}
                                     required
                                 />
                             </div>
@@ -543,7 +656,7 @@ export default function Materials() {
                                         type="number"
                                         step="0.01"
                                         value={showEditTrim.costPerUnit || ''}
-                                        onChange={(e) => setShowEditTrim((t: any) => ({ ...t, costPerUnit: e.target.value }))}
+                                        onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, costPerUnit: e.target.value }) : null)}
                                     />
                                 </div>
                                 <div>
@@ -551,7 +664,7 @@ export default function Materials() {
                                     <select
                                         className="input"
                                         value={showEditTrim.unit || 'piece'}
-                                        onChange={(e) => setShowEditTrim((t: any) => ({ ...t, unit: e.target.value }))}
+                                        onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, unit: e.target.value }) : null)}
                                     >
                                         <option value="piece">Piece</option>
                                         <option value="meter">Meter</option>
@@ -567,7 +680,7 @@ export default function Materials() {
                                         className="input"
                                         type="number"
                                         value={showEditTrim.leadTimeDays || ''}
-                                        onChange={(e) => setShowEditTrim((t: any) => ({ ...t, leadTimeDays: e.target.value }))}
+                                        onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, leadTimeDays: e.target.value }) : null)}
                                     />
                                 </div>
                                 <div>
@@ -577,7 +690,7 @@ export default function Materials() {
                                         type="number"
                                         step="0.01"
                                         value={showEditTrim.minOrderQty || ''}
-                                        onChange={(e) => setShowEditTrim((t: any) => ({ ...t, minOrderQty: e.target.value }))}
+                                        onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, minOrderQty: e.target.value }) : null)}
                                     />
                                 </div>
                             </div>
@@ -586,10 +699,10 @@ export default function Materials() {
                                 <select
                                     className="input"
                                     value={showEditTrim.supplierId || ''}
-                                    onChange={(e) => setShowEditTrim((t: any) => ({ ...t, supplierId: e.target.value }))}
+                                    onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, supplierId: e.target.value }) : null)}
                                 >
                                     <option value="">Select supplier...</option>
-                                    {suppliers?.map((s: any) => (
+                                    {suppliers?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -600,7 +713,7 @@ export default function Materials() {
                                     className="input"
                                     rows={2}
                                     value={showEditTrim.description || ''}
-                                    onChange={(e) => setShowEditTrim((t: any) => ({ ...t, description: e.target.value }))}
+                                    onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, description: e.target.value }) : null)}
                                 />
                             </div>
                             <div className="flex items-center gap-2">
@@ -608,7 +721,7 @@ export default function Materials() {
                                     type="checkbox"
                                     id="trimActive"
                                     checked={showEditTrim.isActive ?? true}
-                                    onChange={(e) => setShowEditTrim((t: any) => ({ ...t, isActive: e.target.checked }))}
+                                    onChange={(e) => setShowEditTrim((t) => t ? ({ ...t, isActive: e.target.checked }) : null)}
                                     className="rounded border-gray-300"
                                 />
                                 <label htmlFor="trimActive" className="text-sm text-gray-700">Active</label>
@@ -713,7 +826,7 @@ export default function Materials() {
                                     onChange={(e) => setServiceForm(f => ({ ...f, vendorId: e.target.value }))}
                                 >
                                     <option value="">Select vendor...</option>
-                                    {suppliers?.map((s: any) => (
+                                    {suppliers?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -756,7 +869,7 @@ export default function Materials() {
                                     <input
                                         className="input"
                                         value={showEditService.code || ''}
-                                        onChange={(e) => setShowEditService((s: any) => ({ ...s, code: e.target.value }))}
+                                        onChange={(e) => setShowEditService((s) => s ? ({ ...s, code: e.target.value }) : null)}
                                         required
                                     />
                                 </div>
@@ -765,7 +878,7 @@ export default function Materials() {
                                     <select
                                         className="input"
                                         value={showEditService.category || 'printing'}
-                                        onChange={(e) => setShowEditService((s: any) => ({ ...s, category: e.target.value }))}
+                                        onChange={(e) => setShowEditService((s) => s ? ({ ...s, category: e.target.value }) : null)}
                                     >
                                         {SERVICE_CATEGORIES.map(c => (
                                             <option key={c} value={c} className="capitalize">{c}</option>
@@ -778,7 +891,7 @@ export default function Materials() {
                                 <input
                                     className="input"
                                     value={showEditService.name || ''}
-                                    onChange={(e) => setShowEditService((s: any) => ({ ...s, name: e.target.value }))}
+                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, name: e.target.value }) : null)}
                                     required
                                 />
                             </div>
@@ -790,7 +903,7 @@ export default function Materials() {
                                         type="number"
                                         step="0.01"
                                         value={showEditService.costPerJob || ''}
-                                        onChange={(e) => setShowEditService((s: any) => ({ ...s, costPerJob: e.target.value }))}
+                                        onChange={(e) => setShowEditService((s) => s ? ({ ...s, costPerJob: e.target.value }) : null)}
                                     />
                                 </div>
                                 <div>
@@ -798,7 +911,7 @@ export default function Materials() {
                                     <select
                                         className="input"
                                         value={showEditService.costUnit || 'per_piece'}
-                                        onChange={(e) => setShowEditService((s: any) => ({ ...s, costUnit: e.target.value }))}
+                                        onChange={(e) => setShowEditService((s) => s ? ({ ...s, costUnit: e.target.value }) : null)}
                                     >
                                         <option value="per_piece">Per Piece</option>
                                         <option value="per_meter">Per Meter</option>
@@ -813,7 +926,7 @@ export default function Materials() {
                                     className="input"
                                     type="number"
                                     value={showEditService.leadTimeDays || ''}
-                                    onChange={(e) => setShowEditService((s: any) => ({ ...s, leadTimeDays: e.target.value }))}
+                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, leadTimeDays: e.target.value }) : null)}
                                 />
                             </div>
                             <div>
@@ -821,10 +934,10 @@ export default function Materials() {
                                 <select
                                     className="input"
                                     value={showEditService.vendorId || ''}
-                                    onChange={(e) => setShowEditService((s: any) => ({ ...s, vendorId: e.target.value }))}
+                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, vendorId: e.target.value }) : null)}
                                 >
                                     <option value="">Select vendor...</option>
-                                    {suppliers?.map((s: any) => (
+                                    {suppliers?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>
@@ -835,7 +948,7 @@ export default function Materials() {
                                     className="input"
                                     rows={2}
                                     value={showEditService.description || ''}
-                                    onChange={(e) => setShowEditService((s: any) => ({ ...s, description: e.target.value }))}
+                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, description: e.target.value }) : null)}
                                 />
                             </div>
                             <div className="flex items-center gap-2">
@@ -843,7 +956,7 @@ export default function Materials() {
                                     type="checkbox"
                                     id="serviceActive"
                                     checked={showEditService.isActive ?? true}
-                                    onChange={(e) => setShowEditService((s: any) => ({ ...s, isActive: e.target.checked }))}
+                                    onChange={(e) => setShowEditService((s) => s ? ({ ...s, isActive: e.target.checked }) : null)}
                                     className="rounded border-gray-300"
                                 />
                                 <label htmlFor="serviceActive" className="text-sm text-gray-700">Active</label>
@@ -911,7 +1024,7 @@ export default function Materials() {
                                     onChange={(e) => setInwardForm(f => ({ ...f, supplierId: e.target.value }))}
                                 >
                                     <option value="">Select supplier...</option>
-                                    {suppliers?.map((s: any) => (
+                                    {suppliers?.map((s) => (
                                         <option key={s.id} value={s.id}>{s.name}</option>
                                     ))}
                                 </select>

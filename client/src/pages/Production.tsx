@@ -12,6 +12,182 @@ import {
     useRequirements,
     useProductionMutations,
 } from '../hooks/production/useProductionData';
+import type { ProductionSearchParams } from '@coh/shared';
+
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+
+/** SKU nested within a batch */
+interface BatchSku {
+    id: string;
+    skuCode: string | null;
+    size: string | null;
+    isCustomSku: boolean | null;
+    customizationType: string | null;
+    customizationValue: string | null;
+    customizationNotes: string | null;
+    variation: {
+        id: string | null;
+        colorName: string | null;
+        fabricId: string | null;
+        product: {
+            id: string | null;
+            name: string | null;
+            styleCode?: string | null;
+        } | null;
+        fabric: {
+            id: string;
+            name: string | null;
+        } | null;
+    } | null;
+}
+
+/** Sample info for sample batches */
+interface SampleInfo {
+    sampleCode: string | null;
+    sampleName: string | null;
+    sampleColour: string | null;
+    sampleSize: string | null;
+}
+
+/** Customization info for custom SKU batches */
+interface BatchCustomization {
+    type: string | null;
+    value: string | null;
+    notes: string | null;
+    sourceOrderLineId?: string | null;
+    linkedOrder: {
+        id: string;
+        orderNumber: string;
+        customerName: string | null;
+    } | null;
+}
+
+/** Production batch from server */
+interface ProductionBatch {
+    id: string;
+    batchCode: string | null;
+    batchDate: Date;
+    status: string;
+    qtyPlanned: number;
+    qtyCompleted: number;
+    priority: string | null;
+    notes: string | null;
+    sourceOrderLineId: string | null;
+    tailorId: string | null;
+    tailorName: string | null;
+    skuId: string | null;
+    isCustomSku: boolean;
+    isSampleBatch: boolean | string | null;
+    sampleInfo?: SampleInfo | undefined;
+    customization?: BatchCustomization | undefined;
+    tailor: { id: string; name: string | null } | null;
+    sku: BatchSku | null;
+    orderLines: Array<{
+        id: string;
+        order: {
+            id: string;
+            orderNumber: string;
+            customerName: string | null;
+        };
+    }>;
+}
+
+/** Consolidated entry for clipboard copy */
+interface ConsolidatedEntry {
+    sku: BatchSku | null;
+    totalQty: number;
+    notes: string[];
+    isCustomSku: boolean;
+    isSampleBatch: boolean;
+    customization: BatchCustomization | null | undefined;
+    sampleInfo: SampleInfo | null | undefined;
+}
+
+/** Consolidated SKU within a color group */
+interface ConsolidatedSku {
+    skuId: string | null;
+    size: string | null;
+    skuCode: string | null;
+    qtyPlanned: number;
+    qtyCompleted: number;
+    status: string;
+    batchIds: string[];
+    originalBatch: ProductionBatch;
+}
+
+/** Color group within a product group */
+interface ColorGroup {
+    colorName: string;
+    skus: ConsolidatedSku[];
+}
+
+/** Product group for consolidated view */
+interface ProductGroup {
+    productName: string;
+    product: {
+        id: string | null;
+        name: string | null;
+    } | null;
+    colors: ColorGroup[];
+}
+
+/** Date group for schedule view */
+interface DateGroup {
+    date: string;
+    displayDate: string;
+    isToday: boolean;
+    isFuture: boolean;
+    isPast: boolean;
+    isLocked: boolean;
+    batches: ProductionBatch[];
+    consolidatedGroups: ProductGroup[];
+    totalPlanned: number;
+    totalCompleted: number;
+    allCompleted: boolean;
+    hasInProgress: boolean;
+}
+
+/** Tailor from server - specializations stored as comma-separated string */
+interface Tailor {
+    id: string;
+    name: string;
+    specializations: string | null;
+    dailyCapacityMins: number;
+    isActive: boolean;
+}
+
+/** Capacity data from server */
+interface TailorCapacity {
+    tailorId: string;
+    tailorName: string;
+    dailyCapacityMins: number;
+    allocatedMins: number;
+    availableMins: number;
+    utilizationPct: string;
+    batches?: ProductionBatch[];
+}
+
+/** Requirement item from server */
+interface RequirementItem {
+    orderLineId: string;
+    orderId: string;
+    orderNumber: string;
+    orderDate: Date;
+    customerName: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    fabricType: string;
+    qty: number;
+    currentInventory: number;
+    scheduledForLine: number;
+    shortage: number;
+    lineStatus: string;
+}
 
 // Default date range for production batches (14 days past to 45 days future)
 const getDefaultDateRange = () => {
@@ -37,16 +213,20 @@ export default function Production() {
     const tab = (search.tab || 'schedule') as 'schedule' | 'capacity' | 'tailors';
 
     const setTab = useCallback((value: 'schedule' | 'capacity' | 'tailors') => {
+        const updatedSearch: ProductionSearchParams = {
+            ...search,
+            tab: value === 'schedule' ? undefined : value,
+        };
         navigate({
             to: '/production',
-            search: { ...search, tab: value === 'schedule' ? undefined : value } as any,
+            search: updatedSearch,
             replace: true,
         });
     }, [navigate, search]);
 
     // UI state - local only
     const [showPlanner, setShowPlanner] = useState(false); // Start collapsed for performance
-    const [showComplete, setShowComplete] = useState<any>(null);
+    const [showComplete, setShowComplete] = useState<ProductionBatch | null>(null);
     const [qtyCompleted, setQtyCompleted] = useState(0);
     const [customConfirmed, setCustomConfirmed] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
@@ -78,11 +258,11 @@ export default function Production() {
 
     // Optimistic update helper for batch status changes
     const optimisticBatchUpdate = useCallback((batchId: string, updates: Partial<{ status: string; qtyCompleted: number }>) => {
-        queryClient.setQueryData(
+        queryClient.setQueryData<ProductionBatch[] | undefined>(
             ['production', 'batches', { startDate: dateRange.startDate, endDate: dateRange.endDate }],
-            (old: any) => {
+            (old) => {
                 if (!old) return old;
-                return old.map((batch: any) =>
+                return old.map((batch) =>
                     batch.id === batchId ? { ...batch, ...updates } : batch
                 );
             }
@@ -108,9 +288,9 @@ export default function Production() {
     // Handle delete batch with optimistic update
     const handleDeleteBatch = useCallback(async (batchId: string) => {
         // Optimistic update - remove from list
-        queryClient.setQueryData(
+        queryClient.setQueryData<ProductionBatch[] | undefined>(
             ['production', 'batches', { startDate: dateRange.startDate, endDate: dateRange.endDate }],
-            (old: any) => old ? old.filter((batch: any) => batch.id !== batchId) : old
+            (old) => old ? old.filter((batch) => batch.id !== batchId) : old
         );
 
         try {
@@ -145,8 +325,9 @@ export default function Production() {
     }) => {
         try {
             await mutations.createBatch.mutateAsync(input);
-        } catch (error: any) {
-            alert(error.message || 'Failed to add item');
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Failed to add item';
+            alert(message);
         }
     }, [mutations.createBatch]);
 
@@ -163,13 +344,13 @@ export default function Production() {
     const isDateLocked = (dateStr: string) => lockedDates?.includes(dateStr) || false;
 
     // Copy production plan to clipboard
-    const copyToClipboard = (group: any) => {
+    const copyToClipboard = (group: DateGroup) => {
         // For custom SKUs and samples, don't consolidate - each batch is unique
         // For regular SKUs, consolidate by SKU ID
-        const consolidatedMap = new Map<string, { sku: any; totalQty: number; notes: string[]; isCustomSku: boolean; isSampleBatch: boolean; customization: any; sampleInfo: any }>();
-        const specialBatches: any[] = []; // Custom and sample batches
+        const consolidatedMap = new Map<string, ConsolidatedEntry>();
+        const specialBatches: ConsolidatedEntry[] = []; // Custom and sample batches
 
-        group.batches.forEach((batch: any) => {
+        group.batches.forEach((batch) => {
             // Sample batches are kept separate
             if (batch.isSampleBatch) {
                 specialBatches.push({
@@ -194,7 +375,7 @@ export default function Production() {
                     sampleInfo: null
                 });
             } else {
-                const key = batch.skuId;
+                const key = batch.skuId ?? 'unknown';
                 if (!consolidatedMap.has(key)) {
                     consolidatedMap.set(key, { sku: batch.sku, totalQty: 0, notes: [], isCustomSku: false, isSampleBatch: false, customization: null, sampleInfo: null });
                 }
@@ -296,9 +477,9 @@ export default function Production() {
     };
 
     // Group and consolidate batches by date, then by product/color
-    const groupBatchesByDate = (batches: any[]) => {
+    const groupBatchesByDate = (batches: ProductionBatch[]): DateGroup[] => {
         if (!batches) return [];
-        const groups: Record<string, any[]> = {};
+        const groups: Record<string, ProductionBatch[]> = {};
 
         batches.forEach(batch => {
             const dateKey = new Date(batch.batchDate).toISOString().split('T')[0];
@@ -316,10 +497,13 @@ export default function Production() {
             })
             .map(([date, items]) => {
                 // Group batches by product -> color for consolidated view
-                const productGroups: Record<string, { product: any; colorGroups: Record<string, { color: string; skus: any[] }> }> = {};
+                const productGroups: Record<string, {
+                    product: { id: string | null; name: string | null } | null;
+                    colorGroups: Record<string, { color: string; skus: ConsolidatedSku[] }>
+                }> = {};
 
                 items.forEach(batch => {
-                    const product = batch.sku?.variation?.product;
+                    const product = batch.sku?.variation?.product ?? null;
                     const productName = product?.name || 'Unknown';
                     const colorName = batch.sku?.variation?.colorName || 'Unknown';
 
@@ -341,8 +525,8 @@ export default function Production() {
                     } else {
                         productGroups[productName].colorGroups[colorName].skus.push({
                             skuId: batch.skuId,
-                            size: batch.sku?.size,
-                            skuCode: batch.sku?.skuCode,
+                            size: batch.sku?.size ?? null,
+                            skuCode: batch.sku?.skuCode ?? null,
                             qtyPlanned: batch.qtyPlanned,
                             qtyCompleted: batch.qtyCompleted,
                             status: batch.status,
@@ -353,7 +537,7 @@ export default function Production() {
                 });
 
                 // Convert to array and sort
-                const consolidatedGroups = Object.entries(productGroups)
+                const consolidatedGroups: ProductGroup[] = Object.entries(productGroups)
                     .sort(([a], [b]) => a.localeCompare(b))
                     .map(([productName, data]) => ({
                         productName,
@@ -493,7 +677,7 @@ export default function Production() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y">
-                                            {requirements.requirements.slice(0, requirementsLimit).map((item: any) => (
+                                            {requirements.requirements.slice(0, requirementsLimit).map((item: RequirementItem) => (
                                                 <tr key={item.orderLineId} className="hover:bg-gray-50">
                                                     <td className="px-3 py-2">
                                                         <div className="font-medium text-gray-900 text-xs">{item.orderNumber}</div>
@@ -681,7 +865,7 @@ export default function Production() {
                                     </thead>
                                     <tbody>
                                         {group.batches
-                                            .sort((a: any, b: any) => {
+                                            .sort((a: ProductionBatch, b: ProductionBatch) => {
                                                 // Samples come first
                                                 if (a.isSampleBatch && !b.isSampleBatch) return -1;
                                                 if (!a.isSampleBatch && b.isSampleBatch) return 1;
@@ -691,7 +875,7 @@ export default function Production() {
                                                 if (colorCompare !== 0) return colorCompare;
                                                 return sortBySizeOrder(a.sku?.size || '', b.sku?.size || '');
                                             })
-                                            .map((batch: any) => (
+                                            .map((batch: ProductionBatch) => (
                                             <tr key={batch.id} className={`border-t hover:bg-gray-50 ${batch.isSampleBatch ? 'bg-purple-50/50' : batch.isCustomSku ? 'bg-orange-50/50' : ''}`}>
                                                 <td className="py-2 px-4 font-mono text-xs text-gray-500">
                                                     {batch.isSampleBatch ? (
@@ -858,13 +1042,13 @@ export default function Production() {
             {/* Capacity */}
             {tab === 'capacity' && (
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {capacity?.map((t: any) => (
+                    {capacity?.map((t: TailorCapacity) => (
                         <div key={t.tailorId} className="card">
                             <h3 className="font-semibold">{t.tailorName}</h3>
                             <div className="mt-3">
                                 <div className="flex justify-between text-sm mb-1"><span>Utilization</span><span>{t.utilizationPct}%</span></div>
                                 <div className="w-full bg-gray-200 rounded-full h-2">
-                                    <div className={`h-2 rounded-full ${Number(t.utilizationPct) > 90 ? 'bg-red-500' : Number(t.utilizationPct) > 70 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, t.utilizationPct)}%` }} />
+                                    <div className={`h-2 rounded-full ${Number(t.utilizationPct) > 90 ? 'bg-red-500' : Number(t.utilizationPct) > 70 ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, Number(t.utilizationPct))}%` }} />
                                 </div>
                             </div>
                             <p className="text-sm text-gray-500 mt-2">{t.allocatedMins} / {t.dailyCapacityMins} mins</p>
@@ -887,10 +1071,10 @@ export default function Production() {
                             </tr>
                         </thead>
                         <tbody>
-                            {tailors?.map((t: any) => (
+                            {tailors?.map((t: Tailor) => (
                                 <tr key={t.id} className="border-b border-gray-100">
                                     <td className="py-2 pr-4 font-medium">{t.name}</td>
-                                    <td className="py-2 pr-4 text-gray-600">{t.specializations?.join(', ') || '-'}</td>
+                                    <td className="py-2 pr-4 text-gray-600">{t.specializations || '-'}</td>
                                     <td className="py-2 pr-4 text-right">{t.dailyCapacityMins} mins</td>
                                     <td className="py-2">
                                         <span className={`text-xs ${t.isActive ? 'text-green-600' : 'text-red-500'}`}>
