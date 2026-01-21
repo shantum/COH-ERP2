@@ -2,14 +2,15 @@
  * Customers Server Functions
  *
  * TanStack Start Server Functions for customers data fetching.
- * Bypasses tRPC/Express, calls Kysely directly from the server.
+ * Uses Prisma for database access.
  *
- * IMPORTANT: All database imports are dynamic to prevent Node.js code
- * (pg, Buffer) from being bundled into the client.
+ * IMPORTANT: Prisma client is dynamically imported to prevent Node.js code
+ * from being bundled into the client.
  */
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import type { Prisma, PrismaClient } from '@prisma/client';
 
 // Input validation schema
 const customersListInputSchema = z.object({
@@ -57,7 +58,7 @@ export interface CustomersListResponse {
 /**
  * Server Function: Get customers list
  *
- * Fetches customers directly from database using Kysely.
+ * Fetches customers directly from database using Prisma.
  * Returns paginated items with tier filtering.
  */
 export const getCustomersList = createServerFn({ method: 'GET' })
@@ -66,31 +67,103 @@ export const getCustomersList = createServerFn({ method: 'GET' })
         console.log('[Server Function] getCustomersList called with:', data);
 
         try {
-            // Dynamic imports - only loaded on server, not bundled into client
-            const { createKysely } = await import('@coh/shared/database');
-            const { listCustomersKysely } = await import(
-                '@coh/shared/database/queries/customersListKysely'
-            );
+            // Dynamic import to prevent bundling Prisma into client
+            const { PrismaClient } = await import('@prisma/client');
 
-            // Initialize Kysely singleton (safe to call multiple times)
-            createKysely(process.env.DATABASE_URL);
+            // Use global singleton pattern
+            const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
 
-            // Call Kysely query directly
-            const result = await listCustomersKysely({
-                search: data.search,
-                tier: data.tier === 'all' ? undefined : data.tier,
-                limit: data.limit,
-                offset: data.offset,
-            });
+            // Build where clause
+            const where: Prisma.CustomerWhereInput = {};
+
+            // Apply search filter
+            // Single word: OR across fields
+            // Multi-word: AND (each word must match at least one field)
+            if (data.search) {
+                const words = data.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+                if (words.length === 1) {
+                    // Single word: OR across all searchable fields
+                    const term = words[0];
+                    where.OR = [
+                        { email: { contains: term, mode: 'insensitive' } },
+                        { firstName: { contains: term, mode: 'insensitive' } },
+                        { lastName: { contains: term, mode: 'insensitive' } },
+                        { phone: { contains: term } },
+                    ];
+                } else if (words.length > 1) {
+                    // Multi-word: AND - each word must match at least one field
+                    where.AND = words.map((word) => ({
+                        OR: [
+                            { email: { contains: word, mode: 'insensitive' as const } },
+                            { firstName: { contains: word, mode: 'insensitive' as const } },
+                            { lastName: { contains: word, mode: 'insensitive' as const } },
+                            { phone: { contains: word } },
+                        ],
+                    }));
+                }
+            }
+
+            // Apply tier filter
+            if (data.tier && data.tier !== 'all') {
+                where.tier = data.tier;
+            }
+
+            // Execute count and data queries in parallel
+            const [total, customersRaw] = await Promise.all([
+                prisma.customer.count({ where }),
+                prisma.customer.findMany({
+                    where,
+                    select: {
+                        id: true,
+                        email: true,
+                        firstName: true,
+                        lastName: true,
+                        phone: true,
+                        orderCount: true,
+                        ltv: true,
+                        tier: true,
+                        createdAt: true,
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    take: data.limit,
+                    skip: data.offset,
+                }),
+            ]);
+
+            // Map to result type
+            const customers: CustomerListItem[] = customersRaw.map((c) => ({
+                id: c.id,
+                email: c.email,
+                firstName: c.firstName,
+                lastName: c.lastName,
+                phone: c.phone,
+                totalOrders: c.orderCount || 0,
+                lifetimeValue: c.ltv || 0,
+                customerTier: (c.tier || 'bronze') as CustomerTier,
+                createdAt: c.createdAt,
+            }));
 
             console.log(
                 '[Server Function] Query returned',
-                result.customers.length,
+                customers.length,
                 'customers, total:',
-                result.pagination.total
+                total
             );
 
-            return result;
+            return {
+                customers,
+                pagination: {
+                    total,
+                    limit: data.limit,
+                    offset: data.offset,
+                    hasMore: data.offset + data.limit < total,
+                },
+            };
         } catch (error) {
             console.error('[Server Function] Error in getCustomersList:', error);
             throw error;

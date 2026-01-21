@@ -1,7 +1,7 @@
 /**
  * Inventory Zod Schemas
  *
- * Defines strict output types for inventory Kysely queries.
+ * Defines strict output types for inventory queries.
  * These schemas validate query results at runtime to catch schema drift.
  */
 
@@ -37,14 +37,14 @@ export type InventorySkuRow = z.infer<typeof inventorySkuRowSchema>;
 export const inventorySkuRowArraySchema = z.array(inventorySkuRowSchema);
 
 // ============================================
-// BALANCE SCHEMAS (for Kysely calculateBalancesKysely)
+// BALANCE SCHEMAS
 // ============================================
 
 // Note: Named differently from types/index.ts InventoryBalance to avoid collision
-export const kyselyBalanceSchema = z.object({
+export const inventoryBalanceSchema = z.object({
     totalInward: z.number(),
     totalOutward: z.number(),
     currentBalance: z.number(),
 });
 
-export type KyselyBalance = z.infer<typeof kyselyBalanceSchema>;
+export type InventoryBalanceRow = z.infer<typeof inventoryBalanceSchema>;

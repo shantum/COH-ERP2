@@ -14,8 +14,6 @@ import { NotFoundError, BusinessLogicError } from '../../../utils/errors.js';
 import { adjustCustomerLtv } from '../../../utils/tierUtils.js';
 import { broadcastOrderUpdate } from '../../sse.js';
 import { enforceRulesInExpress } from '../../../rules/index.js';
-import { getKysely } from '@coh/shared/database';
-import { adjustLineQtyKysely, cancelLineKysely } from '@coh/shared/domain';
 
 const router: Router = Router();
 
@@ -50,7 +48,7 @@ function getParamString(param: string | string[] | undefined): string {
 // ORDER LINE OPERATIONS
 // ============================================
 
-// Cancel a single order line - LEAN: uses shared domain function
+// Cancel a single order line - uses Prisma
 router.post(
     '/lines/:lineId/cancel',
     authenticateToken,
@@ -60,7 +58,7 @@ router.post(
         // Fetch line data for rules engine and LTV adjustment
         const line = await req.prisma.orderLine.findUnique({
             where: { id: lineId },
-            select: { id: true, lineStatus: true, qty: true, unitPrice: true, order: { select: { customerId: true } } },
+            select: { id: true, lineStatus: true, qty: true, unitPrice: true, skuId: true, order: { select: { customerId: true } } },
         });
 
         if (!line) {
@@ -79,20 +77,35 @@ router.post(
             phase: 'pre',
         });
 
-        // Use shared domain function for cancel logic + inventory release
-        const db = getKysely();
-        const result = await cancelLineKysely(db, { lineId, reason: undefined });
+        // Check if line has allocated inventory (allocated, picked, packed)
+        const statusesWithInventory = ['allocated', 'picked', 'packed'];
+        const hasInventory = statusesWithInventory.includes(line.lineStatus || '');
+        let inventoryReleased = false;
 
-        if (!result.success) {
-            if (result.error?.code === 'NOT_FOUND') {
-                throw new NotFoundError('Order line not found', 'OrderLine', lineId);
+        // Update line status to cancelled and release inventory if needed
+        await req.prisma.$transaction(async (tx) => {
+            // Update line status
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: { lineStatus: 'cancelled', productionBatchId: null },
+            });
+
+            // Release inventory if allocated
+            if (hasInventory && line.skuId) {
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: lineId,
+                        txnType: 'outward',
+                        reason: 'order_allocation',
+                    },
+                });
+                inventoryReleased = true;
             }
-            throw new BusinessLogicError(result.error?.message || 'Cannot cancel line', 'CANCEL_FAILED');
-        }
+        });
 
         // Invalidate inventory cache if inventory was released
-        if (result.data?.inventoryReleased && result.data?.skuId) {
-            inventoryBalanceCache.invalidate([result.data.skuId]);
+        if (inventoryReleased && line.skuId) {
+            inventoryBalanceCache.invalidate([line.skuId]);
         }
 
         // Background: adjust LTV (fire and forget)
@@ -212,52 +225,42 @@ router.put(
         // Check if line has allocated inventory AND qty is changing
         const hasInventory = hasAllocatedInventory(line.lineStatus as LineStatus);
         const qtyIsChanging = qty !== undefined && qty !== line.qty;
+        let inventoryAdjusted = false;
 
-        // If line has inventory and qty is changing, use Kysely function to adjust inventory
-        if (hasInventory && qtyIsChanging) {
-            const result = await adjustLineQtyKysely(getKysely(), {
-                lineId,
-                newQty: qty,
-                newUnitPrice: unitPrice,
-                userId: req.user?.id,
-            });
-
-            if (!result.success) {
-                throw new BusinessLogicError(result.error?.message || 'Failed to adjust line qty');
-            }
-
-            // Invalidate inventory cache if inventory was adjusted
-            if (result.data?.inventoryAdjusted && result.data.skuId) {
-                inventoryBalanceCache.invalidate([result.data.skuId]);
-            }
-
-            // Handle notes/awbNumber/courier updates separately (not handled by adjustLineQtyKysely)
-            if (notes !== undefined || awbNumber !== undefined || courier !== undefined) {
-                const additionalUpdateData: Prisma.OrderLineUpdateInput = {};
-                if (notes !== undefined) additionalUpdateData.notes = notes;
-                if (awbNumber !== undefined) additionalUpdateData.awbNumber = awbNumber || null;
-                if (courier !== undefined) additionalUpdateData.courier = courier || null;
-                await req.prisma.orderLine.update({
-                    where: { id: lineId },
-                    data: additionalUpdateData,
-                });
-            }
-
-            const updated = await req.prisma.orderLine.findUnique({
-                where: { id: lineId },
-            });
-
-            res.json(updated);
-            return;
-        }
-
-        // No inventory adjustment needed - use existing Prisma transaction
+        // Use Prisma transaction for all updates
         await req.prisma.$transaction(async (tx) => {
+            // Update line
             await tx.orderLine.update({
                 where: { id: lineId },
                 data: updateData,
             });
 
+            // Adjust inventory if line has inventory and qty is changing
+            if (hasInventory && qtyIsChanging && line.skuId) {
+                // Delete existing outward transaction
+                await tx.inventoryTransaction.deleteMany({
+                    where: {
+                        referenceId: lineId,
+                        txnType: 'outward',
+                        reason: 'order_allocation',
+                    },
+                });
+
+                // Create new outward transaction with updated qty
+                await tx.inventoryTransaction.create({
+                    data: {
+                        skuId: line.skuId,
+                        txnType: 'outward',
+                        qty: qty!,
+                        reason: 'order_allocation',
+                        referenceId: lineId,
+                        createdById: req.user?.id || 'system',
+                    },
+                });
+                inventoryAdjusted = true;
+            }
+
+            // Recalculate order total
             const allLines = await tx.orderLine.findMany({
                 where: { orderId: line.orderId },
             });
@@ -271,6 +274,11 @@ router.put(
                 data: { totalAmount: newTotal },
             });
         });
+
+        // Invalidate inventory cache if inventory was adjusted
+        if (inventoryAdjusted && line.skuId) {
+            inventoryBalanceCache.invalidate([line.skuId]);
+        }
 
         const updated = await req.prisma.orderLine.findUnique({
             where: { id: lineId },

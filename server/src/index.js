@@ -20,11 +20,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import prisma from './lib/prisma.js';
 import initDb from './init-db.js';
-import { createKysely } from '@coh/shared/database';
-
-// Initialize shared Kysely instance for potential use by Server Functions
-// Both Express and TanStack Start can share the same query code
-createKysely(process.env.DATABASE_URL);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

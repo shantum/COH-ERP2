@@ -1,11 +1,15 @@
 /**
- * SPA Fallback Configuration
+ * SPA Fallback Configuration (EMERGENCY USE ONLY)
  *
- * Emergency fallback to pure SPA mode if TanStack Start has issues.
- * Usage: npm run dev:spa
- * Production: npm run build (uses this config)
+ * This config is a fallback if TanStack Start SSR has issues.
+ * DO NOT use for production - SSR mode is the primary build.
  *
- * Note: This config excludes SSR-specific code (@tanstack/react-start)
+ * Usage:
+ *   Development: npm run dev:spa
+ *   Production:  npm run build:spa (fallback only)
+ *
+ * Note: This config stubs out Server Functions - they won't work in SPA mode.
+ * All data fetching falls back to tRPC when using this config.
  */
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'

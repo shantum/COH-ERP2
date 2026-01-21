@@ -1,7 +1,7 @@
 /**
  * Production Zod Schemas
  *
- * Defines strict output types for production Kysely queries.
+ * Defines strict output types for production queries.
  * These schemas validate query results at runtime to catch schema drift.
  */
 

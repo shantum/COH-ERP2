@@ -1,7 +1,7 @@
 /**
  * Products Zod Schemas
  *
- * Defines strict output types for products Kysely queries.
+ * Defines strict output types for product queries.
  * These schemas validate query results at runtime to catch schema drift.
  */
 

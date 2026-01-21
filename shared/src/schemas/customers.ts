@@ -1,7 +1,7 @@
 /**
  * Customers Zod Schemas
  *
- * Defines strict output types for customers Kysely queries.
+ * Defines strict output types for customer queries.
  * These schemas validate query results at runtime to catch schema drift.
  */
 

@@ -21,11 +21,11 @@ import { kysely } from '../index.js';
 import {
     inventorySkuRowArraySchema,
     type InventorySkuRow,
-    type KyselyBalance,
+    type InventoryBalanceRow,
 } from '@coh/shared';
 
 // Re-export output types from schemas
-export type { InventorySkuRow, KyselyBalance };
+export type { InventorySkuRow, InventoryBalanceRow };
 
 // ============================================
 // INPUT TYPES (not validated - internal use)
@@ -130,7 +130,7 @@ export async function listInventorySkusKysely(
  */
 export async function calculateBalancesKysely(
     skuIds: string[]
-): Promise<Map<string, KyselyBalance>> {
+): Promise<Map<string, InventoryBalanceRow>> {
     if (skuIds.length === 0) {
         return new Map();
     }
@@ -148,7 +148,7 @@ export async function calculateBalancesKysely(
         .execute();
 
     // Build balance map
-    const balanceMap = new Map<string, KyselyBalance>();
+    const balanceMap = new Map<string, InventoryBalanceRow>();
 
     for (const row of results) {
         if (!balanceMap.has(row.skuId)) {

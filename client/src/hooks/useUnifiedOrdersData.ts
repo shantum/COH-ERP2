@@ -311,7 +311,7 @@ export function useUnifiedOrdersData({
     const rows = ordersQuery.data?.rows || [];
     const pagination = ordersQuery.data?.pagination;
 
-    // Derive orders from rows when server returns empty orders array (Kysely/Server Function path)
+    // Derive orders from rows when server returns empty orders array (Server Function path)
     // Groups rows by orderId and extracts the order reference from each unique order
     // Note: Server Function returns only `rows`, not `orders` - we always derive from rows
     const orders = useMemo(() => {

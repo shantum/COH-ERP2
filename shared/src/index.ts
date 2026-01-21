@@ -17,7 +17,3 @@ export * from './schemas/materials.js';
 
 // Re-export all validators
 export * from './validators/index.js';
-
-// NOTE: Database module (Kysely) is NOT exported from main entry point
-// because it contains Node.js-only code (pg driver).
-// Server code should import directly: import { createKysely } from '@coh/shared/database'

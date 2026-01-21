@@ -1,8 +1,8 @@
 /**
  * Stub for vinxi in SPA mode
  *
- * Vinxi requires Node.js APIs (AsyncLocalStorage, etc.)
- * This stub provides empty implementations for SPA build.
+ * FALLBACK ONLY: This is used when running in SPA mode (npm run dev:spa / build:spa).
+ * Production uses SSR mode with real Vinxi.
  */
 
 export function getCookie() {
@@ -53,7 +53,7 @@ export function createError() {
   return new Error('Not available in SPA mode');
 }
 
-export const eventHandler = (fn: any) => fn;
+export const eventHandler = (fn: unknown) => fn;
 export const defineEventHandler = eventHandler;
 
 export default {};

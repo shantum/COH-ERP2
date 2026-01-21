@@ -4,10 +4,9 @@
  * Accepts ?redirect=path to redirect after successful login.
  * Also handles beforeLoad to check if already authenticated via cookie.
  */
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 import { z } from 'zod';
-import { getAuthUser } from '../server/functions/auth';
 
 const LoginPage = lazy(() => import('../pages/Login'));
 
@@ -42,13 +41,8 @@ function LoginRoute() {
 
 export const Route = createFileRoute('/login')({
     validateSearch: (search) => loginSearchSchema.parse(search),
-    beforeLoad: async () => {
-        // Check if already authenticated via cookie
-        const user = await getAuthUser();
-        if (user) {
-            // Already logged in - redirect to home
-            throw redirect({ to: '/' });
-        }
-    },
+    // Note: Removed beforeLoad auth check to prevent redirect loops in SSR.
+    // If user is already logged in and visits /login, the Login component
+    // can handle redirecting them via useEffect or the auth context.
     component: LoginRoute,
 });

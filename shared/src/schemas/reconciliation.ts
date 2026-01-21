@@ -1,7 +1,7 @@
 /**
  * Reconciliation Zod Schemas
  *
- * Defines strict output types for reconciliation Kysely queries.
+ * Defines strict output types for reconciliation queries.
  * These schemas validate query results at runtime to catch schema drift.
  */
 

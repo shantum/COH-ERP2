@@ -1,22 +1,17 @@
 /**
- * Order Line Mutations - Domain Layer
+ * Order Line Mutations - Domain Types
  *
- * Core business logic for line-level mutations.
- * Extracted from tRPC procedures to be shared between:
- * - Express tRPC router (existing)
- * - TanStack Start Server Functions (new)
+ * Type definitions for line-level mutation operations.
+ * These types are shared between the Express tRPC router and
+ * (future) TanStack Start Server Functions.
  *
- * All functions:
- * - Accept a Kysely database instance
- * - Return a result (not throw on validation errors)
- * - Do NOT handle SSE broadcasts (that's the caller's job)
+ * NOTE: The actual mutation implementations live in the server package
+ * (server/src/routes/orders/mutations/lineOps.ts) and use Prisma.
+ * This file only contains shared type definitions.
  */
 
-import type { Kysely } from 'kysely';
-import type { DB } from '../../database/types.js';
-
 // ============================================
-// TYPES
+// RESULT TYPES
 // ============================================
 
 export interface MutationResult<T> {
@@ -27,6 +22,10 @@ export interface MutationResult<T> {
         message: string;
     };
 }
+
+// ============================================
+// MARK LINE DELIVERED
+// ============================================
 
 export interface MarkLineDeliveredInput {
     lineId: string;
@@ -40,6 +39,10 @@ export interface MarkLineDeliveredResult {
     orderTerminal: boolean;
 }
 
+// ============================================
+// MARK LINE RTO
+// ============================================
+
 export interface MarkLineRtoInput {
     lineId: string;
 }
@@ -49,6 +52,10 @@ export interface MarkLineRtoResult {
     orderId: string;
     rtoInitiatedAt: Date;
 }
+
+// ============================================
+// RECEIVE LINE RTO
+// ============================================
 
 export interface ReceiveLineRtoInput {
     lineId: string;
@@ -64,6 +71,10 @@ export interface ReceiveLineRtoResult {
     inventoryRestored: boolean;
 }
 
+// ============================================
+// CANCEL LINE
+// ============================================
+
 export interface CancelLineInput {
     lineId: string;
     reason?: string;
@@ -76,6 +87,10 @@ export interface CancelLineResult {
     inventoryReleased: boolean;
     skuId: string | null;
 }
+
+// ============================================
+// ADJUST LINE QTY
+// ============================================
 
 export interface AdjustLineQtyInput {
     lineId: string;
@@ -92,618 +107,4 @@ export interface AdjustLineQtyResult {
     inventoryAdjusted: boolean;
     skuId: string | null;
     newOrderTotal: number;
-}
-
-// ============================================
-// MARK LINE DELIVERED
-// ============================================
-
-/**
- * Mark a shipped line as delivered
- *
- * Business rules:
- * - Line must be in 'shipped' status
- * - Idempotent: returns success if already delivered
- * - Updates order terminal status if all shipped lines delivered
- */
-export async function markLineDeliveredKysely(
-    db: Kysely<DB>,
-    input: MarkLineDeliveredInput
-): Promise<MutationResult<MarkLineDeliveredResult>> {
-    const { lineId, deliveredAt } = input;
-    const deliveryTime = deliveredAt ? new Date(deliveredAt) : new Date();
-
-    // Fetch line with order context
-    const line = await db
-        .selectFrom('OrderLine')
-        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
-        .select([
-            'OrderLine.id',
-            'OrderLine.lineStatus',
-            'OrderLine.deliveredAt',
-            'OrderLine.orderId',
-            'Order.customerId',
-        ])
-        .where('OrderLine.id', '=', lineId)
-        .executeTakeFirst();
-
-    if (!line) {
-        return {
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Order line not found' },
-        };
-    }
-
-    // Validate line is shipped
-    if (line.lineStatus !== 'shipped') {
-        return {
-            success: false,
-            error: {
-                code: 'BAD_REQUEST',
-                message: `Cannot mark as delivered: line status is '${line.lineStatus}', must be 'shipped'`,
-            },
-        };
-    }
-
-    // Already delivered - idempotent
-    if (line.deliveredAt) {
-        return {
-            success: true,
-            data: {
-                lineId,
-                orderId: line.orderId,
-                deliveredAt: line.deliveredAt as Date,
-                orderTerminal: false,
-            },
-        };
-    }
-
-    // Update line-level deliveredAt and trackingStatus
-    await db
-        .updateTable('OrderLine')
-        .set({
-            deliveredAt: deliveryTime,
-            trackingStatus: 'delivered',
-        })
-        .where('id', '=', lineId)
-        .execute();
-
-    // Check if ALL shipped lines are now delivered
-    const undeliveredResult = await db
-        .selectFrom('OrderLine')
-        .select(db.fn.count<number>('id').as('count'))
-        .where('orderId', '=', line.orderId)
-        .where('lineStatus', '=', 'shipped')
-        .where('deliveredAt', 'is', null)
-        .where('id', '!=', lineId)
-        .executeTakeFirst();
-
-    const undeliveredShippedLines = Number(undeliveredResult?.count || 0);
-    let orderTerminal = false;
-
-    if (undeliveredShippedLines === 0) {
-        // All shipped lines are delivered - set order terminal status
-        await db
-            .updateTable('Order')
-            .set({
-                terminalStatus: 'delivered',
-                terminalAt: deliveryTime,
-                deliveredAt: deliveryTime,
-                status: 'delivered',
-            })
-            .where('id', '=', line.orderId)
-            .execute();
-        orderTerminal = true;
-    }
-
-    return {
-        success: true,
-        data: {
-            lineId,
-            orderId: line.orderId,
-            deliveredAt: deliveryTime,
-            orderTerminal,
-        },
-    };
-}
-
-// ============================================
-// MARK LINE RTO
-// ============================================
-
-/**
- * Initiate RTO for a shipped line
- *
- * Business rules:
- * - Line must be in 'shipped' status
- * - Idempotent: returns success if already RTO initiated
- * - Increments customer RTO count
- */
-export async function markLineRtoKysely(
-    db: Kysely<DB>,
-    input: MarkLineRtoInput
-): Promise<MutationResult<MarkLineRtoResult>> {
-    const { lineId } = input;
-    const now = new Date();
-
-    // Fetch line with order context
-    const line = await db
-        .selectFrom('OrderLine')
-        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
-        .select([
-            'OrderLine.id',
-            'OrderLine.lineStatus',
-            'OrderLine.rtoInitiatedAt',
-            'OrderLine.orderId',
-            'Order.customerId',
-        ])
-        .where('OrderLine.id', '=', lineId)
-        .executeTakeFirst();
-
-    if (!line) {
-        return {
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Order line not found' },
-        };
-    }
-
-    // Validate line is shipped
-    if (line.lineStatus !== 'shipped') {
-        return {
-            success: false,
-            error: {
-                code: 'BAD_REQUEST',
-                message: `Cannot initiate RTO: line status is '${line.lineStatus}', must be 'shipped'`,
-            },
-        };
-    }
-
-    // Already RTO initiated - idempotent
-    if (line.rtoInitiatedAt) {
-        return {
-            success: true,
-            data: {
-                lineId,
-                orderId: line.orderId,
-                rtoInitiatedAt: line.rtoInitiatedAt as Date,
-            },
-        };
-    }
-
-    // Update line-level rtoInitiatedAt and trackingStatus
-    await db
-        .updateTable('OrderLine')
-        .set({
-            rtoInitiatedAt: now,
-            trackingStatus: 'rto_initiated',
-        })
-        .where('id', '=', lineId)
-        .execute();
-
-    // Increment customer RTO count
-    if (line.customerId) {
-        await db
-            .updateTable('Customer')
-            .set((eb) => ({
-                rtoCount: eb('rtoCount', '+', 1),
-            }))
-            .where('id', '=', line.customerId)
-            .execute();
-    }
-
-    // Update order-level rtoInitiatedAt for backward compat
-    await db
-        .updateTable('Order')
-        .set({ rtoInitiatedAt: now })
-        .where('id', '=', line.orderId)
-        .execute();
-
-    return {
-        success: true,
-        data: {
-            lineId,
-            orderId: line.orderId,
-            rtoInitiatedAt: now,
-        },
-    };
-}
-
-// ============================================
-// RECEIVE LINE RTO
-// ============================================
-
-/**
- * Mark RTO as received (item returned to warehouse)
- *
- * Business rules:
- * - Line must have RTO initiated
- * - Idempotent: returns success if already received
- * - Restores inventory based on condition
- * - Updates order terminal status if all RTO lines received
- */
-export async function receiveLineRtoKysely(
-    db: Kysely<DB>,
-    input: ReceiveLineRtoInput
-): Promise<MutationResult<ReceiveLineRtoResult>> {
-    const { lineId, condition = 'good' } = input;
-    const now = new Date();
-
-    // Fetch line with SKU context
-    const line = await db
-        .selectFrom('OrderLine')
-        .innerJoin('Order', 'Order.id', 'OrderLine.orderId')
-        .select([
-            'OrderLine.id',
-            'OrderLine.lineStatus',
-            'OrderLine.rtoInitiatedAt',
-            'OrderLine.rtoReceivedAt',
-            'OrderLine.orderId',
-            'OrderLine.skuId',
-            'OrderLine.qty',
-            'Order.customerId',
-        ])
-        .where('OrderLine.id', '=', lineId)
-        .executeTakeFirst();
-
-    if (!line) {
-        return {
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Order line not found' },
-        };
-    }
-
-    // Validate RTO was initiated
-    if (!line.rtoInitiatedAt) {
-        return {
-            success: false,
-            error: {
-                code: 'BAD_REQUEST',
-                message: 'Cannot receive RTO: RTO was not initiated for this line',
-            },
-        };
-    }
-
-    // Already received - idempotent
-    if (line.rtoReceivedAt) {
-        return {
-            success: true,
-            data: {
-                lineId,
-                orderId: line.orderId,
-                rtoReceivedAt: line.rtoReceivedAt as Date,
-                condition,
-                orderTerminal: false,
-                inventoryRestored: false,
-            },
-        };
-    }
-
-    // Update line-level rtoReceivedAt and trackingStatus
-    await db
-        .updateTable('OrderLine')
-        .set({
-            rtoReceivedAt: now,
-            trackingStatus: 'rto_delivered',
-            rtoCondition: condition,
-        })
-        .where('id', '=', lineId)
-        .execute();
-
-    // Restore inventory if condition is good or unopened
-    let inventoryRestored = false;
-    if ((condition === 'good' || condition === 'unopened') && line.skuId) {
-        // Create inward transaction to restore inventory
-        await db
-            .insertInto('InventoryTransaction')
-            .values({
-                id: crypto.randomUUID(),
-                skuId: line.skuId,
-                txnType: 'inward',
-                qty: line.qty,
-                reason: 'rto_receipt',
-                notes: `RTO received (${condition}) - Line ${lineId}`,
-                referenceId: lineId,
-                createdById: 'system', // Server Function context
-            })
-            .execute();
-        inventoryRestored = true;
-    }
-
-    // Check if ALL RTO lines are now received
-    const unreceivedResult = await db
-        .selectFrom('OrderLine')
-        .select(db.fn.count<number>('id').as('count'))
-        .where('orderId', '=', line.orderId)
-        .where('rtoInitiatedAt', 'is not', null)
-        .where('rtoReceivedAt', 'is', null)
-        .where('id', '!=', lineId)
-        .executeTakeFirst();
-
-    const unreceivedRtoLines = Number(unreceivedResult?.count || 0);
-    let orderTerminal = false;
-
-    if (unreceivedRtoLines === 0) {
-        // All RTO lines are received - set order terminal status
-        await db
-            .updateTable('Order')
-            .set({
-                terminalStatus: 'rto_delivered',
-                terminalAt: now,
-                rtoReceivedAt: now,
-            })
-            .where('id', '=', line.orderId)
-            .execute();
-        orderTerminal = true;
-    }
-
-    return {
-        success: true,
-        data: {
-            lineId,
-            orderId: line.orderId,
-            rtoReceivedAt: now,
-            condition,
-            orderTerminal,
-            inventoryRestored,
-        },
-    };
-}
-
-// ============================================
-// CANCEL LINE
-// ============================================
-
-/**
- * Cancel an order line
- *
- * Business rules:
- * - Line must be in cancellable status (pending, allocated)
- * - Releases inventory if allocated
- * - Does NOT cancel whole order (caller decides)
- */
-export async function cancelLineKysely(
-    db: Kysely<DB>,
-    input: CancelLineInput
-): Promise<MutationResult<CancelLineResult>> {
-    const { lineId, reason: _reason } = input;
-    // _reason is captured but not stored in DB (OrderLine has no cancelReason field)
-
-    // Fetch line
-    const line = await db
-        .selectFrom('OrderLine')
-        .select([
-            'OrderLine.id',
-            'OrderLine.lineStatus',
-            'OrderLine.orderId',
-            'OrderLine.skuId',
-            'OrderLine.qty',
-        ])
-        .where('OrderLine.id', '=', lineId)
-        .executeTakeFirst();
-
-    if (!line) {
-        return {
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Order line not found' },
-        };
-    }
-
-    // Already cancelled - idempotent (check before validation)
-    if (line.lineStatus === 'cancelled') {
-        return {
-            success: true,
-            data: {
-                lineId,
-                orderId: line.orderId,
-                lineStatus: 'cancelled',
-                inventoryReleased: false,
-                skuId: null,
-            },
-        };
-    }
-
-    // Validate line is cancellable
-    const cancellableStatuses = ['pending', 'allocated', 'picked', 'packed'];
-    if (!cancellableStatuses.includes(line.lineStatus || '')) {
-        return {
-            success: false,
-            error: {
-                code: 'BAD_REQUEST',
-                message: `Cannot cancel line: status is '${line.lineStatus}', must be one of: ${cancellableStatuses.join(', ')}`,
-            },
-        };
-    }
-
-    // Update line status to cancelled
-    await db
-        .updateTable('OrderLine')
-        .set({
-            lineStatus: 'cancelled',
-            productionBatchId: null, // Clear production batch link
-        })
-        .where('id', '=', lineId)
-        .execute();
-
-    // Release inventory if line was allocated (pending, allocated, picked, packed all have inventory)
-    let inventoryReleased = false;
-    const hasInventory = ['allocated', 'picked', 'packed'].includes(line.lineStatus || '');
-    if (hasInventory && line.skuId) {
-        // Delete the outward transaction created during allocation
-        await db
-            .deleteFrom('InventoryTransaction')
-            .where('referenceId', '=', lineId)
-            .where('txnType', '=', 'outward')
-            .where('reason', '=', 'order_allocation')
-            .execute();
-        inventoryReleased = true;
-    }
-
-    return {
-        success: true,
-        data: {
-            lineId,
-            orderId: line.orderId,
-            lineStatus: 'cancelled',
-            inventoryReleased,
-            skuId: inventoryReleased ? line.skuId : null,
-        },
-    };
-}
-
-// ============================================
-// ADJUST LINE QTY
-// ============================================
-
-/**
- * Adjust quantity (and optionally price) of an order line
- *
- * Business rules:
- * - Line must not be shipped or cancelled
- * - If line has inventory (allocated, picked, packed), adjust the OUTWARD transaction
- * - Recalculates order total
- * - Returns skuId for cache invalidation
- */
-export async function adjustLineQtyKysely(
-    db: Kysely<DB>,
-    input: AdjustLineQtyInput
-): Promise<MutationResult<AdjustLineQtyResult>> {
-    const { lineId, newQty, newUnitPrice, userId } = input;
-
-    // Fetch line with order context
-    const line = await db
-        .selectFrom('OrderLine')
-        .select([
-            'OrderLine.id',
-            'OrderLine.lineStatus',
-            'OrderLine.orderId',
-            'OrderLine.skuId',
-            'OrderLine.qty',
-            'OrderLine.unitPrice',
-        ])
-        .where('OrderLine.id', '=', lineId)
-        .executeTakeFirst();
-
-    if (!line) {
-        return {
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Order line not found' },
-        };
-    }
-
-    // Validate line is editable (not shipped or cancelled)
-    const nonEditableStatuses = ['shipped', 'cancelled'];
-    if (nonEditableStatuses.includes(line.lineStatus || '')) {
-        return {
-            success: false,
-            error: {
-                code: 'BAD_REQUEST',
-                message: `Cannot adjust qty: line status is '${line.lineStatus}', must not be shipped or cancelled`,
-            },
-        };
-    }
-
-    const oldQty = line.qty;
-    const effectiveNewQty = newQty;
-    const effectiveNewPrice = newUnitPrice ?? line.unitPrice;
-
-    // Early return if qty unchanged
-    if (oldQty === effectiveNewQty && (newUnitPrice === undefined || newUnitPrice === line.unitPrice)) {
-        // Fetch current order total for return
-        const order = await db
-            .selectFrom('Order')
-            .select('totalAmount')
-            .where('id', '=', line.orderId)
-            .executeTakeFirst();
-
-        return {
-            success: true,
-            data: {
-                lineId,
-                orderId: line.orderId,
-                oldQty,
-                newQty: effectiveNewQty,
-                inventoryAdjusted: false,
-                skuId: null,
-                newOrderTotal: Number(order?.totalAmount ?? 0),
-            },
-        };
-    }
-
-    // Check if line has allocated inventory
-    const statusesWithInventory = ['allocated', 'picked', 'packed'];
-    const hasInventory = statusesWithInventory.includes(line.lineStatus || '');
-    let inventoryAdjusted = false;
-
-    // Adjust inventory if line has allocation AND qty changed
-    if (hasInventory && line.skuId && oldQty !== effectiveNewQty) {
-        // Delete existing OUTWARD transaction
-        await db
-            .deleteFrom('InventoryTransaction')
-            .where('referenceId', '=', lineId)
-            .where('txnType', '=', 'outward')
-            .where('reason', '=', 'order_allocation')
-            .execute();
-
-        // Create new OUTWARD transaction with updated qty
-        await db
-            .insertInto('InventoryTransaction')
-            .values({
-                id: crypto.randomUUID(),
-                skuId: line.skuId,
-                txnType: 'outward',
-                qty: effectiveNewQty,
-                reason: 'order_allocation',
-                referenceId: lineId,
-                createdById: userId || 'system',
-            })
-            .execute();
-
-        inventoryAdjusted = true;
-    }
-
-    // Update line qty (and unitPrice if provided)
-    const lineUpdateData: { qty: number; unitPrice?: number } = { qty: effectiveNewQty };
-    if (newUnitPrice !== undefined) {
-        lineUpdateData.unitPrice = newUnitPrice;
-    }
-
-    await db
-        .updateTable('OrderLine')
-        .set(lineUpdateData)
-        .where('id', '=', lineId)
-        .execute();
-
-    // Fetch all lines to recalculate order total
-    const allLines = await db
-        .selectFrom('OrderLine')
-        .select(['id', 'qty', 'unitPrice'])
-        .where('orderId', '=', line.orderId)
-        .execute();
-
-    // Calculate new total (use updated values for this line)
-    const newTotal = allLines.reduce((sum, l) => {
-        const lineQty = l.id === lineId ? effectiveNewQty : l.qty;
-        const linePrice = l.id === lineId ? effectiveNewPrice : l.unitPrice;
-        return sum + lineQty * linePrice;
-    }, 0);
-
-    // Update order total
-    await db
-        .updateTable('Order')
-        .set({ totalAmount: newTotal })
-        .where('id', '=', line.orderId)
-        .execute();
-
-    return {
-        success: true,
-        data: {
-            lineId,
-            orderId: line.orderId,
-            oldQty,
-            newQty: effectiveNewQty,
-            inventoryAdjusted,
-            skuId: inventoryAdjusted ? line.skuId : null,
-            newOrderTotal: newTotal,
-        },
-    };
 }

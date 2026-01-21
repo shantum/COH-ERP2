@@ -16,58 +16,58 @@
  *   }
  */
 
-// SPA MODE: All Server Functions disabled - use tRPC instead
-// Server Functions require TanStack Start SSR runtime which isn't available in SPA builds
+// SSR MODE: Server Functions enabled for queries (migrations in progress)
+// Mutations remain on tRPC until query migration is stable
 export const USE_SERVER_FUNCTIONS = {
     /**
-     * orders.list - Main orders listing endpoint
-     * Status: DISABLED for SPA - uses tRPC
+     * customers.list - Customer listing
+     * Status: ENABLED - Simple query, low risk
      */
-    ordersList: false,
+    customersList: true,
+
+    /**
+     * products.list - Product tree listing
+     * Status: ENABLED - Tree structure query
+     */
+    productsList: true,
+
+    /**
+     * inventory.getBalances - Inventory balance lookup
+     * Status: ENABLED - Computed values query
+     */
+    inventoryGetBalances: true,
+
+    /**
+     * inventory.list - Inventory listing page
+     * Status: ENABLED - Larger dataset query
+     */
+    inventoryList: true,
+
+    /**
+     * orders.list - Main orders listing endpoint
+     * Status: ENABLED - Complex query with views/filters
+     */
+    ordersList: true,
 
     /**
      * orders.get - Single order detail
-     * Status: DISABLED - uses tRPC
+     * Status: ENABLED - Single order lookup
      */
-    ordersGet: false,
+    ordersGet: true,
 
     /**
      * orders.* mutations - All order mutations
-     * Status: DISABLED - uses tRPC
+     * Status: DISABLED - Keep on tRPC until queries are stable
      */
     ordersMutations: false,
 
     /**
      * Simple line mutations (markLineDelivered, markLineRto, receiveLineRto, cancelLine)
-     * Status: DISABLED - uses tRPC
+     * Status: DISABLED - Keep on tRPC until queries are stable
      */
     lineDeliveryMutations: false,
     lineRtoMutations: false,
     lineCancelMutations: false,
-
-    /**
-     * inventory.getBalances - Inventory balance lookup
-     * Status: DISABLED - uses tRPC
-     */
-    inventoryGetBalances: false,
-
-    /**
-     * inventory.list - Inventory listing page
-     * Status: DISABLED for SPA - uses tRPC
-     */
-    inventoryList: false,
-
-    /**
-     * customers.list - Customer listing
-     * Status: DISABLED for SPA - uses tRPC
-     */
-    customersList: false,
-
-    /**
-     * products.list - Product tree listing
-     * Status: DISABLED for SPA - uses tRPC
-     */
-    productsList: false,
 } as const;
 
 /**

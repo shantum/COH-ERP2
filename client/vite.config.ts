@@ -36,7 +36,6 @@ export default defineConfig({
     noExternal: [
       '@tanstack/react-start',
       '@tanstack/react-router',
-      'kysely',
       '@coh/shared',
     ],
   },
