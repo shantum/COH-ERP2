@@ -1,13 +1,19 @@
 /**
  * Order line mutations
  * Handles updating lines, adding lines, and customization
- * Uses tRPC for all operations
  */
 
 import { useMemo } from 'react';
-import { trpc } from '../../services/trpc';
+import { useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError, showInfo } from '../../utils/toast';
+import {
+    updateLine as updateLineFn,
+    addLine as addLineFn,
+    customizeLine as customizeLineFn,
+    removeLineCustomization as removeLineCustomizationFn,
+} from '../../server/functions/orderMutations';
 
 export interface UseOrderLineMutationsOptions {
     onEditSuccess?: () => void;
@@ -16,10 +22,25 @@ export interface UseOrderLineMutationsOptions {
 export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}) {
     const { invalidateOpenOrders } = useOrderInvalidation();
 
-    // Update line via tRPC
-    const updateLineMutation = trpc.orders.updateLine.useMutation({
+    // Server Function wrappers
+    const updateLineServerFn = useServerFn(updateLineFn);
+    const addLineServerFn = useServerFn(addLineFn);
+    const customizeLineServerFn = useServerFn(customizeLineFn);
+    const removeLineCustomizationServerFn = useServerFn(removeLineCustomizationFn);
+
+    // ============================================
+    // UPDATE LINE
+    // ============================================
+    const updateLineMutation = useMutation({
+        mutationFn: async (input: { lineId: string; qty?: number; unitPrice?: number; notes?: string; awbNumber?: string; courier?: string }) => {
+            const result = await updateLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update line');
+            }
+            return result.data;
+        },
         onSuccess: () => invalidateOpenOrders(),
-        onError: (err) => showError('Failed to update line', { description: err.message })
+        onError: (err) => showError('Failed to update line', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -33,13 +54,22 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         error: updateLineMutation.error,
     }), [updateLineMutation.isPending, updateLineMutation.isError, updateLineMutation.error]);
 
-    // Add line via tRPC
-    const addLineMutation = trpc.orders.addLine.useMutation({
+    // ============================================
+    // ADD LINE
+    // ============================================
+    const addLineMutation = useMutation({
+        mutationFn: async (input: { orderId: string; skuId: string; qty: number; unitPrice: number }) => {
+            const result = await addLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to add line');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateOpenOrders();
             options.onEditSuccess?.();
         },
-        onError: (err) => showError('Failed to add line', { description: err.message })
+        onError: (err) => showError('Failed to add line', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -53,11 +83,20 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
         error: addLineMutation.error,
     }), [addLineMutation.isPending, addLineMutation.isError, addLineMutation.error]);
 
-    // Customize line via tRPC
-    const customizeLineMutation = trpc.orders.customizeLine.useMutation({
+    // ============================================
+    // CUSTOMIZE LINE
+    // ============================================
+    const customizeLineMutation = useMutation({
+        mutationFn: async (input: { lineId: string; type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string }) => {
+            const result = await customizeLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to customize line');
+            }
+            return result.data;
+        },
         onSuccess: () => invalidateOpenOrders(),
         onError: (err) => {
-            const errorMsg = err.message || '';
+            const errorMsg = err instanceof Error ? err.message : String(err);
             if (errorMsg.includes('allocated') || errorMsg.includes('picked') || errorMsg.includes('packed')) {
                 showError('Cannot customize', { description: 'Line is already allocated/picked/packed. Unallocate first.' });
             } else if (errorMsg.includes('already customized')) {
@@ -70,25 +109,37 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const customizeLine = useMemo(() => ({
-        mutate: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }, options?: Parameters<typeof customizeLineMutation.mutate>[1]) =>
-            customizeLineMutation.mutate({ lineId, type: data.type, value: data.value, notes: data.notes }, options),
-        mutateAsync: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }, options?: Parameters<typeof customizeLineMutation.mutateAsync>[1]) =>
-            customizeLineMutation.mutateAsync({ lineId, type: data.type, value: data.value, notes: data.notes }, options),
+        mutate: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }, mutationOptions?: { onSuccess?: () => void; onError?: (err: unknown) => void; onSettled?: () => void }) =>
+            customizeLineMutation.mutate({ lineId, type: data.type, value: data.value, notes: data.notes }, mutationOptions),
+        mutateAsync: ({ lineId, data }: { lineId: string; data: { type: 'length' | 'size' | 'measurements' | 'other'; value: string; notes?: string } }) =>
+            customizeLineMutation.mutateAsync({ lineId, type: data.type, value: data.value, notes: data.notes }),
         isPending: customizeLineMutation.isPending,
         isError: customizeLineMutation.isError,
         error: customizeLineMutation.error,
     }), [customizeLineMutation.isPending, customizeLineMutation.isError, customizeLineMutation.error]);
 
-    // Remove customization via tRPC
-    const removeCustomizationMutation = trpc.orders.removeCustomization.useMutation({
+    // ============================================
+    // REMOVE CUSTOMIZATION
+    // ============================================
+    const removeCustomizationMutation = useMutation({
+        mutationFn: async (input: { lineId: string; force?: boolean }) => {
+            const result = await removeLineCustomizationServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to remove customization');
+            }
+            return result.data;
+        },
         onSuccess: (data) => {
             invalidateOpenOrders();
-            if (data.forcedCleanup) {
-                showInfo('Customization removed', { description: `Cleared ${data.deletedTransactions} inventory transactions and ${data.deletedBatches} production batches.` });
+            if (data?.forcedCleanup) {
+                // Server Function result includes these fields when force is used
+                const deletedTransactions = (data as { deletedTransactions?: number }).deletedTransactions || 0;
+                const deletedBatches = (data as { deletedBatches?: number }).deletedBatches || 0;
+                showInfo('Customization removed', { description: `Cleared ${deletedTransactions} inventory transactions and ${deletedBatches} production batches.` });
             }
         },
         onError: (err, variables) => {
-            const errorMsg = err.message || '';
+            const errorMsg = err instanceof Error ? err.message : String(err);
 
             if (errorMsg.includes('inventory transactions exist') || errorMsg.includes('production batch exists')) {
                 const confirmMsg = errorMsg.includes('inventory')
@@ -106,10 +157,10 @@ export function useOrderLineMutations(options: UseOrderLineMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const removeCustomization = useMemo(() => ({
-        mutate: ({ lineId, force = false }: { lineId: string; force?: boolean }, options?: Parameters<typeof removeCustomizationMutation.mutate>[1]) =>
-            removeCustomizationMutation.mutate({ lineId, force }, options),
-        mutateAsync: ({ lineId, force = false }: { lineId: string; force?: boolean }, options?: Parameters<typeof removeCustomizationMutation.mutateAsync>[1]) =>
-            removeCustomizationMutation.mutateAsync({ lineId, force }, options),
+        mutate: ({ lineId, force = false }: { lineId: string; force?: boolean }, mutationOptions?: { onSuccess?: () => void; onError?: (err: unknown) => void; onSettled?: () => void }) =>
+            removeCustomizationMutation.mutate({ lineId, force }, mutationOptions),
+        mutateAsync: ({ lineId, force = false }: { lineId: string; force?: boolean }) =>
+            removeCustomizationMutation.mutateAsync({ lineId, force }),
         isPending: removeCustomizationMutation.isPending,
         isError: removeCustomizationMutation.isError,
         error: removeCustomizationMutation.error,

@@ -9,11 +9,18 @@
  */
 
 import { useMemo } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
+import {
+    cancelLine as cancelLineFn,
+    uncancelLine as uncancelLineFn,
+    cancelOrder as cancelOrderFn,
+    uncancelOrder as uncancelOrderFn,
+} from '../../server/functions/orderMutations';
 import {
     getOrdersQueryInput,
     optimisticCancelLine,
@@ -36,6 +43,12 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
     const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders, invalidateCancelledOrders } = useOrderInvalidation();
 
+    // Server Function wrappers
+    const cancelLineServerFn = useServerFn(cancelLineFn);
+    const uncancelLineServerFn = useServerFn(uncancelLineFn);
+    const cancelOrderServerFn = useServerFn(cancelOrderFn);
+    const uncancelOrderServerFn = useServerFn(uncancelOrderFn);
+
     // Build query input for cache operations
     const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
 
@@ -44,10 +57,19 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         return trpcUtils.orders.list.getData(queryInput);
     };
 
-    // Cancel order with optimistic update
-    const cancelOrderMutation = trpc.orders.cancelOrder.useMutation({
+    // ============================================
+    // CANCEL ORDER
+    // ============================================
+    const cancelOrderMutation = useMutation({
+        mutationFn: async (input: { orderId: string; reason?: string }) => {
+            const result = await cancelOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to cancel order');
+            }
+            return result.data;
+        },
         onMutate: async ({ orderId }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Optimistically cancel all lines in the order
@@ -66,7 +88,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateCancelledOrders();
-            showError('Failed to cancel order', { description: err.message });
+            showError('Failed to cancel order', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -86,12 +108,21 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         error: cancelOrderMutation.error,
     }), [cancelOrderMutation.isPending, cancelOrderMutation.isError, cancelOrderMutation.error]);
 
-    // Uncancel order with optimistic update
-    const uncancelOrderMutation = trpc.orders.uncancelOrder.useMutation({
+    // ============================================
+    // UNCANCEL ORDER
+    // ============================================
+    const uncancelOrderMutation = useMutation({
+        mutationFn: async (input: { orderId: string }) => {
+            const result = await uncancelOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to restore order');
+            }
+            return result.data;
+        },
         onMutate: async ({ orderId }) => {
             // For uncancel, we may be in cancelled view
             const cancelledQueryInput = getOrdersQueryInput('cancelled', page, undefined);
-            await trpcUtils.orders.list.cancel(cancelledQueryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = trpcUtils.orders.list.getData(cancelledQueryInput);
 
             trpcUtils.orders.list.setData(
@@ -108,7 +139,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateCancelledOrders();
-            showError('Failed to restore order', { description: err.message });
+            showError('Failed to restore order', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -125,17 +156,25 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         error: uncancelOrderMutation.error,
     }), [uncancelOrderMutation.isPending, uncancelOrderMutation.isError, uncancelOrderMutation.error]);
 
-    // Cancel line with optimistic updates (tRPC)
-    const cancelLineMutation = trpc.orders.cancelLine.useMutation({
+    // ============================================
+    // CANCEL LINE
+    // ============================================
+    const cancelLineMutation = useMutation({
+        mutationFn: async (input: { lineId: string; reason?: string }) => {
+            const result = await cancelLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to cancel line');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId }) => {
             // Cancel inflight refetches
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
 
             // Snapshot previous value
             const previousData = getCachedData();
 
             // Optimistically update
-            // Cast through `any` as tRPC inferred types are stricter than our FlattenedOrderRow
             trpcUtils.orders.list.setData(
                 queryInput,
                 (old: any) => optimisticCancelLine(old, lineId) as any
@@ -150,7 +189,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
-            showError('Failed to cancel line', { description: err.message });
+            showError('Failed to cancel line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -169,14 +208,22 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         error: cancelLineMutation.error,
     }), [cancelLineMutation.isPending, cancelLineMutation.isError, cancelLineMutation.error]);
 
-    // Uncancel line with optimistic updates (tRPC)
-    const uncancelLineMutation = trpc.orders.uncancelLine.useMutation({
+    // ============================================
+    // UNCANCEL LINE
+    // ============================================
+    const uncancelLineMutation = useMutation({
+        mutationFn: async (input: { lineId: string }) => {
+            const result = await uncancelLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to restore line');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Optimistically update
-            // Cast through `any` as tRPC inferred types are stricter than our FlattenedOrderRow
             trpcUtils.orders.list.setData(
                 queryInput,
                 (old: any) => optimisticUncancelLine(old, lineId) as any
@@ -190,7 +237,7 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
-            showError('Failed to restore line', { description: err.message });
+            showError('Failed to restore line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)

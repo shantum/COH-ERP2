@@ -11,11 +11,16 @@
  * SSE handles cross-user synchronization; error rollback ensures consistency.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
+import {
+    allocateOrder as allocateOrderFn,
+    setLineStatus as setLineStatusFn,
+} from '../../server/functions/orderMutations';
 import type { MutationOptions } from './orderMutationUtils';
 import {
     getOrdersQueryInput,
@@ -40,6 +45,10 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
     const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders } = useOrderInvalidation();
 
+    // Server Function wrappers
+    const allocateOrderServerFn = useServerFn(allocateOrderFn);
+    const setLineStatusServerFn = useServerFn(setLineStatusFn);
+
     // Build query input for cache operations
     const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
 
@@ -48,11 +57,27 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
         return trpcUtils.orders.list.getData(queryInput);
     };
 
-    // Allocate mutation with optimistic updates
-    const allocate = trpc.orders.allocate.useMutation({
+    // ============================================
+    // ALLOCATE
+    // ============================================
+    const allocate = useMutation({
+        mutationFn: async (input: { lineIds: string[] }) => {
+            // Server Function expects orderId, but we're using lineIds
+            // We need to get orderId from the first line
+            const cachedData = getCachedData();
+            const row = getRowByLineId(cachedData, input.lineIds[0]);
+            if (!row?.orderId) {
+                throw new Error('Could not determine order ID for allocation');
+            }
+            const result = await allocateOrderServerFn({ data: { orderId: row.orderId, lineIds: input.lineIds } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to allocate');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineIds }) => {
             // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
 
             // Snapshot the previous value
             const previousData = getCachedData();
@@ -69,7 +94,6 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
 
             // Optimistically update the cache
-            // Cast through `any` as tRPC inferred types are stricter than our FlattenedOrderRow
             trpcUtils.orders.list.setData(
                 queryInput,
                 (old: any) => optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas) as any
@@ -87,7 +111,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             invalidateOpenOrders();
 
             // Show error toast for insufficient stock
-            const errorMsg = err.message || '';
+            const errorMsg = err instanceof Error ? err.message : String(err);
             if (errorMsg.includes('Insufficient stock')) {
                 showError('Insufficient stock', { description: errorMsg });
             } else if (!errorMsg.includes('pending') && !errorMsg.includes('allocated')) {
@@ -101,10 +125,19 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
         },
     });
 
-    // Line status mutation with optimistic updates
-    const setLineStatusMutation = trpc.orders.setLineStatus.useMutation({
+    // ============================================
+    // SET LINE STATUS
+    // ============================================
+    const setLineStatusMutation = useMutation({
+        mutationFn: async (input: { lineId: string; status: 'pending' | 'allocated' | 'picked' | 'packed' | 'cancelled' }) => {
+            const result = await setLineStatusServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update line status');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId, status: newStatus }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Get the row to calculate inventory delta
@@ -114,7 +147,6 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
                 : 0;
 
             // Optimistically update
-            // Cast through `any` as tRPC inferred types are stricter than our FlattenedOrderRow
             trpcUtils.orders.list.setData(
                 queryInput,
                 (old: any) => optimisticLineStatusUpdate(old, lineId, newStatus, inventoryDelta) as any
@@ -129,7 +161,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
 
-            const msg = err.message || 'Failed to update line status';
+            const msg = err instanceof Error ? err.message : 'Failed to update line status';
             if (!msg.includes('Cannot transition')) {
                 showError('Failed to update line status', { description: msg });
             }

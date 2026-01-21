@@ -17,7 +17,7 @@ export function getHeader() {
 
 export function setHeader() {}
 
-export function getHeaders() {
+export function getHeaders(): Record<string, string | undefined> {
   return {};
 }
 

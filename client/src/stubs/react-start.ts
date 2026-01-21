@@ -11,9 +11,11 @@ export function createServerFn(_options?: unknown) {
     throw new Error('Server Functions are not available in SPA mode. Use tRPC instead.');
   };
 
-  const builder = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const builder: any = {
     inputValidator: (_validator: unknown) => builder,
     validator: (_validator: unknown) => builder,
+    middleware: (_middlewares: unknown[]) => builder,
     handler: (_handler: unknown) => noopFn,
   };
 

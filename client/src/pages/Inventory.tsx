@@ -25,7 +25,6 @@ import { trpc } from '../services/trpc';
 import { reportsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { Route } from '../routes/_authenticated/inventory';
-import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -74,7 +73,7 @@ export default function Inventory() {
     }, []);
 
     // Check if we have valid loader data (Server Function succeeded)
-    const hasLoaderData = USE_SERVER_FUNCTIONS.inventoryList && loaderData?.inventory;
+    const hasLoaderData = !!loaderData?.inventory;
 
     // Fetch inventory data via tRPC (with fallback when Server Function fails)
     const { data: inventoryData, isLoading, refetch, isFetching } = trpc.inventory.getAllBalances.useQuery(

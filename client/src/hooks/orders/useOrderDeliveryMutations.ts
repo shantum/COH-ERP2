@@ -2,12 +2,12 @@
  * Order delivery tracking mutations with optimistic updates
  * Handles marking orders/lines as delivered, RTO, and receiving RTO
  *
- * Line-level mutations (preferred):
+ * Line-level mutations (preferred) - Server Functions:
  * - markLineDelivered: Mark single line as delivered
  * - markLineRto: Initiate RTO for single line
  * - receiveLineRto: Receive RTO for single line
  *
- * Order-level mutations (backward compat):
+ * Order-level mutations (backward compat) - tRPC only:
  * - markDelivered: Mark all shipped lines as delivered
  * - markRto: Initiate RTO for all shipped lines
  * - receiveRto: Receive RTO for all RTO-initiated lines
@@ -18,11 +18,17 @@
  * 3. onSettled: Invalidate caches to confirm server state
  */
 
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
+import {
+    markLineDelivered as markLineDeliveredFn,
+    markLineRto as markLineRtoFn,
+    receiveLineRto as receiveLineRtoFn,
+} from '../../server/functions/orderMutations';
 import {
     getOrdersQueryInput,
     optimisticMarkDelivered,
@@ -56,7 +62,16 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
     const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders, invalidateShippedOrders, invalidateRtoOrders, invalidateCodPendingOrders } = useOrderInvalidation();
 
-    // Mark delivered with optimistic update
+    // Server Function wrappers
+    const markLineDeliveredServerFn = useServerFn(markLineDeliveredFn);
+    const markLineRtoServerFn = useServerFn(markLineRtoFn);
+    const receiveLineRtoServerFn = useServerFn(receiveLineRtoFn);
+
+    // ============================================
+    // ORDER-LEVEL MUTATIONS (backward compat, tRPC only)
+    // ============================================
+
+    // Mark delivered with optimistic update (order-level - backward compat, always tRPC)
     const markDeliveredMutation = trpc.orders.markDelivered.useMutation({
         onMutate: async ({ orderId }) => {
             // For delivery operations, we're typically in shipped view
@@ -93,7 +108,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         error: markDeliveredMutation.error,
     };
 
-    // Mark RTO with optimistic update
+    // Mark RTO with optimistic update (order-level - backward compat, always tRPC)
     const markRtoMutation = trpc.orders.markRto.useMutation({
         onMutate: async ({ orderId }) => {
             // For RTO operations, we're typically in shipped view
@@ -130,7 +145,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         error: markRtoMutation.error,
     };
 
-    // Receive RTO with optimistic update (restores inventory)
+    // Receive RTO with optimistic update (order-level - backward compat, always tRPC)
     const receiveRtoMutation = trpc.orders.receiveRto.useMutation({
         onMutate: async ({ orderId }) => {
             // For receive RTO, we're typically in RTO view
@@ -169,15 +184,22 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
     };
 
     // ============================================
-    // LINE-LEVEL MUTATIONS (PREFERRED)
+    // LINE-LEVEL MUTATIONS (PREFERRED) - Server Functions
     // ============================================
 
-    // Mark single line as delivered
-    const markLineDeliveredMutation = trpc.orders.markLineDelivered.useMutation({
+    // Mark single line as delivered - Server Function
+    const markLineDeliveredMutation = useMutation({
+        mutationFn: async (input: MarkLineDeliveredInput) => {
+            const result = await markLineDeliveredServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to mark line as delivered');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId }) => {
             // For line delivery, update shipped view optimistically
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await trpcUtils.orders.list.cancel(shippedQueryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
 
             // Update the specific line in the cache
@@ -201,7 +223,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             }
             invalidateShippedOrders();
             invalidateCodPendingOrders();
-            showError('Failed to mark line as delivered', { description: err.message });
+            showError('Failed to mark line as delivered', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // SSE handles real-time updates
@@ -216,11 +238,18 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         error: markLineDeliveredMutation.error,
     };
 
-    // Initiate RTO for single line
-    const markLineRtoMutation = trpc.orders.markLineRto.useMutation({
+    // Initiate RTO for single line - Server Function
+    const markLineRtoMutation = useMutation({
+        mutationFn: async (input: MarkLineRtoInput) => {
+            const result = await markLineRtoServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to initiate RTO for line');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId }) => {
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await trpcUtils.orders.list.cancel(shippedQueryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
 
             trpcUtils.orders.list.setData(shippedQueryInput, (old: any) => {
@@ -243,7 +272,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             }
             invalidateShippedOrders();
             invalidateRtoOrders();
-            showError('Failed to initiate RTO for line', { description: err.message });
+            showError('Failed to initiate RTO for line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // SSE handles real-time updates
@@ -258,11 +287,18 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         error: markLineRtoMutation.error,
     };
 
-    // Receive RTO for single line
-    const receiveLineRtoMutation = trpc.orders.receiveLineRto.useMutation({
+    // Receive RTO for single line - Server Function
+    const receiveLineRtoMutation = useMutation({
+        mutationFn: async (input: ReceiveLineRtoInput) => {
+            const result = await receiveLineRtoServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to receive RTO for line');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId, condition }) => {
             const rtoQueryInput = getOrdersQueryInput('rto', page, undefined);
-            await trpcUtils.orders.list.cancel(rtoQueryInput);
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = trpcUtils.orders.list.getData(rtoQueryInput);
 
             trpcUtils.orders.list.setData(rtoQueryInput, (old: any) => {
@@ -290,7 +326,7 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
             }
             invalidateRtoOrders();
             invalidateOpenOrders();
-            showError('Failed to receive RTO for line', { description: err.message });
+            showError('Failed to receive RTO for line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Invalidate inventory balance since RTO restores stock

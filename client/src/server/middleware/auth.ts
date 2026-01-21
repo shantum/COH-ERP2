@@ -7,7 +7,7 @@
 'use server';
 
 import { createMiddleware } from '@tanstack/react-start';
-import { getCookie } from 'vinxi/http';
+import { getCookie, getHeaders } from 'vinxi/http';
 import jwt from 'jsonwebtoken';
 
 /**
@@ -19,6 +19,37 @@ export interface AuthUser {
     role: string;
     roleId: string;
     tokenVersion: number;
+}
+
+/**
+ * Helper to extract auth token from cookie
+ *
+ * During SSR, getCookie() may return undefined because cookies aren't forwarded.
+ * Fallback: parse auth_token from request headers.
+ *
+ * Note: vinxi/http functions may throw if there's no request context (e.g., client-side).
+ * We catch these errors gracefully and return undefined.
+ */
+function getAuthToken(): string | undefined {
+    try {
+        // Try direct cookie access first (works in production)
+        let token = getCookie('auth_token');
+
+        // Fallback: parse from request headers (for SSR)
+        if (!token) {
+            const headers = getHeaders();
+            const cookieHeader = headers?.cookie;
+            if (cookieHeader) {
+                const match = cookieHeader.match(/auth_token=([^;]+)/);
+                token = match?.[1];
+            }
+        }
+
+        return token;
+    } catch {
+        // No request context available (e.g., client-side call)
+        return undefined;
+    }
 }
 
 /**
@@ -35,7 +66,7 @@ export interface AuthUser {
  * ```
  */
 export const authMiddleware = createMiddleware({ type: 'function' }).server(async ({ next }) => {
-    const token = getCookie('auth_token');
+    const token = getAuthToken();
 
     if (!token) {
         throw new Error('Authentication required');

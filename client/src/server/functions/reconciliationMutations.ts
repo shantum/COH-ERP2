@@ -1,0 +1,574 @@
+/**
+ * Inventory Reconciliation Mutations Server Functions
+ *
+ * TanStack Start Server Functions for physical inventory count reconciliation.
+ * Phase 4 implementation with Prisma, cache invalidation.
+ *
+ * Workflow:
+ * 1. Start count - creates reconciliation with all active SKUs + system balances
+ * 2. Enter physical quantities (manual or CSV upload - CSV stays in Express)
+ * 3. Save progress
+ * 4. Submit - creates InventoryTransaction for each variance
+ *
+ * IMPORTANT: All database imports are dynamic to prevent Node.js code
+ * (pg, Buffer) from being bundled into the client.
+ */
+
+import { createServerFn } from '@tanstack/react-start';
+import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
+
+// ============================================
+// INPUT SCHEMAS
+// ============================================
+
+const startReconciliationSchema = z.object({
+    skuIds: z.array(z.string().uuid()).optional(),
+});
+
+const updateReconciliationItemsSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+    items: z.array(
+        z.object({
+            id: z.string().uuid('Invalid item ID'),
+            physicalQty: z.number().int().nullable(),
+            systemQty: z.number().int(),
+            adjustmentReason: z.string().nullable().optional(),
+            notes: z.string().nullable().optional(),
+        })
+    ),
+});
+
+const submitReconciliationSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+    applyAdjustments: z.boolean().default(true),
+});
+
+const deleteReconciliationSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+});
+
+// ============================================
+// RESULT TYPES
+// ============================================
+
+export interface MutationResult<T> {
+    success: boolean;
+    data?: T;
+    error?: {
+        code: 'NOT_FOUND' | 'BAD_REQUEST' | 'CONFLICT' | 'FORBIDDEN';
+        message: string;
+    };
+}
+
+export interface ReconciliationItem {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    systemQty: number;
+    physicalQty: number | null;
+    variance: number | null;
+    adjustmentReason: string | null;
+    notes: string | null;
+}
+
+export interface StartReconciliationResult {
+    reconciliationId: string;
+    status: string;
+    createdAt: string;
+    itemCount: number;
+    items: ReconciliationItem[];
+}
+
+export interface UpdateReconciliationItemsResult {
+    reconciliationId: string;
+    status: string;
+    itemsUpdated: number;
+}
+
+export interface SubmitReconciliationResult {
+    reconciliationId: string;
+    status: string;
+    adjustmentsMade: number;
+    transactions: Array<{
+        skuId: string;
+        skuCode: string;
+        txnType: string;
+        qty: number;
+        reason: string;
+    }>;
+}
+
+export interface DeleteReconciliationResult {
+    reconciliationId: string;
+    deleted: boolean;
+}
+
+// ============================================
+// PRISMA HELPER
+// ============================================
+
+interface PrismaGlobal {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma: any;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PrismaClientType = any;
+
+async function getPrisma(): Promise<PrismaClientType> {
+    const { PrismaClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const prisma = globalForPrisma.prisma ?? new PrismaClient();
+    if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+    }
+    return prisma;
+}
+
+// ============================================
+// BALANCE CALCULATION HELPER
+// ============================================
+
+async function calculateAllInventoryBalances(
+    prisma: PrismaClientType,
+    skuIds: string[]
+): Promise<Map<string, { currentBalance: number }>> {
+    const aggregations = await prisma.inventoryTransaction.groupBy({
+        by: ['skuId', 'txnType'],
+        where: { skuId: { in: skuIds } },
+        _sum: { qty: true },
+    });
+
+    const balanceMap = new Map<string, { currentBalance: number }>();
+
+    // Initialize all SKUs with zero balance
+    for (const skuId of skuIds) {
+        balanceMap.set(skuId, { currentBalance: 0 });
+    }
+
+    // Calculate balances from aggregations
+    const skuTotals = new Map<string, { inward: number; outward: number }>();
+    for (const agg of aggregations) {
+        if (!skuTotals.has(agg.skuId)) {
+            skuTotals.set(agg.skuId, { inward: 0, outward: 0 });
+        }
+        const totals = skuTotals.get(agg.skuId)!;
+        if (agg.txnType === 'inward') {
+            totals.inward = agg._sum.qty || 0;
+        } else if (agg.txnType === 'outward') {
+            totals.outward = agg._sum.qty || 0;
+        }
+    }
+
+    for (const [skuId, totals] of skuTotals) {
+        balanceMap.set(skuId, { currentBalance: totals.inward - totals.outward });
+    }
+
+    return balanceMap;
+}
+
+// ============================================
+// CACHE INVALIDATION HELPER
+// ============================================
+
+async function invalidateAllCache(): Promise<void> {
+    try {
+        const { inventoryBalanceCache } = await import('../../../../server/src/services/inventoryBalanceCache.js');
+        inventoryBalanceCache.invalidateAll();
+    } catch {
+        console.log('[Server Function] Cache invalidation skipped (server module not available)');
+    }
+}
+
+// ============================================
+// SERVER FUNCTIONS
+// ============================================
+
+/**
+ * Start a new reconciliation with all active, non-custom SKUs
+ */
+export const startReconciliation = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => startReconciliationSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<StartReconciliationResult>> => {
+        const prisma = await getPrisma();
+        const { skuIds: providedSkuIds } = data;
+
+        // Get SKUs - either provided or all active non-custom
+        let skus;
+        if (providedSkuIds && providedSkuIds.length > 0) {
+            skus = await prisma.sku.findMany({
+                where: {
+                    id: { in: providedSkuIds },
+                    isActive: true,
+                },
+                select: {
+                    id: true,
+                    skuCode: true,
+                    size: true,
+                    variation: {
+                        select: {
+                            colorName: true,
+                            product: { select: { name: true } },
+                        },
+                    },
+                },
+            });
+        } else {
+            skus = await prisma.sku.findMany({
+                where: {
+                    isActive: true,
+                    isCustomSku: false,
+                },
+                select: {
+                    id: true,
+                    skuCode: true,
+                    size: true,
+                    variation: {
+                        select: {
+                            colorName: true,
+                            product: { select: { name: true } },
+                        },
+                    },
+                },
+            });
+        }
+
+        if (skus.length === 0) {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'No active SKUs found for reconciliation' },
+            };
+        }
+
+        // Calculate all balances efficiently
+        const skuIds = skus.map((s: { id: string }) => s.id);
+        const balanceMap = await calculateAllInventoryBalances(prisma, skuIds);
+
+        // Create reconciliation with items
+        const reconciliation = await prisma.inventoryReconciliation.create({
+            data: {
+                createdBy: context.user.id,
+                status: 'draft',
+                items: {
+                    create: skus.map((sku: { id: string }) => ({
+                        skuId: sku.id,
+                        systemQty: balanceMap.get(sku.id)?.currentBalance || 0,
+                    })),
+                },
+            },
+            include: {
+                items: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        const items: ReconciliationItem[] = reconciliation.items.map(
+            (item: {
+                id: string;
+                skuId: string;
+                systemQty: number;
+                physicalQty: number | null;
+                variance: number | null;
+                adjustmentReason: string | null;
+                notes: string | null;
+                sku: {
+                    skuCode: string;
+                    size: string;
+                    variation?: {
+                        colorName: string;
+                        product?: { name: string } | null;
+                    } | null;
+                };
+            }) => ({
+                id: item.id,
+                skuId: item.skuId,
+                skuCode: item.sku.skuCode,
+                productName: item.sku.variation?.product?.name || '',
+                colorName: item.sku.variation?.colorName || '',
+                size: item.sku.size,
+                systemQty: item.systemQty,
+                physicalQty: item.physicalQty,
+                variance: item.variance,
+                adjustmentReason: item.adjustmentReason,
+                notes: item.notes,
+            })
+        );
+
+        return {
+            success: true,
+            data: {
+                reconciliationId: reconciliation.id,
+                status: reconciliation.status,
+                createdAt: reconciliation.createdAt.toISOString(),
+                itemCount: items.length,
+                items,
+            },
+        };
+    });
+
+/**
+ * Update reconciliation items (physical quantities, reasons, notes)
+ */
+export const updateReconciliationItems = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateReconciliationItemsSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<UpdateReconciliationItemsResult>> => {
+        const prisma = await getPrisma();
+        const { reconciliationId, items } = data;
+
+        const reconciliation = await prisma.inventoryReconciliation.findUnique({
+            where: { id: reconciliationId },
+        });
+
+        if (!reconciliation) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Reconciliation not found' },
+            };
+        }
+
+        if (reconciliation.status !== 'draft') {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Cannot update submitted reconciliation' },
+            };
+        }
+
+        // Update each item
+        let updatedCount = 0;
+        for (const item of items) {
+            const variance =
+                item.physicalQty !== null && item.physicalQty !== undefined
+                    ? item.physicalQty - item.systemQty
+                    : null;
+
+            await prisma.inventoryReconciliationItem.update({
+                where: { id: item.id },
+                data: {
+                    physicalQty: item.physicalQty,
+                    variance,
+                    adjustmentReason: item.adjustmentReason || null,
+                    notes: item.notes || null,
+                },
+            });
+            updatedCount++;
+        }
+
+        return {
+            success: true,
+            data: {
+                reconciliationId,
+                status: reconciliation.status,
+                itemsUpdated: updatedCount,
+            },
+        };
+    });
+
+/**
+ * Submit reconciliation and create adjustment transactions
+ */
+export const submitReconciliation = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => submitReconciliationSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<SubmitReconciliationResult>> => {
+        const prisma = await getPrisma();
+        const { reconciliationId, applyAdjustments } = data;
+
+        const reconciliation = await prisma.inventoryReconciliation.findUnique({
+            where: { id: reconciliationId },
+            include: {
+                items: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!reconciliation) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Reconciliation not found' },
+            };
+        }
+
+        if (reconciliation.status !== 'draft') {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Reconciliation already submitted' },
+            };
+        }
+
+        // Collect all items with variances for processing
+        interface ItemToProcess {
+            itemId: string;
+            skuId: string;
+            skuCode: string;
+            txnType: 'inward' | 'outward';
+            qty: number;
+            reason: string;
+            notes: string;
+            adjustmentReason: string;
+        }
+
+        const itemsToProcess: ItemToProcess[] = [];
+
+        for (const item of reconciliation.items) {
+            if (item.variance === null || item.variance === 0) continue;
+
+            if (item.physicalQty === null) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST',
+                        message: `Physical quantity not entered for ${item.sku.skuCode}`,
+                    },
+                };
+            }
+
+            const adjustmentReason = item.adjustmentReason || 'count_adjustment';
+            const txnType = item.variance > 0 ? 'inward' : 'outward';
+            const qty = Math.abs(item.variance);
+
+            itemsToProcess.push({
+                itemId: item.id,
+                skuId: item.skuId,
+                skuCode: item.sku.skuCode,
+                txnType,
+                qty,
+                reason: `reconciliation_${adjustmentReason}`,
+                notes: item.notes || `Reconciliation adjustment: ${adjustmentReason}`,
+                adjustmentReason,
+            });
+        }
+
+        const transactions: Array<{
+            skuId: string;
+            skuCode: string;
+            txnType: string;
+            qty: number;
+            reason: string;
+        }> = [];
+
+        // Create transactions if applyAdjustments is true
+        if (applyAdjustments && itemsToProcess.length > 0) {
+            const BATCH_SIZE = 100;
+
+            for (let i = 0; i < itemsToProcess.length; i += BATCH_SIZE) {
+                const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
+
+                await prisma.$transaction(
+                    async (tx: PrismaClientType) => {
+                        for (const item of batch) {
+                            const txn = await tx.inventoryTransaction.create({
+                                data: {
+                                    skuId: item.skuId,
+                                    txnType: item.txnType,
+                                    qty: item.qty,
+                                    reason: item.reason,
+                                    referenceId: reconciliationId,
+                                    notes: item.notes,
+                                    createdById: context.user.id,
+                                },
+                            });
+
+                            // Link transaction to reconciliation item
+                            await tx.inventoryReconciliationItem.update({
+                                where: { id: item.itemId },
+                                data: { txnId: txn.id },
+                            });
+
+                            transactions.push({
+                                skuId: item.skuId,
+                                skuCode: item.skuCode,
+                                txnType: item.txnType,
+                                qty: item.qty,
+                                reason: item.adjustmentReason,
+                            });
+                        }
+                    },
+                    { timeout: 60000 }
+                );
+            }
+        }
+
+        // Mark reconciliation as submitted
+        await prisma.inventoryReconciliation.update({
+            where: { id: reconciliationId },
+            data: { status: 'submitted' },
+        });
+
+        // Invalidate all cache after reconciliation
+        if (applyAdjustments && transactions.length > 0) {
+            await invalidateAllCache();
+        }
+
+        return {
+            success: true,
+            data: {
+                reconciliationId,
+                status: 'submitted',
+                adjustmentsMade: transactions.length,
+                // Limit response size - only return first 50 transactions
+                transactions: transactions.slice(0, 50),
+            },
+        };
+    });
+
+/**
+ * Delete a draft reconciliation
+ */
+export const deleteReconciliation = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => deleteReconciliationSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<DeleteReconciliationResult>> => {
+        const prisma = await getPrisma();
+        const { reconciliationId } = data;
+
+        const reconciliation = await prisma.inventoryReconciliation.findUnique({
+            where: { id: reconciliationId },
+        });
+
+        if (!reconciliation) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Reconciliation not found' },
+            };
+        }
+
+        if (reconciliation.status !== 'draft') {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Cannot delete submitted reconciliation' },
+            };
+        }
+
+        // Delete reconciliation and cascade to items
+        await prisma.inventoryReconciliation.delete({
+            where: { id: reconciliationId },
+        });
+
+        return {
+            success: true,
+            data: {
+                reconciliationId,
+                deleted: true,
+            },
+        };
+    });

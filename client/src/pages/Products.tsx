@@ -23,7 +23,6 @@ import { BomProductList, ConsumptionGridView, ConsumptionImportView } from '../c
 import { FabricMappingView } from '../components/products/fabric-mapping';
 import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
 import { Route } from '../routes/_authenticated/products';
-import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
 
 export default function Products() {
     // Get loader data from route (SSR pre-fetched data)
@@ -45,7 +44,7 @@ export default function Products() {
     const [searchQuery, setSearchQuery] = useState('');
 
     // Check if we have valid loader data (Server Function succeeded)
-    const hasLoaderData = USE_SERVER_FUNCTIONS.productsList && loaderData?.productsTree;
+    const hasLoaderData = !!loaderData?.productsTree;
 
     // Fetch products tree for URL resolution (only for BOM tab)
     // Pass initialData from route loader for instant hydration

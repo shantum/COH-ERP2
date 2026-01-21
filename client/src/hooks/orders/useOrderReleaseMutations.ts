@@ -1,24 +1,42 @@
 /**
  * Order release mutations
  * Handles releasing orders to shipped/cancelled views and migration
- * Uses tRPC for all operations
  */
 
 import { useMemo } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError, showSuccess } from '../../utils/toast';
+import {
+    releaseToShipped as releaseToShippedFn,
+    releaseToCancelled as releaseToCancelledFn,
+} from '../../server/functions/orderMutations';
 
 export function useOrderReleaseMutations() {
     const { invalidateOpenOrders, invalidateShippedOrders, invalidateCancelledOrders } = useOrderInvalidation();
 
-    // Release to shipped via tRPC
-    const releaseToShippedMutation = trpc.orders.releaseToShipped.useMutation({
+    // Server Function wrappers
+    const releaseToShippedServerFn = useServerFn(releaseToShippedFn);
+    const releaseToCancelledServerFn = useServerFn(releaseToCancelledFn);
+
+    // ============================================
+    // RELEASE TO SHIPPED
+    // ============================================
+    const releaseToShippedMutation = useMutation({
+        mutationFn: async (input: { orderIds?: string[] }) => {
+            const result = await releaseToShippedServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to release orders');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateShippedOrders();
         },
-        onError: (err) => showError('Failed to release orders', { description: err.message })
+        onError: (err) => showError('Failed to release orders', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -30,13 +48,22 @@ export function useOrderReleaseMutations() {
         error: releaseToShippedMutation.error,
     }), [releaseToShippedMutation.isPending, releaseToShippedMutation.isError, releaseToShippedMutation.error]);
 
-    // Release to cancelled via tRPC
-    const releaseToCancelledMutation = trpc.orders.releaseToCancelled.useMutation({
+    // ============================================
+    // RELEASE TO CANCELLED
+    // ============================================
+    const releaseToCancelledMutation = useMutation({
+        mutationFn: async (input: { orderIds?: string[] }) => {
+            const result = await releaseToCancelledServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to release cancelled orders');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateOpenOrders();
             invalidateCancelledOrders();
         },
-        onError: (err) => showError('Failed to release cancelled orders', { description: err.message })
+        onError: (err) => showError('Failed to release cancelled orders', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -48,7 +75,9 @@ export function useOrderReleaseMutations() {
         error: releaseToCancelledMutation.error,
     }), [releaseToCancelledMutation.isPending, releaseToCancelledMutation.isError, releaseToCancelledMutation.error]);
 
-    // Migrate Shopify fulfilled orders via tRPC
+    // ============================================
+    // MIGRATE SHOPIFY FULFILLED - Always tRPC (no Server Function equivalent)
+    // ============================================
     const migrateShopifyFulfilledMutation = trpc.orders.migrateShopifyFulfilled.useMutation({
         onSuccess: (data) => {
             invalidateOpenOrders();

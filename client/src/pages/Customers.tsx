@@ -7,7 +7,6 @@ import { useNavigate } from '@tanstack/react-router';
 import { UnifiedOrderModal } from '../components/orders';
 import type { Order } from '../types';
 import { useCustomersUrlModal } from '../hooks/useUrlModal';
-import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
 import { Route } from '../routes/_authenticated/customers';
 
 // Debounce hook for search
@@ -166,7 +165,7 @@ export default function Customers() {
     }, [closeModal]);
 
     // Check if we have valid loader data (Server Function succeeded)
-    const hasLoaderData = USE_SERVER_FUNCTIONS.customersList && tab === 'all' && loaderData?.customers;
+    const hasLoaderData = tab === 'all' && !!loaderData?.customers;
 
     // Server-side search and pagination
     // When Server Function is enabled AND has data, skip tRPC; otherwise use tRPC as fallback

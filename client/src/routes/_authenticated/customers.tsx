@@ -7,7 +7,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { lazy } from 'react';
 import { CustomersSearchParams } from '@coh/shared';
-import { USE_SERVER_FUNCTIONS } from '../../config/serverFunctionFlags';
 import {
     getCustomersList,
     type CustomersListResponse,
@@ -27,9 +26,8 @@ export const Route = createFileRoute('/_authenticated/customers')({
     }),
     // Pre-fetch customers data on server
     loader: async ({ deps }): Promise<CustomersLoaderData> => {
-        // Skip Server Function if flag is disabled or on special tabs
-        // (highValue, atRisk, returners tabs use different data sources)
-        if (!USE_SERVER_FUNCTIONS.customersList || deps.tab !== 'all') {
+        // Skip on special tabs (highValue, atRisk, returners tabs use different data sources)
+        if (deps.tab !== 'all') {
             return { customers: null, error: null };
         }
 

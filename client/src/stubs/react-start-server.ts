@@ -44,3 +44,7 @@ export function getEvent(): unknown {
 export function getContext(): unknown {
     return undefined;
 }
+
+export function getHeaders(): Record<string, string> {
+    return {};
+}

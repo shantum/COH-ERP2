@@ -1,13 +1,20 @@
 /**
  * Order CRUD mutations
  * Handles creating, updating, deleting orders and notes
- * Uses tRPC for all operations
  */
 
 import { useMemo } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
+import {
+    createOrder as createOrderFn,
+    updateOrder as updateOrderFn,
+    markPaid as markPaidFn,
+    deleteOrder as deleteOrderFn,
+} from '../../server/functions/orderMutations';
 
 export interface UseOrderCrudMutationsOptions {
     onCreateSuccess?: () => void;
@@ -16,28 +23,77 @@ export interface UseOrderCrudMutationsOptions {
     onNotesSuccess?: () => void;
 }
 
+// Input type for createOrder Server Function
+interface CreateOrderInput {
+    orderNumber?: string;
+    channel?: string;
+    customerId?: string | null;
+    customerName: string;
+    customerEmail?: string | null;
+    customerPhone?: string | null;
+    shippingAddress?: string | null;
+    internalNotes?: string | null;
+    totalAmount?: number;
+    shipByDate?: string | null;
+    paymentMethod?: 'Prepaid' | 'COD';
+    paymentStatus?: 'pending' | 'paid';
+    isExchange?: boolean;
+    originalOrderId?: string | null;
+    lines: Array<{
+        skuId: string;
+        qty: number;
+        unitPrice?: number;
+        shippingAddress?: string | null;
+    }>;
+}
+
 export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}) {
     const { invalidateOpenOrders, invalidateAll } = useOrderInvalidation();
     const trpcUtils = trpc.useUtils();
 
-    // Create order (already tRPC)
-    const createOrder = trpc.orders.create.useMutation({
+    // Server Function wrappers
+    const createOrderServerFn = useServerFn(createOrderFn);
+    const updateOrderServerFn = useServerFn(updateOrderFn);
+    // markPaidServerFn will be used when markPaid mutation is added
+    void markPaidFn; // Prevent unused import warning
+    const deleteOrderServerFn = useServerFn(deleteOrderFn);
+
+    // ============================================
+    // CREATE ORDER
+    // ============================================
+    const createOrder = useMutation({
+        mutationFn: async (input: CreateOrderInput) => {
+            const result = await createOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to create order');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateOpenOrders();
             options.onCreateSuccess?.();
         },
         onError: (err) => {
-            showError('Failed to create order', { description: err.message });
+            showError('Failed to create order', { description: err instanceof Error ? err.message : String(err) });
         }
     });
 
-    // Delete order via tRPC
-    const deleteOrderMutation = trpc.orders.deleteOrder.useMutation({
+    // ============================================
+    // DELETE ORDER
+    // ============================================
+    const deleteOrderMutation = useMutation({
+        mutationFn: async (input: { orderId: string }) => {
+            const result = await deleteOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to delete order');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateAll();
             options.onDeleteSuccess?.();
         },
-        onError: (err) => showError('Failed to delete order', { description: err.message })
+        onError: (err) => showError('Failed to delete order', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -49,13 +105,22 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         error: deleteOrderMutation.error,
     }), [deleteOrderMutation.isPending, deleteOrderMutation.isError, deleteOrderMutation.error]);
 
-    // Update order via tRPC
-    const updateOrderMutation = trpc.orders.updateOrder.useMutation({
+    // ============================================
+    // UPDATE ORDER
+    // ============================================
+    const updateOrderMutation = useMutation({
+        mutationFn: async (input: { orderId: string; customerName?: string; customerEmail?: string | null; customerPhone?: string | null; shippingAddress?: string | null; internalNotes?: string | null; shipByDate?: string | null; isExchange?: boolean }) => {
+            const result = await updateOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update order');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateOpenOrders();
             options.onEditSuccess?.();
         },
-        onError: (err) => showError('Failed to update order', { description: err.message })
+        onError: (err) => showError('Failed to update order', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -69,13 +134,23 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         error: updateOrderMutation.error,
     }), [updateOrderMutation.isPending, updateOrderMutation.isError, updateOrderMutation.error]);
 
-    // Update order notes via tRPC
-    const updateOrderNotesMutation = trpc.orders.updateOrder.useMutation({
+    // ============================================
+    // UPDATE ORDER NOTES
+    // Note: Uses the same updateOrder mutation but with specific field
+    // ============================================
+    const updateOrderNotesMutation = useMutation({
+        mutationFn: async (input: { orderId: string; internalNotes: string }) => {
+            const result = await updateOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update notes');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             invalidateOpenOrders();
             options.onNotesSuccess?.();
         },
-        onError: (err) => showError('Failed to update notes', { description: err.message })
+        onError: (err) => showError('Failed to update notes', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
@@ -89,7 +164,9 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         error: updateOrderNotesMutation.error,
     }), [updateOrderNotesMutation.isPending, updateOrderNotesMutation.isError, updateOrderNotesMutation.error]);
 
-    // Update line notes via tRPC
+    // ============================================
+    // UPDATE LINE NOTES - Always tRPC (no Server Function equivalent)
+    // ============================================
     const updateLineNotesMutation = trpc.orders.updateLine.useMutation({
         onSuccess: () => {
             // Simple: invalidate current view's cache, let it refetch
@@ -112,13 +189,23 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
         error: updateLineNotesMutation.error,
     }), [updateLineNotesMutation.isPending, updateLineNotesMutation.isError, updateLineNotesMutation.error]);
 
-    // Update ship by date via tRPC
-    const updateShipByDateMutation = trpc.orders.updateOrder.useMutation({
+    // ============================================
+    // UPDATE SHIP BY DATE
+    // Note: Uses the same updateOrder mutation but with specific field
+    // ============================================
+    const updateShipByDateMutation = useMutation({
+        mutationFn: async (input: { orderId: string; shipByDate: string | null }) => {
+            const result = await updateOrderServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update ship by date');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             trpcUtils.orders.list.invalidate();
         },
         onError: (err) => {
-            showError('Failed to update ship by date', { description: err.message });
+            showError('Failed to update ship by date', { description: err instanceof Error ? err.message : String(err) });
         }
     });
 

@@ -7,7 +7,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { lazy } from 'react';
 import { ProductsSearchParams } from '@coh/shared';
-import { USE_SERVER_FUNCTIONS } from '../../config/serverFunctionFlags';
 import {
     getProductsTree,
     type ProductsTreeResponse,
@@ -28,8 +27,8 @@ export const Route = createFileRoute('/_authenticated/products')({
             deps.tab
         );
 
-        // Skip Server Function if flag is disabled or tab doesn't need data
-        if (!USE_SERVER_FUNCTIONS.productsList || !needsProductsTree) {
+        // Skip if tab doesn't need products tree data
+        if (!needsProductsTree) {
             return { productsTree: null, error: null };
         }
 

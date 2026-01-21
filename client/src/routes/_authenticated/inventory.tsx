@@ -7,7 +7,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { lazy } from 'react';
 import { InventorySearchParams } from '@coh/shared';
-import { USE_SERVER_FUNCTIONS } from '../../config/serverFunctionFlags';
 import {
     getInventoryList,
     type InventoryListResponse,
@@ -26,11 +25,6 @@ export const Route = createFileRoute('/_authenticated/inventory')({
     }),
     // Pre-fetch inventory data on server
     loader: async ({ deps }): Promise<InventoryLoaderData> => {
-        // Skip Server Function if flag is disabled
-        if (!USE_SERVER_FUNCTIONS.inventoryList) {
-            return { inventory: null, error: null };
-        }
-
         try {
             const offset = (deps.page - 1) * deps.limit;
             const inventory = await getInventoryList({
