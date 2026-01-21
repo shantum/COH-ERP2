@@ -1918,6 +1918,9 @@ export interface Role {
     displayName: string;
     description: string | null;
     permissions: string[];
+    isBuiltIn: boolean;
+    createdAt: string;
+    updatedAt: string;
 }
 
 /**
@@ -1936,9 +1939,28 @@ export const getRoles = createServerFn({ method: 'GET' })
                 displayName: true,
                 description: true,
                 permissions: true,
+                isBuiltIn: true,
+                createdAt: true,
+                updatedAt: true,
             },
             orderBy: { displayName: 'asc' },
         });
 
-        return { success: true, data: roles };
+        // Convert dates to ISO strings
+        const rolesWithStringDates = roles.map((role: {
+            id: string;
+            name: string;
+            displayName: string;
+            description: string | null;
+            permissions: string[];
+            isBuiltIn: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+        }) => ({
+            ...role,
+            createdAt: role.createdAt.toISOString(),
+            updatedAt: role.updatedAt.toISOString(),
+        }));
+
+        return { success: true, data: rolesWithStringDates };
     });

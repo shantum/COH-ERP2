@@ -7,7 +7,8 @@ import {
 import { usePermissions } from '../hooks/usePermissions';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { adminApi } from '../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getSidebarOrder } from '../server/functions/admin';
 import type { LucideIcon } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { Breadcrumbs } from './ui/Breadcrumbs';
@@ -116,11 +117,15 @@ export default function Layout() {
     });
 
     // Fetch admin-configured sidebar order (client-only to avoid SSR 401)
+    const getSidebarOrderFn = useServerFn(getSidebarOrder);
     const { data: sidebarOrder } = useQuery({
         queryKey: ['sidebarOrder'],
         queryFn: async () => {
-            const res = await adminApi.getSidebarOrder();
-            return res.data;
+            const result = await getSidebarOrderFn();
+            if (!result.success) {
+                return null;
+            }
+            return result.data;
         },
         staleTime: 5 * 60 * 1000, // Cache for 5 minutes
         enabled: typeof window !== 'undefined', // Skip during SSR

@@ -17,13 +17,15 @@
 import { useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { getOrdersListQueryKey } from './orders/orderMutationUtils';
 import { getOrders } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
 import { getProductsList } from '../server/functions/products';
+import { getFabricStockAnalysis } from '../server/functions/fabrics';
+import { getChannels } from '../server/functions/admin';
+import { getCustomer } from '../server/functions/customers';
 
 // Server Function types only - actual function loaded dynamically if enabled
 // This prevents @tanstack/react-start from being bundled in SPA mode
@@ -245,17 +247,28 @@ export function useUnifiedOrdersData({
     });
 
     // Fabric stock - only needed for Open view
+    const getFabricStockAnalysisFn = useServerFn(getFabricStockAnalysis);
     const fabricStockQuery = useQuery({
         queryKey: inventoryQueryKeys.fabric,
-        queryFn: () => fabricsApi.getStockAnalysis().then(r => r.data),
+        queryFn: async () => {
+            const result = await getFabricStockAnalysisFn({ data: {} });
+            return result.analysis;
+        },
         staleTime: 60000,
         enabled: currentView === 'open',
     });
 
     // Channels for CreateOrderModal
+    const getChannelsFn = useServerFn(getChannels);
     const channelsQuery = useQuery({
         queryKey: ['orderChannels'],
-        queryFn: () => adminApi.getChannels().then(r => r.data),
+        queryFn: async () => {
+            const result = await getChannelsFn();
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to fetch channels');
+            }
+            return result.data;
+        },
         staleTime: 300000,
     });
 
@@ -269,9 +282,10 @@ export function useUnifiedOrdersData({
     });
 
     // Customer detail - only when selected
+    const getCustomerFn = useServerFn(getCustomer);
     const customerDetailQuery = useQuery({
         queryKey: ['customer', selectedCustomerId],
-        queryFn: () => customersApi.getById(selectedCustomerId!).then(r => r.data),
+        queryFn: () => getCustomerFn({ data: { id: selectedCustomerId! } }),
         enabled: !!selectedCustomerId
     });
 

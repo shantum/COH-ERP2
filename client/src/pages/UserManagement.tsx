@@ -12,7 +12,6 @@ import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Search, UserPlus, Shield, Users, Check, X as XIcon } from 'lucide-react';
-import { adminApi } from '../services/api';
 import { compactTheme, formatDateWithYear, formatRelativeTime } from '../utils/agGridHelpers';
 import { usePermissions } from '../hooks/usePermissions';
 import { PermissionGate, AccessDenied } from '../components/PermissionGate';
@@ -23,6 +22,7 @@ import PermissionEditorModal from '../components/admin/PermissionEditorModal';
 import {
     getUsers as getUsersFn,
     updateUser as updateUserFn,
+    getRoles as getRolesFn,
     type User as AdminUser,
 } from '../server/functions/admin';
 
@@ -99,10 +99,17 @@ export default function UserManagement() {
         },
     });
 
-    // Fetch roles for dropdown (still using adminApi - no Server Function available yet)
+    // Fetch roles for dropdown using Server Function
+    const getRolesServerFn = useServerFn(getRolesFn);
     const { data: roles } = useQuery({
         queryKey: ['admin-roles'],
-        queryFn: () => adminApi.getRoles().then(r => r.data),
+        queryFn: async () => {
+            const result = await getRolesServerFn();
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to fetch roles');
+            }
+            return result.data;
+        },
     });
 
     // Update user role mutation using Server Function
