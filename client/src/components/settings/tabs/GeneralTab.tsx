@@ -1,16 +1,34 @@
 /**
  * GeneralTab component
  * Handles password change, user management, and order channels
+ *
+ * Migrated to use TanStack Start Server Functions
  */
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, authApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
 import { useAuth } from '../../../hooks/useAuth';
 import {
     Lock, Users, UserPlus, Edit2, Shield, Trash2, RefreshCw, Plus, X,
     ShoppingCart, CheckCircle, Star
 } from 'lucide-react';
+
+// Server Functions
+import {
+    getUsers,
+    createUser,
+    updateUser,
+    deleteUser,
+    getChannels,
+    updateChannels,
+    getTierThresholds,
+    updateTierThresholds,
+    type User,
+    type Channel,
+    type TierThresholds,
+} from '../../../server/functions/admin';
+import { changePassword } from '../../../server/functions/authMutations';
 
 export function GeneralTab() {
     const queryClient = useQueryClient();
@@ -23,23 +41,42 @@ export function GeneralTab() {
     const [passwordSuccess, setPasswordSuccess] = useState('');
 
     // Tier thresholds state
-    const [tierThresholds, setTierThresholds] = useState({ platinum: 50000, gold: 25000, silver: 10000 });
+    const [tierThresholds, setTierThresholds] = useState<TierThresholds>({ platinum: 50000, gold: 25000, silver: 10000 });
     const [tierError, setTierError] = useState('');
     const [tierSuccess, setTierSuccess] = useState('');
 
     // User management state
     const [showAddUser, setShowAddUser] = useState(false);
-    const [editingUser, setEditingUser] = useState<any>(null);
+    const [editingUser, setEditingUser] = useState<(User & { newPassword?: string }) | null>(null);
     const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'staff' });
+
+    // Server Function wrappers
+    const getUsersFn = useServerFn(getUsers);
+    const createUserFn = useServerFn(createUser);
+    const updateUserFn = useServerFn(updateUser);
+    const deleteUserFn = useServerFn(deleteUser);
+    const getChannelsFn = useServerFn(getChannels);
+    const updateChannelsFn = useServerFn(updateChannels);
+    const getTierThresholdsFn = useServerFn(getTierThresholds);
+    const updateTierThresholdsFn = useServerFn(updateTierThresholds);
+    const changePasswordFn = useServerFn(changePassword);
 
     const { data: channels, isLoading } = useQuery({
         queryKey: ['orderChannels'],
-        queryFn: () => adminApi.getChannels().then(r => r.data),
+        queryFn: async () => {
+            const result = await getChannelsFn();
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
     });
 
     const { data: users, isLoading: usersLoading } = useQuery({
         queryKey: ['users'],
-        queryFn: () => adminApi.getUsers().then(r => r.data),
+        queryFn: async () => {
+            const result = await getUsersFn();
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         enabled: user?.role === 'admin',
     });
 
@@ -47,78 +84,110 @@ export function GeneralTab() {
     const { isLoading: tierLoading } = useQuery({
         queryKey: ['tierThresholds'],
         queryFn: async () => {
-            const res = await adminApi.getTierThresholds();
-            setTierThresholds(res.data);
-            return res.data;
+            const result = await getTierThresholdsFn();
+            if (!result.success) throw new Error(result.error?.message);
+            if (result.data) {
+                setTierThresholds(result.data);
+            }
+            return result.data;
         },
         enabled: user?.role === 'admin',
     });
 
     const updateTierMutation = useMutation({
-        mutationFn: (thresholds: { platinum: number; gold: number; silver: number }) =>
-            adminApi.updateTierThresholds(thresholds),
+        mutationFn: async (thresholds: TierThresholds) => {
+            const result = await updateTierThresholdsFn({ data: thresholds });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             setTierSuccess('Tier thresholds updated successfully!');
             setTierError('');
             queryClient.invalidateQueries({ queryKey: ['tierThresholds'] });
         },
-        onError: (error: any) => {
-            setTierError(error.response?.data?.error || 'Failed to update thresholds');
+        onError: (error: Error) => {
+            setTierError(error.message || 'Failed to update thresholds');
             setTierSuccess('');
         },
     });
 
     const updateChannelsMutation = useMutation({
-        mutationFn: (channels: { id: string; name: string }[]) => adminApi.updateChannels(channels),
+        mutationFn: async (channelsList: Channel[]) => {
+            const result = await updateChannelsFn({ data: { channels: channelsList } });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['orderChannels'] });
         },
     });
 
     const changePasswordMutation = useMutation({
-        mutationFn: (data: { currentPassword: string; newPassword: string }) => authApi.changePassword(data),
+        mutationFn: async (data: { currentPassword: string; newPassword: string }) => {
+            const result = await changePasswordFn({ data });
+            return result;
+        },
         onSuccess: () => {
             setPasswordSuccess('Password changed successfully!');
             setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
             setPasswordError('');
         },
-        onError: (error: any) => {
-            setPasswordError(error.response?.data?.error || 'Failed to change password');
+        onError: (error: Error) => {
+            setPasswordError(error.message || 'Failed to change password');
             setPasswordSuccess('');
         },
     });
 
     const createUserMutation = useMutation({
-        mutationFn: (data: { email: string; password: string; name: string; role: string }) =>
-            adminApi.createUser(data),
+        mutationFn: async (data: { email: string; password: string; name: string; role: string }) => {
+            const result = await createUserFn({ data: { email: data.email, password: data.password, name: data.name } });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
             setShowAddUser(false);
             setNewUser({ email: '', password: '', name: '', role: 'staff' });
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to create user');
+        onError: (error: Error) => {
+            alert(error.message || 'Failed to create user');
         },
     });
 
     const updateUserMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => adminApi.updateUser(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: { name?: string; email?: string; role?: string; isActive?: boolean; password?: string } }) => {
+            const result = await updateUserFn({
+                data: {
+                    userId: id,
+                    name: data.name,
+                    email: data.email,
+                    isActive: data.isActive,
+                    password: data.password,
+                },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
             setEditingUser(null);
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to update user');
+        onError: (error: Error) => {
+            alert(error.message || 'Failed to update user');
         },
     });
 
     const deleteUserMutation = useMutation({
-        mutationFn: (id: string) => adminApi.deleteUser(id),
+        mutationFn: async (id: string) => {
+            const result = await deleteUserFn({ data: { userId: id } });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to delete user');
+        onError: (error: Error) => {
+            alert(error.message || 'Failed to delete user');
         },
     });
 
@@ -163,7 +232,7 @@ export function GeneralTab() {
             return;
         }
         const channelId = newChannel.id.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-        if (channels?.some((c: any) => c.id === channelId)) {
+        if (channels?.some((c) => c.id === channelId)) {
             alert('Channel ID already exists');
             return;
         }
@@ -174,7 +243,7 @@ export function GeneralTab() {
 
     const removeChannel = (id: string) => {
         if (!confirm('Remove this channel?')) return;
-        const updatedChannels = channels?.filter((c: any) => c.id !== id) || [];
+        const updatedChannels = channels?.filter((c) => c.id !== id) || [];
         updateChannelsMutation.mutate(updatedChannels);
     };
 
@@ -284,7 +353,7 @@ export function GeneralTab() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {users?.map((u: any) => (
+                                    {users?.map((u) => (
                                         <tr key={u.id} className="border-t">
                                             <td className="px-4 py-3 font-medium">{u.name}</td>
                                             <td className="px-4 py-3">{u.email}</td>
@@ -410,7 +479,7 @@ export function GeneralTab() {
                                             type="text"
                                             className="input"
                                             value={editingUser.name}
-                                            onChange={(e) => setEditingUser((u: any) => ({ ...u, name: e.target.value }))}
+                                            onChange={(e) => setEditingUser((u) => u ? { ...u, name: e.target.value } : null)}
                                         />
                                     </div>
                                     <div>
@@ -419,7 +488,7 @@ export function GeneralTab() {
                                             type="email"
                                             className="input"
                                             value={editingUser.email}
-                                            onChange={(e) => setEditingUser((u: any) => ({ ...u, email: e.target.value }))}
+                                            onChange={(e) => setEditingUser((u) => u ? { ...u, email: e.target.value } : null)}
                                         />
                                     </div>
                                     <div>
@@ -428,7 +497,7 @@ export function GeneralTab() {
                                             type="password"
                                             className="input"
                                             value={editingUser.newPassword || ''}
-                                            onChange={(e) => setEditingUser((u: any) => ({ ...u, newPassword: e.target.value }))}
+                                            onChange={(e) => setEditingUser((u) => u ? { ...u, newPassword: e.target.value } : null)}
                                             placeholder="Enter new password"
                                         />
                                         <p className="text-xs text-gray-500 mt-1">
@@ -440,7 +509,7 @@ export function GeneralTab() {
                                         <select
                                             className="input"
                                             value={editingUser.role}
-                                            onChange={(e) => setEditingUser((u: any) => ({ ...u, role: e.target.value }))}
+                                            onChange={(e) => setEditingUser((u) => u ? { ...u, role: e.target.value } : null)}
                                         >
                                             <option value="staff">Staff</option>
                                             <option value="admin">Admin</option>
@@ -451,7 +520,7 @@ export function GeneralTab() {
                                             type="checkbox"
                                             id="userActive"
                                             checked={editingUser.isActive !== false}
-                                            onChange={(e) => setEditingUser((u: any) => ({ ...u, isActive: e.target.checked }))}
+                                            onChange={(e) => setEditingUser((u) => u ? { ...u, isActive: e.target.checked } : null)}
                                             className="rounded border-gray-300"
                                         />
                                         <label htmlFor="userActive" className="text-sm text-gray-700">Active</label>
@@ -466,7 +535,7 @@ export function GeneralTab() {
                                     </button>
                                     <button
                                         onClick={() => {
-                                            const updateData: any = {
+                                            const updateData: { name?: string; email?: string; role?: string; isActive?: boolean; password?: string } = {
                                                 name: editingUser.name,
                                                 email: editingUser.email,
                                                 role: editingUser.role,
@@ -506,7 +575,7 @@ export function GeneralTab() {
                     <>
                         {/* Current Channels */}
                         <div className="space-y-2 mb-4">
-                            {channels?.map((channel: any) => (
+                            {channels?.map((channel) => (
                                 <div key={channel.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                     <div>
                                         <span className="font-medium text-gray-900">{channel.name}</span>
@@ -588,7 +657,7 @@ export function GeneralTab() {
                                         Platinum
                                     </label>
                                     <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">&#8377;</span>
                                         <input
                                             type="number"
                                             className="input pl-7"
@@ -604,7 +673,7 @@ export function GeneralTab() {
                                         Gold
                                     </label>
                                     <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">&#8377;</span>
                                         <input
                                             type="number"
                                             className="input pl-7"
@@ -620,7 +689,7 @@ export function GeneralTab() {
                                         Silver
                                     </label>
                                     <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">&#8377;</span>
                                         <input
                                             type="number"
                                             className="input pl-7"
@@ -633,7 +702,7 @@ export function GeneralTab() {
                             </div>
 
                             <p className="text-xs text-gray-500">
-                                Example: With Silver=₹10,000, customers with LTV ₹0-9,999 are Bronze, ₹10,000+ are Silver.
+                                Example: With Silver=&#8377;10,000, customers with LTV &#8377;0-9,999 are Bronze, &#8377;10,000+ are Silver.
                             </p>
 
                             {tierError && (

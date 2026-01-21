@@ -1,17 +1,36 @@
 /**
  * ShopifyTab component
  * Shopify integration configuration, sync controls, and webhook management
+ *
+ * Partially migrated to use TanStack Start Server Functions.
+ * Some APIs still use axios (shopifyApi) for features not yet migrated to Server Functions.
  */
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { shopifyApi } from '../../../services/api';
 import JsonViewer from '../../JsonViewer';
 import {
     CheckCircle, XCircle, RefreshCw, ShoppingCart, Users, Eye, Play,
     AlertCircle, Package, Webhook, Copy, ExternalLink, Database, Download,
-    Activity, Clock, Zap, Pause, ChevronDown, ChevronRight, FileJson, ArrowRight
+    Activity, Clock, Zap, Pause, ChevronDown, ChevronRight, FileJson,
 } from 'lucide-react';
+
+// Server Functions (partial migration - only migrated APIs)
+import {
+    getShopifyConfig,
+    getShopifySyncHistory,
+    getSyncJobs,
+    startSyncJob,
+    cancelSyncJob,
+    getCacheStatus,
+    triggerSync,
+    type SyncJobResult,
+} from '../../../server/functions/shopify';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyData = any;
 
 export function ShopifyTab() {
     const queryClient = useQueryClient();
@@ -20,9 +39,9 @@ export function ShopifyTab() {
     const [shopDomain, setShopDomain] = useState('');
 
     // Preview state
-    const [productPreview, setProductPreview] = useState<any>(null);
-    const [orderPreview, setOrderPreview] = useState<any>(null);
-    const [customerPreview, setCustomerPreview] = useState<any>(null);
+    const [productPreview, setProductPreview] = useState<AnyData>(null);
+    const [orderPreview, setOrderPreview] = useState<AnyData>(null);
+    const [customerPreview, setCustomerPreview] = useState<AnyData>(null);
     const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
 
     // Full dump state
@@ -30,61 +49,83 @@ export function ShopifyTab() {
 
     // Webhook Inspector state
     const [expandedWebhookId, setExpandedWebhookId] = useState<string | null>(null);
-    const [webhookDetail, setWebhookDetail] = useState<any>(null);
+    const [webhookDetail, setWebhookDetail] = useState<AnyData>(null);
     const [loadingWebhookDetail, setLoadingWebhookDetail] = useState(false);
 
-    // Fetch current config
+    // Server Function wrappers
+    const getShopifyConfigFn = useServerFn(getShopifyConfig);
+    const getShopifySyncHistoryFn = useServerFn(getShopifySyncHistory);
+    const getSyncJobsFn = useServerFn(getSyncJobs);
+    const startSyncJobFn = useServerFn(startSyncJob);
+    const cancelSyncJobFn = useServerFn(cancelSyncJob);
+    const getCacheStatusFn = useServerFn(getCacheStatus);
+    const triggerSyncFn = useServerFn(triggerSync);
+
+    // Fetch current config using Server Function
     const { data: config, isLoading: configLoading } = useQuery({
         queryKey: ['shopifyConfig'],
         queryFn: async () => {
-            const res = await shopifyApi.getConfig();
-            setShopDomain(res.data.shopDomain || '');
-            return res.data;
+            const result = await getShopifyConfigFn();
+            if (!result.success) throw new Error(result.error?.message);
+            setShopDomain(result.data?.shopDomain || '');
+            return result.data;
         },
     });
 
-    // Fetch sync history
+    // Fetch sync history using Server Function
     const { data: syncHistory } = useQuery({
         queryKey: ['shopifySyncHistory'],
-        queryFn: () => shopifyApi.getSyncHistory().then(r => r.data),
+        queryFn: async () => {
+            const result = await getShopifySyncHistoryFn();
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
     });
 
-    // Cache status (orders)
+    // Cache status using Server Function
     const { data: cacheStatus } = useQuery({
         queryKey: ['cacheStatus'],
-        queryFn: () => shopifyApi.getCacheStatus().then(r => r.data),
+        queryFn: async () => {
+            const result = await getCacheStatusFn();
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         refetchInterval: 10000,
     });
 
-    // Product cache status
+    // Product cache status (still using axios - not yet migrated)
     const { data: productCacheStatus } = useQuery({
         queryKey: ['productCacheStatus'],
         queryFn: () => shopifyApi.getProductCacheStatus().then(r => r.data),
         refetchInterval: 10000,
     });
 
-    // Background sync jobs
+    // Background sync jobs using Server Function
     const { data: syncJobs, refetch: refetchJobs } = useQuery({
         queryKey: ['syncJobs'],
-        queryFn: () => shopifyApi.getSyncJobs(10).then(r => r.data),
+        queryFn: async () => {
+            const result = await getSyncJobsFn({ data: { limit: 10 } });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         refetchInterval: 3000,
     });
 
-    // Scheduler status
+    // Scheduler status (still using axios - not yet migrated)
     const { data: schedulerStatus, refetch: refetchScheduler } = useQuery({
         queryKey: ['schedulerStatus'],
         queryFn: () => shopifyApi.getSchedulerStatus().then(r => r.data),
         refetchInterval: 10000,
     });
 
-    // Webhook activity
+    // Webhook activity (still using axios - not yet migrated)
     const { data: webhookActivity, refetch: refetchWebhooks } = useQuery({
         queryKey: ['webhookActivity'],
         queryFn: () => shopifyApi.getWebhookActivity({ hours: 24, limit: 20 }).then(r => r.data),
         refetchInterval: 15000,
     });
 
-    // Mutations
+    // Mutations - still using axios (not yet migrated to Server Functions)
     const previewProductsMutation = useMutation({
         mutationFn: () => shopifyApi.previewProducts(10),
         onSuccess: (res) => setProductPreview(res.data),
@@ -109,7 +150,7 @@ export function ShopifyTab() {
         },
     });
 
-    // Full dump mutation
+    // Full dump mutation (still using axios)
     const fullDumpMutation = useMutation({
         mutationFn: (daysBack?: number) => shopifyApi.fullDump(daysBack),
         onSuccess: () => {
@@ -118,7 +159,7 @@ export function ShopifyTab() {
         },
     });
 
-    // Process cache mutation
+    // Process cache mutation (still using axios)
     const processCacheMutation = useMutation({
         mutationFn: ({ limit, retryFailed }: { limit?: number; retryFailed?: boolean }) =>
             shopifyApi.processCache(limit, retryFailed),
@@ -129,32 +170,54 @@ export function ShopifyTab() {
         },
     });
 
+    // Start job mutation using Server Function
     const startJobMutation = useMutation({
-        mutationFn: (params: {
+        mutationFn: async (params: {
             jobType: string;
-            syncMode?: 'deep' | 'incremental';
+            syncMode?: 'deep' | 'incremental' | 'quick' | 'update';
             days?: number;
             staleAfterMins?: number;
-        }) => shopifyApi.startSyncJob(params),
+        }) => {
+            const result = await startSyncJobFn({
+                data: {
+                    jobType: params.jobType as 'orders' | 'customers' | 'products',
+                    syncMode: params.syncMode,
+                    days: params.days,
+                    staleAfterMins: params.staleAfterMins,
+                },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => refetchJobs(),
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to start sync job');
+        onError: (error: Error) => {
+            alert(error.message || 'Failed to start sync job');
         },
     });
 
+    // Cancel job mutation using Server Function
     const cancelJobMutation = useMutation({
-        mutationFn: (jobId: string) => shopifyApi.cancelSyncJob(jobId),
+        mutationFn: async (jobId: string) => {
+            const result = await cancelSyncJobFn({ data: { jobId } });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => refetchJobs(),
     });
 
+    // Resume job mutation (still using axios - not in Server Functions)
     const resumeJobMutation = useMutation({
         mutationFn: (jobId: string) => shopifyApi.resumeSyncJob(jobId),
         onSuccess: () => refetchJobs(),
     });
 
-    // Scheduler mutations
+    // Scheduler mutations (still using axios - not yet migrated)
     const triggerSyncMutation = useMutation({
-        mutationFn: () => shopifyApi.triggerSchedulerSync(),
+        mutationFn: async () => {
+            const result = await triggerSyncFn();
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             refetchScheduler();
             queryClient.invalidateQueries({ queryKey: ['cacheStatus'] });
@@ -505,7 +568,7 @@ export function ShopifyTab() {
                                     <div className="flex items-center gap-2">
                                         <XCircle size={16} className="text-red-600" />
                                         <span className="text-sm font-medium text-red-800">
-                                            {(fullDumpMutation.error as any)?.response?.data?.error || 'Full dump failed'}
+                                            {(fullDumpMutation.error as AnyData)?.response?.data?.error || 'Full dump failed'}
                                         </span>
                                     </div>
                                 </div>
@@ -580,7 +643,7 @@ export function ShopifyTab() {
                                         <div className="mt-2 text-xs text-red-600">
                                             <p className="font-medium">Errors:</p>
                                             <ul className="list-disc list-inside max-h-20 overflow-y-auto">
-                                                {processCacheMutation.data.data.errors.slice(0, 3).map((err: any, i: number) => (
+                                                {processCacheMutation.data.data.errors.slice(0, 3).map((err: AnyData, i: number) => (
                                                     <li key={i}>{err.orderNumber}: {err.error}</li>
                                                 ))}
                                                 {processCacheMutation.data.data.errors.length > 3 && (
@@ -671,7 +734,7 @@ export function ShopifyTab() {
                         <Webhook size={20} /> Webhook Endpoints
                     </h2>
                     <p className="text-sm text-gray-600 mb-4">
-                        Configure these in Shopify Admin → Settings → Notifications → Webhooks.
+                        Configure these in Shopify Admin - Settings - Notifications - Webhooks.
                         All events for each type use a single unified endpoint.
                     </p>
 
@@ -682,7 +745,7 @@ export function ShopifyTab() {
                             { name: 'Customers', path: '/shopify/customers', topics: 'create, update', topicPrefix: 'customers/' },
                         ].map((endpoint) => {
                             const lastLog = webhookActivity?.recentLogs?.find(
-                                (log: any) => log.topic?.startsWith(endpoint.topicPrefix)
+                                (log: AnyData) => log.topic?.startsWith(endpoint.topicPrefix)
                             );
                             return (
                                 <div key={endpoint.name} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
@@ -696,7 +759,7 @@ export function ShopifyTab() {
                                             )}
                                         </div>
                                         <code className="text-xs text-gray-600 font-mono">
-                                            {window.location.origin}/api/webhooks{endpoint.path}
+                                            {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks{endpoint.path}
                                         </code>
                                         <div className="text-xs text-gray-500 mt-1">
                                             Topics: {endpoint.topics}
@@ -705,9 +768,11 @@ export function ShopifyTab() {
                                     <button
                                         className="btn btn-secondary btn-sm flex items-center gap-1"
                                         onClick={() => {
-                                            navigator.clipboard.writeText(window.location.origin + '/api/webhooks' + endpoint.path);
-                                            setCopiedWebhook(endpoint.name);
-                                            setTimeout(() => setCopiedWebhook(null), 2000);
+                                            if (typeof window !== 'undefined') {
+                                                navigator.clipboard.writeText(window.location.origin + '/api/webhooks' + endpoint.path);
+                                                setCopiedWebhook(endpoint.name);
+                                                setTimeout(() => setCopiedWebhook(null), 2000);
+                                            }
                                         }}
                                     >
                                         {copiedWebhook === endpoint.name ? (
@@ -787,587 +852,239 @@ export function ShopifyTab() {
                                 )}
                             </div>
 
-                            {/* Last Sync Result */}
-                            {schedulerStatus?.lastSyncResult && (
-                                <div className="bg-white rounded-lg p-3 mb-4 text-sm">
-                                    <div className="font-medium text-gray-700 mb-2">Last Sync Result</div>
-                                    <div className="grid grid-cols-2 gap-2 text-xs">
-                                        <div>
-                                            <span className="text-gray-500">Fetched:</span>{' '}
-                                            <span className="font-medium">{schedulerStatus.lastSyncResult.step1_dump?.fetched || 0}</span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500">Cached:</span>{' '}
-                                            <span className="font-medium text-green-600">{schedulerStatus.lastSyncResult.step1_dump?.cached || 0}</span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500">Processed:</span>{' '}
-                                            <span className="font-medium">{schedulerStatus.lastSyncResult.step2_process?.processed || 0}</span>
-                                        </div>
-                                        <div>
-                                            <span className="text-gray-500">Duration:</span>{' '}
-                                            <span className="font-medium">{Math.round((schedulerStatus.lastSyncResult.durationMs || 0) / 1000)}s</span>
-                                        </div>
-                                    </div>
-                                    {schedulerStatus.lastSyncResult.error && (
-                                        <div className="mt-2 text-red-600 text-xs">
-                                            Error: {schedulerStatus.lastSyncResult.error}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
+                            {/* Action Buttons */}
                             <div className="flex gap-2">
                                 <button
-                                    className="btn btn-primary btn-sm flex-1 flex items-center justify-center gap-1"
+                                    className="btn btn-primary flex-1 flex items-center justify-center gap-1"
                                     onClick={() => triggerSyncMutation.mutate()}
                                     disabled={triggerSyncMutation.isPending || schedulerStatus?.isRunning}
                                 >
-                                    {triggerSyncMutation.isPending || schedulerStatus?.isRunning ? (
-                                        <RefreshCw size={14} className="animate-spin" />
-                                    ) : (
-                                        <Zap size={14} />
-                                    )}
-                                    Sync Now
+                                    <Zap size={14} />
+                                    {triggerSyncMutation.isPending ? 'Triggering...' : 'Trigger Now'}
                                 </button>
                                 <button
-                                    className={`btn btn-sm flex items-center gap-1 ${
-                                        schedulerStatus?.schedulerActive
-                                            ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                    }`}
-                                    onClick={() => toggleSchedulerMutation.mutate(
-                                        schedulerStatus?.schedulerActive ? 'stop' : 'start'
-                                    )}
+                                    className={`btn ${schedulerStatus?.schedulerActive ? 'btn-secondary' : 'btn-primary'} flex items-center gap-1`}
+                                    onClick={() => toggleSchedulerMutation.mutate(schedulerStatus?.schedulerActive ? 'stop' : 'start')}
                                     disabled={toggleSchedulerMutation.isPending}
                                 >
-                                    {schedulerStatus?.schedulerActive ? (
-                                        <>
-                                            <Pause size={14} />
-                                            Stop
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Play size={14} />
-                                            Start
-                                        </>
-                                    )}
+                                    {schedulerStatus?.schedulerActive ? <Pause size={14} /> : <Play size={14} />}
+                                    {schedulerStatus?.schedulerActive ? 'Stop' : 'Start'}
                                 </button>
                             </div>
                         </div>
 
                         {/* Webhook Activity Summary */}
-                        <div className="border rounded-lg p-4 bg-gradient-to-br from-green-50 to-emerald-50">
+                        <div className="border rounded-lg p-4 bg-gradient-to-br from-blue-50 to-cyan-50">
                             <div className="flex items-center justify-between mb-3">
-                                <h3 className="font-semibold text-green-800 flex items-center gap-2">
+                                <h3 className="font-semibold text-blue-800 flex items-center gap-2">
                                     <Webhook size={18} /> Webhook Activity (24h)
                                 </h3>
                                 <button
-                                    className="text-green-600 hover:text-green-800"
                                     onClick={() => refetchWebhooks()}
-                                    title="Refresh"
+                                    className="text-blue-600 hover:text-blue-800"
                                 >
-                                    <RefreshCw size={16} />
+                                    <RefreshCw size={14} />
                                 </button>
                             </div>
 
                             {webhookActivity && (
-                                <>
-                                    {/* Summary Stats */}
-                                    <div className="grid grid-cols-3 gap-2 mb-4">
-                                        <div className="bg-white rounded-lg p-2 text-center">
-                                            <p className="text-xl font-bold text-gray-900">
-                                                {(webhookActivity.summary?.processed || 0) + (webhookActivity.summary?.failed || 0)}
-                                            </p>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-3 gap-2 text-center">
+                                        <div className="bg-white rounded-lg p-2">
+                                            <p className="text-lg font-bold text-gray-900">{webhookActivity.stats?.total || 0}</p>
                                             <p className="text-xs text-gray-500">Total</p>
                                         </div>
-                                        <div className="bg-white rounded-lg p-2 text-center">
-                                            <p className="text-xl font-bold text-green-600">{webhookActivity.summary?.processed || 0}</p>
-                                            <p className="text-xs text-gray-500">Processed</p>
+                                        <div className="bg-white rounded-lg p-2">
+                                            <p className="text-lg font-bold text-green-600">{webhookActivity.stats?.success || 0}</p>
+                                            <p className="text-xs text-gray-500">Success</p>
                                         </div>
-                                        <div className="bg-white rounded-lg p-2 text-center">
-                                            <p className="text-xl font-bold text-red-600">{webhookActivity.summary?.failed || 0}</p>
+                                        <div className="bg-white rounded-lg p-2">
+                                            <p className="text-lg font-bold text-red-600">{webhookActivity.stats?.failed || 0}</p>
                                             <p className="text-xs text-gray-500">Failed</p>
                                         </div>
                                     </div>
 
-                                    {/* By Topic */}
-                                    {webhookActivity.byTopic && Object.keys(webhookActivity.byTopic).length > 0 && (
-                                        <div className="bg-white rounded-lg p-3 mb-4">
-                                            <div className="font-medium text-gray-700 mb-2 text-sm">By Topic</div>
-                                            <div className="space-y-1">
-                                                {Object.entries(webhookActivity.byTopic).map(([topic, count]) => (
-                                                    <div key={topic} className="flex justify-between text-xs">
-                                                        <code className="text-purple-600">{topic}</code>
-                                                        <span className="font-medium">{count as number}</span>
+                                    {/* Recent Webhooks */}
+                                    {webhookActivity.recentLogs?.length > 0 && (
+                                        <div className="mt-3">
+                                            <p className="text-xs font-medium text-gray-600 mb-1">Recent Activity:</p>
+                                            <div className="space-y-1 max-h-32 overflow-y-auto">
+                                                {webhookActivity.recentLogs.slice(0, 5).map((log: AnyData) => (
+                                                    <div
+                                                        key={log.id}
+                                                        className="flex items-center gap-2 text-xs bg-white rounded p-1.5 cursor-pointer hover:bg-gray-50"
+                                                        onClick={() => toggleWebhookDetail(log.id)}
+                                                    >
+                                                        {expandedWebhookId === log.id ? (
+                                                            <ChevronDown size={12} className="text-gray-400" />
+                                                        ) : (
+                                                            <ChevronRight size={12} className="text-gray-400" />
+                                                        )}
+                                                        <span className={`w-2 h-2 rounded-full ${log.processedSuccessfully ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                                                        <span className="font-mono text-gray-700">{log.topic}</span>
+                                                        <span className="text-gray-400 ml-auto">
+                                                            {new Date(log.receivedAt).toLocaleTimeString()}
+                                                        </span>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
                                     )}
-
-                                    {/* Status Indicator */}
-                                    <div className={`flex items-center gap-2 text-sm ${
-                                        (webhookActivity.summary?.failed || 0) > 0 ? 'text-yellow-700' : 'text-green-700'
-                                    }`}>
-                                        {(webhookActivity.summary?.failed || 0) > 0 ? (
-                                            <>
-                                                <AlertCircle size={16} />
-                                                <span>{webhookActivity.summary?.failed} webhooks failed - check logs</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <CheckCircle size={16} />
-                                                <span>All webhooks processed successfully</span>
-                                            </>
-                                        )}
-                                    </div>
-                                </>
-                            )}
-
-                            {!webhookActivity && (
-                                <div className="text-center text-gray-500 py-4">
-                                    <Activity size={24} className="mx-auto mb-2 opacity-50" />
-                                    <p className="text-sm">Loading webhook activity...</p>
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    {/* Recent Webhook Logs */}
-                    {webhookActivity?.recentLogs && webhookActivity.recentLogs.length > 0 && (
-                        <div>
-                            <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                                <Activity size={16} /> Recent Webhooks
-                            </h3>
-                            <div className="overflow-x-auto border rounded-lg">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Time</th>
-                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Topic</th>
-                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Resource ID</th>
-                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Status</th>
-                                            <th className="px-3 py-2 text-left font-medium text-gray-600">Duration</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {webhookActivity.recentLogs.slice(0, 10).map((log: any) => (
-                                            <tr key={log.id} className="hover:bg-gray-50">
-                                                <td className="px-3 py-2 text-xs text-gray-500">
-                                                    {new Date(log.receivedAt).toLocaleTimeString()}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <code className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
-                                                        {log.topic}
-                                                    </code>
-                                                </td>
-                                                <td className="px-3 py-2 text-xs text-gray-600 font-mono">
-                                                    {log.resourceId?.slice(-8) || '-'}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <span className={`px-2 py-0.5 rounded-full text-xs ${
-                                                        log.status === 'processed'
-                                                            ? 'bg-green-100 text-green-700'
-                                                            : log.status === 'failed'
-                                                            ? 'bg-red-100 text-red-700'
-                                                            : 'bg-yellow-100 text-yellow-700'
-                                                    }`}>
-                                                        {log.status}
+                    {/* Expanded Webhook Detail */}
+                    {expandedWebhookId && (
+                        <div className="border rounded-lg p-4 bg-gray-50">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-medium text-gray-700 flex items-center gap-2">
+                                    <FileJson size={16} /> Webhook Detail
+                                </h4>
+                                <button
+                                    onClick={() => {
+                                        setExpandedWebhookId(null);
+                                        setWebhookDetail(null);
+                                    }}
+                                    className="text-gray-400 hover:text-gray-600"
+                                >
+                                    <XCircle size={16} />
+                                </button>
+                            </div>
+
+                            {loadingWebhookDetail && (
+                                <div className="flex items-center gap-2 text-gray-500">
+                                    <RefreshCw size={14} className="animate-spin" />
+                                    Loading...
+                                </div>
+                            )}
+
+                            {webhookDetail && !loadingWebhookDetail && (
+                                <div className="space-y-3">
+                                    {webhookDetail.error ? (
+                                        <p className="text-red-600">{webhookDetail.error}</p>
+                                    ) : (
+                                        <>
+                                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                                <div>
+                                                    <span className="text-gray-500">Topic:</span>
+                                                    <span className="ml-2 font-mono">{webhookDetail.topic}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Order:</span>
+                                                    <span className="ml-2">{webhookDetail.orderNumber || 'N/A'}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Received:</span>
+                                                    <span className="ml-2">{new Date(webhookDetail.receivedAt).toLocaleString()}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Status:</span>
+                                                    <span className={`ml-2 ${webhookDetail.processedSuccessfully ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {webhookDetail.processedSuccessfully ? 'Success' : 'Failed'}
                                                     </span>
-                                                    {log.error && (
-                                                        <span className="ml-1 text-red-500" title={log.error}>⚠</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2 text-xs text-gray-500">
-                                                    {log.processingTimeMs ? `${log.processingTimeMs}ms` : '-'}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                                </div>
+                                            </div>
+
+                                            {webhookDetail.processingError && (
+                                                <div className="p-2 bg-red-50 rounded text-sm text-red-700">
+                                                    <span className="font-medium">Error:</span> {webhookDetail.processingError}
+                                                </div>
+                                            )}
+
+                                            {webhookDetail.payload && (
+                                                <div>
+                                                    <p className="text-xs font-medium text-gray-600 mb-1">Payload:</p>
+                                                    <JsonViewer data={webhookDetail.payload} rootName="payload" />
+                                                </div>
+                                            )}
+
+                                            {webhookDetail.processingResult && (
+                                                <div>
+                                                    <p className="text-xs font-medium text-gray-600 mb-1">Processing Result:</p>
+                                                    <JsonViewer data={webhookDetail.processingResult} rootName="result" />
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Background Sync Jobs */}
+                    {syncJobs && syncJobs.length > 0 && (
+                        <div className="mt-6">
+                            <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <RefreshCw size={16} /> Background Sync Jobs
+                            </h3>
+                            <div className="space-y-2">
+                                {syncJobs.map((job: SyncJobResult) => (
+                                    <div key={job.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                                        <div className={`w-3 h-3 rounded-full ${
+                                            job.status === 'running' ? 'bg-blue-500 animate-pulse' :
+                                            job.status === 'completed' ? 'bg-green-500' :
+                                            job.status === 'failed' ? 'bg-red-500' :
+                                            'bg-gray-400'
+                                        }`}></div>
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-medium text-sm capitalize">{job.jobType}</span>
+                                                <span className={`text-xs px-2 py-0.5 rounded ${
+                                                    job.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                                                    job.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                                    job.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                                    'bg-gray-100 text-gray-700'
+                                                }`}>
+                                                    {job.status}
+                                                </span>
+                                                {job.progress !== undefined && job.status === 'running' && (
+                                                    <span className="text-xs text-gray-500">{job.progress}%</span>
+                                                )}
+                                            </div>
+                                            {job.startedAt && (
+                                                <span className="text-xs text-gray-500">
+                                                    Started: {new Date(job.startedAt).toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {job.status === 'running' && (
+                                            <button
+                                                className="btn btn-secondary btn-sm"
+                                                onClick={() => cancelJobMutation.mutate(job.id)}
+                                                disabled={cancelJobMutation.isPending}
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                        {job.status === 'paused' && (
+                                            <button
+                                                className="btn btn-primary btn-sm"
+                                                onClick={() => resumeJobMutation.mutate(job.id)}
+                                                disabled={resumeJobMutation.isPending}
+                                            >
+                                                Resume
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}
-
-                    {webhookActivity?.recentLogs?.length === 0 && (
-                        <div className="text-center py-6 bg-gray-50 rounded-lg">
-                            <Webhook size={32} className="mx-auto mb-2 text-gray-300" />
-                            <p className="text-gray-500 text-sm">No webhook activity in the last 24 hours</p>
-                            <p className="text-gray-400 text-xs mt-1">Configure webhooks in Shopify to receive real-time updates</p>
-                        </div>
-                    )}
                 </div>
             )}
 
-            {/* Background Sync Jobs */}
-            {config?.hasAccessToken && (
-                <div className="card">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <RefreshCw size={20} /> Sync Job History
-                    </h2>
-                    <p className="text-sm text-gray-600 mb-4">
-                        Background sync jobs with automatic checkpointing. Failed jobs can be resumed.
-                    </p>
-
-                    {syncJobs && syncJobs.length > 0 && (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead className="bg-gray-100">
-                                    <tr>
-                                        <th className="px-3 py-2 text-left">Type</th>
-                                        <th className="px-3 py-2 text-left">Mode</th>
-                                        <th className="px-3 py-2 text-left">Status</th>
-                                        <th className="px-3 py-2 text-left">Progress</th>
-                                        <th className="px-3 py-2 text-left">Started</th>
-                                        <th className="px-3 py-2 text-left">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {syncJobs.map((job: any) => {
-                                        const progress = job.totalRecords
-                                            ? Math.round((job.processed / job.totalRecords) * 100)
-                                            : 0;
-                                        return (
-                                            <tr key={job.id} className="hover:bg-gray-50">
-                                                <td className="px-3 py-2 capitalize font-medium">{job.jobType}</td>
-                                                <td className="px-3 py-2">
-                                                    {job.syncMode ? (
-                                                        <span className={`px-2 py-0.5 rounded text-xs ${
-                                                            job.syncMode === 'deep' ? 'bg-amber-100 text-amber-700' :
-                                                            'bg-blue-100 text-blue-700'
-                                                        }`}>
-                                                            {job.syncMode === 'deep' ? 'deep' : 'incremental'}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700">incremental</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <span className={`px-2 py-0.5 rounded-full text-xs ${
-                                                        job.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                        job.status === 'running' ? 'bg-blue-100 text-blue-700' :
-                                                        job.status === 'failed' ? 'bg-red-100 text-red-700' :
-                                                        job.status === 'cancelled' ? 'bg-gray-100 text-gray-700' :
-                                                        'bg-yellow-100 text-yellow-700'
-                                                    }`}>
-                                                        {job.status}
-                                                    </span>
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                                            <div
-                                                                className={`h-full transition-all ${
-                                                                    job.status === 'completed' ? 'bg-green-500' :
-                                                                    job.status === 'failed' ? 'bg-red-500' :
-                                                                    'bg-blue-500'
-                                                                }`}
-                                                                style={{ width: `${progress}%` }}
-                                                            />
-                                                        </div>
-                                                        <span className="text-xs text-gray-600 whitespace-nowrap">
-                                                            {job.processed}/{job.totalRecords || '?'}
-                                                            {job.status !== 'pending' && (
-                                                                <span className="text-gray-400 ml-1">
-                                                                    (+{job.created} / ~{job.updated} / !{job.errors})
-                                                                </span>
-                                                            )}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-3 py-2 text-xs text-gray-500">
-                                                    {job.startedAt ? new Date(job.startedAt).toLocaleString() : '-'}
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    {(job.status === 'running' || job.status === 'pending') && (
-                                                        <button
-                                                            className="text-red-600 hover:text-red-800 text-xs"
-                                                            onClick={() => cancelJobMutation.mutate(job.id)}
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                    )}
-                                                    {(job.status === 'failed' || job.status === 'cancelled') && (
-                                                        <button
-                                                            className="text-blue-600 hover:text-blue-800 text-xs"
-                                                            onClick={() => resumeJobMutation.mutate(job.id)}
-                                                        >
-                                                            Resume
-                                                        </button>
-                                                    )}
-                                                    {job.lastError && (
-                                                        <span className="text-xs text-red-500 ml-2" title={job.lastError}>
-                                                            ⚠
-                                                        </span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-
-                    {(!syncJobs || syncJobs.length === 0) && (
-                        <p className="text-gray-500 text-sm text-center py-4">
-                            No sync jobs yet. Use the Order Sync section above to start syncing.
-                        </p>
-                    )}
-
-                    {syncJobs && syncJobs.length > 0 && (
-                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                            <strong>Legend:</strong> Progress shows (processed/total) with (+created / ~updated / !errors)
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Webhook Inspector - Detailed view with payload and result */}
-            {config?.hasAccessToken && webhookActivity?.recentLogs && webhookActivity.recentLogs.length > 0 && (
-                <div className="card">
-                    <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <FileJson size={20} /> Webhook Inspector
-                    </h2>
-                    <p className="text-sm text-gray-600 mb-4">
-                        Click on a webhook to see the raw payload and DB update result. Shows payload sent by Shopify and what was created/updated in the database.
-                    </p>
-
-                    <div className="overflow-x-auto border rounded-lg">
-                        <table className="w-full text-sm">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600 w-8"></th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Time</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Topic</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Resource</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Status</th>
-                                    <th className="px-3 py-2 text-left font-medium text-gray-600">Duration</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                                {webhookActivity.recentLogs.slice(0, 20).map((log: any) => (
-                                    <>
-                                        <tr
-                                            key={log.id}
-                                            className={`hover:bg-gray-50 cursor-pointer ${expandedWebhookId === log.id ? 'bg-blue-50' : ''}`}
-                                            onClick={() => toggleWebhookDetail(log.id)}
-                                        >
-                                            <td className="px-3 py-2 text-gray-400">
-                                                {expandedWebhookId === log.id ? (
-                                                    <ChevronDown size={16} />
-                                                ) : (
-                                                    <ChevronRight size={16} />
-                                                )}
-                                            </td>
-                                            <td className="px-3 py-2 text-xs text-gray-500">
-                                                {new Date(log.receivedAt).toLocaleString()}
-                                            </td>
-                                            <td className="px-3 py-2">
-                                                <code className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-xs">
-                                                    {log.topic}
-                                                </code>
-                                            </td>
-                                            <td className="px-3 py-2 text-xs text-gray-600 font-mono">
-                                                {log.resourceId || '-'}
-                                            </td>
-                                            <td className="px-3 py-2">
-                                                <span className={`px-2 py-0.5 rounded-full text-xs ${
-                                                    log.status === 'processed'
-                                                        ? 'bg-green-100 text-green-700'
-                                                        : log.status === 'failed'
-                                                        ? 'bg-red-100 text-red-700'
-                                                        : 'bg-yellow-100 text-yellow-700'
-                                                }`}>
-                                                    {log.status}
-                                                </span>
-                                                {log.error && (
-                                                    <span className="ml-1 text-red-500" title={log.error}>⚠</span>
-                                                )}
-                                            </td>
-                                            <td className="px-3 py-2 text-xs text-gray-500">
-                                                {log.processingTimeMs ? `${log.processingTimeMs}ms` : '-'}
-                                            </td>
-                                        </tr>
-                                        {expandedWebhookId === log.id && (
-                                            <tr key={`${log.id}-detail`}>
-                                                <td colSpan={6} className="p-0">
-                                                    <div className="bg-gray-50 p-4 border-t border-b">
-                                                        {loadingWebhookDetail ? (
-                                                            <div className="flex items-center gap-2 text-gray-500">
-                                                                <RefreshCw size={16} className="animate-spin" />
-                                                                Loading webhook details...
-                                                            </div>
-                                                        ) : webhookDetail?.error ? (
-                                                            <div className="text-red-600">
-                                                                Error: {typeof webhookDetail.error === 'string' ? webhookDetail.error : 'Failed to load'}
-                                                            </div>
-                                                        ) : webhookDetail ? (
-                                                            <div className="grid md:grid-cols-2 gap-4">
-                                                                {/* Left: Payload from Shopify */}
-                                                                <div>
-                                                                    <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
-                                                                        <Webhook size={14} /> Webhook Payload
-                                                                        <span className="text-xs font-normal text-gray-400">
-                                                                            (from Shopify)
-                                                                        </span>
-                                                                    </h4>
-                                                                    {webhookDetail.payload ? (
-                                                                        <div className="border rounded bg-white max-h-80 overflow-auto">
-                                                                            <JsonViewer
-                                                                                data={webhookDetail.payload}
-                                                                                rootName="payload"
-                                                                            />
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="text-gray-400 text-sm p-3 bg-white rounded border">
-                                                                            No payload stored (older webhook)
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-
-                                                                {/* Right: Result + Related DB Data */}
-                                                                <div className="space-y-4">
-                                                                    {/* Processing Result */}
-                                                                    <div>
-                                                                        <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
-                                                                            <ArrowRight size={14} /> Processing Result
-                                                                        </h4>
-                                                                        {webhookDetail.resultData ? (
-                                                                            <div className="border rounded bg-white max-h-40 overflow-auto">
-                                                                                <JsonViewer
-                                                                                    data={webhookDetail.resultData}
-                                                                                    rootName="result"
-                                                                                />
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="text-gray-400 text-sm p-3 bg-white rounded border">
-                                                                                No result stored (older webhook)
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-
-                                                                    {/* Related DB Data */}
-                                                                    {(webhookDetail.relatedData?.order || webhookDetail.relatedData?.product || webhookDetail.relatedData?.customer) && (
-                                                                        <div>
-                                                                            <h4 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
-                                                                                <Database size={14} /> Related DB Record
-                                                                            </h4>
-                                                                            {webhookDetail.relatedData.order && (
-                                                                                <div className="border rounded bg-white p-3 text-xs space-y-1">
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Order:</span>
-                                                                                        <span className="font-medium">{webhookDetail.relatedData.order.orderNumber}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Status:</span>
-                                                                                        <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                                                                            webhookDetail.relatedData.order.status === 'shipped' ? 'bg-green-100 text-green-700' :
-                                                                                            webhookDetail.relatedData.order.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                                                                                            'bg-blue-100 text-blue-700'
-                                                                                        }`}>
-                                                                                            {webhookDetail.relatedData.order.status}
-                                                                                        </span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Payment:</span>
-                                                                                        <span>{webhookDetail.relatedData.order.paymentMethod} ({webhookDetail.relatedData.order.paymentStatus})</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Lines:</span>
-                                                                                        <span>{webhookDetail.relatedData.order.orderLines?.length || 0}</span>
-                                                                                    </div>
-                                                                                    {webhookDetail.relatedData.order.orderLines?.length > 0 && (
-                                                                                        <div className="mt-2 pt-2 border-t space-y-1">
-                                                                                            {webhookDetail.relatedData.order.orderLines.map((line: any) => (
-                                                                                                <div key={line.id} className="flex justify-between text-xs">
-                                                                                                    <span className="text-gray-500">
-                                                                                                        #{line.lineNumber}: {line.sku?.skuCode || 'No SKU'}
-                                                                                                    </span>
-                                                                                                    <span className={`px-1 rounded ${
-                                                                                                        line.status === 'shipped' ? 'bg-green-100 text-green-700' :
-                                                                                                        line.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                                                                                                        'bg-gray-100'
-                                                                                                    }`}>
-                                                                                                        {line.status}
-                                                                                                        {line.awbNumber && ` (${line.awbNumber})`}
-                                                                                                    </span>
-                                                                                                </div>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                            {webhookDetail.relatedData.product && (
-                                                                                <div className="border rounded bg-white p-3 text-xs space-y-1">
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Product:</span>
-                                                                                        <span className="font-medium">{webhookDetail.relatedData.product.name}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Variations:</span>
-                                                                                        <span>{webhookDetail.relatedData.product.variations?.length || 0}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Updated:</span>
-                                                                                        <span>{new Date(webhookDetail.relatedData.product.updatedAt).toLocaleString()}</span>
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
-                                                                            {webhookDetail.relatedData.customer && (
-                                                                                <div className="border rounded bg-white p-3 text-xs space-y-1">
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Customer:</span>
-                                                                                        <span className="font-medium">{webhookDetail.relatedData.customer.name}</span>
-                                                                                    </div>
-                                                                                    <div className="flex justify-between">
-                                                                                        <span className="text-gray-500">Email:</span>
-                                                                                        <span>{webhookDetail.relatedData.customer.email}</span>
-                                                                                    </div>
-                                                                                    {webhookDetail.relatedData.customer.phone && (
-                                                                                        <div className="flex justify-between">
-                                                                                            <span className="text-gray-500">Phone:</span>
-                                                                                            <span>{webhookDetail.relatedData.customer.phone}</span>
-                                                                                        </div>
-                                                                                    )}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-
-                                                                    {/* Error if present */}
-                                                                    {webhookDetail.error && (
-                                                                        <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                                                                            <strong>Error:</strong> {webhookDetail.error}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        ) : null}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <p className="text-xs text-gray-500 mt-3">
-                        Showing up to 20 recent webhooks. Click a row to see detailed payload and result data.
-                    </p>
-                </div>
-            )}
-
-            {/* Warning if not configured */}
+            {/* Not Configured Message */}
             {!config?.hasAccessToken && (
-                <div className="flex items-center gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <AlertCircle size={20} className="text-yellow-600" />
-                    <p className="text-yellow-800">
-                        Configure your Shopify API credentials above to enable order and customer sync.
-                    </p>
+                <div className="card">
+                    <div className="flex items-center gap-3 text-yellow-700 bg-yellow-50 p-4 rounded-lg">
+                        <AlertCircle size={24} />
+                        <div>
+                            <p className="font-medium">Shopify Not Configured</p>
+                            <p className="text-sm">Please configure your Shopify credentials to enable sync features.</p>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

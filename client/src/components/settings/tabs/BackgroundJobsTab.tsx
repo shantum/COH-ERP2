@@ -1,30 +1,25 @@
 /**
  * BackgroundJobsTab component
  * View and manage background sync jobs and scheduled tasks
+ *
+ * Migrated to use TanStack Start Server Functions
  */
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
 import {
     RefreshCw, Play, Clock, CheckCircle, XCircle, Info,
     Store, Truck, Trash2, Archive, AlertTriangle, Database
 } from 'lucide-react';
 
-interface BackgroundJob {
-    id: string;
-    name: string;
-    description: string;
-    enabled: boolean;
-    isRunning?: boolean;
-    intervalMinutes?: number;
-    schedule?: string;
-    lastRunAt?: string;
-    lastResult?: any;
-    config?: Record<string, any>;
-    stats?: any;
-    note?: string;
-}
+// Server Functions
+import {
+    getBackgroundJobs,
+    startBackgroundJob,
+    updateBackgroundJob,
+    type BackgroundJob,
+} from '../../../server/functions/admin';
 
 interface JobsResponse {
     jobs: BackgroundJob[];
@@ -34,16 +29,32 @@ export function BackgroundJobsTab() {
     const queryClient = useQueryClient();
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
 
+    // Server Function wrappers
+    const getBackgroundJobsFn = useServerFn(getBackgroundJobs);
+    const startBackgroundJobFn = useServerFn(startBackgroundJob);
+    const updateBackgroundJobFn = useServerFn(updateBackgroundJob);
+
     // Fetch jobs status
     const { data, isLoading, refetch } = useQuery({
         queryKey: ['backgroundJobs'],
-        queryFn: () => adminApi.getBackgroundJobs().then(r => r.data as JobsResponse),
+        queryFn: async (): Promise<JobsResponse> => {
+            const result = await getBackgroundJobsFn();
+            if (!result.success) throw new Error(result.error?.message);
+            return { jobs: result.data || [] };
+        },
         refetchInterval: 10000, // Refresh every 10 seconds to show running status
     });
 
     // Trigger job mutation
     const triggerMutation = useMutation({
-        mutationFn: (jobId: string) => adminApi.triggerBackgroundJob(jobId),
+        mutationFn: async (jobId: string) => {
+            // Cast jobId to the expected enum type
+            const result = await startBackgroundJobFn({
+                data: { jobId: jobId as 'shopify_sync' | 'tracking_sync' | 'cache_cleanup' },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['backgroundJobs'] });
         },
@@ -51,8 +62,13 @@ export function BackgroundJobsTab() {
 
     // Update job settings mutation
     const updateMutation = useMutation({
-        mutationFn: ({ jobId, enabled }: { jobId: string; enabled: boolean }) =>
-            adminApi.updateBackgroundJob(jobId, { enabled }),
+        mutationFn: async ({ jobId, enabled }: { jobId: string; enabled: boolean }) => {
+            const result = await updateBackgroundJobFn({
+                data: { jobId, enabled },
+            });
+            if (!result.success) throw new Error(result.error?.message);
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['backgroundJobs'] });
         },
@@ -184,7 +200,7 @@ export function BackgroundJobsTab() {
         return null;
     };
 
-    const renderCacheStats = (stats: any) => {
+    const renderCacheStats = (stats: BackgroundJob['stats']) => {
         if (!stats) return null;
 
         return (

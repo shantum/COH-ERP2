@@ -490,3 +490,342 @@ export const deleteColour = createServerFn({ method: 'POST' })
             await prisma.$disconnect();
         }
     });
+
+// ============================================
+// TRIM MUTATIONS
+// ============================================
+
+const createTrimSchema = z.object({
+    code: z.string().min(1, 'Trim code is required').trim(),
+    name: z.string().min(1, 'Trim name is required').trim(),
+    category: z.string().min(1, 'Category is required'),
+    description: z.string().optional().nullable(),
+    costPerUnit: z.number().nonnegative().default(0),
+    unit: z.string().default('piece'),
+    supplierId: z.string().uuid().optional().nullable(),
+    leadTimeDays: z.number().int().positive().optional().nullable(),
+    minOrderQty: z.number().positive().optional().nullable(),
+});
+
+const updateTrimSchema = z.object({
+    id: z.string().uuid('Invalid trim ID'),
+    code: z.string().min(1, 'Trim code is required').trim().optional(),
+    name: z.string().min(1, 'Trim name is required').trim().optional(),
+    category: z.string().optional(),
+    description: z.string().optional().nullable(),
+    costPerUnit: z.number().nonnegative().optional().nullable(),
+    unit: z.string().optional(),
+    supplierId: z.string().uuid().optional().nullable(),
+    leadTimeDays: z.number().int().positive().optional().nullable(),
+    minOrderQty: z.number().positive().optional().nullable(),
+    isActive: z.boolean().optional(),
+});
+
+const deleteTrimSchema = z.object({
+    id: z.string().uuid('Invalid trim ID'),
+});
+
+/**
+ * Create a new trim item
+ */
+export const createTrim = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createTrimSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const trim = await prisma.trimItem.create({
+                data: {
+                    code: data.code,
+                    name: data.name,
+                    category: data.category,
+                    description: data.description || null,
+                    costPerUnit: data.costPerUnit,
+                    unit: data.unit,
+                    supplierId: data.supplierId || null,
+                    leadTimeDays: data.leadTimeDays || null,
+                    minOrderQty: data.minOrderQty || null,
+                },
+                include: {
+                    supplier: true,
+                },
+            });
+
+            return {
+                success: true,
+                trim,
+            };
+        } catch (error: any) {
+            if (error.code === 'P2002') {
+                throw new Error(`Trim with code "${data.code}" already exists`);
+            }
+            throw error;
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Update a trim item
+ */
+export const updateTrim = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateTrimSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            // Build update data object - only include fields that were provided
+            const updateData: Record<string, unknown> = {};
+            if (data.code !== undefined) updateData.code = data.code;
+            if (data.name !== undefined) updateData.name = data.name;
+            if (data.category !== undefined) updateData.category = data.category;
+            if (data.description !== undefined) updateData.description = data.description;
+            if (data.costPerUnit !== undefined) updateData.costPerUnit = data.costPerUnit;
+            if (data.unit !== undefined) updateData.unit = data.unit;
+            if (data.supplierId !== undefined) updateData.supplierId = data.supplierId;
+            if (data.leadTimeDays !== undefined) updateData.leadTimeDays = data.leadTimeDays;
+            if (data.minOrderQty !== undefined) updateData.minOrderQty = data.minOrderQty;
+            if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+            const trim = await prisma.trimItem.update({
+                where: { id: data.id },
+                data: updateData,
+                include: {
+                    supplier: true,
+                },
+            });
+
+            return {
+                success: true,
+                trim,
+            };
+        } catch (error: any) {
+            if (error.code === 'P2025') {
+                throw new Error('Trim not found');
+            }
+            if (error.code === 'P2002') {
+                throw new Error(`Trim with code "${data.code}" already exists`);
+            }
+            throw error;
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Delete a trim item
+ */
+export const deleteTrim = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => deleteTrimSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            await prisma.trimItem.delete({
+                where: { id: data.id },
+            });
+
+            return {
+                success: true,
+                message: 'Trim deleted successfully',
+            };
+        } catch (error: any) {
+            if (error.code === 'P2025') {
+                throw new Error('Trim not found');
+            }
+            if (error.code === 'P2003') {
+                throw new Error('Cannot delete trim that is used in BOMs. Remove BOM references first.');
+            }
+            throw error;
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// SERVICE MUTATIONS
+// ============================================
+
+const createServiceSchema = z.object({
+    code: z.string().min(1, 'Service code is required').trim(),
+    name: z.string().min(1, 'Service name is required').trim(),
+    category: z.string().min(1, 'Category is required'),
+    description: z.string().optional().nullable(),
+    costPerJob: z.number().nonnegative().default(0),
+    costUnit: z.string().default('per_piece'),
+    vendorId: z.string().uuid().optional().nullable(),
+    leadTimeDays: z.number().int().positive().optional().nullable(),
+});
+
+const updateServiceSchema = z.object({
+    id: z.string().uuid('Invalid service ID'),
+    code: z.string().min(1, 'Service code is required').trim().optional(),
+    name: z.string().min(1, 'Service name is required').trim().optional(),
+    category: z.string().optional(),
+    description: z.string().optional().nullable(),
+    costPerJob: z.number().nonnegative().optional().nullable(),
+    costUnit: z.string().optional(),
+    vendorId: z.string().uuid().optional().nullable(),
+    leadTimeDays: z.number().int().positive().optional().nullable(),
+    isActive: z.boolean().optional(),
+});
+
+const deleteServiceSchema = z.object({
+    id: z.string().uuid('Invalid service ID'),
+});
+
+/**
+ * Create a new service item
+ */
+export const createService = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createServiceSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const service = await prisma.serviceItem.create({
+                data: {
+                    code: data.code,
+                    name: data.name,
+                    category: data.category,
+                    description: data.description || null,
+                    costPerJob: data.costPerJob,
+                    costUnit: data.costUnit,
+                    vendorId: data.vendorId || null,
+                    leadTimeDays: data.leadTimeDays || null,
+                },
+                include: {
+                    vendor: true,
+                },
+            });
+
+            return {
+                success: true,
+                service,
+            };
+        } catch (error: any) {
+            if (error.code === 'P2002') {
+                throw new Error(`Service with code "${data.code}" already exists`);
+            }
+            throw error;
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Update a service item
+ */
+export const updateService = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateServiceSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            // Build update data object - only include fields that were provided
+            const updateData: Record<string, unknown> = {};
+            if (data.code !== undefined) updateData.code = data.code;
+            if (data.name !== undefined) updateData.name = data.name;
+            if (data.category !== undefined) updateData.category = data.category;
+            if (data.description !== undefined) updateData.description = data.description;
+            if (data.costPerJob !== undefined) updateData.costPerJob = data.costPerJob;
+            if (data.costUnit !== undefined) updateData.costUnit = data.costUnit;
+            if (data.vendorId !== undefined) updateData.vendorId = data.vendorId;
+            if (data.leadTimeDays !== undefined) updateData.leadTimeDays = data.leadTimeDays;
+            if (data.isActive !== undefined) updateData.isActive = data.isActive;
+
+            const service = await prisma.serviceItem.update({
+                where: { id: data.id },
+                data: updateData,
+                include: {
+                    vendor: true,
+                },
+            });
+
+            return {
+                success: true,
+                service,
+            };
+        } catch (error: any) {
+            if (error.code === 'P2025') {
+                throw new Error('Service not found');
+            }
+            if (error.code === 'P2002') {
+                throw new Error(`Service with code "${data.code}" already exists`);
+            }
+            throw error;
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Delete a service item
+ */
+export const deleteService = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => deleteServiceSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            await prisma.serviceItem.delete({
+                where: { id: data.id },
+            });
+
+            return {
+                success: true,
+                message: 'Service deleted successfully',
+            };
+        } catch (error: any) {
+            if (error.code === 'P2025') {
+                throw new Error('Service not found');
+            }
+            if (error.code === 'P2003') {
+                throw new Error('Cannot delete service that is used in BOMs. Remove BOM references first.');
+            }
+            throw error;
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// COLOUR TRANSACTION MUTATIONS
+// ============================================
+
+const createColourTransactionSchema = z.object({
+    colourId: z.string().uuid('Invalid colour ID'),
+    qty: z.number().positive('Quantity must be positive'),
+    reason: z.string().min(1, 'Reason is required'),
+    notes: z.string().optional().nullable(),
+    costPerUnit: z.number().nonnegative().optional().nullable(),
+    supplierId: z.string().uuid().optional().nullable(),
+});
+
+/**
+ * Create a fabric colour transaction (inward/outward)
+ *
+ * NOTE: FabricColour inventory tracking is not yet implemented.
+ * The FabricColour model doesn't have a separate transaction table.
+ * This function is stubbed to allow the UI to compile and show a proper error.
+ */
+export const createColourTransaction = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createColourTransactionSchema.parse(input))
+    .handler(async () => {
+        // FabricColour transactions are not implemented yet
+        // The schema only has FabricTransaction which links to the legacy Fabric model
+        throw new Error('Colour inventory tracking is not yet implemented. Please use the Fabrics page for inventory transactions.');
+    });

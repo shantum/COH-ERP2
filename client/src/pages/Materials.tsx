@@ -15,9 +15,17 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearch, useNavigate } from '@tanstack/react-router';
+import { useServerFn } from '@tanstack/react-start';
 import { Layers, Scissors, Package, X } from 'lucide-react';
 
-import { materialsApi, fabricsApi } from '../services/api';
+import { getFabricSuppliers } from '@/server/functions/fabrics';
+import {
+    createTrim,
+    updateTrim,
+    createService,
+    updateService,
+    createColourTransaction,
+} from '@/server/functions/materialsMutations';
 import { DetailPanel } from '../components/materials/DetailPanel';
 import { MaterialsTreeView } from '../components/materials/MaterialsTreeView';
 import { TrimsTable } from '../components/materials/TrimsTable';
@@ -71,15 +79,67 @@ export default function Materials() {
         qty: '', notes: '', costPerUnit: '', supplierId: ''
     });
 
+    // Server function hooks
+    const getSuppliersFn = useServerFn(getFabricSuppliers);
+    const createTrimFn = useServerFn(createTrim);
+    const updateTrimFn = useServerFn(updateTrim);
+    const createServiceFn = useServerFn(createService);
+    const updateServiceFn = useServerFn(updateService);
+    const createColourTxnFn = useServerFn(createColourTransaction);
+
     // Fetch suppliers
-    const { data: suppliers } = useQuery({
+    const { data: suppliersData } = useQuery({
         queryKey: ['suppliers'],
-        queryFn: () => fabricsApi.getSuppliers().then(r => r.data),
+        queryFn: () => getSuppliersFn({ data: {} }),
     });
+    const suppliers = suppliersData?.suppliers;
+
+    // Mutation types - defined inline based on Zod schema shapes
+    type CreateTrimInput = {
+        code: string;
+        name: string;
+        category: string;
+        description?: string | null;
+        costPerUnit?: number | null;
+        unit?: string;
+        supplierId?: string | null;
+        leadTimeDays?: number | null;
+        minOrderQty?: number | null;
+    };
+
+    type UpdateTrimInput = CreateTrimInput & {
+        id: string;
+        isActive?: boolean;
+    };
+
+    type CreateServiceInput = {
+        code: string;
+        name: string;
+        category: string;
+        description?: string | null;
+        costPerJob?: number | null;
+        costUnit?: string;
+        vendorId?: string | null;
+        leadTimeDays?: number | null;
+    };
+
+    type UpdateServiceInput = CreateServiceInput & {
+        id: string;
+        isActive?: boolean;
+    };
+
+    type CreateColourTransactionInput = {
+        colourId: string;
+        qty: number;
+        reason: string;
+        notes?: string | null;
+        costPerUnit?: number | null;
+        supplierId?: string | null;
+    };
 
     // Mutations
-    const createTrim = useMutation({
-        mutationFn: (data: any) => materialsApi.createTrim(data),
+    const createTrimMutation = useMutation({
+        mutationFn: (data: CreateTrimInput) => createTrimFn({ data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['trimsCatalog'] });
             setShowAddTrim(false);
@@ -88,20 +148,20 @@ export default function Materials() {
                 costPerUnit: '', unit: 'piece', supplierId: '', leadTimeDays: '', minOrderQty: ''
             });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create trim'),
+        onError: (err: Error) => alert(err.message || 'Failed to create trim'),
     });
 
-    const updateTrim = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateTrim(id, data),
+    const updateTrimMutation = useMutation({
+        mutationFn: (data: UpdateTrimInput) => updateTrimFn({ data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['trimsCatalog'] });
             setShowEditTrim(null);
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update trim'),
+        onError: (err: Error) => alert(err.message || 'Failed to update trim'),
     });
 
-    const createService = useMutation({
-        mutationFn: (data: any) => materialsApi.createService(data),
+    const createServiceMutation = useMutation({
+        mutationFn: (data: CreateServiceInput) => createServiceFn({ data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['servicesCatalog'] });
             setShowAddService(false);
@@ -110,33 +170,32 @@ export default function Materials() {
                 costPerJob: '', costUnit: 'per_piece', vendorId: '', leadTimeDays: ''
             });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create service'),
+        onError: (err: Error) => alert(err.message || 'Failed to create service'),
     });
 
-    const updateService = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateService(id, data),
+    const updateServiceMutation = useMutation({
+        mutationFn: (data: UpdateServiceInput) => updateServiceFn({ data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['servicesCatalog'] });
             setShowEditService(null);
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update service'),
+        onError: (err: Error) => alert(err.message || 'Failed to update service'),
     });
 
-    const createInward = useMutation({
-        mutationFn: (data: { colourId: string; [key: string]: any }) =>
-            materialsApi.createColourTransaction(data.colourId, data),
+    const createInwardMutation = useMutation({
+        mutationFn: (data: CreateColourTransactionInput) => createColourTxnFn({ data }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsTree'] });
             setShowInward(null);
             setInwardForm({ qty: '', notes: '', costPerUnit: '', supplierId: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create inward'),
+        onError: (err: Error) => alert(err.message || 'Failed to create inward'),
     });
 
     // Form handlers
     const handleSubmitTrim = (e: React.FormEvent) => {
         e.preventDefault();
-        createTrim.mutate({
+        createTrimMutation.mutate({
             code: trimForm.code,
             name: trimForm.name,
             category: trimForm.category,
@@ -152,26 +211,24 @@ export default function Materials() {
     const handleUpdateTrim = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showEditTrim) return;
-        updateTrim.mutate({
+        updateTrimMutation.mutate({
             id: showEditTrim.id,
-            data: {
-                code: showEditTrim.code,
-                name: showEditTrim.name,
-                category: showEditTrim.category,
-                description: showEditTrim.description || null,
-                costPerUnit: showEditTrim.costPerUnit ? parseFloat(showEditTrim.costPerUnit) : null,
-                unit: showEditTrim.unit,
-                supplierId: showEditTrim.supplierId || null,
-                leadTimeDays: showEditTrim.leadTimeDays ? parseInt(showEditTrim.leadTimeDays) : null,
-                minOrderQty: showEditTrim.minOrderQty ? parseFloat(showEditTrim.minOrderQty) : null,
-                isActive: showEditTrim.isActive,
-            },
+            code: showEditTrim.code,
+            name: showEditTrim.name,
+            category: showEditTrim.category,
+            description: showEditTrim.description || null,
+            costPerUnit: showEditTrim.costPerUnit ? parseFloat(showEditTrim.costPerUnit) : null,
+            unit: showEditTrim.unit,
+            supplierId: showEditTrim.supplierId || null,
+            leadTimeDays: showEditTrim.leadTimeDays ? parseInt(showEditTrim.leadTimeDays) : null,
+            minOrderQty: showEditTrim.minOrderQty ? parseFloat(showEditTrim.minOrderQty) : null,
+            isActive: showEditTrim.isActive,
         });
     };
 
     const handleSubmitService = (e: React.FormEvent) => {
         e.preventDefault();
-        createService.mutate({
+        createServiceMutation.mutate({
             code: serviceForm.code,
             name: serviceForm.name,
             category: serviceForm.category,
@@ -186,26 +243,24 @@ export default function Materials() {
     const handleUpdateService = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showEditService) return;
-        updateService.mutate({
+        updateServiceMutation.mutate({
             id: showEditService.id,
-            data: {
-                code: showEditService.code,
-                name: showEditService.name,
-                category: showEditService.category,
-                description: showEditService.description || null,
-                costPerJob: showEditService.costPerJob ? parseFloat(showEditService.costPerJob) : null,
-                costUnit: showEditService.costUnit,
-                vendorId: showEditService.vendorId || null,
-                leadTimeDays: showEditService.leadTimeDays ? parseInt(showEditService.leadTimeDays) : null,
-                isActive: showEditService.isActive,
-            },
+            code: showEditService.code,
+            name: showEditService.name,
+            category: showEditService.category,
+            description: showEditService.description || null,
+            costPerJob: showEditService.costPerJob ? parseFloat(showEditService.costPerJob) : null,
+            costUnit: showEditService.costUnit,
+            vendorId: showEditService.vendorId || null,
+            leadTimeDays: showEditService.leadTimeDays ? parseInt(showEditService.leadTimeDays) : null,
+            isActive: showEditService.isActive,
         });
     };
 
     const handleSubmitInward = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showInward) return;
-        createInward.mutate({
+        createInwardMutation.mutate({
             colourId: showInward.id,
             qty: parseFloat(inwardForm.qty),
             reason: 'supplier_receipt',
@@ -428,8 +483,8 @@ export default function Materials() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddTrim(false)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createTrim.isPending}>
-                                    {createTrim.isPending ? 'Creating...' : 'Add Trim'}
+                                <button type="submit" className="btn-primary flex-1" disabled={createTrimMutation.isPending}>
+                                    {createTrimMutation.isPending ? 'Creating...' : 'Add Trim'}
                                 </button>
                             </div>
                         </form>
@@ -560,8 +615,8 @@ export default function Materials() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowEditTrim(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={updateTrim.isPending}>
-                                    {updateTrim.isPending ? 'Saving...' : 'Save Changes'}
+                                <button type="submit" className="btn-primary flex-1" disabled={updateTrimMutation.isPending}>
+                                    {updateTrimMutation.isPending ? 'Saving...' : 'Save Changes'}
                                 </button>
                             </div>
                         </form>
@@ -675,8 +730,8 @@ export default function Materials() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddService(false)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createService.isPending}>
-                                    {createService.isPending ? 'Creating...' : 'Add Service'}
+                                <button type="submit" className="btn-primary flex-1" disabled={createServiceMutation.isPending}>
+                                    {createServiceMutation.isPending ? 'Creating...' : 'Add Service'}
                                 </button>
                             </div>
                         </form>
@@ -795,8 +850,8 @@ export default function Materials() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowEditService(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={updateService.isPending}>
-                                    {updateService.isPending ? 'Saving...' : 'Save Changes'}
+                                <button type="submit" className="btn-primary flex-1" disabled={updateServiceMutation.isPending}>
+                                    {updateServiceMutation.isPending ? 'Saving...' : 'Save Changes'}
                                 </button>
                             </div>
                         </form>
@@ -873,8 +928,8 @@ export default function Materials() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowInward(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createInward.isPending}>
-                                    {createInward.isPending ? 'Adding...' : 'Add Inward'}
+                                <button type="submit" className="btn-primary flex-1" disabled={createInwardMutation.isPending}>
+                                    {createInwardMutation.isPending ? 'Adding...' : 'Add Inward'}
                                 </button>
                             </div>
                         </form>
