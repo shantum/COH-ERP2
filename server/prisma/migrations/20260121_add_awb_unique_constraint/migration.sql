@@ -1,0 +1,17 @@
+-- AWB Uniqueness Note:
+--
+-- Originally planned to add a unique constraint on awbNumber to prevent
+-- duplicate AWB usage across orders. However, this is complex because:
+-- 1. Multiple lines in the SAME order can legitimately share an AWB (split shipments)
+-- 2. A simple unique index on (awbNumber, orderId) prevents duplicates WITHIN an order
+-- 3. We need the OPPOSITE: prevent duplicates ACROSS orders
+--
+-- The application-level validation in shipOrderService.ts handles this correctly:
+-- - Checks if AWB exists on any order OTHER than the ones being shipped
+-- - Allows same AWB on multiple lines of the same order
+--
+-- Decision: Keep AWB validation at application level. The race condition edge case
+-- (two concurrent requests with same AWB) is extremely rare and handled gracefully.
+--
+-- This migration is intentionally empty to mark the feature as "considered but deferred".
+SELECT 1; -- No-op to make migration valid

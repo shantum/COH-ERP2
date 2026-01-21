@@ -1,17 +1,29 @@
 /**
  * Inventory Balance Calculations
  * SKU and fabric balance functions
+ *
+ * Uses pure functions from shared domain layer for balance calculations.
+ * This module handles the Prisma-specific data fetching.
  */
 
 import type { Prisma } from '@prisma/client';
+import {
+    calculateBalance,
+    calculateFabricBalance as calculateFabricBalancePure,
+    createEmptyBalanceWithId,
+    type InventoryBalance,
+    type InventoryBalanceWithSkuId,
+    type FabricBalance,
+    type FabricBalanceWithId,
+} from '@coh/shared/domain';
 import type {
     PrismaOrTransaction,
-    InventoryBalance,
-    InventoryBalanceWithSkuId,
+    PrismaTransactionClient,
     InventoryBalanceOptions,
-    FabricBalance,
-    FabricBalanceWithId,
 } from './types.js';
+
+// Re-export types from shared for backwards compatibility
+export type { InventoryBalance, InventoryBalanceWithSkuId, FabricBalance, FabricBalanceWithId };
 
 // ============================================
 // SKU INVENTORY BALANCE
@@ -19,14 +31,13 @@ import type {
 
 /**
  * Calculate inventory balance for a SKU
+ * Fetches transaction data from database and uses shared pure function for calculation.
  */
 export async function calculateInventoryBalance(
     prisma: PrismaOrTransaction,
     skuId: string,
     options: Pick<InventoryBalanceOptions, 'allowNegative'> = {}
 ): Promise<InventoryBalance> {
-    const { allowNegative = true } = options;
-
     const result = await prisma.inventoryTransaction.groupBy({
         by: ['txnType'],
         where: { skuId },
@@ -41,23 +52,8 @@ export async function calculateInventoryBalance(
         else if (r.txnType === 'outward') totalOutward = r._sum.qty || 0;
     });
 
-    let currentBalance = totalInward - totalOutward;
-    let availableBalance = currentBalance;
-
-    const hasDataIntegrityIssue = currentBalance < 0;
-
-    if (!allowNegative) {
-        currentBalance = Math.max(0, currentBalance);
-        availableBalance = Math.max(0, availableBalance);
-    }
-
-    return {
-        totalInward,
-        totalOutward,
-        currentBalance,
-        availableBalance,
-        hasDataIntegrityIssue
-    };
+    // Use shared pure function for balance calculation
+    return calculateBalance({ totalInward, totalOutward }, options);
 }
 
 /**
@@ -87,40 +83,79 @@ export async function calculateAllInventoryBalances(
         _sum: { qty: true },
     });
 
-    const balanceMap = new Map<string, InventoryBalanceWithSkuId>();
+    // Aggregate transaction totals by SKU
+    const summaryMap = new Map<string, { totalInward: number; totalOutward: number }>();
 
     result.forEach((r) => {
-        if (!balanceMap.has(r.skuId)) {
-            balanceMap.set(r.skuId, {
-                skuId: r.skuId,
-                totalInward: 0,
-                totalOutward: 0,
-                currentBalance: 0,
-                availableBalance: 0,
-                hasDataIntegrityIssue: false,
-            });
+        if (!summaryMap.has(r.skuId)) {
+            summaryMap.set(r.skuId, { totalInward: 0, totalOutward: 0 });
         }
 
-        const balance = balanceMap.get(r.skuId)!;
-        if (r.txnType === 'inward') balance.totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') balance.totalOutward = r._sum.qty || 0;
+        const summary = summaryMap.get(r.skuId)!;
+        if (r.txnType === 'inward') summary.totalInward = r._sum.qty || 0;
+        else if (r.txnType === 'outward') summary.totalOutward = r._sum.qty || 0;
     });
 
-    // Calculate derived fields
-    for (const [skuId, balance] of balanceMap) {
-        let currentBalance = balance.totalInward - balance.totalOutward;
-        let availableBalance = currentBalance;
+    // Calculate balances using shared pure function
+    const balanceMap = new Map<string, InventoryBalanceWithSkuId>();
 
-        balance.hasDataIntegrityIssue = currentBalance < 0;
+    for (const [skuId, summary] of summaryMap) {
+        const balance = calculateBalance(summary, { allowNegative });
+        balanceMap.set(skuId, { skuId, ...balance });
+    }
 
-        if (!allowNegative) {
-            currentBalance = Math.max(0, currentBalance);
-            availableBalance = Math.max(0, availableBalance);
-        }
+    return balanceMap;
+}
 
-        balance.currentBalance = currentBalance;
-        balance.availableBalance = availableBalance;
-        balance.skuId = skuId;
+/**
+ * Calculate inventory balances with row-level locking for allocation
+ * Uses FOR UPDATE to prevent race conditions during concurrent allocations
+ *
+ * CRITICAL: This function MUST be called inside a transaction to be effective.
+ * The FOR UPDATE lock is held until the transaction commits/rolls back.
+ *
+ * @param tx - Prisma transaction client (NOT regular PrismaClient)
+ * @param skuIds - Array of SKU IDs to check and lock
+ * @returns Map of skuId to balance with locking guarantee
+ */
+export async function calculateInventoryBalancesWithLock(
+    tx: PrismaTransactionClient,
+    skuIds: string[]
+): Promise<Map<string, InventoryBalanceWithSkuId>> {
+    if (skuIds.length === 0) {
+        return new Map();
+    }
+
+    // Use raw SQL with FOR UPDATE to lock inventory transaction rows
+    // This prevents concurrent allocations from reading stale data
+    const result = await tx.$queryRaw<Array<{
+        skuId: string;
+        totalInward: bigint;
+        totalOutward: bigint;
+    }>>`
+        SELECT
+            "skuId",
+            COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN qty ELSE 0 END), 0) as "totalInward",
+            COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN qty ELSE 0 END), 0) as "totalOutward"
+        FROM "InventoryTransaction"
+        WHERE "skuId" = ANY(${skuIds}::uuid[])
+        GROUP BY "skuId"
+        FOR UPDATE
+    `;
+
+    const balanceMap = new Map<string, InventoryBalanceWithSkuId>();
+
+    // Initialize all requested SKUs using shared helper (some may have no transactions yet)
+    for (const skuId of skuIds) {
+        balanceMap.set(skuId, createEmptyBalanceWithId(skuId));
+    }
+
+    // Populate with actual data from locked rows using shared pure function
+    for (const row of result) {
+        const totalInward = Number(row.totalInward);
+        const totalOutward = Number(row.totalOutward);
+        const balance = calculateBalance({ totalInward, totalOutward });
+        balanceMap.set(row.skuId, { skuId: row.skuId, ...balance });
     }
 
     return balanceMap;
@@ -132,6 +167,7 @@ export async function calculateAllInventoryBalances(
 
 /**
  * Calculate fabric balance for a fabric
+ * Fetches transaction data from database and uses shared pure function for calculation.
  */
 export async function calculateFabricBalance(
     prisma: PrismaOrTransaction,
@@ -151,9 +187,8 @@ export async function calculateFabricBalance(
         else if (r.txnType === 'outward') totalOutward = r._sum.qty || 0;
     });
 
-    const currentBalance = totalInward - totalOutward;
-
-    return { totalInward, totalOutward, currentBalance };
+    // Use shared pure function for balance calculation
+    return calculateFabricBalancePure({ totalInward, totalOutward });
 }
 
 /**
@@ -167,26 +202,25 @@ export async function calculateAllFabricBalances(
         _sum: { qty: true },
     });
 
-    const balanceMap = new Map<string, FabricBalanceWithId>();
+    // Aggregate transaction totals by fabric
+    const summaryMap = new Map<string, { totalInward: number; totalOutward: number }>();
 
     result.forEach((r) => {
-        if (!balanceMap.has(r.fabricId)) {
-            balanceMap.set(r.fabricId, {
-                fabricId: r.fabricId,
-                totalInward: 0,
-                totalOutward: 0,
-                currentBalance: 0,
-            });
+        if (!summaryMap.has(r.fabricId)) {
+            summaryMap.set(r.fabricId, { totalInward: 0, totalOutward: 0 });
         }
 
-        const balance = balanceMap.get(r.fabricId)!;
-        if (r.txnType === 'inward') balance.totalInward = r._sum.qty || 0;
-        else if (r.txnType === 'outward') balance.totalOutward = r._sum.qty || 0;
+        const summary = summaryMap.get(r.fabricId)!;
+        if (r.txnType === 'inward') summary.totalInward = r._sum.qty || 0;
+        else if (r.txnType === 'outward') summary.totalOutward = r._sum.qty || 0;
     });
 
-    // Calculate current balance
-    for (const [, balance] of balanceMap) {
-        balance.currentBalance = balance.totalInward - balance.totalOutward;
+    // Calculate balances using shared pure function
+    const balanceMap = new Map<string, FabricBalanceWithId>();
+
+    for (const [fabricId, summary] of summaryMap) {
+        const balance = calculateFabricBalancePure(summary);
+        balanceMap.set(fabricId, { fabricId, ...balance });
     }
 
     return balanceMap;

@@ -8,7 +8,7 @@
  * Key patterns:
  * - ORDER_LIST_SELECT: Unified select for all order list views
  * - Transaction helpers: createReservedTransaction, createSaleTransaction, releaseReservedInventory
- * - Inventory balance: calculateInventoryBalance, calculateAllInventoryBalances
+ * - Inventory balance: calculateInventoryBalance, calculateAllInventoryBalances, calculateInventoryBalancesWithLock
  * - Customer enrichment: enrichOrdersWithCustomerStats
  * - Custom SKU workflow: createCustomSku, removeCustomization
  */

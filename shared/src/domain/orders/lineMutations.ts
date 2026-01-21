@@ -74,6 +74,24 @@ export interface CancelLineResult {
     orderId: string;
     lineStatus: 'cancelled';
     inventoryReleased: boolean;
+    skuId: string | null;
+}
+
+export interface AdjustLineQtyInput {
+    lineId: string;
+    newQty: number;
+    newUnitPrice?: number;
+    userId?: string;
+}
+
+export interface AdjustLineQtyResult {
+    lineId: string;
+    orderId: string;
+    oldQty: number;
+    newQty: number;
+    inventoryAdjusted: boolean;
+    skuId: string | null;
+    newOrderTotal: number;
 }
 
 // ============================================
@@ -470,19 +488,7 @@ export async function cancelLineKysely(
         };
     }
 
-    // Validate line is cancellable
-    const cancellableStatuses = ['pending', 'allocated', 'picked', 'packed'];
-    if (!cancellableStatuses.includes(line.lineStatus || '')) {
-        return {
-            success: false,
-            error: {
-                code: 'BAD_REQUEST',
-                message: `Cannot cancel line: status is '${line.lineStatus}', must be one of: ${cancellableStatuses.join(', ')}`,
-            },
-        };
-    }
-
-    // Already cancelled - idempotent
+    // Already cancelled - idempotent (check before validation)
     if (line.lineStatus === 'cancelled') {
         return {
             success: true,
@@ -491,6 +497,19 @@ export async function cancelLineKysely(
                 orderId: line.orderId,
                 lineStatus: 'cancelled',
                 inventoryReleased: false,
+                skuId: null,
+            },
+        };
+    }
+
+    // Validate line is cancellable
+    const cancellableStatuses = ['pending', 'allocated', 'picked', 'packed'];
+    if (!cancellableStatuses.includes(line.lineStatus || '')) {
+        return {
+            success: false,
+            error: {
+                code: 'BAD_REQUEST',
+                message: `Cannot cancel line: status is '${line.lineStatus}', must be one of: ${cancellableStatuses.join(', ')}`,
             },
         };
     }
@@ -526,6 +545,165 @@ export async function cancelLineKysely(
             orderId: line.orderId,
             lineStatus: 'cancelled',
             inventoryReleased,
+            skuId: inventoryReleased ? line.skuId : null,
+        },
+    };
+}
+
+// ============================================
+// ADJUST LINE QTY
+// ============================================
+
+/**
+ * Adjust quantity (and optionally price) of an order line
+ *
+ * Business rules:
+ * - Line must not be shipped or cancelled
+ * - If line has inventory (allocated, picked, packed), adjust the OUTWARD transaction
+ * - Recalculates order total
+ * - Returns skuId for cache invalidation
+ */
+export async function adjustLineQtyKysely(
+    db: Kysely<DB>,
+    input: AdjustLineQtyInput
+): Promise<MutationResult<AdjustLineQtyResult>> {
+    const { lineId, newQty, newUnitPrice, userId } = input;
+
+    // Fetch line with order context
+    const line = await db
+        .selectFrom('OrderLine')
+        .select([
+            'OrderLine.id',
+            'OrderLine.lineStatus',
+            'OrderLine.orderId',
+            'OrderLine.skuId',
+            'OrderLine.qty',
+            'OrderLine.unitPrice',
+        ])
+        .where('OrderLine.id', '=', lineId)
+        .executeTakeFirst();
+
+    if (!line) {
+        return {
+            success: false,
+            error: { code: 'NOT_FOUND', message: 'Order line not found' },
+        };
+    }
+
+    // Validate line is editable (not shipped or cancelled)
+    const nonEditableStatuses = ['shipped', 'cancelled'];
+    if (nonEditableStatuses.includes(line.lineStatus || '')) {
+        return {
+            success: false,
+            error: {
+                code: 'BAD_REQUEST',
+                message: `Cannot adjust qty: line status is '${line.lineStatus}', must not be shipped or cancelled`,
+            },
+        };
+    }
+
+    const oldQty = line.qty;
+    const effectiveNewQty = newQty;
+    const effectiveNewPrice = newUnitPrice ?? line.unitPrice;
+
+    // Early return if qty unchanged
+    if (oldQty === effectiveNewQty && (newUnitPrice === undefined || newUnitPrice === line.unitPrice)) {
+        // Fetch current order total for return
+        const order = await db
+            .selectFrom('Order')
+            .select('totalAmount')
+            .where('id', '=', line.orderId)
+            .executeTakeFirst();
+
+        return {
+            success: true,
+            data: {
+                lineId,
+                orderId: line.orderId,
+                oldQty,
+                newQty: effectiveNewQty,
+                inventoryAdjusted: false,
+                skuId: null,
+                newOrderTotal: Number(order?.totalAmount ?? 0),
+            },
+        };
+    }
+
+    // Check if line has allocated inventory
+    const statusesWithInventory = ['allocated', 'picked', 'packed'];
+    const hasInventory = statusesWithInventory.includes(line.lineStatus || '');
+    let inventoryAdjusted = false;
+
+    // Adjust inventory if line has allocation AND qty changed
+    if (hasInventory && line.skuId && oldQty !== effectiveNewQty) {
+        // Delete existing OUTWARD transaction
+        await db
+            .deleteFrom('InventoryTransaction')
+            .where('referenceId', '=', lineId)
+            .where('txnType', '=', 'outward')
+            .where('reason', '=', 'order_allocation')
+            .execute();
+
+        // Create new OUTWARD transaction with updated qty
+        await db
+            .insertInto('InventoryTransaction')
+            .values({
+                id: crypto.randomUUID(),
+                skuId: line.skuId,
+                txnType: 'outward',
+                qty: effectiveNewQty,
+                reason: 'order_allocation',
+                referenceId: lineId,
+                createdById: userId || 'system',
+            })
+            .execute();
+
+        inventoryAdjusted = true;
+    }
+
+    // Update line qty (and unitPrice if provided)
+    const lineUpdateData: { qty: number; unitPrice?: number } = { qty: effectiveNewQty };
+    if (newUnitPrice !== undefined) {
+        lineUpdateData.unitPrice = newUnitPrice;
+    }
+
+    await db
+        .updateTable('OrderLine')
+        .set(lineUpdateData)
+        .where('id', '=', lineId)
+        .execute();
+
+    // Fetch all lines to recalculate order total
+    const allLines = await db
+        .selectFrom('OrderLine')
+        .select(['id', 'qty', 'unitPrice'])
+        .where('orderId', '=', line.orderId)
+        .execute();
+
+    // Calculate new total (use updated values for this line)
+    const newTotal = allLines.reduce((sum, l) => {
+        const lineQty = l.id === lineId ? effectiveNewQty : l.qty;
+        const linePrice = l.id === lineId ? effectiveNewPrice : l.unitPrice;
+        return sum + lineQty * linePrice;
+    }, 0);
+
+    // Update order total
+    await db
+        .updateTable('Order')
+        .set({ totalAmount: newTotal })
+        .where('id', '=', line.orderId)
+        .execute();
+
+    return {
+        success: true,
+        data: {
+            lineId,
+            orderId: line.orderId,
+            oldQty,
+            newQty: effectiveNewQty,
+            inventoryAdjusted,
+            skuId: inventoryAdjusted ? line.skuId : null,
+            newOrderTotal: newTotal,
         },
     };
 }

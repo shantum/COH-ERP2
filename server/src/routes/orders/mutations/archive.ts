@@ -135,81 +135,76 @@ export async function autoArchiveOldOrders(prisma: PrismaClient): Promise<number
         legacyCutoff.setDate(legacyCutoff.getDate() - AUTO_ARCHIVE_DAYS);
 
         const now = new Date();
-        let totalArchived = 0;
 
-        // 1. Archive delivered prepaid orders
-        const prepaidResult = await prisma.order.updateMany({
-            where: {
-                terminalStatus: 'delivered',
-                paymentMethod: { not: 'COD' },
-                terminalAt: { lt: terminalCutoff },
-                isArchived: false,
-            },
-            data: {
-                isArchived: true,
-                archivedAt: now,
-            },
-        });
-        totalArchived += prepaidResult.count;
+        // Run all archive operations in a single transaction for atomicity
+        const [prepaidResult, codResult, rtoResult, cancelledResult, legacyResult] = await prisma.$transaction([
+            // 1. Archive delivered prepaid orders
+            prisma.order.updateMany({
+                where: {
+                    terminalStatus: 'delivered',
+                    paymentMethod: { not: 'COD' },
+                    terminalAt: { lt: terminalCutoff },
+                    isArchived: false,
+                },
+                data: {
+                    isArchived: true,
+                    archivedAt: now,
+                },
+            }),
+            // 2. Archive delivered COD orders (only if remitted)
+            prisma.order.updateMany({
+                where: {
+                    terminalStatus: 'delivered',
+                    paymentMethod: 'COD',
+                    codRemittedAt: { not: null },
+                    terminalAt: { lt: terminalCutoff },
+                    isArchived: false,
+                },
+                data: {
+                    isArchived: true,
+                    archivedAt: now,
+                },
+            }),
+            // 3. Archive RTO received orders
+            prisma.order.updateMany({
+                where: {
+                    terminalStatus: 'rto_received',
+                    terminalAt: { lt: terminalCutoff },
+                    isArchived: false,
+                },
+                data: {
+                    isArchived: true,
+                    archivedAt: now,
+                },
+            }),
+            // 4. Archive cancelled orders
+            prisma.order.updateMany({
+                where: {
+                    terminalStatus: 'cancelled',
+                    terminalAt: { lt: cancelledCutoff },
+                    isArchived: false,
+                },
+                data: {
+                    isArchived: true,
+                    archivedAt: now,
+                },
+            }),
+            // 5. Legacy: Archive shipped orders without terminalStatus (backward compat)
+            prisma.order.updateMany({
+                where: {
+                    status: 'shipped',
+                    terminalStatus: null,
+                    isArchived: false,
+                    shippedAt: { lt: legacyCutoff },
+                },
+                data: {
+                    isArchived: true,
+                    archivedAt: now,
+                },
+            }),
+        ]);
 
-        // 2. Archive delivered COD orders (only if remitted)
-        const codResult = await prisma.order.updateMany({
-            where: {
-                terminalStatus: 'delivered',
-                paymentMethod: 'COD',
-                codRemittedAt: { not: null },
-                terminalAt: { lt: terminalCutoff },
-                isArchived: false,
-            },
-            data: {
-                isArchived: true,
-                archivedAt: now,
-            },
-        });
-        totalArchived += codResult.count;
-
-        // 3. Archive RTO received orders
-        const rtoResult = await prisma.order.updateMany({
-            where: {
-                terminalStatus: 'rto_received',
-                terminalAt: { lt: terminalCutoff },
-                isArchived: false,
-            },
-            data: {
-                isArchived: true,
-                archivedAt: now,
-            },
-        });
-        totalArchived += rtoResult.count;
-
-        // 4. Archive cancelled orders
-        const cancelledResult = await prisma.order.updateMany({
-            where: {
-                terminalStatus: 'cancelled',
-                terminalAt: { lt: cancelledCutoff },
-                isArchived: false,
-            },
-            data: {
-                isArchived: true,
-                archivedAt: now,
-            },
-        });
-        totalArchived += cancelledResult.count;
-
-        // 5. Legacy: Archive shipped orders without terminalStatus (backward compat)
-        const legacyResult = await prisma.order.updateMany({
-            where: {
-                status: 'shipped',
-                terminalStatus: null,
-                isArchived: false,
-                shippedAt: { lt: legacyCutoff },
-            },
-            data: {
-                isArchived: true,
-                archivedAt: now,
-            },
-        });
-        totalArchived += legacyResult.count;
+        const totalArchived = prepaidResult.count + codResult.count + rtoResult.count + cancelledResult.count + legacyResult.count;
 
         if (totalArchived > 0) {
             orderLogger.info({

@@ -7,6 +7,8 @@
  * - Consumption: Fabric matrix (sizes × fabric consumption)
  */
 
+import { getGstRate } from '@coh/shared/domain/constants';
+
 // Standard sizes for consumption matrix
 export const CONSUMPTION_SIZES = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 
@@ -93,7 +95,7 @@ export function aggregateByVariation(items: any[]): any[] {
             // Calculate cost multiple from averaged values
             group.costMultiple = group.totalCost > 0 ? Math.round((group.mrp / group.totalCost) * 100) / 100 : null;
             // GST rate based on averaged MRP (threshold-based)
-            group.gstRate = group.mrp >= 2500 ? 18 : 5;
+            group.gstRate = getGstRate(group.mrp);
         }
         // Clean up temp fields
         delete group._mrpSum;
@@ -216,7 +218,7 @@ export function aggregateByProduct(items: any[]): any[] {
             // Calculate cost multiple from averaged values
             group.costMultiple = group.totalCost > 0 ? Math.round((group.mrp / group.totalCost) * 100) / 100 : null;
             // GST rate based on averaged MRP (threshold-based)
-            group.gstRate = group.mrp >= 2500 ? 18 : 5;
+            group.gstRate = getGstRate(group.mrp);
         }
         // Clean up temp fields
         delete group._mrpSum;

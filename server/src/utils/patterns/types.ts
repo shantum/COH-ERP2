@@ -84,31 +84,18 @@ export type FabricTxnType = typeof FABRIC_TXN_TYPE[keyof typeof FABRIC_TXN_TYPE]
 // INVENTORY BALANCE TYPES
 // ============================================
 
-export interface InventoryBalance {
-    totalInward: number;
-    totalOutward: number;
-    currentBalance: number;
-    availableBalance: number;
-    hasDataIntegrityIssue: boolean;
-}
+// Re-export shared domain types for backwards compatibility
+export type {
+    InventoryBalance,
+    InventoryBalanceWithSkuId,
+    FabricBalance,
+    FabricBalanceWithId,
+} from '@coh/shared/domain';
 
-export interface InventoryBalanceWithSkuId extends InventoryBalance {
-    skuId: string;
-}
-
+// Server-specific options (includes Prisma-specific options like excludeCustomSkus)
 export interface InventoryBalanceOptions {
     allowNegative?: boolean;
     excludeCustomSkus?: boolean;
-}
-
-export interface FabricBalance {
-    totalInward: number;
-    totalOutward: number;
-    currentBalance: number;
-}
-
-export interface FabricBalanceWithId extends FabricBalance {
-    fabricId: string;
 }
 
 // ============================================

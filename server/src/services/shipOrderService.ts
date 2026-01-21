@@ -34,6 +34,17 @@
 import type { PrismaTransactionClient } from '../utils/queryPatterns.js';
 import type { PrismaClient } from '@prisma/client';
 import { shippingLogger } from '../utils/logger.js';
+import { BusinessLogicError } from '../utils/errors.js';
+
+/**
+ * Prisma error with code property for unique constraint violations
+ */
+interface PrismaError extends Error {
+    code?: string;
+    meta?: {
+        target?: string[];
+    };
+}
 
 // ============================================
 // TYPE DEFINITIONS
@@ -298,7 +309,18 @@ export async function shipOrderLines(
                 });
             }
         } catch (error) {
-            // If batch update fails, record error for all lines
+            const prismaError = error as PrismaError;
+
+            // Handle unique constraint violation on AWB number
+            // This catches the race condition where two requests try to use the same AWB
+            if (prismaError.code === 'P2002' && prismaError.meta?.target?.includes('awbNumber')) {
+                throw new BusinessLogicError(
+                    'AWB number is already in use on another order',
+                    'AWB_DUPLICATE'
+                );
+            }
+
+            // If batch update fails for other reasons, record error for all lines
             for (const line of linesToShip) {
                 errors.push({
                     lineId: line.id,

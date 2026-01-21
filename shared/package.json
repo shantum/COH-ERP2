@@ -21,6 +21,10 @@
     "./database": {
       "types": "./dist/database/index.d.ts",
       "import": "./dist/database/index.js"
+    },
+    "./domain": {
+      "types": "./dist/domain/index.d.ts",
+      "import": "./dist/domain/index.js"
     }
   },
   "scripts": {

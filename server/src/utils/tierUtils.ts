@@ -6,22 +6,40 @@
  * - Tier is calculated from stored ltv (no expensive aggregation)
  * - adjustCustomerLtv() for incremental changes (fast)
  * - recalculateCustomerLtv() for full recalc (slow, use sparingly)
+ *
+ * ARCHITECTURE:
+ * - Pure tier calculation logic lives in @coh/shared/domain (shared layer)
+ * - This file contains Prisma-dependent database operations
+ * - Types and pure functions are re-exported for backward compatibility
  */
 
 import type { PrismaClient } from '@prisma/client';
 import { customerStatsCache } from '../services/customerStatsCache.js';
 
+// Import pure functions and types from shared domain layer
+import {
+    calculateTierFromLtv,
+    DEFAULT_TIER_THRESHOLDS,
+    type CustomerTier,
+    type TierThresholds,
+} from '@coh/shared/domain';
+
 // ============================================
-// TYPES
+// RE-EXPORTS FROM SHARED (for backward compatibility)
 // ============================================
 
-export type CustomerTier = 'bronze' | 'silver' | 'gold' | 'platinum';
+export type { CustomerTier, TierThresholds };
+export { DEFAULT_TIER_THRESHOLDS };
 
-export interface TierThresholds {
-    platinum: number;
-    gold: number;
-    silver: number;
-}
+/**
+ * Calculate tier from LTV (alias for backward compatibility)
+ * @deprecated Use calculateTierFromLtv from @coh/shared/domain directly
+ */
+export const calculateTier = calculateTierFromLtv;
+
+// ============================================
+// TYPES (server-specific)
+// ============================================
 
 export interface TierUpdateResult {
     updated: boolean;
@@ -31,24 +49,15 @@ export interface TierUpdateResult {
 }
 
 // ============================================
-// CONSTANTS
+// THRESHOLD CACHE (server-specific)
 // ============================================
-
-export const DEFAULT_TIER_THRESHOLDS: TierThresholds = {
-    platinum: 50000,
-    gold: 25000,
-    silver: 10000
-};
 
 // Cache tier thresholds (they rarely change)
 let cachedThresholds: TierThresholds | null = null;
 
-// ============================================
-// CORE FUNCTIONS
-// ============================================
-
 /**
- * Get tier thresholds (cached)
+ * Get tier thresholds from database (cached)
+ * Falls back to DEFAULT_TIER_THRESHOLDS if not configured
  */
 export async function getTierThresholds(prisma: PrismaClient): Promise<TierThresholds> {
     if (cachedThresholds) return cachedThresholds;
@@ -66,16 +75,6 @@ export async function getTierThresholds(prisma: PrismaClient): Promise<TierThres
     }
     cachedThresholds = DEFAULT_TIER_THRESHOLDS;
     return cachedThresholds;
-}
-
-/**
- * Calculate tier from LTV
- */
-export function calculateTier(ltv: number, thresholds: TierThresholds = DEFAULT_TIER_THRESHOLDS): CustomerTier {
-    if (ltv >= thresholds.platinum) return 'platinum';
-    if (ltv >= thresholds.gold) return 'gold';
-    if (ltv >= thresholds.silver) return 'silver';
-    return 'bronze';
 }
 
 /**

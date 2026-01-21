@@ -10,9 +10,27 @@
  * TO CHANGE TIER THRESHOLDS:
  * 1. Update the TIER_THRESHOLDS values
  * 2. Run the recalculateAllCustomerLtvs script to update existing customers
+ *
+ * ARCHITECTURE:
+ * - Pure tier calculation logic lives in @coh/shared/domain (shared layer)
+ * - This file provides config-specific exports and backward compatibility
  */
 
-import type { TierThresholds, CustomerTier } from '../types.js';
+// Import pure functions and constants from shared domain layer
+import {
+    calculateTierFromLtv,
+    compareTiers as sharedCompareTiers,
+    shouldUpgradeTier as sharedShouldUpgradeTier,
+    DEFAULT_TIER_THRESHOLDS,
+    TIER_ORDER,
+    TIER_LABELS,
+    TIER_COLORS,
+    type CustomerTier,
+    type TierThresholds,
+} from '@coh/shared/domain';
+
+// Re-export types for backward compatibility
+export type { CustomerTier, TierThresholds };
 
 // ============================================
 // TIER CONFIGURATION
@@ -22,42 +40,20 @@ import type { TierThresholds, CustomerTier } from '../types.js';
  * LTV thresholds for each tier
  *
  * A customer is assigned the highest tier where their LTV meets the threshold.
- * - LTV >= platinum threshold → platinum
- * - LTV >= gold threshold → gold
- * - LTV >= silver threshold → silver
- * - LTV < silver threshold → bronze (default)
+ * - LTV >= platinum threshold -> platinum
+ * - LTV >= gold threshold -> gold
+ * - LTV >= silver threshold -> silver
+ * - LTV < silver threshold -> bronze (default)
+ *
+ * @deprecated Use DEFAULT_TIER_THRESHOLDS from @coh/shared/domain
  */
-export const TIER_THRESHOLDS: TierThresholds = {
-    /** Minimum LTV for platinum tier */
-    platinum: 50000,
-    /** Minimum LTV for gold tier */
-    gold: 25000,
-    /** Minimum LTV for silver tier */
-    silver: 10000,
-};
+export const TIER_THRESHOLDS: TierThresholds = DEFAULT_TIER_THRESHOLDS;
 
-/**
- * Tier display names for UI
- */
-export const TIER_LABELS: Record<CustomerTier, string> = {
-    platinum: 'Platinum',
-    gold: 'Gold',
-    silver: 'Silver',
-    bronze: 'Bronze',
-};
-
-/**
- * Tier colors for UI (Tailwind classes)
- */
-export const TIER_COLORS: Record<CustomerTier, string> = {
-    platinum: 'text-purple-600 bg-purple-50',
-    gold: 'text-yellow-600 bg-yellow-50',
-    silver: 'text-gray-600 bg-gray-100',
-    bronze: 'text-orange-600 bg-orange-50',
-};
+// Re-export shared constants
+export { TIER_LABELS, TIER_COLORS, TIER_ORDER };
 
 // ============================================
-// TIER CALCULATION
+// TIER CALCULATION (re-exports for backward compatibility)
 // ============================================
 
 /**
@@ -71,40 +67,43 @@ export const TIER_COLORS: Record<CustomerTier, string> = {
  * calculateTier(60000) // => 'platinum'
  * calculateTier(15000) // => 'silver'
  * calculateTier(5000)  // => 'bronze'
+ *
+ * @deprecated Use calculateTierFromLtv from @coh/shared/domain directly
  */
 export function calculateTier(
     ltv: number,
     thresholds: TierThresholds = TIER_THRESHOLDS
 ): CustomerTier {
-    if (ltv >= thresholds.platinum) return 'platinum';
-    if (ltv >= thresholds.gold) return 'gold';
-    if (ltv >= thresholds.silver) return 'silver';
-    return 'bronze';
+    return calculateTierFromLtv(ltv, thresholds);
 }
 
 /**
  * Get all tiers in order from highest to lowest
+ *
+ * @deprecated Use TIER_ORDER from @coh/shared/domain directly
  */
 export function getTierOrder(): CustomerTier[] {
-    return ['platinum', 'gold', 'silver', 'bronze'];
+    return [...TIER_ORDER];
 }
 
 /**
  * Compare two tiers (returns -1 if a < b, 0 if equal, 1 if a > b)
+ *
+ * @deprecated Use compareTiers from @coh/shared/domain directly
  */
 export function compareTiers(a: CustomerTier, b: CustomerTier): number {
-    const order = getTierOrder();
-    return order.indexOf(b) - order.indexOf(a);
+    return sharedCompareTiers(a, b);
 }
 
 /**
  * Check if customer qualifies for a tier upgrade
+ *
+ * @deprecated Use shouldUpgradeTier from @coh/shared/domain directly
  */
 export function shouldUpgradeTier(
     currentTier: CustomerTier,
     newLtv: number,
     thresholds: TierThresholds = TIER_THRESHOLDS
 ): boolean {
-    const newTier = calculateTier(newLtv, thresholds);
-    return compareTiers(newTier, currentTier) > 0;
+    return sharedShouldUpgradeTier(currentTier, newLtv, thresholds);
 }
