@@ -2,11 +2,11 @@
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["cd client && npm install --include=dev", "cd server && npm install"]
+cmds = ["cd shared && npm install", "cd client && npm install --include=dev", "cd server && npm install"]
 dependsOn = ["setup"]
 
 [phases.build]
-cmds = ["cd client && npm run build", "cd server && npx prisma generate"]
+cmds = ["cd shared && npm run build", "cd client && npm run build", "cd server && npx prisma generate"]
 dependsOn = ["install"]
 
 [start]
