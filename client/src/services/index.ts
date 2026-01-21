@@ -1,12 +1,13 @@
 /**
  * Services Index
  *
- * Central export point for API clients.
+ * Exports Axios APIs for operations that CANNOT use Server Functions:
+ * - File uploads (multipart/form-data)
+ * - Auth (cookie management)
+ * - Shopify admin sync operations
  *
- * @example Axios (existing pattern)
- * import { ordersApi } from '@/services';
- * const { data } = await ordersApi.getAll({ view: 'open' });
+ * For all other data operations, use Server Functions:
+ * @see client/src/server/functions/
  */
 
-// Re-export all Axios APIs for backward compatibility
 export * from './api';
