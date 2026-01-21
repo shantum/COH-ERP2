@@ -2158,3 +2158,226 @@ export const getCogs = createServerFn({ method: 'GET' })
             };
         }
     });
+
+// ==================== FABRIC MAPPING ====================
+
+/**
+ * Get Fabric Assignments for Fabric Mapping view
+ * Returns all fabric assignments for variations
+ */
+const getFabricAssignmentsSchema = z.object({
+    roleId: z.string().optional(),
+});
+
+export interface FabricAssignment {
+    variationId: string;
+    colourId: string;
+    colourName: string;
+    colourHex?: string;
+    fabricId: string;
+    fabricName: string;
+    materialId: string;
+    materialName: string;
+}
+
+export const getFabricAssignments = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getFabricAssignmentsSchema.parse(input))
+    .handler(async ({ data }: { data: z.infer<typeof getFabricAssignmentsSchema> }): Promise<{ assignments: FabricAssignment[] }> => {
+        const prisma = await getPrisma();
+
+        let roleId = data.roleId;
+
+        // Get the main fabric role if not specified
+        if (!roleId) {
+            const mainFabricRole = await prisma.componentRole.findFirst({
+                where: {
+                    code: 'main',
+                    type: { code: 'FABRIC' },
+                },
+            });
+            if (!mainFabricRole) {
+                throw new Error('Main fabric role not configured');
+            }
+            roleId = mainFabricRole.id;
+        }
+
+        // Fetch all variation BOM lines with fabric colour assignments
+        const bomLines = await prisma.variationBomLine.findMany({
+            where: {
+                roleId,
+                fabricColourId: { not: null },
+            },
+            select: {
+                variationId: true,
+                fabricColourId: true,
+                fabricColour: {
+                    select: {
+                        id: true,
+                        colourName: true,
+                        colourHex: true,
+                        fabricId: true,
+                        fabric: {
+                            select: {
+                                id: true,
+                                name: true,
+                                materialId: true,
+                                material: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Transform to flat response
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const assignments: FabricAssignment[] = bomLines.map((line: any) => ({
+            variationId: line.variationId,
+            colourId: line.fabricColour?.id || '',
+            colourName: line.fabricColour?.colourName || '',
+            colourHex: line.fabricColour?.colourHex || undefined,
+            fabricId: line.fabricColour?.fabric?.id || '',
+            fabricName: line.fabricColour?.fabric?.name || '',
+            materialId: line.fabricColour?.fabric?.material?.id || '',
+            materialName: line.fabricColour?.fabric?.material?.name || '',
+        }));
+
+        return { assignments };
+    });
+
+/**
+ * Link Variations to Fabric Colour
+ * Creates VariationBomLine records for the main fabric role
+ */
+const linkVariationsToColourSchema = z.object({
+    colourId: z.string(),
+    variationIds: z.array(z.string()),
+    roleId: z.string().optional(),
+});
+
+export const linkVariationsToColour = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => linkVariationsToColourSchema.parse(input))
+    .handler(async ({ data }: { data: z.infer<typeof linkVariationsToColourSchema> }): Promise<{
+        success: boolean;
+        fabricColour?: { id: string; name: string; fabricName: string };
+        linked?: { total: number };
+        error?: { code: string; message: string };
+    }> => {
+        const prisma = await getPrisma();
+
+        try {
+            const { colourId, variationIds, roleId } = data;
+
+            if (!variationIds || variationIds.length === 0) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'variationIds array is required' },
+                };
+            }
+
+            // Verify the colour exists
+            const colour = await prisma.fabricColour.findUnique({
+                where: { id: colourId },
+                include: { fabric: true },
+            });
+
+            if (!colour) {
+                return {
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Fabric colour not found' },
+                };
+            }
+
+            // Get the main fabric role if not specified
+            let targetRoleId = roleId;
+            if (!targetRoleId) {
+                const mainFabricRole = await prisma.componentRole.findFirst({
+                    where: {
+                        code: 'main',
+                        type: { code: 'FABRIC' },
+                    },
+                });
+                if (!mainFabricRole) {
+                    return {
+                        success: false,
+                        error: { code: 'SERVER_ERROR', message: 'Main fabric role not configured' },
+                    };
+                }
+                targetRoleId = mainFabricRole.id;
+            }
+
+            // Verify variations exist
+            const variations = await prisma.variation.findMany({
+                where: { id: { in: variationIds } },
+                select: { id: true, colorName: true, product: { select: { name: true } } },
+            });
+
+            if (variations.length !== variationIds.length) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'One or more variations not found' },
+                };
+            }
+
+            // Create/update BOM lines AND update variation.fabricId in a transaction
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const results = await prisma.$transaction(async (tx: any) => {
+                const updated: string[] = [];
+
+                for (const variation of variations) {
+                    // 1. FIRST update the variation's fabricId to match the colour's parent fabric
+                    await tx.variation.update({
+                        where: { id: variation.id },
+                        data: { fabricId: colour.fabricId },
+                    });
+
+                    // 2. THEN create/update the BOM line with the fabric colour
+                    await tx.variationBomLine.upsert({
+                        where: {
+                            variationId_roleId: {
+                                variationId: variation.id,
+                                roleId: targetRoleId!,
+                            },
+                        },
+                        update: { fabricColourId: colourId },
+                        create: {
+                            variationId: variation.id,
+                            roleId: targetRoleId!,
+                            fabricColourId: colourId,
+                        },
+                    });
+
+                    updated.push(variation.id);
+                }
+
+                return { updated };
+            }, {
+                timeout: 30000, // 30 second timeout for bulk operations
+            });
+
+            return {
+                success: true,
+                fabricColour: {
+                    id: colour.id,
+                    name: colour.colourName,
+                    fabricName: colour.fabric.name,
+                },
+                linked: {
+                    total: results.updated.length,
+                },
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to link variations';
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message },
+            };
+        }
+    });

@@ -9,7 +9,9 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { productsApi, bomApi } from '../../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getProductsTree } from '../../../../server/functions/products';
+import { getComponentRoles, getFabricAssignments } from '../../../../server/functions/bomMutations';
 import { useMaterialsTree } from '../../../materials/hooks/useMaterialsTree';
 import type { ProductTreeResponse, ProductTreeNode } from '../../types';
 import type { MaterialNode } from '../../../materials/types';
@@ -216,6 +218,11 @@ function buildFabricMappingRows(
 export function useFabricMappingData(options: UseFabricMappingDataOptions = {}): UseFabricMappingDataReturn {
     const { filter = 'all', searchQuery = '' } = options;
 
+    // Server function hooks
+    const getProductsTreeFn = useServerFn(getProductsTree);
+    const getComponentRolesFn = useServerFn(getComponentRoles);
+    const getFabricAssignmentsFn = useServerFn(getFabricAssignments);
+
     // Fetch products tree
     const {
         data: productsResponse,
@@ -223,10 +230,10 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         error: productsError,
         refetch: refetchProducts,
     } = useQuery<ProductTreeResponse>({
-        queryKey: ['productsTree', 'tree'],
+        queryKey: ['productsTree', 'tree', 'server-fn'],
         queryFn: async () => {
-            const response = await productsApi.getTree();
-            return response.data;
+            const result = await getProductsTreeFn({ data: {} });
+            return result as ProductTreeResponse;
         },
         staleTime: 30 * 1000,
     });
@@ -244,8 +251,8 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         data: rolesData,
         isLoading: rolesLoading,
     } = useQuery({
-        queryKey: ['componentRoles'],
-        queryFn: () => bomApi.getComponentRoles().then(r => r.data),
+        queryKey: ['componentRoles', 'server-fn'],
+        queryFn: () => getComponentRolesFn(),
         staleTime: 5 * 60 * 1000, // 5 minutes
     });
 
@@ -265,10 +272,10 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         isLoading: assignmentsLoading,
         refetch: refetchAssignments,
     } = useQuery({
-        queryKey: ['fabricMappingAssignments', mainFabricRoleId],
+        queryKey: ['fabricMappingAssignments', mainFabricRoleId, 'server-fn'],
         queryFn: async () => {
-            const response = await bomApi.getFabricAssignments(mainFabricRoleId || undefined);
-            return response.data;
+            const result = await getFabricAssignmentsFn({ data: { roleId: mainFabricRoleId || undefined } });
+            return result;
         },
         enabled: !!mainFabricRoleId,
         staleTime: 30 * 1000,

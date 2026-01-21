@@ -15,17 +15,17 @@
  */
 
 import { queryOptions } from '@tanstack/react-query';
-import { ordersApi } from '../services/api';
 import { getTopProductsForDashboard, getTopCustomersForDashboard } from '../server/functions/reports';
 import { getTopFabricsForDashboard } from '../server/functions/fabrics';
+import { getOrdersAnalytics } from '../server/functions/orders';
 
 /**
  * Orders analytics (summary counts for analytics bar)
- * NOTE: Still uses API until orders Server Functions are fully migrated
+ * Uses Server Function
  */
 export const ordersAnalyticsQueryOptions = queryOptions({
   queryKey: ['ordersAnalytics'],
-  queryFn: () => ordersApi.getAnalytics().then(r => r.data),
+  queryFn: () => getOrdersAnalytics(),
   staleTime: 30 * 1000, // 30 seconds
 });
 

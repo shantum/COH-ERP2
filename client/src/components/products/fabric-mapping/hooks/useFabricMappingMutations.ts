@@ -2,11 +2,12 @@
  * useFabricMappingMutations - Mutations for Fabric Mapping view
  *
  * Handles batch saving of fabric assignments.
- * Groups changes by colourId and calls the link-variations endpoint for each.
+ * Groups changes by colourId and calls the link-variations Server Function for each.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { bomApi } from '../../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { linkVariationsToColour } from '../../../../server/functions/bomMutations';
 import type { PendingFabricChange } from '../types';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
 import { materialsTreeKeys } from '../../../materials/hooks/useMaterialsTree';
@@ -27,6 +28,7 @@ interface SaveResult {
  */
 export function useFabricMappingMutations() {
     const queryClient = useQueryClient();
+    const linkVariationsToColourFn = useServerFn(linkVariationsToColour);
 
     const saveAssignments = useMutation<SaveResult, Error, SaveFabricAssignmentsParams>({
         mutationFn: async ({ changes, roleId }) => {
@@ -50,12 +52,21 @@ export function useFabricMappingMutations() {
             const promises = Array.from(changesByColour.entries()).map(
                 async ([colourId, variationIds]) => {
                     try {
-                        await bomApi.linkVariationsToColour(colourId, variationIds, roleId);
-                        savedCount += variationIds.length;
+                        const result = await linkVariationsToColourFn({
+                            data: { colourId, variationIds, roleId },
+                        });
+                        if (result.success) {
+                            savedCount += variationIds.length;
+                        } else {
+                            errors.push({
+                                colourId,
+                                error: result.error?.message || 'Unknown error',
+                            });
+                        }
                     } catch (err: any) {
                         errors.push({
                             colourId,
-                            error: err.response?.data?.error || err.message || 'Unknown error',
+                            error: err.message || 'Unknown error',
                         });
                     }
                 }

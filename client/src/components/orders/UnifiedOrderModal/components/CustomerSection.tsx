@@ -4,8 +4,9 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { User, Mail, Phone, MapPin, Search, ChevronDown, ChevronUp, CreditCard, ExternalLink, Loader2, X } from 'lucide-react';
-import { customersApi } from '../../../../services/api';
+import { getCustomer } from '../../../../server/functions/customers';
 import { CustomerSearch } from '../../../common/CustomerSearch';
 import type { Order } from '../../../../types';
 import type { ModalMode, AddressData, EditFormState, OrderWithShopifyDetails } from '../types';
@@ -48,21 +49,24 @@ export function CustomerSection({
   // Auto-expand manual address form if no customer linked (no saved addresses to show)
   const [isManualAddressOpen, setIsManualAddressOpen] = useState(!order.customerId && !editForm.customerId);
 
+  // Server function hooks
+  const getCustomerFn = useServerFn(getCustomer);
+
   // Fetch customer details for LTV and RTO info
   const { data: customerData, isLoading: isLoadingCustomer } = useQuery({
-    queryKey: ['customer-details', order.customerId],
-    queryFn: () => customersApi.getById(order.customerId!),
+    queryKey: ['customer-details', order.customerId, 'server-fn'],
+    queryFn: () => getCustomerFn({ data: { id: order.customerId! } }),
     enabled: !!order.customerId && mode === 'view',
     staleTime: 60 * 1000,
   });
 
   // Extract customer insights
-  const customerInsights = customerData?.data ? {
-    lifetimeValue: customerData.data.lifetimeValue || 0,
-    totalOrders: customerData.data.totalOrders || 0,
-    customerTier: customerData.data.customerTier || 'New',
-    // Calculate RTO stats from orders
-    rtoCount: customerData.data.orders?.filter((o: any) =>
+  const customerInsights = customerData ? {
+    lifetimeValue: 0, // Not available in server function response
+    totalOrders: customerData.ordersCount || 0,
+    customerTier: customerData.tier || 'New',
+    // Calculate RTO stats from recent orders
+    rtoCount: customerData.recentOrders?.filter((o: any) =>
       o.trackingStatus?.startsWith('rto_') || o.status === 'returned'
     ).length || 0,
   } : null;

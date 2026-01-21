@@ -5,7 +5,8 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { customersApi } from '../../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getCustomerAddresses } from '../../../../server/functions/customers';
 import { calculateOrderTotal } from '../../../../utils/orderPricing';
 import type { Order } from '../../../../types';
 import type {
@@ -58,6 +59,9 @@ interface UseUnifiedOrderModalProps {
 }
 
 export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: UseUnifiedOrderModalProps) {
+  // Server function hooks
+  const getCustomerAddressesFn = useServerFn(getCustomerAddresses);
+
   // Determine available modes based on order state
   // Line-level: can edit if ANY line is not shipped/cancelled (not just order.status)
   const hasEditableLines = order.orderLines?.some(
@@ -215,13 +219,13 @@ export function useUnifiedOrderModal({ order, initialMode, onNavigateToOrder }: 
 
   // Fetch past addresses when address picker is expanded
   const { data: pastAddressesData, isLoading: isLoadingAddresses } = useQuery({
-    queryKey: ['customer-addresses', activeCustomerId],
-    queryFn: () => customersApi.getAddresses(activeCustomerId!),
+    queryKey: ['customer-addresses', activeCustomerId, 'server-fn'],
+    queryFn: () => getCustomerAddressesFn({ data: { customerId: activeCustomerId! } }),
     enabled: expandedSections.addressPicker && !!activeCustomerId,
     staleTime: 60 * 1000,
   });
 
-  const pastAddresses: AddressData[] = pastAddressesData?.data || [];
+  const pastAddresses: AddressData[] = pastAddressesData || [];
 
   // Categorize lines for display
   const categorizedLines = useMemo<CategorizedLines>(() => {
