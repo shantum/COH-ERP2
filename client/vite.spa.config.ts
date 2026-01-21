@@ -20,18 +20,20 @@ export default defineConfig({
   resolve: {
     // Dedupe shared dependencies to avoid multiple instances
     dedupe: ['zod', 'react', 'react-dom'],
-    alias: {
+    // Use array format for aliases - order matters! More specific paths first
+    alias: [
       // Ensure @coh/shared resolves to the built dist folder
-      '@coh/shared': path.resolve(__dirname, '../shared/dist'),
-      // Stub out TanStack Start and vinxi imports for SPA mode (they require Node.js)
-      '@tanstack/react-start': path.resolve(__dirname, 'src/stubs/react-start.ts'),
-      '@tanstack/react-start/client': path.resolve(__dirname, 'src/stubs/react-start.ts'),
-      '@tanstack/react-start/server': path.resolve(__dirname, 'src/stubs/react-start-server.ts'),
-      '@tanstack/react-start/server-entry': path.resolve(__dirname, 'src/stubs/react-start.ts'),
-      'vinxi/http': path.resolve(__dirname, 'src/stubs/vinxi.ts'),
-      'vinxi/runtime/http': path.resolve(__dirname, 'src/stubs/vinxi.ts'),
-      'vinxi': path.resolve(__dirname, 'src/stubs/vinxi.ts'),
-    },
+      { find: '@coh/shared', replacement: path.resolve(__dirname, '../shared/dist') },
+      // Stub out TanStack Start imports for SPA mode (more specific paths FIRST)
+      { find: '@tanstack/react-start/server-entry', replacement: path.resolve(__dirname, 'src/stubs/react-start.ts') },
+      { find: '@tanstack/react-start/server', replacement: path.resolve(__dirname, 'src/stubs/react-start-server.ts') },
+      { find: '@tanstack/react-start/client', replacement: path.resolve(__dirname, 'src/stubs/react-start.ts') },
+      { find: '@tanstack/react-start', replacement: path.resolve(__dirname, 'src/stubs/react-start.ts') },
+      // Stub out vinxi imports
+      { find: 'vinxi/runtime/http', replacement: path.resolve(__dirname, 'src/stubs/vinxi.ts') },
+      { find: 'vinxi/http', replacement: path.resolve(__dirname, 'src/stubs/vinxi.ts') },
+      { find: 'vinxi', replacement: path.resolve(__dirname, 'src/stubs/vinxi.ts') },
+    ],
   },
   optimizeDeps: {
     // Include shared package dependencies for pre-bundling
