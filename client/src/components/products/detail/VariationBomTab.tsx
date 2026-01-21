@@ -9,7 +9,8 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, AlertCircle } from 'lucide-react';
-import { bomApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getProductBom, type ProductBomResult } from '../../../server/functions/bomMutations';
 import {
     BomLinesTable,
     BomCostSummary,
@@ -24,14 +25,24 @@ interface VariationBomTabProps {
 }
 
 export function VariationBomTab({ variation }: VariationBomTabProps) {
+    // Server Functions
+    const getProductBomFn = useServerFn(getProductBom);
+
     // Fetch BOM data for the parent product
     const {
         data: bomData,
         isLoading,
         error,
-    } = useQuery({
+    } = useQuery<ProductBomResult | null>({
         queryKey: ['productBom', variation.productId],
-        queryFn: () => bomApi.getProductBom(variation.productId!).then((r) => r.data),
+        queryFn: async () => {
+            if (!variation.productId) return null;
+            const result = await getProductBomFn({ data: { productId: variation.productId } });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load BOM');
+            }
+            return result.data;
+        },
         enabled: !!variation.productId,
     });
 

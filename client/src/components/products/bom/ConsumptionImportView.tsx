@@ -21,7 +21,13 @@ import {
     Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { bomApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getProductsForMapping,
+    importConsumption,
+    resetConsumption,
+    type ProductForMappingResult,
+} from '../../../server/functions/bomMutations';
 
 interface CsvRow {
     id: string;
@@ -36,16 +42,7 @@ interface CsvRow {
     autoMatched: boolean;
 }
 
-interface InternalProduct {
-    id: string;
-    name: string;
-    styleCode: string | null;
-    category: string | null;
-    imageUrl: string | null;
-    gender: string | null;
-    hasConsumption: boolean;
-    avgConsumption: number;
-}
+// ProductForMappingResult is now imported as ProductForMappingResult from bomMutations
 
 const SIZE_COLUMNS = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
 
@@ -150,10 +147,21 @@ export function ConsumptionImportView() {
     const [searchQuery, setSearchQuery] = useState('');
     const [filterUnmapped, setFilterUnmapped] = useState(false);
 
+    // Server Functions
+    const getProductsForMappingFn = useServerFn(getProductsForMapping);
+    const importConsumptionFn = useServerFn(importConsumption);
+    const resetConsumptionFn = useServerFn(resetConsumption);
+
     // Fetch internal products
-    const { data: internalProducts = [], isLoading: loadingProducts } = useQuery<InternalProduct[]>({
+    const { data: internalProducts = [], isLoading: loadingProducts } = useQuery<ProductForMappingResult[]>({
         queryKey: ['productsForMapping'],
-        queryFn: () => bomApi.getProductsForMapping().then((r) => r.data),
+        queryFn: async () => {
+            const result = await getProductsForMappingFn({ data: undefined });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load products');
+            }
+            return result.data;
+        },
     });
 
     // Import mutation
@@ -187,13 +195,17 @@ export function ConsumptionImportView() {
             console.log('Importing:', imports.length, 'unique products from', mappedRows.length, 'mapped rows');
             console.log('Sample import:', imports[0]);
 
-            return bomApi.importConsumption(imports);
+            const result = await importConsumptionFn({ data: { imports } });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Import failed');
+            }
+            return result.data;
         },
         onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['consumptionGrid'] });
-            alert(`Import complete!\n\nProducts processed: ${data.data.productsImported}\nSKUs updated: ${data.data.skusUpdated}`);
+            alert(`Import complete!\n\nProducts processed: ${data.productsImported}\nSKUs updated: ${data.skusUpdated}`);
         },
-        onError: (error: any) => {
+        onError: (error: Error) => {
             console.error('Import error:', error);
             alert(`Import failed: ${error.message || 'Unknown error'}`);
         },
@@ -201,10 +213,16 @@ export function ConsumptionImportView() {
 
     // Reset mutation
     const resetMutation = useMutation({
-        mutationFn: () => bomApi.resetConsumption(),
+        mutationFn: async () => {
+            const result = await resetConsumptionFn({ data: undefined });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Reset failed');
+            }
+            return result.data;
+        },
         onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['consumptionGrid'] });
-            alert(`Reset complete! ${data.data.deletedBomLines} BOM lines deleted, ${data.data.resetSkus} SKUs reset.`);
+            alert(`Reset complete! ${data.deletedBomLines} BOM lines deleted, ${data.resetSkus} SKUs reset.`);
         },
     });
 
@@ -221,7 +239,7 @@ export function ConsumptionImportView() {
         (rows: CsvRow[]): CsvRow[] => {
             return rows.map((row) => {
                 // Find best match (skip products with existing consumption)
-                let bestMatch: InternalProduct | null = null;
+                let bestMatch: ProductForMappingResult | null = null;
                 let bestScore = 0;
 
                 for (const prod of internalProducts) {
@@ -284,7 +302,7 @@ export function ConsumptionImportView() {
     );
 
     // Map a row to a product
-    const mapRow = useCallback((rowId: string, product: InternalProduct | null) => {
+    const mapRow = useCallback((rowId: string, product: ProductForMappingResult | null) => {
         setCsvRows((prev) =>
             prev.map((row) =>
                 row.id === rowId

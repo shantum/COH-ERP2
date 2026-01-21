@@ -14,7 +14,12 @@ import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Save, Search, X, Copy, ClipboardPaste, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { bomApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getConsumptionGrid,
+    updateConsumptionGrid,
+    type ConsumptionGridResult,
+} from '../../../server/functions/bomMutations';
 
 interface SizeData {
     quantity: number | null;
@@ -46,13 +51,7 @@ interface GenderGroup {
     totalProducts: number;
 }
 
-interface GridData {
-    roleId: string;
-    roleName: string;
-    roleType: string;
-    sizes: string[];
-    rows: GridRow[];
-}
+// GridData is now imported as ConsumptionGridResult from bomMutations
 
 // Pending changes for batch save
 interface PendingChange {
@@ -78,17 +77,36 @@ export function ConsumptionGridView() {
     const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // Server Functions
+    const getConsumptionGridFn = useServerFn(getConsumptionGrid);
+    const updateConsumptionGridFn = useServerFn(updateConsumptionGrid);
+
     // Fetch grid data
-    const { data: gridData, isLoading, error } = useQuery<GridData>({
+    const { data: gridData, isLoading, error } = useQuery<ConsumptionGridResult | null>({
         queryKey: ['consumptionGrid'],
-        queryFn: () => bomApi.getConsumptionGrid().then((r) => r.data),
+        queryFn: async () => {
+            const result = await getConsumptionGridFn({ data: {} });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load consumption grid');
+            }
+            return result.data;
+        },
     });
 
     // Batch update mutation
     const updateMutation = useMutation({
         mutationFn: async (changes: PendingChange[]) => {
             if (!gridData?.roleId) throw new Error('No role ID');
-            return bomApi.updateConsumptionGrid(changes, gridData.roleId);
+            const result = await updateConsumptionGridFn({
+                data: {
+                    updates: changes,
+                    roleId: gridData.roleId,
+                },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update consumption grid');
+            }
+            return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['consumptionGrid'] });

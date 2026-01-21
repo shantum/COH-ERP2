@@ -1222,6 +1222,17 @@ export interface ScanLookupMatch {
         customerName?: string;
         qty: number;
         atWarehouse?: boolean;
+        // Repacking-specific fields
+        queueId?: string;
+        condition?: string;
+        returnRequestNumber?: string | null;
+        // Production-specific fields
+        batchId?: string;
+        batchCode?: string;
+        qtyPlanned?: number;
+        qtyCompleted?: number;
+        qtyPending?: number;
+        batchDate?: string;
     };
 }
 
@@ -1230,6 +1241,7 @@ export interface ScanLookupResult {
     sku: {
         id: string;
         skuCode: string;
+        barcode: string | null;
         productName: string;
         colorName: string;
         size: string;
@@ -1315,6 +1327,36 @@ export const scanLookup = createServerFn({ method: 'GET' })
             take: 10,
         });
 
+        // Find matching repacking queue items
+        const repackingMatches = await prisma.repackingQueueItem.findMany({
+            where: {
+                skuId: sku.id,
+                status: 'pending',
+            },
+            include: {
+                returnRequest: {
+                    select: { requestNumber: true },
+                },
+            },
+            take: 10,
+        });
+
+        // Find matching production batches
+        const productionMatches = await prisma.productionBatch.findMany({
+            where: {
+                skuId: sku.id,
+                status: { in: ['pending', 'planned', 'in_progress'] },
+            },
+            select: {
+                id: true,
+                batchCode: true,
+                batchDate: true,
+                qtyPlanned: true,
+                qtyCompleted: true,
+            },
+            take: 10,
+        });
+
         // Build matches array
         const matches: ScanLookupMatch[] = [];
 
@@ -1347,10 +1389,45 @@ export const scanLookup = createServerFn({ method: 'GET' })
             });
         }
 
+        for (const repackItem of repackingMatches) {
+            matches.push({
+                source: 'repacking',
+                priority: 3,
+                data: {
+                    lineId: repackItem.id,
+                    queueId: repackItem.id,
+                    qty: repackItem.qty,
+                    condition: repackItem.condition || 'unknown',
+                    returnRequestNumber: repackItem.returnRequest?.requestNumber || null,
+                },
+            });
+        }
+
+        for (const prodBatch of productionMatches) {
+            const qtyPending = prodBatch.qtyPlanned - prodBatch.qtyCompleted;
+            if (qtyPending > 0) {
+                matches.push({
+                    source: 'production',
+                    priority: 4,
+                    data: {
+                        lineId: prodBatch.id,
+                        batchId: prodBatch.id,
+                        batchCode: prodBatch.batchCode || '',
+                        qty: qtyPending,
+                        qtyPlanned: prodBatch.qtyPlanned,
+                        qtyCompleted: prodBatch.qtyCompleted,
+                        qtyPending,
+                        batchDate: prodBatch.batchDate.toISOString(),
+                    },
+                });
+            }
+        }
+
         return {
             sku: {
                 id: sku.id,
                 skuCode: sku.skuCode,
+                barcode: null, // SKU model doesn't have barcode field
                 productName: sku.variation.product.name,
                 colorName: sku.variation.colorName,
                 size: sku.size,

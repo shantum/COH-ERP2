@@ -10,7 +10,13 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DollarSign, Info, AlertCircle, Loader2, ArrowDown, TrendingUp } from 'lucide-react';
-import { productsApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getCostConfig,
+    getCogs,
+    type CostConfigResult,
+    type CogsResult,
+} from '../../../server/functions/bomMutations';
 import type { ProductTreeNode } from '../types';
 
 interface ProductCostsTabProps {
@@ -18,20 +24,33 @@ interface ProductCostsTabProps {
 }
 
 export function ProductCostsTab({ product }: ProductCostsTabProps) {
+    // Server Functions
+    const getCostConfigFn = useServerFn(getCostConfig);
+    const getCogsFn = useServerFn(getCogs);
+
     // Fetch cost config (global defaults)
-    const { data: costConfig } = useQuery({
+    const { data: costConfig } = useQuery<CostConfigResult | null>({
         queryKey: ['costConfig'],
-        queryFn: () => productsApi.getCostConfig().then(r => r.data),
+        queryFn: async () => {
+            const result = await getCostConfigFn({ data: undefined });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load cost config');
+            }
+            return result.data;
+        },
         staleTime: 5 * 60 * 1000,
     });
 
     // Fetch COGS data for this product's SKUs
-    const { data: cogsData, isLoading, error } = useQuery({
+    const { data: cogsData, isLoading, error } = useQuery<CogsResult[]>({
         queryKey: ['productCogs', product.id],
         queryFn: async () => {
             // Fetch all COGS and filter for this product
-            const response = await productsApi.getCogs();
-            return response.data.filter((item: any) =>
+            const result = await getCogsFn({ data: undefined });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load COGS');
+            }
+            return result.data.filter((item) =>
                 product.children?.some(v =>
                     v.children?.some(s => s.id === item.skuId)
                 )

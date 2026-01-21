@@ -5,10 +5,11 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
+import { quickInwardBySkuCode } from '../../server/functions/inventoryMutations';
 import { Search, Plus, X, Check, AlertTriangle, Package } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
-import type { ScanLookupResult } from '../../types';
 
 interface AdjustmentsInwardProps {
     onSuccess?: (message: string) => void;
@@ -25,6 +26,10 @@ const ADJUSTMENT_REASONS = [
 export default function AdjustmentsInward({ onSuccess, onError }: AdjustmentsInwardProps) {
     const queryClient = useQueryClient();
     const inputRef = useRef<HTMLInputElement>(null);
+
+    // Server function hooks
+    const scanLookupFn = useServerFn(scanLookup);
+    const quickInwardFn = useServerFn(quickInwardBySkuCode);
 
     // State
     const [searchInput, setSearchInput] = useState('');
@@ -58,7 +63,7 @@ export default function AdjustmentsInward({ onSuccess, onError }: AdjustmentsInw
         }
     }, [scanError]);
 
-    // Scan mutation - any SKU is valid for adjustments
+    // Scan handler - any SKU is valid for adjustments
     const handleScan = async () => {
         if (!searchInput.trim()) return;
 
@@ -67,16 +72,16 @@ export default function AdjustmentsInward({ onSuccess, onError }: AdjustmentsInw
         setScanResult(null);
 
         try {
-            const res = await inventoryApi.scanLookup(searchInput.trim());
-            const result = res.data as ScanLookupResult;
+            const result = await scanLookupFn({ data: { code: searchInput.trim() } });
 
             setScanResult(result);
             setQuantity(1);
             setAdjustmentReason('adjustment');
             setNotes('');
             setSearchInput('');
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : 'SKU not found';
+            setScanError(errMsg);
         } finally {
             setIsSearching(false);
             inputRef.current?.focus();
@@ -94,12 +99,18 @@ export default function AdjustmentsInward({ onSuccess, onError }: AdjustmentsInw
     const adjustmentMutation = useMutation({
         mutationFn: async () => {
             if (!scanResult?.sku) throw new Error('No SKU selected');
-            return inventoryApi.quickInward({
-                skuCode: scanResult.sku.skuCode,
-                qty: quantity,
-                reason: adjustmentReason,
-                notes: notes || undefined,
+            const result = await quickInwardFn({
+                data: {
+                    skuCode: scanResult.sku.skuCode,
+                    qty: quantity,
+                    reason: adjustmentReason,
+                    notes: notes || undefined,
+                },
             });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to add adjustment');
+            }
+            return result;
         },
         onSuccess: () => {
             const reasonLabel = ADJUSTMENT_REASONS.find(r => r.value === adjustmentReason)?.label || adjustmentReason;
@@ -110,8 +121,8 @@ export default function AdjustmentsInward({ onSuccess, onError }: AdjustmentsInw
             queryClient.invalidateQueries({ queryKey: ['recent-inwards', 'adjustments'] });
             queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
         },
-        onError: (error: any) => {
-            const msg = error.response?.data?.error || 'Failed to add adjustment';
+        onError: (error: unknown) => {
+            const msg = error instanceof Error ? error.message : 'Failed to add adjustment';
             setScanError(msg);
             onError?.(msg);
         },

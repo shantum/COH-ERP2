@@ -5,15 +5,25 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi, returnsApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
+import { receiveReturnItem } from '../../server/functions/returnsMutations';
 import { Search, Check, AlertTriangle, X, RotateCcw } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
-import type { ScanLookupResult, PendingReturnItem } from '../../types';
 
 interface ReturnsInwardProps {
     onSuccess?: (message: string) => void;
     onError?: (message: string) => void;
+}
+
+// Local type for matched return item from scan lookup
+interface MatchedReturnItem {
+    lineId: string;
+    requestId: string;
+    requestNumber: string;
+    reasonCategory?: string | null;
+    customerName?: string;
 }
 
 // Condition options for return items
@@ -28,11 +38,15 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
     const queryClient = useQueryClient();
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // Server function hooks
+    const scanLookupFn = useServerFn(scanLookup);
+    const receiveReturnFn = useServerFn(receiveReturnItem);
+
     // State
     const [searchInput, setSearchInput] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [scanResult, setScanResult] = useState<ScanLookupResult | null>(null);
-    const [matchedReturn, setMatchedReturn] = useState<PendingReturnItem | null>(null);
+    const [matchedReturn, setMatchedReturn] = useState<MatchedReturnItem | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [selectedCondition, setSelectedCondition] = useState('unused');
@@ -76,8 +90,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
         setMatchedReturn(null);
 
         try {
-            const res = await inventoryApi.scanLookup(code.trim());
-            const result = res.data as ScanLookupResult;
+            const result = await scanLookupFn({ data: { code: code.trim() } });
 
             const returnMatch = result.matches.find(m => m.source === 'return');
             if (!returnMatch) {
@@ -88,10 +101,17 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
             }
 
             setScanResult(result);
-            setMatchedReturn(returnMatch.data as PendingReturnItem);
+            setMatchedReturn({
+                lineId: returnMatch.data.lineId,
+                requestId: returnMatch.data.requestId || '',
+                requestNumber: returnMatch.data.requestNumber || '',
+                reasonCategory: returnMatch.data.reasonCategory,
+                customerName: returnMatch.data.customerName,
+            });
             setSelectedCondition('unused');
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : 'SKU not found';
+            setScanError(errMsg);
         } finally {
             setIsSearching(false);
             setSearchInput('');
@@ -102,36 +122,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
     // Handle scan lookup
     const handleScan = async () => {
         if (!searchInput.trim()) return;
-
-        setIsSearching(true);
-        setScanError(null);
-        setScanResult(null);
-        setMatchedReturn(null);
-
-        try {
-            const res = await inventoryApi.scanLookup(searchInput.trim());
-            const result = res.data as ScanLookupResult;
-
-            // Find return match
-            const returnMatch = result.matches.find(m => m.source === 'return');
-
-            if (!returnMatch) {
-                setScanError('No matching return ticket for this SKU');
-                setSearchInput('');
-                inputRef.current?.focus();
-                return;
-            }
-
-            setScanResult(result);
-            setMatchedReturn(returnMatch.data as PendingReturnItem);
-            setSelectedCondition('unused');
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
-        } finally {
-            setIsSearching(false);
-            setSearchInput('');
-            inputRef.current?.focus();
-        }
+        await handleScanWithCode(searchInput.trim());
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -153,10 +144,17 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
     const receiveReturnMutation = useMutation({
         mutationFn: async () => {
             if (!matchedReturn) throw new Error('No return selected');
-            return returnsApi.receiveItem(matchedReturn.requestId, {
-                lineId: matchedReturn.lineId,
-                condition: selectedCondition as 'good' | 'used' | 'damaged' | 'wrong_product',
+            const result = await receiveReturnFn({
+                data: {
+                    requestId: matchedReturn.requestId,
+                    lineId: matchedReturn.lineId,
+                    condition: selectedCondition as 'unused' | 'used' | 'damaged' | 'wrong_product',
+                },
             });
+            if (!result.success) {
+                throw new Error('Failed to receive return');
+            }
+            return result;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['recent-inwards', 'returns'] });
@@ -165,8 +163,9 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
             setSuccessMessage(`Return ${matchedReturn?.requestNumber} received - item sent to QC queue`);
             clearScan();
         },
-        onError: (error: any) => {
-            setScanError(error.response?.data?.error || 'Failed to receive return');
+        onError: (error: unknown) => {
+            const errMsg = error instanceof Error ? error.message : 'Failed to receive return';
+            setScanError(errMsg);
         },
     });
 
@@ -267,7 +266,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
                                 </div>
                                 <div className="col-span-2">
                                     <span className="text-orange-600">Reason:</span>{' '}
-                                    {matchedReturn.reasonCategory.replace(/_/g, ' ')}
+                                    {(matchedReturn.reasonCategory || '').replace(/_/g, ' ')}
                                 </div>
                             </div>
                         </div>
@@ -310,7 +309,7 @@ export default function ReturnsInward({ onSuccess: _onSuccess, onError: _onError
 
                         {receiveReturnMutation.isError && (
                             <p className="text-red-600 text-sm mt-2">
-                                {(receiveReturnMutation.error as any)?.response?.data?.error || 'Failed to receive return'}
+                                {receiveReturnMutation.error instanceof Error ? receiveReturnMutation.error.message : 'Failed to receive return'}
                             </p>
                         )}
                     </div>

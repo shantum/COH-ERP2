@@ -5,20 +5,34 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
+import { quickInwardBySkuCode } from '../../server/functions/inventoryMutations';
 import { Search, Plus, X, Check, AlertTriangle, Package } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
-import type { ScanLookupResult, PendingProductionItem } from '../../types';
-
 interface ProductionInwardProps {
     onSuccess?: (message: string) => void;
     onError?: (message: string) => void;
 }
 
+// Local type for matched production item from scan lookup
+interface MatchedProductionItem {
+    batchId: string;
+    batchCode: string;
+    qtyPlanned: number;
+    qtyCompleted: number;
+    qtyPending: number;
+    batchDate: string;
+}
+
 export default function ProductionInward({ onSuccess, onError }: ProductionInwardProps) {
     const queryClient = useQueryClient();
     const inputRef = useRef<HTMLInputElement>(null);
+
+    // Server function hooks
+    const scanLookupFn = useServerFn(scanLookup);
+    const quickInwardFn = useServerFn(quickInwardBySkuCode);
 
     // State
     const [searchInput, setSearchInput] = useState('');
@@ -52,7 +66,15 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
     }, [scanError]);
 
     // Get matched production item from scan result
-    const matchedItem = scanResult?.matches?.find(m => m.source === 'production')?.data as PendingProductionItem | null;
+    const prodMatch = scanResult?.matches?.find(m => m.source === 'production');
+    const matchedItem: MatchedProductionItem | null = prodMatch ? {
+        batchId: prodMatch.data.batchId || '',
+        batchCode: prodMatch.data.batchCode || '',
+        qtyPlanned: prodMatch.data.qtyPlanned || 0,
+        qtyCompleted: prodMatch.data.qtyCompleted || 0,
+        qtyPending: prodMatch.data.qtyPending || 0,
+        batchDate: prodMatch.data.batchDate || new Date().toISOString(),
+    } : null;
 
     // Check if this is a custom SKU
     const skuCode = scanResult?.sku?.skuCode || '';
@@ -79,8 +101,7 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
         setScanResult(null);
 
         try {
-            const res = await inventoryApi.scanLookup(code.trim());
-            const result = res.data as ScanLookupResult;
+            const result = await scanLookupFn({ data: { code: code.trim() } });
 
             const productionMatch = result.matches?.find(m => m.source === 'production');
             if (!productionMatch) {
@@ -94,45 +115,19 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
             setQuantity(1);
             setCustomConfirmed(false);
             setSearchInput('');
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : 'SKU not found';
+            setScanError(errMsg);
         } finally {
             setIsSearching(false);
             inputRef.current?.focus();
         }
     };
 
-    // Scan mutation
+    // Scan handler - just delegates to handleScanWithCode
     const handleScan = async () => {
         if (!searchInput.trim()) return;
-
-        setIsSearching(true);
-        setScanError(null);
-        setScanResult(null);
-
-        try {
-            const res = await inventoryApi.scanLookup(searchInput.trim());
-            const result = res.data as ScanLookupResult;
-
-            // Check if there's a production match
-            const productionMatch = result.matches?.find(m => m.source === 'production');
-            if (!productionMatch) {
-                setScanError('No matching production batch for this SKU');
-                setSearchInput('');
-                inputRef.current?.focus();
-                return;
-            }
-
-            setScanResult(result);
-            setQuantity(1);
-            setCustomConfirmed(false);
-            setSearchInput('');
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
-        } finally {
-            setIsSearching(false);
-            inputRef.current?.focus();
-        }
+        await handleScanWithCode(searchInput.trim());
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -146,11 +141,17 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
     const productionInwardMutation = useMutation({
         mutationFn: async () => {
             if (!scanResult?.sku) throw new Error('No SKU selected');
-            return inventoryApi.quickInward({
-                skuCode: scanResult.sku.skuCode,
-                qty: quantity,
-                reason: 'production',
+            const result = await quickInwardFn({
+                data: {
+                    skuCode: scanResult.sku.skuCode,
+                    qty: quantity,
+                    reason: 'production',
+                },
             });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to complete inward');
+            }
+            return result;
         },
         onSuccess: () => {
             const msg = `+${quantity} ${scanResult?.sku.skuCode} added from production`;
@@ -160,8 +161,8 @@ export default function ProductionInward({ onSuccess, onError }: ProductionInwar
             queryClient.invalidateQueries({ queryKey: ['recent-inwards', 'production'] });
             queryClient.invalidateQueries({ queryKey: ['pending-sources'] });
         },
-        onError: (error: any) => {
-            const msg = error.response?.data?.error || 'Failed to complete inward';
+        onError: (error: unknown) => {
+            const msg = error instanceof Error ? error.message : 'Failed to complete inward';
             setScanError(msg);
             onError?.(msg);
         },

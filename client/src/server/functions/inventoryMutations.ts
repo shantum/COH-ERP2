@@ -96,6 +96,13 @@ const instantInwardBySkuCodeSchema = z.object({
     skuCode: z.string().min(1, 'SKU code is required'),
 });
 
+const quickInwardBySkuCodeSchema = z.object({
+    skuCode: z.string().min(1, 'SKU code is required'),
+    qty: z.number().int().positive('Quantity must be a positive integer'),
+    reason: z.string().optional().default('production'),
+    notes: z.string().optional(),
+});
+
 const getTransactionMatchesSchema = z.object({
     transactionId: z.string().uuid('Invalid transaction ID'),
 });
@@ -205,6 +212,17 @@ export interface RtoInwardLineResult {
 }
 
 export interface InstantInwardBySkuCodeResult {
+    transactionId: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    newBalance: number;
+}
+
+export interface QuickInwardBySkuCodeResult {
     transactionId: string;
     skuId: string;
     skuCode: string;
@@ -1732,4 +1750,91 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
                 data: { type: 'adjustment', referenceId: null },
             };
         }
+    });
+
+/**
+ * Quick inward by SKU code - fast scan workflow with custom quantity
+ *
+ * Looks up SKU by code and creates inward transaction with specified quantity.
+ * Used by Production Inward and Adjustments Inward components.
+ */
+export const quickInwardBySkuCode = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => quickInwardBySkuCodeSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<QuickInwardBySkuCodeResult>> => {
+        const prisma = await getPrisma();
+        const { skuCode, qty, reason, notes } = data;
+
+        // Find SKU by code
+        const sku = await prisma.sku.findFirst({
+            where: { skuCode },
+            select: {
+                id: true,
+                skuCode: true,
+                size: true,
+                isActive: true,
+                variation: {
+                    select: {
+                        colorName: true,
+                        product: { select: { name: true } },
+                    },
+                },
+            },
+        });
+
+        if (!sku) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: `SKU not found: ${skuCode}` },
+            };
+        }
+
+        if (!sku.isActive) {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Cannot inward to inactive SKU' },
+            };
+        }
+
+        // Create transaction and calculate balance in single DB transaction
+        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+            const transaction = await tx.inventoryTransaction.create({
+                data: {
+                    skuId: sku.id,
+                    txnType: TXN_TYPE.INWARD,
+                    qty,
+                    reason: reason || 'production',
+                    notes: notes || null,
+                    createdById: context.user.id,
+                },
+            });
+
+            const balance = await calculateInventoryBalance(tx, sku.id);
+            return { transaction, balance };
+        });
+
+        await invalidateCache([sku.id]);
+
+        broadcastUpdate({
+            type: 'inventory_updated',
+            skuId: sku.id,
+            changes: {
+                availableBalance: result.balance.availableBalance,
+                currentBalance: result.balance.currentBalance,
+            },
+        });
+
+        return {
+            success: true,
+            data: {
+                transactionId: result.transaction.id,
+                skuId: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation.product.name,
+                colorName: sku.variation.colorName,
+                size: sku.size,
+                qty,
+                newBalance: result.balance.currentBalance,
+            },
+        };
     });

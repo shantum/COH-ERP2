@@ -1,11 +1,13 @@
 /**
  * SidebarTab component
  * Admin UI for reordering sidebar sections
+ *
+ * Uses Server Functions for data fetching and mutations.
  */
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '../../../services/api';
+import { getSidebarOrder, updateSidebarOrder } from '../../../server/functions/admin';
 import { useAuth } from '../../../hooks/useAuth';
 import {
     DndContext,
@@ -106,8 +108,11 @@ export function SidebarTab() {
     const { data: savedOrder, isLoading } = useQuery({
         queryKey: ['sidebarOrder'],
         queryFn: async () => {
-            const res = await adminApi.getSidebarOrder();
-            return res.data;
+            const result = await getSidebarOrder();
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to fetch sidebar order');
+            }
+            return result.data;
         },
         enabled: user?.role === 'admin',
     });
@@ -119,7 +124,13 @@ export function SidebarTab() {
     }, [savedOrder]);
 
     const saveMutation = useMutation({
-        mutationFn: (newOrder: string[]) => adminApi.updateSidebarOrder(newOrder),
+        mutationFn: async (newOrder: string[]) => {
+            const result = await updateSidebarOrder({ data: { order: newOrder } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update sidebar order');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['sidebarOrder'] });
             setHasChanges(false);

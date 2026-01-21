@@ -16,7 +16,16 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Save, AlertCircle, Loader2 } from 'lucide-react';
-import { bomApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getProductBom,
+    getComponentRoles,
+    getAvailableComponents,
+    updateProductBom,
+    type ProductBomResult,
+    type ComponentRoleResult,
+    type AvailableComponentsResult,
+} from '../../server/functions/bomMutations';
 import BomTemplateTab from './BomTemplateTab';
 import BomVariationsTab from './BomVariationsTab';
 import BomSkuTab from './BomSkuTab';
@@ -41,36 +50,66 @@ export default function BomEditorPanel({
     const [activeTab, setActiveTab] = useState<TabType>('template');
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+    // Server Functions
+    const getProductBomFn = useServerFn(getProductBom);
+    const getComponentRolesFn = useServerFn(getComponentRoles);
+    const getAvailableComponentsFn = useServerFn(getAvailableComponents);
+    const updateProductBomFn = useServerFn(updateProductBom);
+
     // Fetch BOM data for product
-    const { data: bomData, isLoading, error } = useQuery({
+    const { data: bomData, isLoading, error } = useQuery<ProductBomResult | null>({
         queryKey: ['productBom', productId],
-        queryFn: () => bomApi.getProductBom(productId).then(r => r.data),
+        queryFn: async () => {
+            const result = await getProductBomFn({ data: { productId } });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load BOM');
+            }
+            return result.data;
+        },
         enabled: isOpen && !!productId,
     });
 
     // Fetch component roles (from config)
-    const { data: componentRoles } = useQuery({
+    const { data: componentRoles } = useQuery<ComponentRoleResult[]>({
         queryKey: ['componentRoles'],
-        queryFn: () => bomApi.getComponentRoles().then(r => r.data),
+        queryFn: async () => {
+            const result = await getComponentRolesFn({ data: undefined });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load component roles');
+            }
+            return result.data;
+        },
         staleTime: 60 * 60 * 1000, // 1 hour
     });
 
     // Fetch available components for selection
-    const { data: availableComponents } = useQuery({
+    const { data: availableComponents } = useQuery<AvailableComponentsResult | null>({
         queryKey: ['availableComponents'],
-        queryFn: () => bomApi.getAvailableComponents().then(r => r.data),
+        queryFn: async () => {
+            const result = await getAvailableComponentsFn({ data: undefined });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load available components');
+            }
+            return result.data;
+        },
         staleTime: 5 * 60 * 1000,
     });
 
     // Save BOM mutation
     const saveBom = useMutation({
-        mutationFn: (updates: any) => bomApi.updateProductBom(productId, updates),
+        mutationFn: async (updates: { template?: { roleId: string; componentType: 'FABRIC' | 'TRIM' | 'SERVICE'; componentId?: string | null; resolvedQuantity?: number | null }[] }) => {
+            const result = await updateProductBomFn({ data: { productId, ...updates } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to save BOM');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['productBom', productId] });
             setHasUnsavedChanges(false);
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to save BOM');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to save BOM');
         },
     });
 
@@ -82,15 +121,21 @@ export default function BomEditorPanel({
         let trimCost = 0;
         let serviceCost = 0;
 
-        // Calculate from template + variations
-        bomData.template?.forEach((line: any) => {
-            const cost = line.resolvedCost || 0;
-            const qty = line.resolvedQuantity || 0;
+        // Calculate from templates + variations
+        bomData.templates?.forEach((line) => {
+            const qty = line.defaultQuantity || 0;
+            let cost = 0;
+
+            if (line.typeCode === 'TRIM' && line.trimItem) {
+                cost = line.trimItem.costPerUnit || 0;
+            } else if (line.typeCode === 'SERVICE' && line.serviceItem) {
+                cost = line.serviceItem.costPerJob || 0;
+            }
             const lineTotal = cost * qty;
 
-            if (line.componentType === 'FABRIC') fabricCost += lineTotal;
-            else if (line.componentType === 'TRIM') trimCost += lineTotal;
-            else if (line.componentType === 'SERVICE') serviceCost += lineTotal;
+            if (line.typeCode === 'FABRIC') fabricCost += lineTotal;
+            else if (line.typeCode === 'TRIM') trimCost += lineTotal;
+            else if (line.typeCode === 'SERVICE') serviceCost += lineTotal;
         });
 
         return {
@@ -114,7 +159,14 @@ export default function BomEditorPanel({
     // Handle save
     const handleSave = () => {
         // Collect all changes and save
-        saveBom.mutate(bomData);
+        // Convert templates to the expected format for updateProductBom
+        const template = bomData?.templates?.map((t) => ({
+            roleId: t.roleId,
+            componentType: t.typeCode as 'FABRIC' | 'TRIM' | 'SERVICE',
+            componentId: t.trimItemId || t.serviceItemId || null,
+            resolvedQuantity: t.defaultQuantity,
+        }));
+        saveBom.mutate({ template });
     };
 
     if (!isOpen) return null;
@@ -196,8 +248,29 @@ export default function BomEditorPanel({
                         <>
                             {activeTab === 'template' && (
                                 <BomTemplateTab
-                                    template={bomData.template || []}
-                                    componentRoles={componentRoles || []}
+                                    template={(bomData.templates || []).map(t => ({
+                                        id: t.id,
+                                        roleId: t.roleId,
+                                        roleName: t.roleName,
+                                        roleCode: t.roleCode,
+                                        componentType: t.typeCode,
+                                        trimItemId: t.trimItemId || undefined,
+                                        trimItemName: t.trimItem?.name,
+                                        serviceItemId: t.serviceItemId || undefined,
+                                        serviceItemName: t.serviceItem?.name,
+                                        defaultQuantity: t.defaultQuantity ?? 0,
+                                        quantityUnit: t.quantityUnit || 'unit',
+                                        wastagePercent: t.wastagePercent ?? 0,
+                                    }))}
+                                    componentRoles={(componentRoles || []).map(r => ({
+                                        id: r.id,
+                                        code: r.code,
+                                        name: r.name,
+                                        typeCode: r.type.code,
+                                        isRequired: r.isRequired,
+                                        allowMultiple: r.allowMultiple,
+                                        sortOrder: r.sortOrder,
+                                    }))}
                                     availableComponents={availableComponents || { trims: [], services: [] }}
                                     onUpdate={() => {
                                         setHasUnsavedChanges(true);
@@ -208,10 +281,50 @@ export default function BomEditorPanel({
 
                             {activeTab === 'variations' && (
                                 <BomVariationsTab
-                                    variations={bomData.variations || []}
-                                    template={bomData.template || []}
-                                    componentRoles={componentRoles || []}
-                                    availableComponents={availableComponents || { fabricColours: [], trims: [], services: [] }}
+                                    variations={(bomData.variations || []).map(v => ({
+                                        id: v.id,
+                                        colorName: v.colorName,
+                                        bomLines: v.bomLines.map(line => {
+                                            // Find the corresponding template to get role info
+                                            const template = bomData.templates?.find(t => t.roleId === line.roleId);
+                                            return {
+                                                id: line.id,
+                                                roleId: line.roleId,
+                                                roleName: template?.roleName || '',
+                                                roleCode: line.roleCode,
+                                                componentType: line.typeCode,
+                                                fabricColourId: line.fabricColourId || undefined,
+                                                fabricColourName: line.fabricColour?.name,
+                                                fabricColourHex: line.fabricColour?.colourHex || undefined,
+                                                trimItemId: line.trimItemId || undefined,
+                                                trimItemName: line.trimItem?.name,
+                                                serviceItemId: line.serviceItemId || undefined,
+                                                serviceItemName: line.serviceItem?.name,
+                                                quantity: line.quantity ?? undefined,
+                                                isInherited: false,
+                                            };
+                                        }),
+                                    }))}
+                                    template={(bomData.templates || []).map(t => ({
+                                        roleId: t.roleId,
+                                        roleName: t.roleName,
+                                        defaultQuantity: t.defaultQuantity ?? 0,
+                                        quantityUnit: t.quantityUnit || 'unit',
+                                        trimItemId: t.trimItemId || undefined,
+                                        trimItemName: t.trimItem?.name,
+                                        serviceItemId: t.serviceItemId || undefined,
+                                        serviceItemName: t.serviceItem?.name,
+                                    }))}
+                                    componentRoles={(componentRoles || []).map(r => ({
+                                        id: r.id,
+                                        code: r.code,
+                                        name: r.name,
+                                        typeCode: r.type.code,
+                                        isRequired: r.isRequired,
+                                        allowMultiple: r.allowMultiple,
+                                        sortOrder: r.sortOrder,
+                                    }))}
+                                    availableComponents={availableComponents as typeof availableComponents & { fabricColours: never[] } || { fabricColours: [], trims: [], services: [] }}
                                     onUpdate={() => {
                                         setHasUnsavedChanges(true);
                                     }}
@@ -220,10 +333,34 @@ export default function BomEditorPanel({
 
                             {activeTab === 'skus' && (
                                 <BomSkuTab
-                                    skus={bomData.skus || []}
-                                    variations={bomData.variations || []}
-                                    template={bomData.template || []}
-                                    componentRoles={componentRoles || []}
+                                    skus={[]}
+                                    variations={(bomData.variations || []).map(v => ({
+                                        id: v.id,
+                                        colorName: v.colorName,
+                                        bomLines: v.bomLines.map(line => ({
+                                            roleId: line.roleId,
+                                            quantity: line.quantity ?? undefined,
+                                        })),
+                                    }))}
+                                    template={(bomData.templates || []).map(t => ({
+                                        id: t.id,
+                                        roleId: t.roleId,
+                                        roleName: t.roleName,
+                                        roleCode: t.roleCode,
+                                        componentType: t.typeCode,
+                                        defaultQuantity: t.defaultQuantity ?? 0,
+                                        quantityUnit: t.quantityUnit || 'unit',
+                                        wastagePercent: t.wastagePercent ?? 0,
+                                    }))}
+                                    componentRoles={(componentRoles || []).map(r => ({
+                                        id: r.id,
+                                        code: r.code,
+                                        name: r.name,
+                                        typeCode: r.type.code,
+                                        isRequired: r.isRequired,
+                                        allowMultiple: r.allowMultiple,
+                                        sortOrder: r.sortOrder,
+                                    }))}
                                     onUpdate={() => {
                                         setHasUnsavedChanges(true);
                                     }}

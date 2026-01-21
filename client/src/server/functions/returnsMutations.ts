@@ -509,6 +509,14 @@ const deleteQueueItemInputSchema = z.object({
     id: z.string().uuid(),
 });
 
+const processRepackingItemInputSchema = z.object({
+    itemId: z.string().uuid(),
+    action: z.enum(['ready', 'write_off']),
+    writeOffReason: z.string().optional(),
+    qcComments: z.string().optional(),
+    notes: z.string().optional(),
+});
+
 // Type for queue item result
 export interface RepackingQueueItemResult {
     id: string;
@@ -669,4 +677,128 @@ export const deleteRepackingQueueItem = createServerFn({ method: 'POST' })
         });
 
         return { success: true };
+    });
+
+/**
+ * Process repacking queue item (QC decision)
+ * Action: 'ready' -> add to stock, 'write_off' -> create write-off log
+ */
+export const processRepackingQueueItem = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => processRepackingItemInputSchema.parse(input))
+    .handler(async ({ data, context }: { data: z.infer<typeof processRepackingItemInputSchema>; context: { user: AuthUser } }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const { itemId, action, writeOffReason, qcComments, notes } = data;
+
+        // Get queue item with SKU info
+        const queueItem = await prisma.repackingQueueItem.findUnique({
+            where: { id: itemId },
+            include: {
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!queueItem) {
+            throw new Error('Queue item not found');
+        }
+
+        if (queueItem.status !== 'pending') {
+            throw new Error(`Item already processed with status: ${queueItem.status}`);
+        }
+
+        const now = new Date();
+
+        if (action === 'ready') {
+            // Add to stock - create inward transaction
+            await prisma.$transaction(async (tx) => {
+                // Create inventory inward transaction
+                await tx.inventoryTransaction.create({
+                    data: {
+                        skuId: queueItem.skuId,
+                        txnType: 'inward',
+                        qty: queueItem.qty,
+                        reason: 'repack_complete',
+                        referenceId: queueItem.id,
+                        notes: notes || qcComments || 'QC passed - added to stock',
+                        createdById: context.user.id,
+                    },
+                });
+
+                // Update queue item status
+                await tx.repackingQueueItem.update({
+                    where: { id: itemId },
+                    data: {
+                        status: 'ready',
+                        qcComments: qcComments || null,
+                        processedAt: now,
+                        processedById: context.user.id,
+                    },
+                });
+            });
+
+            return {
+                success: true,
+                message: `${queueItem.sku.skuCode} added to stock`,
+                action: 'ready',
+                skuCode: queueItem.sku.skuCode,
+                qty: queueItem.qty,
+            };
+        } else {
+            // Write-off - create write-off log
+            await prisma.$transaction(async (tx) => {
+                // Create write-off log
+                await tx.writeOffLog.create({
+                    data: {
+                        skuId: queueItem.skuId,
+                        qty: queueItem.qty,
+                        reason: writeOffReason || 'defective',
+                        sourceType: 'repacking',
+                        sourceId: queueItem.id,
+                        notes: notes || qcComments || 'QC failed - written off',
+                        createdById: context.user.id,
+                    },
+                });
+
+                // Update SKU write-off count
+                await tx.sku.update({
+                    where: { id: queueItem.skuId },
+                    data: {
+                        writeOffCount: { increment: queueItem.qty },
+                    },
+                });
+
+                // Update queue item status
+                await tx.repackingQueueItem.update({
+                    where: { id: itemId },
+                    data: {
+                        status: 'write_off',
+                        qcComments: qcComments || null,
+                        processedAt: now,
+                        processedById: context.user.id,
+                    },
+                });
+            });
+
+            return {
+                success: true,
+                message: `${queueItem.sku.skuCode} written off`,
+                action: 'write_off',
+                skuCode: queueItem.sku.skuCode,
+                qty: queueItem.qty,
+            };
+        }
     });

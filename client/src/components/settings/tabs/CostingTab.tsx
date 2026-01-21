@@ -1,22 +1,14 @@
 /**
  * CostingTab component
  * Manages global costing settings with elegant design
+ *
+ * Uses Server Functions for data fetching and mutations.
  */
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { productsApi } from '../../../services/api';
+import { getCostConfig, updateCostConfig } from '../../../server/functions/admin';
 import { Package, DollarSign, Clock, Save, RefreshCw, Info, Sparkles, Percent } from 'lucide-react';
-
-interface CostConfig {
-    id: string;
-    laborRatePerMin: number;
-    defaultPackagingCost: number;
-    gstThreshold: number;
-    gstRateAbove: number;
-    gstRateBelow: number;
-    lastUpdated: string;
-}
 
 export function CostingTab() {
     const queryClient = useQueryClient();
@@ -30,9 +22,15 @@ export function CostingTab() {
     const [hasChanges, setHasChanges] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
 
-    const { data: config, isLoading } = useQuery<CostConfig>({
+    const { data: config, isLoading } = useQuery({
         queryKey: ['costConfig'],
-        queryFn: () => productsApi.getCostConfig().then(r => r.data),
+        queryFn: async () => {
+            const result = await getCostConfig();
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to fetch cost config');
+            }
+            return result.data;
+        },
     });
 
     useEffect(() => {
@@ -48,8 +46,19 @@ export function CostingTab() {
     }, [config]);
 
     const updateMutation = useMutation({
-        mutationFn: (data: { laborRatePerMin?: number; defaultPackagingCost?: number; gstThreshold?: number; gstRateAbove?: number; gstRateBelow?: number }) =>
-            productsApi.updateCostConfig(data),
+        mutationFn: async (data: {
+            laborRatePerMin?: number;
+            defaultPackagingCost?: number;
+            gstThreshold?: number;
+            gstRateAbove?: number;
+            gstRateBelow?: number;
+        }) => {
+            const result = await updateCostConfig({ data });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update cost config');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['costConfig'] });
             queryClient.invalidateQueries({ queryKey: ['catalogSkuInventory'] });

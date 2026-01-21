@@ -971,3 +971,613 @@ export const updateBackgroundJob = createServerFn({ method: 'POST' })
             };
         }
     });
+
+// ============================================
+// COST CONFIG SERVER FUNCTIONS
+// ============================================
+
+const updateCostConfigSchema = z.object({
+    laborRatePerMin: z.number().nonnegative().optional(),
+    defaultPackagingCost: z.number().nonnegative().optional(),
+    gstThreshold: z.number().nonnegative().optional(),
+    gstRateAbove: z.number().min(0).max(100).optional(),
+    gstRateBelow: z.number().min(0).max(100).optional(),
+});
+
+export interface CostConfig {
+    id: string;
+    laborRatePerMin: number;
+    defaultPackagingCost: number;
+    gstThreshold: number;
+    gstRateAbove: number;
+    gstRateBelow: number;
+    lastUpdated: string;
+}
+
+/**
+ * Get cost configuration
+ */
+export const getCostConfig = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<MutationResult<CostConfig>> => {
+        const prisma = await getPrisma();
+
+        const config = await prisma.costConfig.findFirst();
+
+        // Default values if no config exists
+        const defaultConfig: CostConfig = {
+            id: 'default',
+            laborRatePerMin: 2.5,
+            defaultPackagingCost: 50,
+            gstThreshold: 2500,
+            gstRateAbove: 18,
+            gstRateBelow: 5,
+            lastUpdated: new Date().toISOString(),
+        };
+
+        if (!config) {
+            return { success: true, data: defaultConfig };
+        }
+
+        return {
+            success: true,
+            data: {
+                id: config.id,
+                laborRatePerMin: config.laborRatePerMin,
+                defaultPackagingCost: config.defaultPackagingCost,
+                gstThreshold: config.gstThreshold ?? 2500,
+                gstRateAbove: config.gstRateAbove ?? 18,
+                gstRateBelow: config.gstRateBelow ?? 5,
+                lastUpdated: config.updatedAt.toISOString(),
+            },
+        };
+    });
+
+/**
+ * Update cost configuration
+ * Requires admin role
+ */
+export const updateCostConfig = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateCostConfigSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<CostConfig>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+
+        // Build update object from provided fields
+        const updateData: Record<string, unknown> = {};
+        if (data.laborRatePerMin !== undefined) updateData.laborRatePerMin = data.laborRatePerMin;
+        if (data.defaultPackagingCost !== undefined) updateData.defaultPackagingCost = data.defaultPackagingCost;
+        if (data.gstThreshold !== undefined) updateData.gstThreshold = data.gstThreshold;
+        if (data.gstRateAbove !== undefined) updateData.gstRateAbove = data.gstRateAbove;
+        if (data.gstRateBelow !== undefined) updateData.gstRateBelow = data.gstRateBelow;
+
+        // Find existing config or create new
+        const existingConfig = await prisma.costConfig.findFirst();
+
+        let config;
+        if (existingConfig) {
+            config = await prisma.costConfig.update({
+                where: { id: existingConfig.id },
+                data: updateData,
+            });
+        } else {
+            config = await prisma.costConfig.create({
+                data: {
+                    laborRatePerMin: data.laborRatePerMin ?? 2.5,
+                    defaultPackagingCost: data.defaultPackagingCost ?? 50,
+                    gstThreshold: data.gstThreshold ?? 2500,
+                    gstRateAbove: data.gstRateAbove ?? 18,
+                    gstRateBelow: data.gstRateBelow ?? 5,
+                },
+            });
+        }
+
+        return {
+            success: true,
+            data: {
+                id: config.id,
+                laborRatePerMin: config.laborRatePerMin,
+                defaultPackagingCost: config.defaultPackagingCost,
+                gstThreshold: config.gstThreshold ?? 2500,
+                gstRateAbove: config.gstRateAbove ?? 18,
+                gstRateBelow: config.gstRateBelow ?? 5,
+                lastUpdated: config.updatedAt.toISOString(),
+            },
+        };
+    });
+
+// ============================================
+// SIDEBAR ORDER SERVER FUNCTIONS
+// ============================================
+
+const updateSidebarOrderSchema = z.object({
+    order: z.array(z.string()),
+});
+
+/**
+ * Get sidebar section order
+ */
+export const getSidebarOrder = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<MutationResult<string[] | null>> => {
+        const prisma = await getPrisma();
+
+        const setting = await prisma.systemSetting.findUnique({
+            where: { key: 'sidebar_order' },
+        });
+
+        if (!setting?.value) {
+            return { success: true, data: null };
+        }
+
+        return { success: true, data: JSON.parse(setting.value) as string[] };
+    });
+
+/**
+ * Update sidebar section order
+ * Requires admin role
+ */
+export const updateSidebarOrder = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateSidebarOrderSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const { order } = data;
+
+        await prisma.systemSetting.upsert({
+            where: { key: 'sidebar_order' },
+            update: { value: JSON.stringify(order) },
+            create: { key: 'sidebar_order', value: JSON.stringify(order) },
+        });
+
+        return { success: true, data: { updated: true } };
+    });
+
+// ============================================
+// DATABASE STATS SERVER FUNCTIONS
+// ============================================
+
+export interface DatabaseStats {
+    products: number;
+    skus: number;
+    orders: number;
+    customers: number;
+    fabrics: number;
+    variations: number;
+    inventoryTransactions: number;
+}
+
+/**
+ * Get database statistics
+ * Requires admin role
+ */
+export const getDatabaseStats = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async ({ context }): Promise<MutationResult<DatabaseStats>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+
+        const [
+            products,
+            skus,
+            orders,
+            customers,
+            fabrics,
+            variations,
+            inventoryTransactions,
+        ] = await Promise.all([
+            prisma.product.count(),
+            prisma.sku.count(),
+            prisma.order.count(),
+            prisma.customer.count(),
+            prisma.fabricColour.count(),
+            prisma.variation.count(),
+            prisma.inventoryTransaction.count(),
+        ]);
+
+        return {
+            success: true,
+            data: {
+                products,
+                skus,
+                orders,
+                customers,
+                fabrics,
+                variations,
+                inventoryTransactions,
+            },
+        };
+    });
+
+// ============================================
+// DATABASE CLEAR SERVER FUNCTIONS
+// ============================================
+
+const clearTablesSchema = z.object({
+    tables: z.array(z.string()),
+    confirmPhrase: z.string(),
+});
+
+export interface ClearTablesResult {
+    deleted: Record<string, number>;
+}
+
+/**
+ * Clear database tables (danger zone)
+ * Requires admin role and confirmation phrase
+ */
+export const clearTables = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => clearTablesSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<ClearTablesResult>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const { tables, confirmPhrase } = data;
+
+        if (confirmPhrase !== 'DELETE ALL DATA') {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Invalid confirmation phrase' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const deleted: Record<string, number> = {};
+
+        // Process tables in order to respect foreign key constraints
+        if (tables.includes('all') || tables.includes('orders')) {
+            // Delete order lines first (child table)
+            const orderLinesResult = await prisma.orderLine.deleteMany();
+            deleted.orderLines = orderLinesResult.count;
+
+            const ordersResult = await prisma.order.deleteMany();
+            deleted.orders = ordersResult.count;
+        }
+
+        if (tables.includes('all') || tables.includes('inventoryTransactions')) {
+            const txnsResult = await prisma.inventoryTransaction.deleteMany();
+            deleted.inventoryTransactions = txnsResult.count;
+        }
+
+        if (tables.includes('all') || tables.includes('customers')) {
+            const customersResult = await prisma.customer.deleteMany();
+            deleted.customers = customersResult.count;
+        }
+
+        if (tables.includes('all') || tables.includes('products')) {
+            // Delete in order: SKU BOM → SKU → Variation → Product
+            const skuBomResult = await prisma.skuBom.deleteMany();
+            deleted.skuBom = skuBomResult.count;
+
+            const skusResult = await prisma.sku.deleteMany();
+            deleted.skus = skusResult.count;
+
+            const variationsResult = await prisma.variation.deleteMany();
+            deleted.variations = variationsResult.count;
+
+            const productsResult = await prisma.product.deleteMany();
+            deleted.products = productsResult.count;
+        }
+
+        if (tables.includes('all') || tables.includes('fabrics')) {
+            // Delete in order: FabricColour → Fabric → Material
+            const coloursResult = await prisma.fabricColour.deleteMany();
+            deleted.fabricColours = coloursResult.count;
+
+            const fabricsResult = await prisma.fabric.deleteMany();
+            deleted.fabrics = fabricsResult.count;
+
+            const materialsResult = await prisma.material.deleteMany();
+            deleted.materials = materialsResult.count;
+        }
+
+        return { success: true, data: { deleted } };
+    });
+
+// ============================================
+// LOG STATS SERVER FUNCTIONS
+// ============================================
+
+export interface LogStats {
+    total: number;
+    maxSize: number;
+    byLevel: { error: number; warn: number; info: number; debug: number };
+    lastHour: { total: number; byLevel: { error: number; warn: number } };
+    last24Hours: { total: number; byLevel: { error: number; warn: number } };
+    isPersistent: boolean;
+    retentionHours: number;
+    fileSizeKB?: number;
+    fileSizeMB?: number;
+    oldestLog?: string;
+    newestLog?: string;
+    nextCleanup?: string;
+}
+
+/**
+ * Get log statistics
+ * Requires admin role
+ */
+export const getLogStats = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async ({ context }): Promise<MutationResult<LogStats>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        // Call the Express backend API for log stats
+        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+
+        try {
+            const response = await fetch(`${baseUrl}/api/admin/logs/stats`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'Failed to fetch log stats' },
+                };
+            }
+
+            const result = await response.json() as LogStats;
+            return { success: true, data: result };
+        } catch {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Failed to connect to log service' },
+            };
+        }
+    });
+
+/**
+ * Clear all server logs
+ * Requires admin role
+ */
+export const clearLogs = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .handler(async ({ context }): Promise<MutationResult<{ cleared: boolean }>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        // Call the Express backend API to clear logs
+        const baseUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+
+        try {
+            const response = await fetch(`${baseUrl}/api/admin/logs`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'Failed to clear logs' },
+                };
+            }
+
+            return { success: true, data: { cleared: true } };
+        } catch {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Failed to connect to log service' },
+            };
+        }
+    });
+
+// ============================================
+// DATABASE INSPECTOR SERVER FUNCTIONS
+// ============================================
+
+export interface TableInfo {
+    name: string;
+    displayName: string;
+    count: number;
+}
+
+export interface InspectResult {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any[];
+    total: number;
+    table: string;
+}
+
+const inspectTableSchema = z.object({
+    tableName: z.string().min(1, 'Table name is required'),
+    limit: z.number().int().positive().max(2000).optional().default(100),
+    offset: z.number().int().nonnegative().optional().default(0),
+});
+
+/**
+ * Get all database tables with counts
+ * Requires admin role
+ */
+export const getTables = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async ({ context }): Promise<MutationResult<{ tables: TableInfo[] }>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+
+        // Define table name mappings (Prisma model name to display name)
+        const tableConfigs: { model: string; displayName: string }[] = [
+            { model: 'order', displayName: 'Order' },
+            { model: 'orderLine', displayName: 'Order Line' },
+            { model: 'customer', displayName: 'Customer' },
+            { model: 'product', displayName: 'Product' },
+            { model: 'variation', displayName: 'Variation' },
+            { model: 'sku', displayName: 'SKU' },
+            { model: 'material', displayName: 'Material' },
+            { model: 'fabric', displayName: 'Fabric' },
+            { model: 'fabricColour', displayName: 'Fabric Colour' },
+            { model: 'inventoryTransaction', displayName: 'Inventory Transaction' },
+            { model: 'shopifyOrderCache', displayName: 'Shopify Order Cache' },
+            { model: 'shopifyProductCache', displayName: 'Shopify Product Cache' },
+            { model: 'user', displayName: 'User' },
+            { model: 'role', displayName: 'Role' },
+            { model: 'systemSetting', displayName: 'System Setting' },
+            { model: 'returnRequest', displayName: 'Return Request' },
+            { model: 'trim', displayName: 'Trim' },
+            { model: 'externalService', displayName: 'External Service' },
+            { model: 'supplier', displayName: 'Supplier' },
+        ];
+
+        const tables: TableInfo[] = [];
+
+        for (const config of tableConfigs) {
+            try {
+                // Use Prisma's count method for each model
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const count = await (prisma as any)[config.model]?.count?.() ?? 0;
+                tables.push({
+                    name: config.model,
+                    displayName: config.displayName,
+                    count,
+                });
+            } catch {
+                // Skip tables that don't exist or have errors
+                tables.push({
+                    name: config.model,
+                    displayName: config.displayName,
+                    count: 0,
+                });
+            }
+        }
+
+        // Sort by count descending
+        tables.sort((a, b) => b.count - a.count);
+
+        return { success: true, data: { tables } };
+    });
+
+/**
+ * Inspect a database table
+ * Requires admin role
+ */
+export const inspectTable = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => inspectTableSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<InspectResult>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const { tableName, limit, offset } = data;
+
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const model = (prisma as any)[tableName];
+
+            if (!model || typeof model.findMany !== 'function') {
+                return {
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: `Table '${tableName}' not found` },
+                };
+            }
+
+            const [rows, total] = await Promise.all([
+                model.findMany({
+                    take: limit,
+                    skip: offset,
+                    orderBy: { createdAt: 'desc' },
+                }),
+                model.count(),
+            ]);
+
+            return {
+                success: true,
+                data: {
+                    data: rows,
+                    total,
+                    table: tableName,
+                },
+            };
+        } catch (err) {
+            // Try without ordering if createdAt doesn't exist
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const model = (prisma as any)[tableName];
+                const [rows, total] = await Promise.all([
+                    model.findMany({
+                        take: limit,
+                        skip: offset,
+                    }),
+                    model.count(),
+                ]);
+
+                return {
+                    success: true,
+                    data: {
+                        data: rows,
+                        total,
+                        table: tableName,
+                    },
+                };
+            } catch {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: `Failed to query table '${tableName}'` },
+                };
+            }
+        }
+    });

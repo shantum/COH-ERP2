@@ -11,7 +11,12 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, AlertCircle } from 'lucide-react';
-import { bomApi } from '../../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getProductBom,
+    updateTemplate,
+    type ProductBomResult,
+} from '../../../server/functions/bomMutations';
 import {
     BomLinesTable,
     BomCostSummary,
@@ -33,14 +38,24 @@ export function ProductBomTab({ product }: ProductBomTabProps) {
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [consumptionModalLine, setConsumptionModalLine] = useState<UnifiedBomLine | null>(null);
 
+    // Server Functions
+    const getProductBomFn = useServerFn(getProductBom);
+    const updateTemplateFn = useServerFn(updateTemplate);
+
     // Fetch BOM data
     const {
         data: bomData,
         isLoading,
         error,
-    } = useQuery({
+    } = useQuery<ProductBomResult | null>({
         queryKey: ['productBom', product.id],
-        queryFn: () => bomApi.getProductBom(product.id).then((r) => r.data),
+        queryFn: async () => {
+            const result = await getProductBomFn({ data: { productId: product.id } });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to load BOM');
+            }
+            return result.data;
+        },
         enabled: !!product.id,
     });
 
@@ -140,7 +155,13 @@ export function ProductBomTab({ product }: ProductBomTabProps) {
             quantity?: number;
         }) => {
             // Build the template line data
-            const lineData: any = {
+            const lineData: {
+                roleId: string;
+                defaultQuantity: number | null;
+                quantityUnit: string;
+                trimItemId?: string | null;
+                serviceItemId?: string | null;
+            } = {
                 roleId: data.roleId,
                 defaultQuantity: data.quantity ?? null,
                 quantityUnit: data.componentType === 'FABRIC' ? 'meter' : 'unit',
@@ -154,9 +175,21 @@ export function ProductBomTab({ product }: ProductBomTabProps) {
             }
             // For FABRIC, componentId is not set at product level
 
-            return bomApi.updateTemplate(product.id, {
-                lines: [...(bomData?.templates || []), lineData],
+            const lines = [...(bomData?.templates || []).map((t) => ({
+                roleId: t.roleId,
+                defaultQuantity: t.defaultQuantity,
+                quantityUnit: t.quantityUnit || 'unit',
+                trimItemId: t.trimItemId,
+                serviceItemId: t.serviceItemId,
+            })), lineData];
+
+            const result = await updateTemplateFn({
+                data: { productId: product.id, lines },
             });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to add line');
+            }
+            return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['productBom', product.id] });
@@ -168,17 +201,22 @@ export function ProductBomTab({ product }: ProductBomTabProps) {
         mutationFn: async (line: UnifiedBomLine) => {
             // Filter out the line to delete and update
             const remainingLines = (bomData?.templates || [])
-                .filter((t: any) => t.id !== line.id)
-                .map((t: any) => ({
-                    id: t.id,
+                .filter((t) => t.id !== line.id)
+                .map((t) => ({
                     roleId: t.roleId,
                     defaultQuantity: t.defaultQuantity,
-                    quantityUnit: t.quantityUnit,
+                    quantityUnit: t.quantityUnit || 'unit',
                     trimItemId: t.trimItemId,
                     serviceItemId: t.serviceItemId,
                 }));
 
-            return bomApi.updateTemplate(product.id, { lines: remainingLines });
+            const result = await updateTemplateFn({
+                data: { productId: product.id, lines: remainingLines },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to delete line');
+            }
+            return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['productBom', product.id] });

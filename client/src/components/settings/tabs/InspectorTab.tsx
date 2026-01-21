@@ -2,17 +2,13 @@
  * InspectorTab component
  * Database inspector with dynamic table views - shows ALL tables automatically
  * Features: live table counts, column auto-detection, smart value formatting
+ *
+ * Uses Server Functions for data fetching.
  */
 
 import { useState, useEffect } from 'react';
-import { adminApi } from '../../../services/api';
+import { getTables, inspectTable, type TableInfo } from '../../../server/functions/admin';
 import { Database, Eye, RefreshCw, Table2, Layers, Search } from 'lucide-react';
-
-interface TableInfo {
-    name: string;
-    displayName: string;
-    count: number;
-}
 
 export function InspectorTab() {
     const [tables, setTables] = useState<TableInfo[]>([]);
@@ -25,16 +21,18 @@ export function InspectorTab() {
 
     // Fetch all tables on mount
     useEffect(() => {
-        const fetchTables = async () => {
+        const fetchTablesData = async () => {
             try {
-                const res = await adminApi.getTables();
-                setTables(res.data.tables || []);
-                // Select Order table by default if available
-                const orderTable = res.data.tables?.find((t: TableInfo) => t.name === 'order');
-                if (orderTable) {
-                    setSelectedTable('order');
-                } else if (res.data.tables?.length > 0) {
-                    setSelectedTable(res.data.tables[0].name);
+                const result = await getTables();
+                if (result.success && result.data) {
+                    setTables(result.data.tables || []);
+                    // Select Order table by default if available
+                    const orderTable = result.data.tables?.find((t: TableInfo) => t.name === 'order');
+                    if (orderTable) {
+                        setSelectedTable('order');
+                    } else if (result.data.tables?.length > 0) {
+                        setSelectedTable(result.data.tables[0].name);
+                    }
                 }
             } catch (err) {
                 console.error('Failed to fetch tables:', err);
@@ -42,15 +40,21 @@ export function InspectorTab() {
                 setTablesLoading(false);
             }
         };
-        fetchTables();
+        fetchTablesData();
     }, []);
 
     const fetchData = async () => {
         if (!selectedTable) return;
         setInspectorLoading(true);
         try {
-            const res = await adminApi.inspectTable(selectedTable, inspectorLimit);
-            setInspectorData(res.data);
+            const result = await inspectTable({
+                data: { tableName: selectedTable, limit: inspectorLimit, offset: 0 },
+            }) as { success: boolean; data?: { data: unknown[]; total: number; table: string }; error?: { message: string } };
+            if (result.success && result.data) {
+                setInspectorData(result.data);
+            } else {
+                alert(result.error?.message || 'Failed to fetch data');
+            }
         } catch (err) {
             console.error(err);
             alert('Failed to fetch data');
@@ -62,8 +66,10 @@ export function InspectorTab() {
     const refreshTables = async () => {
         setTablesLoading(true);
         try {
-            const res = await adminApi.getTables();
-            setTables(res.data.tables || []);
+            const result = await getTables();
+            if (result.success && result.data) {
+                setTables(result.data.tables || []);
+            }
         } catch (err) {
             console.error('Failed to refresh tables:', err);
         } finally {

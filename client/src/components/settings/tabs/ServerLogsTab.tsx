@@ -1,11 +1,13 @@
 /**
  * ServerLogsTab component
  * Real-time server logs viewer with filtering and search
+ *
+ * Uses Server Functions for data fetching and mutations.
  */
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '../../../services/api';
+import { getServerLogs, getLogStats, clearLogs } from '../../../server/functions/admin';
 import {
     Terminal, RefreshCw, Trash2, Search, AlertCircle, Info, AlertTriangle,
     XCircle, Filter, Clock, Activity, TrendingUp
@@ -13,12 +15,16 @@ import {
 
 type LogLevel = 'all' | 'error' | 'warn' | 'info' | 'debug';
 
+// Extended LogEntry with id for the frontend display
 interface LogEntry {
-    id: string;
+    id?: string;
     timestamp: string;
     level: string;
     message: string;
-    context: Record<string, any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    meta?: Record<string, any>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    context?: Record<string, any>;
 }
 
 export function ServerLogsTab() {
@@ -31,25 +37,45 @@ export function ServerLogsTab() {
     // Fetch logs
     const { data: logsData, isLoading, refetch } = useQuery({
         queryKey: ['serverLogs', selectedLevel, searchTerm, limit],
-        queryFn: () => adminApi.getLogs({
-            level: selectedLevel,
-            limit,
-            offset: 0,
-            search: searchTerm || undefined,
-        }).then(r => r.data),
+        queryFn: async () => {
+            const result = await getServerLogs({
+                data: {
+                    level: selectedLevel,
+                    limit,
+                    offset: 0,
+                    search: searchTerm || null,
+                },
+            });
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to fetch logs');
+            }
+            return result.data;
+        },
         refetchInterval: autoRefresh ? 3000 : false,
     });
 
     // Fetch log stats
     const { data: stats } = useQuery({
         queryKey: ['logStats'],
-        queryFn: () => adminApi.getLogStats().then(r => r.data),
+        queryFn: async () => {
+            const result = await getLogStats();
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to fetch log stats');
+            }
+            return result.data;
+        },
         refetchInterval: autoRefresh ? 5000 : false,
     });
 
     // Clear logs mutation
     const clearLogsMutation = useMutation({
-        mutationFn: () => adminApi.clearLogs(),
+        mutationFn: async () => {
+            const result = await clearLogs();
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to clear logs');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['serverLogs'] });
             queryClient.invalidateQueries({ queryKey: ['logStats'] });
@@ -312,9 +338,9 @@ export function ServerLogsTab() {
 
                     {!isLoading && logsData?.logs && logsData.logs.length > 0 && (
                         <div className="space-y-2">
-                            {logsData.logs.map((log: LogEntry) => (
+                            {logsData.logs.map((log: LogEntry, index: number) => (
                                 <div
-                                    key={log.id}
+                                    key={log.id || `log-${index}`}
                                     className="flex gap-3 hover:bg-gray-800 p-2 rounded transition-colors"
                                 >
                                     {/* Timestamp */}

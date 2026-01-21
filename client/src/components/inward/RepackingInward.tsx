@@ -5,15 +5,24 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi, repackingApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
+import { processRepackingQueueItem } from '../../server/functions/returnsMutations';
 import { Search, Check, AlertTriangle, X, RefreshCw, Plus } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
-import type { ScanLookupResult, PendingRepackingItem } from '../../types';
 
 interface RepackingInwardProps {
     onSuccess?: (message: string) => void;
     onError?: (message: string) => void;
+}
+
+// Local type for matched repacking item from scan lookup
+interface MatchedRepackingItem {
+    queueId: string;
+    qty: number;
+    condition: string;
+    returnRequestNumber?: string | null;
 }
 
 // QC decision options
@@ -35,11 +44,15 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
     const queryClient = useQueryClient();
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // Server function hooks
+    const scanLookupFn = useServerFn(scanLookup);
+    const processRepackingFn = useServerFn(processRepackingQueueItem);
+
     // State
     const [searchInput, setSearchInput] = useState('');
     const [isSearching, setIsSearching] = useState(false);
     const [scanResult, setScanResult] = useState<ScanLookupResult | null>(null);
-    const [matchedRepack, setMatchedRepack] = useState<PendingRepackingItem | null>(null);
+    const [matchedRepack, setMatchedRepack] = useState<MatchedRepackingItem | null>(null);
     const [scanError, setScanError] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [qcDecision, setQcDecision] = useState<'ready' | 'write_off'>('ready');
@@ -85,8 +98,7 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
         setMatchedRepack(null);
 
         try {
-            const res = await inventoryApi.scanLookup(code.trim());
-            const result = res.data as ScanLookupResult;
+            const result = await scanLookupFn({ data: { code: code.trim() } });
 
             const repackMatch = result.matches.find(m => m.source === 'repacking');
             if (!repackMatch) {
@@ -97,12 +109,18 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
             }
 
             setScanResult(result);
-            setMatchedRepack(repackMatch.data as PendingRepackingItem);
+            setMatchedRepack({
+                queueId: repackMatch.data.queueId || repackMatch.data.lineId,
+                qty: repackMatch.data.qty,
+                condition: repackMatch.data.condition || 'unknown',
+                returnRequestNumber: repackMatch.data.returnRequestNumber,
+            });
             setQcDecision('ready');
             setWriteOffReason('defective');
             setNotes('');
-        } catch (error: any) {
-            setScanError(error.response?.data?.error || 'SKU not found');
+        } catch (error: unknown) {
+            const errMsg = error instanceof Error ? error.message : 'SKU not found';
+            setScanError(errMsg);
         } finally {
             setIsSearching(false);
             setSearchInput('');
@@ -137,12 +155,18 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
     const processMutation = useMutation({
         mutationFn: async () => {
             if (!matchedRepack) throw new Error('No QC item selected');
-            return repackingApi.process({
-                itemId: matchedRepack.queueId,
-                action: qcDecision,
-                writeOffReason: qcDecision === 'write_off' ? writeOffReason : undefined,
-                notes: notes || undefined,
+            const result = await processRepackingFn({
+                data: {
+                    itemId: matchedRepack.queueId,
+                    action: qcDecision,
+                    writeOffReason: qcDecision === 'write_off' ? writeOffReason : undefined,
+                    notes: notes || undefined,
+                },
             });
+            if (!result.success) {
+                throw new Error(result.message || 'Failed to process item');
+            }
+            return result;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['recent-inwards', 'repack_complete'] });
@@ -155,8 +179,9 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
             setSuccessMessage(message);
             clearScan();
         },
-        onError: (error: any) => {
-            setScanError(error.response?.data?.error || 'Failed to process item');
+        onError: (error: unknown) => {
+            const errMsg = error instanceof Error ? error.message : 'Failed to process item';
+            setScanError(errMsg);
         },
     });
 
@@ -353,7 +378,7 @@ export default function RepackingInward({ onSuccess: _onSuccess, onError: _onErr
 
                         {processMutation.isError && (
                             <p className="text-red-600 text-sm mt-2">
-                                {(processMutation.error as any)?.response?.data?.error || 'Failed to process item'}
+                                {processMutation.error instanceof Error ? processMutation.error.message : 'Failed to process item'}
                             </p>
                         )}
                     </div>

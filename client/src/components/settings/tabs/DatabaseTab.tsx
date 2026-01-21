@@ -1,11 +1,13 @@
 /**
  * DatabaseTab component
  * Database statistics, danger zone for clearing data, and deployment guide
+ *
+ * Uses Server Functions for data fetching and mutations.
  */
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi } from '../../../services/api';
+import { getDatabaseStats, clearTables } from '../../../server/functions/admin';
 import { Database, RefreshCw, AlertOctagon, Trash2 } from 'lucide-react';
 
 export function DatabaseTab() {
@@ -15,19 +17,33 @@ export function DatabaseTab() {
 
     const { data: stats, isLoading: statsLoading } = useQuery({
         queryKey: ['dbStats'],
-        queryFn: () => adminApi.getStats().then(r => r.data),
+        queryFn: async () => {
+            const result = await getDatabaseStats();
+            if (!result.success || !result.data) {
+                throw new Error(result.error?.message || 'Failed to fetch database stats');
+            }
+            return result.data;
+        },
     });
 
     const clearMutation = useMutation({
-        mutationFn: () => adminApi.clearTables(selectedTables, clearConfirm),
-        onSuccess: (res) => {
+        mutationFn: async () => {
+            const result = await clearTables({
+                data: { tables: selectedTables, confirmPhrase: clearConfirm },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to clear database');
+            }
+            return result.data;
+        },
+        onSuccess: (data) => {
             queryClient.invalidateQueries();
             setClearConfirm('');
             setSelectedTables([]);
-            alert(`Database cleared! Deleted: ${JSON.stringify(res.data.deleted)}`);
+            alert(`Database cleared! Deleted: ${JSON.stringify(data?.deleted)}`);
         },
-        onError: (error: any) => {
-            alert(error.response?.data?.error || 'Failed to clear database');
+        onError: (error: Error) => {
+            alert(error.message || 'Failed to clear database');
         },
     });
 

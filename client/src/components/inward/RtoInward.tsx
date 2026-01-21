@@ -16,7 +16,9 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { scanLookup, type ScanLookupResult } from '../../server/functions/returns';
+import { rtoInwardLine } from '../../server/functions/inventoryMutations';
 import {
     Package,
     Check,
@@ -29,7 +31,7 @@ import {
 } from 'lucide-react';
 import RecentInwardsTable from './RecentInwardsTable';
 import PendingQueuePanel from './PendingQueuePanel';
-import type { ScanLookupResult, RtoScanMatchData, RtoCondition } from '../../types';
+import type { RtoScanMatchData, RtoCondition } from '../../types';
 
 interface RtoInwardProps {
     onSuccess?: (message: string) => void;
@@ -97,14 +99,23 @@ function RtoInwardForm({ scanResult, rtoData, onSuccess, onCancel }: RtoInwardFo
     const [notes, setNotes] = useState('');
     const [error, setError] = useState<string | null>(null);
 
+    // Server function hook
+    const rtoInwardLineFn = useServerFn(rtoInwardLine);
+
     const rtoInwardMutation = useMutation({
         mutationFn: async () => {
             if (!selectedCondition) throw new Error('Please select a condition');
-            return inventoryApi.rtoInwardLine({
-                lineId: rtoData.lineId,
-                condition: selectedCondition,
-                notes: notes || undefined,
+            const result = await rtoInwardLineFn({
+                data: {
+                    lineId: rtoData.lineId,
+                    condition: selectedCondition,
+                    notes: notes || undefined,
+                },
             });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to process RTO inward');
+            }
+            return result;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
@@ -334,6 +345,9 @@ export default function RtoInward({ onSuccess: _onSuccess, onError: _onError }: 
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // Server function hook
+    const scanLookupFn = useServerFn(scanLookup);
+
     // Auto-focus input on mount and after operations
     useEffect(() => {
         inputRef.current?.focus();
@@ -374,8 +388,7 @@ export default function RtoInward({ onSuccess: _onSuccess, onError: _onError }: 
         setRtoMatch(null);
 
         try {
-            const res = await inventoryApi.scanLookup(code.trim());
-            const result: ScanLookupResult = res.data;
+            const result = await scanLookupFn({ data: { code: code.trim() } });
             setScanResult(result);
 
             const rtoMatchItem = result.matches.find(m => m.source === 'rto');
