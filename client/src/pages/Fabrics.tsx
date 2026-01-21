@@ -4,13 +4,16 @@
  */
 
 import { useState, useMemo, useRef, useEffect } from 'react';
+import { useServerFn } from '@tanstack/react-start';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams, ValueFormatterParams, CellClassParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Search, Eye, Package, Plus, Users, AlertTriangle, X, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle, RefreshCw } from 'lucide-react';
-import { fabricsApi } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+// Server Functions
+import { getFabricsFlat, getFabricsFilters, getFabricSuppliers, getFabricTransactions } from '@/server/functions/fabrics';
+import { createFabricType, updateFabricType, createFabric, updateFabric, deleteFabric, createFabricTransaction, deleteFabricTransaction, createSupplier } from '@/server/functions/fabricMutations';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { ColumnVisibilityDropdown, FabricStatusBadge, GridPreferencesToolbar } from '../components/common/grid';
 import { useGridState, getColumnOrderFromApi, applyColumnVisibility, applyColumnWidths, orderColumns } from '../hooks/useGridState';
@@ -171,127 +174,195 @@ export default function Fabrics() {
         return () => clearTimeout(timer);
     }, [searchInput]);
 
+    // Server Function hooks
+    const getFabricsFlatFn = useServerFn(getFabricsFlat);
+    const getFabricsFiltersFn = useServerFn(getFabricsFilters);
+    const getFabricSuppliersFn = useServerFn(getFabricSuppliers);
+    const getFabricTransactionsFn = useServerFn(getFabricTransactions);
+    const createFabricTypeFn = useServerFn(createFabricType);
+    const updateFabricTypeFn = useServerFn(updateFabricType);
+    const createFabricFn = useServerFn(createFabric);
+    const updateFabricFn = useServerFn(updateFabric);
+    const deleteFabricFn = useServerFn(deleteFabric);
+    const createFabricTransactionFn = useServerFn(createFabricTransaction);
+    const deleteFabricTransactionFn = useServerFn(deleteFabricTransaction);
+    const createSupplierFn = useServerFn(createSupplier);
+
     // Fetch flat fabric data (switches between color and type views)
     const { data: fabricData, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['fabricsFlat', filter.fabricTypeId, filter.status, viewLevel],
-        queryFn: () => fabricsApi.getFlat({
-            fabricTypeId: filter.fabricTypeId || undefined,
-            status: filter.status || undefined,
-            view: viewLevel,
-        }).then(r => r.data),
+        queryFn: () => getFabricsFlatFn({
+            data: {
+                ...(filter.fabricTypeId ? { fabricTypeId: filter.fabricTypeId } : {}),
+                ...(filter.status ? { status: filter.status as 'low' | 'ok' } : {}),
+                view: viewLevel,
+            },
+        }),
     });
 
     // Fetch filter options
     const { data: filterOptions } = useQuery({
         queryKey: ['fabricFilters'],
-        queryFn: () => fabricsApi.getFilters().then(r => r.data),
+        queryFn: async () => {
+            const result = await getFabricsFiltersFn({ data: undefined });
+            return result.filters;
+        },
         staleTime: 5 * 60 * 1000,
     });
 
     // Fetch suppliers for forms
     const { data: suppliers } = useQuery({
         queryKey: ['suppliers'],
-        queryFn: () => fabricsApi.getSuppliers().then(r => r.data),
+        queryFn: async () => {
+            const result = await getFabricSuppliersFn({ data: {} });
+            return result.suppliers;
+        },
     });
 
     // Fetch transactions when detail view is open
     const { data: transactions, isLoading: txnLoading } = useQuery({
         queryKey: ['fabricTransactions', showDetail?.fabricId],
-        queryFn: () => fabricsApi.getTransactions(showDetail.fabricId).then(r => r.data),
+        queryFn: async () => {
+            const result = await getFabricTransactionsFn({
+                data: { fabricId: showDetail.fabricId },
+            });
+            return result.transactions;
+        },
         enabled: !!showDetail?.fabricId,
     });
 
+    // Type for mutation results
+    type MutationResult = { success: boolean; error?: { message: string }; [key: string]: unknown };
+
     // Mutations
-    const createType = useMutation({
-        mutationFn: (data: any) => fabricsApi.createType(data),
-        onSuccess: () => {
+    const createTypeMutation = useMutation({
+        mutationFn: (data: { name: string; composition?: string; unit: string; avgShrinkagePct: number; defaultCostPerUnit: number | null; defaultLeadTimeDays: number | null; defaultMinOrderQty: number | null }) =>
+            createFabricTypeFn({ data }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to create fabric type');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddType(false);
             setTypeForm({ name: '', composition: '', unit: 'meter', avgShrinkagePct: 0, defaultCostPerUnit: '', defaultLeadTimeDays: '', defaultMinOrderQty: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric type'),
+        onError: (err: Error) => alert(err.message || 'Failed to create fabric type'),
     });
 
-    const updateType = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => fabricsApi.updateType(id, data),
-        onSuccess: () => {
+    const updateTypeMutation = useMutation({
+        mutationFn: (data: { id: string; name?: string; composition?: string; unit?: string; avgShrinkagePct?: number; defaultCostPerUnit?: number | null; defaultLeadTimeDays?: number | null; defaultMinOrderQty?: number | null }) =>
+            updateFabricTypeFn({ data }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to update fabric type');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             setShowEditType(null);
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update fabric type'),
+        onError: (err: Error) => alert(err.message || 'Failed to update fabric type'),
     });
 
-    const createFabric = useMutation({
-        mutationFn: (data: any) => fabricsApi.create(data),
-        onSuccess: () => {
+    const createFabricMutation = useMutation({
+        mutationFn: (data: { fabricTypeId: string; name: string; colorName: string; standardColor?: string | null; colorHex?: string; costPerUnit?: number | null; supplierId?: string | null; leadTimeDays?: number | null; minOrderQty?: number | null }) =>
+            createFabricFn({ data }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to create fabric');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddColor(null);
             setColorForm({ colorName: '', standardColor: '', colorHex: '#6B8E9F', costPerUnit: '', supplierId: '', leadTimeDays: '', minOrderQty: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create fabric'),
+        onError: (err: Error) => alert(err.message || 'Failed to create fabric'),
     });
 
-    const createInward = useMutation({
-        mutationFn: ({ fabricId, data }: { fabricId: string; data: any }) => fabricsApi.createTransaction(fabricId, data),
-        onSuccess: () => {
+    const createInwardMutation = useMutation({
+        mutationFn: (data: { fabricId: string; txnType: 'inward' | 'outward'; qty: number; unit: 'meter' | 'kg'; reason: string; notes?: string | null; costPerUnit?: number | null; supplierId?: string | null }) =>
+            createFabricTransactionFn({ data }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to record inward');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             setShowInward(null);
             setInwardForm({ qty: 0, notes: '', costPerUnit: 0, supplierId: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to record inward'),
+        onError: (err: Error) => alert(err.message || 'Failed to record inward'),
     });
 
-    const createSupplier = useMutation({
-        mutationFn: (data: any) => fabricsApi.createSupplier(data),
-        onSuccess: () => {
+    const createSupplierMutation = useMutation({
+        mutationFn: (data: { name: string; contactName?: string | null; email?: string | null; phone?: string | null; address?: string | null }) =>
+            createSupplierFn({ data }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to create supplier');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['suppliers'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             setShowAddSupplier(false);
             setSupplierForm({ name: '', contactName: '', email: '', phone: '', address: '' });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to create supplier'),
+        onError: (err: Error) => alert(err.message || 'Failed to create supplier'),
     });
 
-    const deleteTransaction = useMutation({
-        mutationFn: (txnId: string) => fabricsApi.deleteTransaction(txnId),
-        onSuccess: () => {
+    const deleteTransactionMutation = useMutation({
+        mutationFn: (txnId: string) => deleteFabricTransactionFn({ data: { txnId } }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to delete transaction');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricTransactions', showDetail?.fabricId] });
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction'),
+        onError: (err: Error) => alert(err.message || 'Failed to delete transaction'),
     });
 
-    const deleteFabric = useMutation({
-        mutationFn: (fabricId: string) => fabricsApi.delete(fabricId),
-        onSuccess: (response: any) => {
+    const deleteFabricMutation = useMutation({
+        mutationFn: (fabricId: string) => deleteFabricFn({ data: { fabricId } }),
+        onSuccess: (result: MutationResult & { variationsReassigned?: number; fabricTypeDeleted?: boolean }) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to delete fabric');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             queryClient.invalidateQueries({ queryKey: ['fabricFilters'] });
             queryClient.invalidateQueries({ queryKey: ['fabricTypes'] });
             const messages: string[] = [];
-            if (response.data.variationsReassigned > 0) {
-                messages.push(`${response.data.variationsReassigned} product variation(s) reassigned to default fabric`);
+            if (result.variationsReassigned && result.variationsReassigned > 0) {
+                messages.push(`${result.variationsReassigned} product variation(s) reassigned to default fabric`);
             }
-            if (response.data.fabricTypeDeleted) {
+            if (result.fabricTypeDeleted) {
                 messages.push('Fabric type also deleted (no remaining colors)');
             }
             if (messages.length > 0) {
                 alert(`Fabric deleted.\n\n${messages.join('\n')}`);
             }
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete fabric'),
+        onError: (err: Error) => alert(err.message || 'Failed to delete fabric'),
     });
 
-    const updateFabric = useMutation({
-        mutationFn: ({ fabricId, data }: { fabricId: string; data: any }) => fabricsApi.update(fabricId, data),
-        onSuccess: () => {
+    const updateFabricMutation = useMutation({
+        mutationFn: (data: { fabricId: string; colorName?: string; standardColor?: string | null; colorHex?: string; costPerUnit?: number | null; supplierId?: string | null; leadTimeDays?: number | null; minOrderQty?: number | null }) =>
+            updateFabricFn({ data }),
+        onSuccess: (result: MutationResult) => {
+            if (!result.success) {
+                alert(result.error?.message || 'Failed to update fabric');
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['fabricsFlat'] });
             setShowEditFabric(null);
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update fabric'),
+        onError: (err: Error) => alert(err.message || 'Failed to update fabric'),
     });
 
     // Grid column moved handler
@@ -317,7 +388,7 @@ export default function Fabrics() {
 
     const handleSubmitType = (e: React.FormEvent) => {
         e.preventDefault();
-        createType.mutate({
+        createTypeMutation.mutate({
             name: typeForm.name,
             composition: typeForm.composition,
             unit: typeForm.unit,
@@ -344,17 +415,15 @@ export default function Fabrics() {
     const handleSubmitEditType = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showEditType) return;
-        updateType.mutate({
+        updateTypeMutation.mutate({
             id: showEditType.fabricTypeId,
-            data: {
-                name: editTypeForm.name,
-                composition: editTypeForm.composition,
-                unit: editTypeForm.unit,
-                avgShrinkagePct: editTypeForm.avgShrinkagePct,
-                defaultCostPerUnit: editTypeForm.defaultCostPerUnit !== '' ? Number(editTypeForm.defaultCostPerUnit) : null,
-                defaultLeadTimeDays: editTypeForm.defaultLeadTimeDays !== '' ? Number(editTypeForm.defaultLeadTimeDays) : null,
-                defaultMinOrderQty: editTypeForm.defaultMinOrderQty !== '' ? Number(editTypeForm.defaultMinOrderQty) : null,
-            },
+            name: editTypeForm.name,
+            composition: editTypeForm.composition,
+            unit: editTypeForm.unit as 'meter' | 'kg',
+            avgShrinkagePct: editTypeForm.avgShrinkagePct,
+            defaultCostPerUnit: editTypeForm.defaultCostPerUnit !== '' ? Number(editTypeForm.defaultCostPerUnit) : null,
+            defaultLeadTimeDays: editTypeForm.defaultLeadTimeDays !== '' ? Number(editTypeForm.defaultLeadTimeDays) : null,
+            defaultMinOrderQty: editTypeForm.defaultMinOrderQty !== '' ? Number(editTypeForm.defaultMinOrderQty) : null,
         });
     };
 
@@ -362,7 +431,7 @@ export default function Fabrics() {
         e.preventDefault();
         if (!showAddColor) return;
         const fabricType = filterOptions?.fabricTypes?.find((t: any) => t.id === showAddColor);
-        createFabric.mutate({
+        createFabricMutation.mutate({
             fabricTypeId: showAddColor,
             // Use clean fabric type name (not concatenated with color)
             // Color information is stored separately in colorName field
@@ -370,33 +439,31 @@ export default function Fabrics() {
             colorName: colorForm.colorName,
             standardColor: colorForm.standardColor || null,
             colorHex: colorForm.colorHex,
-            costPerUnit: colorForm.costPerUnit,
+            costPerUnit: colorForm.costPerUnit === '' ? null : Number(colorForm.costPerUnit),
             supplierId: colorForm.supplierId || null,
-            leadTimeDays: colorForm.leadTimeDays,
-            minOrderQty: colorForm.minOrderQty,
+            leadTimeDays: colorForm.leadTimeDays === '' ? null : Number(colorForm.leadTimeDays),
+            minOrderQty: colorForm.minOrderQty === '' ? null : Number(colorForm.minOrderQty),
         });
     };
 
     const handleSubmitInward = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showInward) return;
-        createInward.mutate({
+        createInwardMutation.mutate({
             fabricId: showInward.fabricId,
-            data: {
-                txnType: 'inward',
-                qty: inwardForm.qty,
-                unit: showInward.unit || 'meter',
-                reason: 'supplier_receipt',
-                notes: inwardForm.notes,
-                costPerUnit: inwardForm.costPerUnit || null,
-                supplierId: inwardForm.supplierId || null,
-            },
+            txnType: 'inward',
+            qty: inwardForm.qty,
+            unit: (showInward.unit || 'meter') as 'meter' | 'kg',
+            reason: 'supplier_receipt',
+            notes: inwardForm.notes || null,
+            costPerUnit: inwardForm.costPerUnit || null,
+            supplierId: inwardForm.supplierId || null,
         });
     };
 
     const handleSubmitSupplier = (e: React.FormEvent) => {
         e.preventDefault();
-        createSupplier.mutate(supplierForm);
+        createSupplierMutation.mutate(supplierForm);
     };
 
     const handleOpenEdit = (row: any) => {
@@ -416,18 +483,16 @@ export default function Fabrics() {
     const handleSubmitEdit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!showEditFabric) return;
-        updateFabric.mutate({
+        updateFabricMutation.mutate({
             fabricId: showEditFabric.fabricId,
-            data: {
-                colorName: editForm.colorName,
-                standardColor: editForm.standardColor || null,
-                colorHex: editForm.colorHex,
-                // Empty string = inherit from type (sends null to backend)
-                costPerUnit: editForm.costPerUnit === '' ? null : editForm.costPerUnit,
-                supplierId: editForm.supplierId || null,
-                leadTimeDays: editForm.leadTimeDays === '' ? null : editForm.leadTimeDays,
-                minOrderQty: editForm.minOrderQty === '' ? null : editForm.minOrderQty,
-            },
+            colorName: editForm.colorName,
+            standardColor: editForm.standardColor || null,
+            colorHex: editForm.colorHex,
+            // Empty string = inherit from type (sends null to backend)
+            costPerUnit: editForm.costPerUnit === '' ? null : Number(editForm.costPerUnit),
+            supplierId: editForm.supplierId || null,
+            leadTimeDays: editForm.leadTimeDays === '' ? null : Number(editForm.leadTimeDays),
+            minOrderQty: editForm.minOrderQty === '' ? null : Number(editForm.minOrderQty),
         });
     };
 
@@ -677,7 +742,7 @@ export default function Fabrics() {
                             <button
                                 onClick={() => {
                                     if (confirm(`Delete "${row.colorName}" (${row.fabricTypeName})?\n\nAny products using this fabric will be reassigned to the default fabric.`)) {
-                                        deleteFabric.mutate(row.fabricId);
+                                        deleteFabricMutation.mutate(row.fabricId);
                                     }
                                 }}
                                 className="p-1 rounded hover:bg-red-100 text-gray-400 hover:text-red-600"
@@ -857,8 +922,13 @@ export default function Fabrics() {
         return orderColumns(withWidths, columnOrder);
     }, [activeColumnDefs, visibleColumns, columnWidths, columnOrder]);
 
-    // Summary stats
-    const summary = fabricData?.summary || { total: 0, orderNow: 0, orderSoon: 0, ok: 0 };
+    // Summary stats - ensure all values are defined with defaults
+    const summary = {
+        total: fabricData?.summary?.total ?? 0,
+        orderNow: fabricData?.summary?.orderNow ?? 0,
+        orderSoon: fabricData?.summary?.orderSoon ?? 0,
+        ok: fabricData?.summary?.ok ?? 0,
+    };
 
     return (
         <div className="space-y-4">
@@ -964,7 +1034,7 @@ export default function Fabrics() {
                 <div className="hidden sm:block sm:flex-1" />
 
                 {/* Add Color button - exclude Default fabric type */}
-                {filterOptions?.fabricTypes?.filter((t: any) => t.name !== 'Default').length > 0 && (
+                {(filterOptions?.fabricTypes?.filter((t: any) => t.name !== 'Default').length ?? 0) > 0 && (
                     <select
                         value=""
                         onChange={(e) => e.target.value && setShowAddColor(e.target.value)}
@@ -1100,7 +1170,7 @@ export default function Fabrics() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddType(false)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createType.isPending}>{createType.isPending ? 'Creating...' : 'Add Type'}</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={createTypeMutation.isPending}>{createTypeMutation.isPending ? 'Creating...' : 'Add Type'}</button>
                             </div>
                         </form>
                     </div>
@@ -1156,7 +1226,7 @@ export default function Fabrics() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowEditType(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={updateType.isPending}>{updateType.isPending ? 'Saving...' : 'Save Changes'}</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={updateTypeMutation.isPending}>{updateTypeMutation.isPending ? 'Saving...' : 'Save Changes'}</button>
                             </div>
                         </form>
                     </div>
@@ -1226,7 +1296,7 @@ export default function Fabrics() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddColor(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createFabric.isPending}>{createFabric.isPending ? 'Creating...' : 'Add Color'}</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={createFabricMutation.isPending}>{createFabricMutation.isPending ? 'Creating...' : 'Add Color'}</button>
                             </div>
                         </form>
                     </div>
@@ -1299,7 +1369,7 @@ export default function Fabrics() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowEditFabric(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={updateFabric.isPending}>{updateFabric.isPending ? 'Saving...' : 'Save Changes'}</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={updateFabricMutation.isPending}>{updateFabricMutation.isPending ? 'Saving...' : 'Save Changes'}</button>
                             </div>
                         </form>
                     </div>
@@ -1345,7 +1415,7 @@ export default function Fabrics() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowInward(null)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createInward.isPending}>{createInward.isPending ? 'Saving...' : 'Add to Inventory'}</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={createInwardMutation.isPending}>{createInwardMutation.isPending ? 'Saving...' : 'Add to Inventory'}</button>
                             </div>
                         </form>
                     </div>
@@ -1385,7 +1455,7 @@ export default function Fabrics() {
                             </div>
                             <div className="flex gap-3 pt-2">
                                 <button type="button" onClick={() => setShowAddSupplier(false)} className="btn-secondary flex-1">Cancel</button>
-                                <button type="submit" className="btn-primary flex-1" disabled={createSupplier.isPending}>{createSupplier.isPending ? 'Creating...' : 'Add Supplier'}</button>
+                                <button type="submit" className="btn-primary flex-1" disabled={createSupplierMutation.isPending}>{createSupplierMutation.isPending ? 'Creating...' : 'Add Supplier'}</button>
                             </div>
                         </form>
                     </div>
@@ -1484,7 +1554,7 @@ export default function Fabrics() {
                                                         <button
                                                             onClick={() => {
                                                                 if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} ${txn.unit}?`)) {
-                                                                    deleteTransaction.mutate(txn.id);
+                                                                    deleteTransactionMutation.mutate(txn.id);
                                                                 }
                                                             }}
                                                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
