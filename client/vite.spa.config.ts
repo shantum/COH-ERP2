@@ -43,14 +43,7 @@ export default defineConfig({
     // Ensure proper source maps and chunk splitting
     sourcemap: true,
     rollupOptions: {
-      // Exclude SSR-specific files
-      external: [
-        '@tanstack/react-start',
-        '@tanstack/react-start/client',
-        '@tanstack/react-start/server',
-        '@tanstack/react-start/server-entry',
-        '@tanstack/start-storage-context',
-      ],
+      // Don't mark SSR modules as external - let aliases stub them
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
