@@ -8,11 +8,20 @@
  * Real implementations are used in SSR mode (npm run build:ssr)
  */
 
-// Server function stub - returns a no-op function
-export function createServerFn() {
-  return () => () => {
-    throw new Error('Server Functions are not available in SPA mode');
+// Server function stub - returns a chainable builder that produces a no-op function
+export function createServerFn(_options?: unknown) {
+  const noopFn = () => {
+    throw new Error('Server Functions are not available in SPA mode. Use tRPC instead.');
   };
+
+  // Chainable builder pattern matching TanStack Start API
+  const builder = {
+    inputValidator: (_validator: unknown) => builder,
+    validator: (_validator: unknown) => builder,
+    handler: (_handler: unknown) => noopFn,
+  };
+
+  return builder;
 }
 
 // Middleware stub
