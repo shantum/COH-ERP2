@@ -2,11 +2,11 @@
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["npm install -g typescript", "cd shared && npm install", "cd client && npm install", "cd server && npm install"]
+cmds = ["cd shared && npm install", "cd client && npm install", "cd server && npm install"]
 dependsOn = ["setup"]
 
 [phases.build]
-cmds = ["cd shared && tsc", "cd client && npm run build", "cd server && npx prisma generate"]
+cmds = ["cd shared && npx -y -p typescript tsc", "cd client && npm run build", "cd server && npx prisma generate"]
 dependsOn = ["install"]
 
 [start]
