@@ -1,11 +1,14 @@
 /**
  * useSkuEditForm - Form state management for SKU level
+ *
+ * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { productsApi } from '@/services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { updateSku } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
 import type { SkuFormData, SkuDetailData, VariationDetailData, ProductDetailData, CostCascade } from '../types';
 
@@ -26,6 +29,9 @@ export function useSkuEditForm({
 }: UseSkuEditFormOptions) {
   const queryClient = useQueryClient();
 
+  // Server Function
+  const updateSkuFn = useServerFn(updateSku);
+
   // Form setup
   const form = useForm<SkuFormData>({
     defaultValues: getDefaultValues(sku),
@@ -40,19 +46,28 @@ export function useSkuEditForm({
     }
   }, [sku, reset]);
 
-  // Update mutation
+  // Update mutation using Server Function
   const updateMutation = useMutation({
     mutationFn: async (data: SkuFormData) => {
-      const response = await productsApi.updateSku(sku.id, {
-        size: data.size,
-        fabricConsumption: data.fabricConsumption ?? undefined,
-        mrp: data.mrp ?? undefined,
-        targetStockQty: data.targetStockQty ?? undefined,
-        trimsCost: data.trimsCost ?? undefined,
-        packagingCost: data.packagingCost ?? undefined,
-        isActive: data.isActive,
+      const result = await updateSkuFn({
+        data: {
+          id: sku.id,
+          fabricConsumption: data.fabricConsumption ?? undefined,
+          mrp: data.mrp ?? undefined,
+          targetStockQty: data.targetStockQty ?? undefined,
+          trimsCost: data.trimsCost ?? undefined,
+          packagingCost: data.packagingCost ?? undefined,
+          liningCost: data.liningCost ?? undefined,
+          laborMinutes: data.laborMinutes ?? undefined,
+          isActive: data.isActive,
+        },
       });
-      return response.data;
+
+      if (!result.success) {
+        throw new Error(result.error?.message ?? 'Failed to update SKU');
+      }
+
+      return result.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['product', product.id] });

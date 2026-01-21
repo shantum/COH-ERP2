@@ -11,6 +11,7 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Scissors, Package, Wrench, Loader2 } from 'lucide-react';
 import {
     Dialog,
@@ -29,7 +30,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { bomApi } from '@/services/api';
+import {
+    getComponentRoles,
+    getAvailableComponents,
+} from '@/server/functions/bomMutations';
 import type { AddBomLineModalProps, BomComponentType, ComponentRole } from './types';
 
 const TYPE_CARDS: Array<{
@@ -84,17 +88,27 @@ export function AddBomLineModal({
     const [quantity, setQuantity] = useState<string>('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Server Functions
+    const getComponentRolesFn = useServerFn(getComponentRoles);
+    const getAvailableComponentsFn = useServerFn(getAvailableComponents);
+
     // Fetch component roles
     const { data: allRoles = [], isLoading: rolesLoading } = useQuery({
         queryKey: ['componentRoles'],
-        queryFn: () => bomApi.getComponentRoles().then((r) => r.data),
+        queryFn: async () => {
+            const result = await getComponentRolesFn();
+            return result.success ? result.data ?? [] : [];
+        },
         staleTime: 60 * 60 * 1000,
     });
 
     // Fetch available components
     const { data: availableComponents, isLoading: componentsLoading } = useQuery({
         queryKey: ['availableComponents'],
-        queryFn: () => bomApi.getAvailableComponents().then((r) => r.data),
+        queryFn: async () => {
+            const result = await getAvailableComponentsFn();
+            return result.success ? result.data : undefined;
+        },
         staleTime: 5 * 60 * 1000,
     });
 

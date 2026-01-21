@@ -432,3 +432,266 @@ export const getProductsList = createServerFn({ method: 'GET' })
             limit: input.limit,
         });
     });
+
+// ============================================
+// PRODUCT DETAIL
+// ============================================
+
+const getProductByIdInputSchema = z.object({
+    id: z.string().uuid('Invalid product ID'),
+});
+
+/**
+ * Product detail response type for unified edit modal
+ */
+export interface ProductDetailResponse {
+    id: string;
+    name: string;
+    styleCode: string | null;
+    category: string;
+    productType: string;
+    gender: string;
+    fabricTypeId: string | null;
+    fabricTypeName: string | null;
+    baseProductionTimeMins: number;
+    defaultFabricConsumption: number | null;
+    trimsCost: number | null;
+    liningCost: number | null;
+    packagingCost: number | null;
+    isActive: boolean;
+    imageUrl: string | null;
+    variations: VariationDetailResponse[];
+}
+
+export interface VariationDetailResponse {
+    id: string;
+    productId: string;
+    colorName: string;
+    colorHex: string | null;
+    fabricId: string | null;
+    fabricName: string | null;
+    hasLining: boolean;
+    trimsCost: number | null;
+    liningCost: number | null;
+    packagingCost: number | null;
+    laborMinutes: number | null;
+    isActive: boolean;
+    imageUrl: string | null;
+    skus: SkuDetailResponse[];
+}
+
+export interface SkuDetailResponse {
+    id: string;
+    skuCode: string;
+    variationId: string;
+    size: string;
+    fabricConsumption: number | null;
+    mrp: number | null;
+    targetStockQty: number | null;
+    trimsCost: number | null;
+    liningCost: number | null;
+    packagingCost: number | null;
+    laborMinutes: number | null;
+    isActive: boolean;
+    currentBalance: number;
+}
+
+/**
+ * Server Function: Get product by ID
+ *
+ * Fetches a single product with full nested hierarchy (variations, SKUs).
+ * Used by UnifiedProductEditModal for editing.
+ */
+export const getProductById = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getProductByIdInputSchema.parse(input))
+    .handler(async ({ data }): Promise<ProductDetailResponse> => {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            // Get inventory balances for SKUs
+            const balances: BalanceRow[] = await prisma.$queryRaw`
+                SELECT
+                    "skuId",
+                    SUM(qty)::bigint AS "balance"
+                FROM "InventoryTransaction"
+                WHERE "skuId" IN (
+                    SELECT s.id FROM "Sku" s
+                    JOIN "Variation" v ON s."variationId" = v.id
+                    WHERE v."productId" = ${data.id}::uuid
+                )
+                GROUP BY "skuId"
+            `;
+
+            const balanceMap = new Map<string, number>(
+                balances.map((b: BalanceRow) => [b.skuId, Number(b.balance)])
+            );
+
+            // Fetch product with full hierarchy
+            const product = await prisma.product.findUnique({
+                where: { id: data.id },
+                include: {
+                    fabricType: true,
+                    variations: {
+                        orderBy: { colorName: 'asc' },
+                        include: {
+                            fabric: true,
+                            skus: {
+                                orderBy: { size: 'asc' },
+                            },
+                        },
+                    },
+                },
+            });
+
+            if (!product) {
+                throw new Error('Product not found');
+            }
+
+            // Transform to response type
+            return {
+                id: product.id,
+                name: product.name,
+                styleCode: product.styleCode,
+                category: product.category,
+                productType: product.productType,
+                gender: product.gender,
+                fabricTypeId: product.fabricTypeId,
+                fabricTypeName: product.fabricType?.name ?? null,
+                baseProductionTimeMins: product.baseProductionTimeMins,
+                defaultFabricConsumption: product.defaultFabricConsumption,
+                trimsCost: product.trimsCost,
+                liningCost: product.liningCost,
+                packagingCost: product.packagingCost,
+                isActive: product.isActive,
+                imageUrl: product.imageUrl,
+                variations: product.variations.map((v: VariationData & { skus: SkuData[] }) => ({
+                    id: v.id,
+                    productId: v.productId,
+                    colorName: v.colorName,
+                    colorHex: v.colorHex,
+                    fabricId: v.fabricId,
+                    fabricName: v.fabric?.name ?? null,
+                    hasLining: v.hasLining,
+                    trimsCost: v.trimsCost,
+                    liningCost: v.liningCost,
+                    packagingCost: v.packagingCost,
+                    laborMinutes: v.laborMinutes,
+                    isActive: v.isActive,
+                    imageUrl: v.imageUrl,
+                    skus: v.skus.map((s: SkuData) => ({
+                        id: s.id,
+                        skuCode: s.skuCode,
+                        variationId: s.variationId,
+                        size: s.size,
+                        fabricConsumption: s.fabricConsumption,
+                        mrp: s.mrp,
+                        targetStockQty: s.targetStockQty,
+                        trimsCost: s.trimsCost,
+                        liningCost: s.liningCost,
+                        packagingCost: s.packagingCost,
+                        laborMinutes: s.laborMinutes,
+                        isActive: s.isActive,
+                        currentBalance: balanceMap.get(s.id) ?? 0,
+                    })),
+                })),
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in getProductById:', error);
+            throw error;
+        }
+    });
+
+// ============================================
+// CATALOG FILTERS
+// ============================================
+
+/**
+ * Catalog filters response for dropdowns
+ */
+export interface CatalogFiltersResponse {
+    fabricTypes: { id: string; name: string }[];
+    fabrics: {
+        id: string;
+        name: string;
+        fabricTypeId: string;
+        colorName: string | null;
+        colorHex: string | null;
+        costPerUnit: number | null;
+    }[];
+    categories: string[];
+    genders: string[];
+}
+
+/**
+ * Server Function: Get catalog filters
+ *
+ * Fetches filter data for product forms (fabric types, fabrics, categories, genders).
+ * Used by UnifiedProductEditModal for dropdown options.
+ */
+export const getCatalogFilters = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<CatalogFiltersResponse> => {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            // Fetch fabric types
+            const fabricTypes = await prisma.fabricType.findMany({
+                where: { isActive: true },
+                select: { id: true, name: true },
+                orderBy: { name: 'asc' },
+            });
+
+            // Fetch fabrics (legacy FabricColor table for product variations)
+            const fabrics = await prisma.fabricColor.findMany({
+                where: { isActive: true },
+                select: {
+                    id: true,
+                    name: true,
+                    fabricTypeId: true,
+                    colorName: true,
+                    colorHex: true,
+                    costPerUnit: true,
+                },
+                orderBy: { name: 'asc' },
+            });
+
+            // Get distinct categories from products
+            const categoriesResult = await prisma.product.findMany({
+                where: { isActive: true },
+                select: { category: true },
+                distinct: ['category'],
+                orderBy: { category: 'asc' },
+            });
+            const categories = categoriesResult.map((c: { category: string }) => c.category).filter(Boolean);
+
+            // Static gender options
+            const genders = ['Men', 'Women', 'Unisex', 'Kids'];
+
+            return {
+                fabricTypes,
+                fabrics,
+                categories,
+                genders,
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in getCatalogFilters:', error);
+            throw error;
+        }
+    });

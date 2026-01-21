@@ -1,11 +1,14 @@
 /**
  * useVariationEditForm - Form state management for Variation level
+ *
+ * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { productsApi } from '@/services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { updateVariation } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
 import type { VariationFormData, VariationDetailData, ProductDetailData, CostCascade } from '../types';
 
@@ -24,6 +27,9 @@ export function useVariationEditForm({
 }: UseVariationEditFormOptions) {
   const queryClient = useQueryClient();
 
+  // Server Function
+  const updateVariationFn = useServerFn(updateVariation);
+
   // Form setup
   const form = useForm<VariationFormData>({
     defaultValues: getDefaultValues(variation),
@@ -38,19 +44,29 @@ export function useVariationEditForm({
     }
   }, [variation, reset]);
 
-  // Update mutation
+  // Update mutation using Server Function
   const updateMutation = useMutation({
     mutationFn: async (data: VariationFormData) => {
-      const response = await productsApi.updateVariation(variation.id, {
-        colorName: data.colorName,
-        colorHex: data.colorHex ?? undefined,
-        fabricId: data.fabricId ?? undefined,
-        hasLining: data.hasLining,
-        trimsCost: data.trimsCost ?? undefined,
-        packagingCost: data.packagingCost ?? undefined,
-        isActive: data.isActive,
+      const result = await updateVariationFn({
+        data: {
+          id: variation.id,
+          colorName: data.colorName,
+          colorHex: data.colorHex ?? undefined,
+          fabricId: data.fabricId ?? undefined,
+          hasLining: data.hasLining,
+          trimsCost: data.trimsCost ?? undefined,
+          packagingCost: data.packagingCost ?? undefined,
+          liningCost: data.liningCost ?? undefined,
+          laborMinutes: data.laborMinutes ?? undefined,
+          isActive: data.isActive,
+        },
       });
-      return response.data;
+
+      if (!result.success) {
+        throw new Error(result.error?.message ?? 'Failed to update variation');
+      }
+
+      return result.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['product', product.id] });

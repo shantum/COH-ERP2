@@ -5,30 +5,33 @@
  * - Sortable columns
  * - Search filtering
  * - Actions (view, edit)
+ *
+ * Uses Server Functions for data fetching instead of REST API.
  */
 
 import { useMemo } from 'react';
 import { type ColumnDef } from '@tanstack/react-table';
 import { Eye, Pencil, Plus, RefreshCw } from 'lucide-react';
+import { useServerFn } from '@tanstack/react-start';
 import { useQuery } from '@tanstack/react-query';
 
 import { DataTable } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { materialsApi } from '@/services/api';
+import { getTrims } from '@/server/functions/materials';
 
 interface Trim {
     id: string;
     code: string;
     name: string;
     category: string;
-    description?: string;
-    costPerUnit?: number;
+    description?: string | null;
+    costPerUnit?: number | null;
     unit: string;
-    supplierId?: string;
-    supplierName?: string;
-    leadTimeDays?: number;
-    minOrderQty?: number;
+    supplierId?: string | null;
+    supplierName?: string | null;
+    leadTimeDays?: number | null;
+    minOrderQty?: number | null;
     usageCount?: number;
     isActive: boolean;
 }
@@ -40,10 +43,13 @@ interface TrimsTableProps {
 }
 
 export function TrimsTable({ onEdit, onViewDetails, onAdd }: TrimsTableProps) {
-    // Fetch trims data
+    // Server Function hook
+    const getTrimsFn = useServerFn(getTrims);
+
+    // Fetch trims data using Server Function
     const { data, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['trimsCatalog'],
-        queryFn: () => materialsApi.getTrims().then(r => r.data),
+        queryFn: () => getTrimsFn({ data: {} }),
     });
 
     const items: Trim[] = data?.items || [];

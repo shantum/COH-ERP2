@@ -353,6 +353,151 @@ export const getMaterialsFlat = createServerFn({ method: 'GET' })
         }
     });
 
+// ============================================
+// TRIMS QUERY FUNCTIONS
+// ============================================
+
+const getTrimsSchema = z.object({
+    category: z.string().optional(),
+    search: z.string().optional(),
+});
+
+/**
+ * Get trims catalog
+ *
+ * Returns flat list of trim items with supplier info.
+ * Supports filtering by category and search term.
+ */
+export const getTrims = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTrimsSchema.parse(input ?? {}))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const trims = await prisma.trimItem.findMany({
+                where: {
+                    ...(data.category && { category: data.category }),
+                    ...(data.search && {
+                        OR: [
+                            { name: { contains: data.search, mode: 'insensitive' as const } },
+                            { code: { contains: data.search, mode: 'insensitive' as const } },
+                        ],
+                    }),
+                },
+                include: {
+                    supplier: { select: { id: true, name: true } },
+                    _count: {
+                        select: {
+                            productBomTemplates: true,
+                        },
+                    },
+                },
+                orderBy: [{ category: 'asc' }, { name: 'asc' }],
+            });
+
+            const items = trims.map((t) => ({
+                id: t.id,
+                code: t.code,
+                name: t.name,
+                category: t.category,
+                description: t.description,
+                costPerUnit: t.costPerUnit,
+                unit: t.unit,
+                supplierId: t.supplierId,
+                supplierName: t.supplier?.name || null,
+                leadTimeDays: t.leadTimeDays,
+                minOrderQty: t.minOrderQty,
+                usageCount: t._count.productBomTemplates,
+                isActive: t.isActive,
+                createdAt: t.createdAt.toISOString(),
+                updatedAt: t.updatedAt.toISOString(),
+            }));
+
+            return {
+                success: true,
+                items,
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// SERVICES QUERY FUNCTIONS
+// ============================================
+
+const getServicesSchema = z.object({
+    category: z.string().optional(),
+    search: z.string().optional(),
+});
+
+/**
+ * Get services catalog
+ *
+ * Returns flat list of service items with vendor info.
+ * Supports filtering by category and search term.
+ */
+export const getServices = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getServicesSchema.parse(input ?? {}))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const services = await prisma.serviceItem.findMany({
+                where: {
+                    ...(data.category && { category: data.category }),
+                    ...(data.search && {
+                        OR: [
+                            { name: { contains: data.search, mode: 'insensitive' as const } },
+                            { code: { contains: data.search, mode: 'insensitive' as const } },
+                        ],
+                    }),
+                },
+                include: {
+                    vendor: { select: { id: true, name: true } },
+                    _count: {
+                        select: {
+                            productBomTemplates: true,
+                        },
+                    },
+                },
+                orderBy: [{ category: 'asc' }, { name: 'asc' }],
+            });
+
+            const items = services.map((s) => ({
+                id: s.id,
+                code: s.code,
+                name: s.name,
+                category: s.category,
+                description: s.description,
+                costPerJob: s.costPerJob,
+                costUnit: s.costUnit,
+                vendorId: s.vendorId,
+                vendorName: s.vendor?.name || null,
+                leadTimeDays: s.leadTimeDays,
+                usageCount: s._count.productBomTemplates,
+                isActive: s.isActive,
+                createdAt: s.createdAt.toISOString(),
+                updatedAt: s.updatedAt.toISOString(),
+            }));
+
+            return {
+                success: true,
+                items,
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// MATERIALS FILTERS
+// ============================================
+
 /**
  * Get filters metadata for materials hierarchy
  *

@@ -1,11 +1,15 @@
 /**
  * useProductEditForm - Form state management for Product level
+ *
+ * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { productsApi, catalogApi } from '@/services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getProductById, getCatalogFilters } from '@/server/functions/products';
+import { updateProduct } from '@/server/functions/productsMutations';
 import { productsTreeKeys } from '../../hooks/useProductsTree';
 import type { ProductFormData, ProductDetailData, CatalogFilters, CostCascade } from '../types';
 
@@ -18,7 +22,12 @@ interface UseProductEditFormOptions {
 export function useProductEditForm({ productId, onSuccess, onError }: UseProductEditFormOptions) {
   const queryClient = useQueryClient();
 
-  // Fetch product data
+  // Server Functions
+  const getProductByIdFn = useServerFn(getProductById);
+  const getCatalogFiltersFn = useServerFn(getCatalogFilters);
+  const updateProductFn = useServerFn(updateProduct);
+
+  // Fetch product data using Server Function
   const {
     data: product,
     isLoading: isLoadingProduct,
@@ -26,21 +35,21 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
   } = useQuery<ProductDetailData>({
     queryKey: ['product', productId],
     queryFn: async () => {
-      const response = await productsApi.getById(productId);
-      return response.data;
+      const result = await getProductByIdFn({ data: { id: productId } });
+      return result as ProductDetailData;
     },
     enabled: !!productId,
   });
 
-  // Fetch catalog filters for dropdowns
+  // Fetch catalog filters using Server Function
   const {
     data: filters,
     isLoading: isLoadingFilters,
   } = useQuery<CatalogFilters>({
     queryKey: ['catalogFilters'],
     queryFn: async () => {
-      const response = await catalogApi.getFilters();
-      return response.data;
+      const result = await getCatalogFiltersFn({ data: undefined });
+      return result as CatalogFilters;
     },
   });
 
@@ -58,23 +67,32 @@ export function useProductEditForm({ productId, onSuccess, onError }: UseProduct
     }
   }, [product, reset]);
 
-  // Update mutation
+  // Update mutation using Server Function
   const updateMutation = useMutation({
     mutationFn: async (data: ProductFormData) => {
-      const response = await productsApi.update(productId, {
-        name: data.name,
-        styleCode: data.styleCode,
-        category: data.category,
-        productType: data.productType,
-        gender: data.gender,
-        fabricTypeId: data.fabricTypeId,
-        baseProductionTimeMins: data.baseProductionTimeMins,
-        defaultFabricConsumption: data.defaultFabricConsumption,
-        trimsCost: data.trimsCost,
-        packagingCost: data.packagingCost,
-        isActive: data.isActive,
+      const result = await updateProductFn({
+        data: {
+          id: productId,
+          name: data.name,
+          styleCode: data.styleCode,
+          category: data.category,
+          productType: data.productType,
+          gender: data.gender,
+          fabricTypeId: data.fabricTypeId,
+          baseProductionTimeMins: data.baseProductionTimeMins,
+          defaultFabricConsumption: data.defaultFabricConsumption,
+          trimsCost: data.trimsCost,
+          packagingCost: data.packagingCost,
+          liningCost: data.liningCost,
+          isActive: data.isActive,
+        },
       });
-      return response.data;
+
+      if (!result.success) {
+        throw new Error(result.error?.message ?? 'Failed to update product');
+      }
+
+      return result.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['product', productId] });

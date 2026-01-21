@@ -9,10 +9,13 @@
  * - Back button to return to previous level
  * - Unsaved changes warning
  * - Cost cascade visualization
+ *
+ * Migrated to use TanStack Start Server Functions instead of REST API.
  */
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Loader2 } from 'lucide-react';
 import {
   DialogStack,
@@ -21,7 +24,7 @@ import {
   DialogStackContent,
   useDialogStack,
 } from '@/components/ui/dialog-stack';
-import { productsApi, catalogApi } from '@/services/api';
+import { getProductById, getCatalogFilters } from '@/server/functions/products';
 import { ProductEditDialog } from './levels/ProductEditDialog';
 import { VariationEditDialog } from './levels/VariationEditDialog';
 import { SkuEditDialog } from './levels/SkuEditDialog';
@@ -75,28 +78,32 @@ export function UnifiedProductEditModal({
     return entries;
   });
 
-  // Fetch product data
+  // Server Functions
+  const getProductByIdFn = useServerFn(getProductById);
+  const getCatalogFiltersFn = useServerFn(getCatalogFilters);
+
+  // Fetch product data using Server Function
   const {
     data: product,
     isLoading: isLoadingProduct,
   } = useQuery<ProductDetailData>({
     queryKey: ['product', productId],
     queryFn: async () => {
-      const response = await productsApi.getById(productId!);
-      return response.data;
+      const result = await getProductByIdFn({ data: { id: productId! } });
+      return result as ProductDetailData;
     },
     enabled: isOpen && !!productId,
   });
 
-  // Fetch catalog filters
+  // Fetch catalog filters using Server Function
   const {
     data: filters,
     isLoading: isLoadingFilters,
   } = useQuery<CatalogFilters>({
     queryKey: ['catalogFilters'],
     queryFn: async () => {
-      const response = await catalogApi.getFilters();
-      return response.data;
+      const result = await getCatalogFiltersFn({ data: undefined });
+      return result as CatalogFilters;
     },
     enabled: isOpen,
   });

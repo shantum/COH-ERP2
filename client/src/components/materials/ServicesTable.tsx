@@ -5,29 +5,32 @@
  * - Sortable columns
  * - Search filtering
  * - Actions (view, edit)
+ *
+ * Uses Server Functions for data fetching instead of REST API.
  */
 
 import { useMemo } from 'react';
 import { type ColumnDef } from '@tanstack/react-table';
 import { Eye, Pencil, Plus, RefreshCw } from 'lucide-react';
+import { useServerFn } from '@tanstack/react-start';
 import { useQuery } from '@tanstack/react-query';
 
 import { DataTable } from '@/components/ui/data-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { materialsApi } from '@/services/api';
+import { getServices } from '@/server/functions/materials';
 
 interface Service {
     id: string;
     code: string;
     name: string;
     category: string;
-    description?: string;
-    costPerJob?: number;
+    description?: string | null;
+    costPerJob?: number | null;
     costUnit: string;
-    vendorId?: string;
-    vendorName?: string;
-    leadTimeDays?: number;
+    vendorId?: string | null;
+    vendorName?: string | null;
+    leadTimeDays?: number | null;
     usageCount?: number;
     isActive: boolean;
 }
@@ -46,10 +49,13 @@ function formatCostUnit(value: string | null | undefined): string {
 }
 
 export function ServicesTable({ onEdit, onViewDetails, onAdd }: ServicesTableProps) {
-    // Fetch services data
+    // Server Function hook
+    const getServicesFn = useServerFn(getServices);
+
+    // Fetch services data using Server Function
     const { data, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['servicesCatalog'],
-        queryFn: () => materialsApi.getServices().then(r => r.data),
+        queryFn: () => getServicesFn({ data: {} }),
     });
 
     const items: Service[] = data?.items || [];

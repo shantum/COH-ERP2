@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Loader2, Save } from 'lucide-react';
 import {
     Dialog,
@@ -18,7 +19,10 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { bomApi } from '@/services/api';
+import {
+    getSizeConsumptions,
+    updateSizeConsumptions,
+} from '@/server/functions/bomMutations';
 import { TypeBadge } from './cells';
 import type { BomComponentType } from './types';
 
@@ -51,10 +55,20 @@ export function SizeConsumptionModal({
     const [localValues, setLocalValues] = useState<Record<string, string>>({});
     const [hasChanges, setHasChanges] = useState(false);
 
+    // Server Functions
+    const getSizeConsumptionsFn = useServerFn(getSizeConsumptions);
+    const updateSizeConsumptionsFn = useServerFn(updateSizeConsumptions);
+
     // Fetch size consumptions
     const { data, isLoading, error } = useQuery({
         queryKey: ['sizeConsumptions', productId, roleId],
-        queryFn: () => bomApi.getSizeConsumptions(productId, roleId).then((r) => r.data),
+        queryFn: async () => {
+            const result = await getSizeConsumptionsFn({ data: { productId, roleId } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to fetch size consumptions');
+            }
+            return result.data;
+        },
         enabled: isOpen && !!productId && !!roleId,
     });
 
@@ -79,7 +93,13 @@ export function SizeConsumptionModal({
                     size,
                     quantity: parseFloat(value),
                 }));
-            return bomApi.updateSizeConsumptions(productId, roleId, consumptions);
+            const result = await updateSizeConsumptionsFn({
+                data: { productId, roleId, consumptions },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update size consumptions');
+            }
+            return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['sizeConsumptions', productId, roleId] });
