@@ -28,9 +28,9 @@
     }
   },
   "scripts": {
-    "build": "npx tsc",
-    "dev": "npx tsc --watch",
-    "typecheck": "npx tsc --noEmit",
+    "build": "./node_modules/.bin/tsc",
+    "dev": "./node_modules/.bin/tsc --watch",
+    "typecheck": "./node_modules/.bin/tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
