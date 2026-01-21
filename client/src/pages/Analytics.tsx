@@ -41,8 +41,9 @@ export default function Analytics() {
     const [dimension, setDimension] = useState<SalesDimension>('summary');
     const [activeMetric, setActiveMetric] = useState<'revenue' | 'units' | 'orders'>('revenue');
 
-    // Column widths state for grid
+    // Column widths state for grid (SSR-safe initialization)
     const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+        if (typeof window === 'undefined') return {};
         const saved = localStorage.getItem('analyticsGridColumnWidths');
         if (saved) { try { return JSON.parse(saved); } catch { return {}; } }
         return {};

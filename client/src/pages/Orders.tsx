@@ -6,9 +6,9 @@
  */
 
 import { useState, useMemo, useCallback } from 'react';
-import { useSearch, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { OrdersSearchParams } from '@coh/shared';
+import { Route } from '../routes/_authenticated/orders';
 import { Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
 
 // Custom hooks
@@ -52,8 +52,12 @@ export default function Orders() {
     const queryClient = useQueryClient();
     const { user } = useAuth();
 
+    // Get loader data from route (SSR pre-fetched data)
+    const loaderData = Route.useLoaderData();
+
     // View and page state - persisted in URL via TanStack Router
-    const search = useSearch({ strict: false }) as OrdersSearchParams;
+    // Using Route.useSearch() for proper SSR support
+    const search = Route.useSearch();
     const navigate = useNavigate();
     const view = (search.view || 'open') as OrderView;
     const page = search.page || 1;
@@ -176,6 +180,8 @@ export default function Orders() {
         isSSEConnected,
         // Pass shipped filter for server-side filtering (rto, cod_pending)
         shippedFilter: view === 'shipped' && shippedFilter !== 'all' ? shippedFilter : undefined,
+        // Pass loader data for instant SSR hydration
+        initialData: loaderData?.orders ?? null,
     });
 
     // Search data hook - only active when searching

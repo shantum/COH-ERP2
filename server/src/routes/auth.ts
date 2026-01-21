@@ -191,11 +191,15 @@ router.post(
 );
 
 // Get current user
+// Supports both Authorization header (legacy/tRPC) and auth_token cookie (SSR/Server Functions)
 router.get(
     '/me',
     asyncHandler(async (req: Request, res: Response) => {
+        // Try Authorization header first (for tRPC/legacy), then cookie (for SSR)
         const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
+        const headerToken = authHeader && authHeader.split(' ')[1];
+        const cookieToken = req.cookies?.auth_token;
+        const token = headerToken || cookieToken;
 
         if (!token) {
             res.status(401).json({ error: 'No token provided' });

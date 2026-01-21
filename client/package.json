@@ -10,7 +10,7 @@
     "dev:spa": "vite --config vite.spa.config.ts",
     "build": "vite build --config vite.spa.config.ts",
     "build:ssr": "vite build",
-    "start": "node .output/server/index.mjs",
+    "start": "node dist/server/server.js",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "playwright test",

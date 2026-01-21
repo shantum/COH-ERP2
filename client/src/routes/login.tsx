@@ -1,13 +1,20 @@
 /**
  * Login Route - /login
  *
- * Auth check happens in component (not beforeLoad) to handle SSR properly.
+ * Accepts ?redirect=path to redirect after successful login.
+ * Also handles beforeLoad to check if already authenticated via cookie.
  */
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { z } from 'zod';
+import { getAuthUser } from '../server/functions/auth';
 
 const LoginPage = lazy(() => import('../pages/Login'));
+
+// Search param validation
+const loginSearchSchema = z.object({
+    redirect: z.string().optional(),
+});
 
 function LoadingSpinner() {
     return (
@@ -18,25 +25,30 @@ function LoadingSpinner() {
 }
 
 function LoginRoute() {
-    const auth = useAuth();
+    const navigate = useNavigate();
+    const { redirect: redirectTo } = Route.useSearch();
 
-    // Show loading spinner while auth is being determined
-    if (auth.isLoading) {
-        return <LoadingSpinner />;
-    }
-
-    // Redirect to home if already authenticated (declarative redirect)
-    if (auth.isAuthenticated) {
-        return <Navigate to="/" />;
-    }
+    // Callback to handle successful login - navigate to redirect target
+    const onLoginSuccess = () => {
+        navigate({ to: redirectTo || '/' });
+    };
 
     return (
         <Suspense fallback={<LoadingSpinner />}>
-            <LoginPage />
+            <LoginPage onLoginSuccess={onLoginSuccess} />
         </Suspense>
     );
 }
 
 export const Route = createFileRoute('/login')({
+    validateSearch: (search) => loginSearchSchema.parse(search),
+    beforeLoad: async () => {
+        // Check if already authenticated via cookie
+        const user = await getAuthUser();
+        if (user) {
+            // Already logged in - redirect to home
+            throw redirect({ to: '/' });
+        }
+    },
     component: LoginRoute,
 });

@@ -172,8 +172,10 @@ export default function InventoryReconciliation() {
         }
     };
 
-    // Download CSV template
+    // Download CSV template (SSR-safe - DOM/URL APIs only available in browser)
     const downloadTemplate = () => {
+        if (typeof window === 'undefined') return;
+
         const headers = 'SKU Code,Physical Qty\n';
         const sampleData = localItems.slice(0, 3).map(i => `${i.skuCode},`).join('\n');
         const csv = headers + sampleData;

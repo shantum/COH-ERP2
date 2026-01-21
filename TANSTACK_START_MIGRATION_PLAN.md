@@ -250,14 +250,74 @@ const { value, setValue, handleBlur, isSaving, error } = useDebouncedAutoSave({
 | `ShipByDateCell` | Click-to-select popover | No (instant selection) |
 | `TrackingInfoCell` | Form popover with Save button | No (explicit save) |
 
+### ✅ Phase 4: Server Functions & Route Loaders - COMPLETE (2026-01-21)
+
+**Goal:** Replace tRPC data fetching with TanStack Start Server Functions for key pages.
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Orders Route Loader | ✅ Done | `getOrders()` Server Function with Kysely |
+| Customers Route Loader | ✅ Done | `getCustomersList()` with search/pagination |
+| Inventory Route Loader | ✅ Done | `getInventoryList()` with stock filters |
+| Products Route Loader | ✅ Done | `getProductsTree()` hierarchical query |
+| Feature Flag System | ✅ Done | `serverFunctionFlags.ts` for gradual rollout |
+| Fallback Pattern | ✅ Done | Auto-fallback to tRPC if Server Function fails |
+| Simple Mutations Domain Layer | ✅ Done | `lineMutations.ts` in shared package |
+| Simple Mutations Server Functions | ✅ Done | Ready but flags disabled pending testing |
+
+#### Key Files Created (Phase 4)
+
+| File | Purpose |
+|------|---------|
+| `client/src/server/functions/orders.ts` | Orders Server Function |
+| `client/src/server/functions/customers.ts` | Customers Server Function |
+| `client/src/server/functions/inventory.ts` | Inventory Server Function |
+| `client/src/server/functions/products.ts` | Products Server Function |
+| `client/src/server/functions/orderMutations.ts` | Line mutation Server Functions |
+| `client/src/config/serverFunctionFlags.ts` | Feature flags for migration |
+| `shared/src/database/queries/ordersListKysely.ts` | Kysely orders query |
+| `shared/src/database/queries/customersListKysely.ts` | Kysely customers query |
+| `shared/src/database/queries/inventoryListKysely.ts` | Kysely inventory query |
+| `shared/src/database/queries/productsTreeKysely.ts` | Kysely products tree query |
+| `shared/src/domain/orders/lineMutations.ts` | Domain layer for line mutations |
+
+#### Feature Flags Status
+
+```typescript
+// client/src/config/serverFunctionFlags.ts
+USE_SERVER_FUNCTIONS = {
+    ordersList: true,           // ✅ Enabled
+    customersList: true,        // ✅ Enabled
+    inventoryList: true,        // ✅ Enabled
+    productsList: true,         // ✅ Enabled
+    lineDeliveryMutations: false,  // Ready, pending testing
+    lineRtoMutations: false,       // Ready, pending testing
+    lineCancelMutations: false,    // Ready, pending testing
+}
+```
+
+#### Key Pattern: Proper Fallback
+
+```typescript
+// Pages use this pattern for graceful degradation:
+const hasLoaderData = USE_SERVER_FUNCTIONS.flag && loaderData?.data;
+
+const { data } = trpc.query.useQuery(params, {
+    enabled: !hasLoaderData,  // Falls back to tRPC if Server Function fails
+});
+
+const effectiveData = hasLoaderData ? loaderData.data : data;
+```
+
 ### ⏳ Remaining Phases
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Phase 4: Server Functions | ⏳ Optional | Migrate tRPC → Server Functions |
-| Phase 5: Full TanStack Start | ⏳ Optional | Replace Express backend |
+| Phase 4.5: Enable Mutations | ⏳ Pending | Test and enable line mutation flags |
+| Phase 5: Complex Mutations | ⏳ Deferred | allocate, ship, cancelOrder (high complexity) |
+| Phase 6: Full TanStack Start | ⏳ Optional | Replace Express backend entirely |
 
-> **Note:** Phases 3.5 and 3.6 established all core patterns. The app is fully functional. Phases 4-5 are optional backend migrations.
+> **Note:** Phase 4 Route Loaders complete. Simple mutations ready but need testing. Complex mutations deferred due to high complexity.
 
 ---
 
@@ -266,17 +326,17 @@ const { value, setValue, handleBlur, isSaving, error } = useDebouncedAutoSave({
 | Layer | Technology | Status |
 |-------|-----------|--------|
 | **Frontend Router** | TanStack Router | ✅ Complete |
-| **Route Loaders** | Dashboard prefetching | ✅ Complete |
+| **Route Loaders** | Server Functions + Kysely | ✅ Complete (4 pages) |
 | **Document Titles** | useDocumentTitle hook | ✅ Complete |
 | **Breadcrumbs** | Breadcrumbs component | ✅ Complete |
 | **Loading States** | RouteLoadingBar | ✅ Complete |
 | **URL-Driven Modals** | useUrlModal hook | ✅ Complete (Orders, Customers) |
 | **Debounced Auto-Save** | useDebouncedAutoSave hook | ✅ Complete (NotesCell) |
 | **Inline Edit Validation** | Zod schemas | ✅ Complete |
-| **Data Fetching** | tRPC + TanStack Query | 🔄 Hybrid (works fine) |
-| **Mutations** | tRPC mutations | 🔄 Hybrid (works fine) |
+| **Data Fetching** | Server Functions (primary) + tRPC (fallback) | ✅ Migrated |
+| **Mutations** | tRPC mutations (Domain layer ready) | 🔄 Hybrid |
 | **Backend** | Express + tRPC | 🔄 Unchanged |
-| **Database** | Prisma + PostgreSQL | 🔄 Unchanged |
+| **Database** | Prisma + Kysely | ✅ Dual ORM |
 | **Validation** | Zod (search params + inline edits) | ✅ Complete |
 
 ### Core Constraints (Your Requirements)
@@ -938,5 +998,5 @@ cd client && npm run build
 
 ---
 
-**Last Updated:** 2026-01-20 (Phase 3.6 Complete)
+**Last Updated:** 2026-01-21 (Phase 4 Complete - Server Functions & Route Loaders)
 

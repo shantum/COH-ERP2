@@ -10,9 +10,8 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { useSearch, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2 } from 'lucide-react';
-import type { ProductsSearchParams } from '@coh/shared';
 
 import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
 import { DetailPanel } from '../components/products/DetailPanel';
@@ -23,9 +22,13 @@ import { useProductsTree } from '../components/products/hooks/useProductsTree';
 import { BomProductList, ConsumptionGridView, ConsumptionImportView } from '../components/products/bom';
 import { FabricMappingView } from '../components/products/fabric-mapping';
 import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
+import { Route } from '../routes/_authenticated/products';
+import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
 
 export default function Products() {
-    const search = useSearch({ strict: false }) as ProductsSearchParams;
+    // Get loader data from route (SSR pre-fetched data)
+    const loaderData = Route.useLoaderData();
+    const search = Route.useSearch();
     const navigate = useNavigate();
 
     // Active main tab from URL
@@ -41,8 +44,15 @@ export default function Products() {
     // Search query
     const [searchQuery, setSearchQuery] = useState('');
 
+    // Check if we have valid loader data (Server Function succeeded)
+    const hasLoaderData = USE_SERVER_FUNCTIONS.productsList && loaderData?.productsTree;
+
     // Fetch products tree for URL resolution (only for BOM tab)
-    const { data: productsData } = useProductsTree({ enabled: activeTab === 'bom' });
+    // Pass initialData from route loader for instant hydration
+    const { data: productsData } = useProductsTree({
+        enabled: activeTab === 'bom',
+        initialData: hasLoaderData ? loaderData.productsTree : null,
+    });
 
     // Resolve selected node from URL params when data loads (BOM tab)
     useEffect(() => {

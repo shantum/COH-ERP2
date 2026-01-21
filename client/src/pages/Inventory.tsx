@@ -20,10 +20,12 @@ import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
-import { useSearch, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { trpc } from '../services/trpc';
 import { reportsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
+import { Route } from '../routes/_authenticated/inventory';
+import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -45,8 +47,9 @@ export default function Inventory() {
     const gridRef = useRef<AgGridReact>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // URL state via TanStack Router
-    const search = useSearch({ from: '/_authenticated/inventory' });
+    // Get loader data from route (SSR pre-fetched data)
+    const loaderData = Route.useLoaderData();
+    const search = Route.useSearch();
     const navigate = useNavigate();
 
     // Stock filter from URL (URL-persisted for bookmarking/sharing)
@@ -70,11 +73,25 @@ export default function Inventory() {
         searchInputRef.current?.focus();
     }, []);
 
-    // Fetch inventory data via tRPC
-    const { data: inventoryData, isLoading, refetch, isFetching } = trpc.inventory.getAllBalances.useQuery({
-        includeCustomSkus: false,
-        limit: 10000,
-    });
+    // Check if we have valid loader data (Server Function succeeded)
+    const hasLoaderData = USE_SERVER_FUNCTIONS.inventoryList && loaderData?.inventory;
+
+    // Fetch inventory data via tRPC (with fallback when Server Function fails)
+    const { data: inventoryData, isLoading, refetch, isFetching } = trpc.inventory.getAllBalances.useQuery(
+        {
+            includeCustomSkus: false,
+            limit: 10000,
+        },
+        {
+            // Only skip tRPC when Server Function is enabled AND loader has data
+            enabled: !hasLoaderData,
+        }
+    );
+
+    // Use loader data when available, otherwise use tRPC data
+    const effectiveInventoryData = hasLoaderData && loaderData?.inventory
+        ? loaderData.inventory
+        : inventoryData;
 
     // Fetch demand data (top products by units sold)
     const { data: demandData, isLoading: demandLoading } = useQuery({
@@ -96,7 +113,7 @@ export default function Inventory() {
 
     // Filter data by stock status
     const filteredData = useMemo(() => {
-        const items = inventoryData?.items || [];
+        const items = effectiveInventoryData?.items || [];
 
         switch (stockFilter) {
             case 'in_stock':
@@ -108,11 +125,11 @@ export default function Inventory() {
             default:
                 return items;
         }
-    }, [inventoryData?.items, stockFilter]);
+    }, [effectiveInventoryData?.items, stockFilter]);
 
     // Stats for header cards (including total pieces)
     const stats = useMemo(() => {
-        const items = inventoryData?.items || [];
+        const items = effectiveInventoryData?.items || [];
         const totalPieces = items.reduce((sum, i) => sum + (i.availableBalance || 0), 0);
         return {
             total: items.length,
@@ -121,11 +138,11 @@ export default function Inventory() {
             lowStock: items.filter(i => i.status === 'below_target' && i.availableBalance > 0).length,
             outOfStock: items.filter(i => i.availableBalance === 0).length,
         };
-    }, [inventoryData?.items]);
+    }, [effectiveInventoryData?.items]);
 
     // Aggregate inventory by product (for "Most Stocked Products")
     const mostStockedProducts = useMemo(() => {
-        const items = inventoryData?.items || [];
+        const items = effectiveInventoryData?.items || [];
         const productMap = new Map<string, ProductStock>();
 
         for (const item of items) {
@@ -162,7 +179,7 @@ export default function Inventory() {
                 // Sort colors by available descending
                 colors: p.colors.sort((a, b) => b.available - a.available).slice(0, 3),
             }));
-    }, [inventoryData?.items]);
+    }, [effectiveInventoryData?.items]);
 
     // Column definitions
     const columnDefs = useMemo(() => [

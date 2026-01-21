@@ -18,8 +18,15 @@ export const productsTreeKeys = {
 
 /**
  * Hook to fetch the full products tree
+ *
+ * Supports initialData from route loaders for instant SSR hydration.
+ * When initialData is provided, the hook starts with that data and
+ * skips the initial fetch.
  */
-export function useProductsTree(options?: { enabled?: boolean }) {
+export function useProductsTree(options?: {
+    enabled?: boolean;
+    initialData?: ProductTreeResponse | null;
+}) {
     const query = useQuery<ProductTreeResponse>({
         queryKey: productsTreeKeys.tree(),
         queryFn: async () => {
@@ -28,6 +35,8 @@ export function useProductsTree(options?: { enabled?: boolean }) {
         },
         staleTime: 30 * 1000, // 30 seconds
         enabled: options?.enabled !== false,
+        // Use initialData from route loader if available
+        initialData: options?.initialData ?? undefined,
     });
 
     return {

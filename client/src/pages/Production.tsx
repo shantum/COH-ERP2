@@ -253,10 +253,13 @@ export default function Production() {
 
         lines.push(`\n*Total ${totalPcs} pcs*`);
 
-        navigator.clipboard.writeText(lines.join('\n')).then(() => {
-            setCopiedDate(group.date);
-            setTimeout(() => setCopiedDate(null), 2000);
-        });
+        // Guard for SSR safety (clipboard only available in browser)
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+            navigator.clipboard.writeText(lines.join('\n')).then(() => {
+                setCopiedDate(group.date);
+                setTimeout(() => setCopiedDate(null), 2000);
+            });
+        }
     };
 
     // Group and consolidate batches by date, then by product/color

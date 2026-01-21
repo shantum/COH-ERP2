@@ -26,6 +26,7 @@ export default defineConfig({
       // Stub out TanStack Start and vinxi imports for SPA mode (they require Node.js)
       '@tanstack/react-start': path.resolve(__dirname, 'src/stubs/react-start.ts'),
       '@tanstack/react-start/client': path.resolve(__dirname, 'src/stubs/react-start.ts'),
+      '@tanstack/react-start/server': path.resolve(__dirname, 'src/stubs/react-start-server.ts'),
       '@tanstack/react-start/server-entry': path.resolve(__dirname, 'src/stubs/react-start.ts'),
       'vinxi/http': path.resolve(__dirname, 'src/stubs/vinxi.ts'),
       'vinxi/runtime/http': path.resolve(__dirname, 'src/stubs/vinxi.ts'),
@@ -46,6 +47,7 @@ export default defineConfig({
       external: [
         '@tanstack/react-start',
         '@tanstack/react-start/client',
+        '@tanstack/react-start/server',
         '@tanstack/react-start/server-entry',
         '@tanstack/start-storage-context',
       ],

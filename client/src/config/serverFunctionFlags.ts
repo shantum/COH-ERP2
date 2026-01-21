@@ -19,10 +19,10 @@
 export const USE_SERVER_FUNCTIONS = {
     /**
      * orders.list - Main orders listing endpoint
-     * Status: DISABLED - Server Functions require TanStack Start SSR mode
-     * Set to true only when running with `npm run dev` (SSR mode)
+     * Status: ENABLED - Using TanStack Start Server Function with Kysely
+     *         Vite SSR externals configured to prevent pg bundling in client.
      */
-    ordersList: false,
+    ordersList: true,
 
     /**
      * orders.get - Single order detail
@@ -37,22 +37,36 @@ export const USE_SERVER_FUNCTIONS = {
     ordersMutations: false,
 
     /**
+     * Simple line mutations (markLineDelivered, markLineRto, receiveLineRto, cancelLine)
+     * Status: PENDING - Server Functions available, waiting for testing
+     */
+    lineDeliveryMutations: false,
+    lineRtoMutations: false,
+    lineCancelMutations: false,
+
+    /**
      * inventory.getBalances - Inventory balance lookup
      * Status: PENDING - Simple read, good candidate
      */
     inventoryGetBalances: false,
 
     /**
-     * customers.list - Customer listing
-     * Status: PENDING - Simple read, good candidate
+     * inventory.list - Inventory listing page
+     * Status: ENABLED - Using TanStack Start Server Function with Kysely
      */
-    customersList: false,
+    inventoryList: true,
+
+    /**
+     * customers.list - Customer listing
+     * Status: ENABLED - Using TanStack Start Server Function with Kysely
+     */
+    customersList: true,
 
     /**
      * products.list - Product tree listing
-     * Status: PENDING - Tree structure, medium complexity
+     * Status: ENABLED - Using TanStack Start Server Function with Kysely
      */
-    productsList: false,
+    productsList: true,
 } as const;
 
 /**

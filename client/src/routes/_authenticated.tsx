@@ -2,13 +2,12 @@
  * Authenticated Layout Route
  *
  * All routes under /_authenticated require authentication.
- * Auth check happens in component (not beforeLoad) to handle SSR properly.
- * During SSR, router context has static default values, so beforeLoad
- * redirects don't work correctly with TanStack Start.
+ * Auth check happens in beforeLoad using Server Function (SSR-safe).
+ * This ensures loaders don't run for unauthenticated users.
  */
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { getAuthUser } from '../server/functions/auth';
 
 const Layout = lazy(() => import('../components/Layout'));
 
@@ -21,23 +20,6 @@ function LoadingSpinner() {
 }
 
 function AuthenticatedLayout() {
-    const auth = useAuth();
-
-    // During SSR (typeof window === 'undefined'), isLoading is false and isAuthenticated is false
-    // We render the layout shell during SSR - client will check auth and redirect if needed
-    const isSSR = typeof window === 'undefined';
-
-    // Show loading spinner while auth is being determined (client-side only)
-    if (!isSSR && auth.isLoading) {
-        return <LoadingSpinner />;
-    }
-
-    // Redirect to login if not authenticated (client-side only)
-    // During SSR, we skip this check and render the layout
-    if (!isSSR && !auth.isAuthenticated) {
-        return <Navigate to="/login" />;
-    }
-
     return (
         <Suspense fallback={<LoadingSpinner />}>
             <Layout />
@@ -46,5 +28,28 @@ function AuthenticatedLayout() {
 }
 
 export const Route = createFileRoute('/_authenticated')({
+    beforeLoad: async ({ context, location }) => {
+        // Check if we already have auth in context (from parent route)
+        if (context.auth?.isAuthenticated && context.auth?.user) {
+            return { user: context.auth.user };
+        }
+
+        // Call server function to verify auth from cookie
+        const user = await getAuthUser();
+
+        if (!user) {
+            // Not authenticated - redirect to login
+            // Use location.pathname from router context (SSR-safe)
+            throw redirect({
+                to: '/login',
+                search: {
+                    redirect: location.pathname,
+                },
+            });
+        }
+
+        // Return user to context for child routes
+        return { user };
+    },
     component: AuthenticatedLayout,
 });

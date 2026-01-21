@@ -22,4 +22,26 @@ export default defineConfig({
     tanstackStart(),
     viteReact(),
   ],
+  // SSR configuration: externalize Node.js-only packages
+  // These packages should only run on the server, not be bundled for client
+  ssr: {
+    // Packages that should remain as external imports in SSR bundle
+    // (not bundled, loaded from node_modules at runtime)
+    external: [
+      'pg',
+      'pg-pool',
+      'pg-native',
+    ],
+    // Don't externalize these - they need to be bundled for consistent module resolution
+    noExternal: [
+      '@tanstack/react-start',
+      '@tanstack/react-router',
+      'kysely',
+      '@coh/shared',
+    ],
+  },
+  // Optimize deps - exclude Node.js packages from client pre-bundling
+  optimizeDeps: {
+    exclude: ['pg', 'pg-pool'],
+  },
 })

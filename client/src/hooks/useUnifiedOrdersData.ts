@@ -17,10 +17,12 @@
 
 import { useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
+import { getOrders } from '../server/functions/orders';
 
 // Server Function types only - actual function loaded dynamically if enabled
 // This prevents @tanstack/react-start from being bundled in SPA mode
@@ -71,6 +73,8 @@ interface UseUnifiedOrdersDataOptions {
     isSSEConnected?: boolean;
     /** Filter for shipped view (rto, cod_pending) */
     shippedFilter?: ShippedFilter;
+    /** Initial data from route loader (SSR) */
+    initialData?: GetOrdersResponse | null;
 }
 
 export function useUnifiedOrdersData({
@@ -79,6 +83,7 @@ export function useUnifiedOrdersData({
     selectedCustomerId,
     isSSEConnected = false,
     shippedFilter,
+    initialData,
 }: UseUnifiedOrdersDataOptions) {
     const queryClient = useQueryClient();
 
@@ -109,16 +114,25 @@ export function useUnifiedOrdersData({
         ...(currentView === 'shipped' && shippedFilter ? { shippedFilter } : {}),
     }), [currentView, page, shippedFilter]);
 
-    // Server Function path - DISABLED for SPA mode
+    // Server Function path - uses useServerFn hook for proper client-side calls
     // Server Functions require TanStack Start SSR mode to work
-    // When enabled, this would use direct DB access via Server Function
+    const getOrdersFn = useServerFn(getOrders);
+
+    // Check if initial data matches current query params (view/page)
+    // Only use initial data if it matches the current request
+    const initialDataMatchesQuery = initialData &&
+        initialData.view === currentView &&
+        initialData.pagination?.page === page;
+
     const serverFnQuery = useQuery<GetOrdersResponse>({
         queryKey: ['orders', 'list', 'server-fn', queryParams],
         queryFn: async () => {
-            // Dynamic import to avoid bundling @tanstack/react-start in SPA mode
-            const { getOrders } = await import('../server/functions/orders');
-            return getOrders({ data: queryParams });
+            const result = await getOrdersFn({ data: queryParams });
+            return result as GetOrdersResponse;
         },
+        // Use initial data from route loader if it matches current query
+        // This enables instant page load from SSR
+        initialData: initialDataMatchesQuery ? initialData : undefined,
         staleTime: STALE_TIME,
         gcTime: GC_TIME,
         refetchOnWindowFocus: false,
@@ -130,7 +144,7 @@ export function useUnifiedOrdersData({
             }
             return pollInterval;
         },
-        // Only enable when Server Function flag is on (disabled for SPA)
+        // Only enable when Server Function flag is on
         enabled: USE_SERVER_FUNCTIONS.ordersList,
     });
 
@@ -157,7 +171,9 @@ export function useUnifiedOrdersData({
     );
 
     // Select active query based on feature flag
-    const ordersQuery = USE_SERVER_FUNCTIONS.ordersList ? serverFnQuery : trpcQuery;
+    // Type assertion needed because tRPC and Server Function have different return types
+    // but both conform to GetOrdersResponse structure
+    const ordersQuery = (USE_SERVER_FUNCTIONS.ordersList ? serverFnQuery : trpcQuery) as typeof serverFnQuery;
 
     // ==========================================
     // HYBRID LOADING: Prefetch adjacent pages and related views

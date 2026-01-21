@@ -3,10 +3,12 @@ import { customersApi, ordersApi } from '../services/api';
 import { trpc } from '../services/trpc';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
-import { useSearch, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { UnifiedOrderModal } from '../components/orders';
 import type { Order } from '../types';
 import { useCustomersUrlModal } from '../hooks/useUrlModal';
+import { USE_SERVER_FUNCTIONS } from '../config/serverFunctionFlags';
+import { Route } from '../routes/_authenticated/customers';
 
 // Debounce hook for search
 function useDebounce<T>(value: T, delay: number): T {
@@ -61,8 +63,11 @@ const TIME_PERIOD_OPTIONS = [
 ];
 
 export default function Customers() {
+    // Get loader data from route (SSR pre-fetched data)
+    const loaderData = Route.useLoaderData();
+
     // URL state via TanStack Router
-    const urlSearch = useSearch({ from: '/_authenticated/customers' });
+    const urlSearch = Route.useSearch();
     const navigate = useNavigate();
 
     // URL-persisted state (enables bookmarking/sharing)
@@ -160,13 +165,28 @@ export default function Customers() {
         setModalOrder(null);
     }, [closeModal]);
 
-    // Server-side search and pagination (using tRPC)
-    const { data: customersData, isLoading, isFetching } = trpc.customers.list.useQuery({
-        ...(debouncedSearch && { search: debouncedSearch }),
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE
-    });
-    const customers = customersData?.customers;
+    // Check if we have valid loader data (Server Function succeeded)
+    const hasLoaderData = USE_SERVER_FUNCTIONS.customersList && tab === 'all' && loaderData?.customers;
+
+    // Server-side search and pagination
+    // When Server Function is enabled AND has data, skip tRPC; otherwise use tRPC as fallback
+    const { data: customersData, isLoading, isFetching } = trpc.customers.list.useQuery(
+        {
+            ...(debouncedSearch && { search: debouncedSearch }),
+            limit: PAGE_SIZE,
+            offset: page * PAGE_SIZE,
+        },
+        {
+            // Only skip tRPC when Server Function is enabled AND loader has data
+            // This ensures fallback to tRPC if Server Function fails
+            enabled: !hasLoaderData,
+        }
+    );
+
+    // Use loader data when available, otherwise use tRPC data
+    const customers = hasLoaderData && loaderData?.customers
+        ? loaderData.customers.customers
+        : customersData?.customers;
     const { data: overviewStats } = useQuery({
         queryKey: ['customerOverviewStats', timePeriod],
         queryFn: () => customersApi.getOverviewStats(timePeriod).then(r => r.data),

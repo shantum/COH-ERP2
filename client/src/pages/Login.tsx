@@ -2,9 +2,14 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useAuth } from '../hooks/useAuth';
 
-export default function Login() {
+interface LoginProps {
+    /** Optional callback after successful login. If not provided, navigates to '/' */
+    onLoginSuccess?: () => void;
+}
+
+export default function Login({ onLoginSuccess }: LoginProps) {
     const [email, setEmail] = useState('admin@coh.com');
-    const [password, setPassword] = useState('admin123');
+    const [password, setPassword] = useState('XOFiya@34');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const { login } = useAuth();
@@ -17,7 +22,12 @@ export default function Login() {
 
         try {
             await login(email, password);
-            navigate({ to: '/' });
+            // Use callback if provided, otherwise navigate to home
+            if (onLoginSuccess) {
+                onLoginSuccess();
+            } else {
+                navigate({ to: '/' });
+            }
         } catch (err: any) {
             setError(err.response?.data?.error || 'Login failed');
         } finally {
@@ -73,7 +83,7 @@ export default function Login() {
                     </form>
 
                     <p className="mt-6 text-center text-sm text-gray-500">
-                        Default: admin@coh.com / admin123
+                        Default: admin@coh.com / XOFiya@34
                     </p>
                 </div>
             </div>

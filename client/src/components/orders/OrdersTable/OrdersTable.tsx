@@ -90,6 +90,7 @@ export function OrdersTable({
 
     // Custom headers state
     const [customHeaders, setCustomHeaders] = useState<Record<string, string>>(() => {
+        if (typeof window === 'undefined') return {};
         const saved = localStorage.getItem('ordersTableHeaders');
         return saved ? JSON.parse(saved) : {};
     });
@@ -106,7 +107,9 @@ export function OrdersTable({
     const setCustomHeader = useCallback((colId: string, headerName: string) => {
         setCustomHeaders((prev) => {
             const updated = { ...prev, [colId]: headerName };
-            localStorage.setItem('ordersTableHeaders', JSON.stringify(updated));
+            if (typeof window !== 'undefined') {
+                localStorage.setItem('ordersTableHeaders', JSON.stringify(updated));
+            }
             return updated;
         });
     }, []);
