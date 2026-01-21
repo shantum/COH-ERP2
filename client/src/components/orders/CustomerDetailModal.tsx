@@ -15,7 +15,9 @@ import {
     RotateCcw, Truck,
     Heart, AlertCircle, CheckCircle2, XCircle
 } from 'lucide-react';
-import { trpc } from '../../services/trpc';
+import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
+import { getCustomer } from '../../server/functions/customers';
 import {
     TIER_CONFIG,
     calculateHealthScore,
@@ -381,11 +383,13 @@ export function CustomerDetailModal({
 }: CustomerDetailModalProps) {
     const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
 
-    // Fetch customer data if customerId is provided and no customer object (using tRPC)
-    const { data: fetchedCustomer, isLoading: fetchLoading } = trpc.customers.get.useQuery(
-        { id: customerId! },
-        { enabled: !!customerId && !providedCustomer }
-    );
+    // Fetch customer data if customerId is provided and no customer object
+    const getCustomerFn = useServerFn(getCustomer);
+    const { data: fetchedCustomer, isLoading: fetchLoading } = useQuery({
+        queryKey: ['customers', 'detail', customerId],
+        queryFn: () => getCustomerFn({ data: { id: customerId! } }),
+        enabled: !!customerId && !providedCustomer,
+    });
 
     // Use provided customer or fetched customer
     const customer = providedCustomer || fetchedCustomer;

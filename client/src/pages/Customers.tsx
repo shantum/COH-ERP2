@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { customersApi, ordersApi } from '../services/api';
-import { trpc } from '../services/trpc';
+import { getCustomersList, getCustomer } from '../server/functions/customers';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
@@ -132,10 +133,12 @@ export default function Customers() {
     }, [debouncedSearch]);
 
     // Fetch customer's most recent order when selected
-    const { data: customerOrderData, isLoading: isLoadingCustomerOrder } = trpc.customers.get.useQuery(
-        { id: selectedCustomerId! },
-        { enabled: !!selectedCustomerId && !modalOrder }
-    );
+    const getCustomerFn = useServerFn(getCustomer);
+    const { data: customerOrderData, isLoading: isLoadingCustomerOrder } = useQuery({
+        queryKey: ['customers', 'detail', selectedCustomerId],
+        queryFn: () => getCustomerFn({ data: { id: selectedCustomerId! } }),
+        enabled: !!selectedCustomerId && !modalOrder,
+    });
 
     // Fetch full order when customer data is available
     useEffect(() => {
@@ -167,22 +170,17 @@ export default function Customers() {
     // Check if we have valid loader data (Server Function succeeded)
     const hasLoaderData = tab === 'all' && !!loaderData?.customers;
 
-    // Server-side search and pagination
-    // When Server Function is enabled AND has data, skip tRPC; otherwise use tRPC as fallback
-    const { data: customersData, isLoading, isFetching } = trpc.customers.list.useQuery(
-        {
-            ...(debouncedSearch && { search: debouncedSearch }),
-            limit: PAGE_SIZE,
-            offset: page * PAGE_SIZE,
-        },
-        {
-            // Only skip tRPC when Server Function is enabled AND loader has data
-            // This ensures fallback to tRPC if Server Function fails
-            enabled: !hasLoaderData,
-        }
-    );
+    // Server-side search and pagination using Server Functions
+    const getCustomersListFn = useServerFn(getCustomersList);
+    const { data: customersData, isLoading, isFetching } = useQuery({
+        queryKey: ['customers', 'list', { search: debouncedSearch, tier: 'all', limit: PAGE_SIZE, offset: page * PAGE_SIZE }],
+        queryFn: () => getCustomersListFn({ data: { search: debouncedSearch, tier: 'all', limit: PAGE_SIZE, offset: page * PAGE_SIZE } }),
+        // Use loader data as initial data when available
+        initialData: hasLoaderData ? loaderData?.customers : undefined,
+        staleTime: hasLoaderData ? 30000 : 0,
+    });
 
-    // Use loader data when available, otherwise use tRPC data
+    // Use loader data when available, otherwise use Server Function query data
     const customers = hasLoaderData && loaderData?.customers
         ? loaderData.customers.customers
         : customersData?.customers;

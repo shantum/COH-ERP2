@@ -169,3 +169,26 @@ export const getCustomersList = createServerFn({ method: 'GET' })
             throw error;
         }
     });
+
+const getCustomerInputSchema = z.object({
+    id: z.string().uuid(),
+});
+
+/**
+ * Server Function: Get single customer by ID
+ *
+ * Uses Kysely for high-performance query with order count and recent orders.
+ */
+export const getCustomer = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => getCustomerInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { getCustomerKysely } = await import('../../../../server/src/db/queries/index.js');
+
+        const customer = await getCustomerKysely(data.id);
+
+        if (!customer) {
+            throw new Error('Customer not found');
+        }
+
+        return customer;
+    });
