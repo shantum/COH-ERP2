@@ -1,4 +1,4 @@
-# Prevent node_modules from being copied (install fresh in container)
+# Prevent node_modules from being copied (forces fresh npm install in container)
 node_modules
 **/node_modules
 
