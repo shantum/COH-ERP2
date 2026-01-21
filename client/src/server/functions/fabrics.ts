@@ -66,6 +66,35 @@ const getReconciliationHistoryInputSchema = z.object({
     limit: z.number().int().positive().optional().default(10),
 }).optional();
 
+// ============================================
+// MUTATION INPUT SCHEMAS
+// ============================================
+
+const startFabricReconciliationInputSchema = z.object({
+    notes: z.string().optional(),
+}).optional();
+
+const updateFabricReconciliationItemsInputSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+    items: z.array(
+        z.object({
+            id: z.string().uuid('Invalid item ID'),
+            physicalQty: z.number().nullable(),
+            systemQty: z.number(),
+            adjustmentReason: z.string().nullable().optional(),
+            notes: z.string().nullable().optional(),
+        })
+    ),
+});
+
+const submitFabricReconciliationInputSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+});
+
+const deleteFabricReconciliationInputSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+});
+
 const getStockAnalysisInputSchema = z.object({}).optional();
 
 // ============================================
@@ -1165,6 +1194,373 @@ export const getFabricReconciliation = createServerFn({ method: 'GET' })
                         adjustmentReason: item.adjustmentReason,
                         notes: item.notes,
                     })),
+                },
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// RECONCILIATION MUTATIONS
+// ============================================
+
+/**
+ * Start a new fabric reconciliation with all active fabrics
+ *
+ * Creates a reconciliation record and items for each active fabric with
+ * their current system balance from FabricTransaction.
+ */
+export const startFabricReconciliation = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => startFabricReconciliationInputSchema.parse(input))
+    .handler(async ({ data, context }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            // Get all active fabrics
+            const fabrics = await prisma.fabric.findMany({
+                where: { isActive: true },
+                include: { fabricType: true },
+            });
+
+            if (fabrics.length === 0) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST' as const,
+                        message: 'No active fabrics found',
+                    },
+                };
+            }
+
+            // Calculate balances for all fabrics in batch
+            const fabricIds = fabrics.map((f: any) => f.id);
+            const balanceMap = await calculateAllFabricBalances(prisma, fabricIds);
+
+            // Create reconciliation with items
+            const reconciliation = await prisma.fabricReconciliation.create({
+                data: {
+                    createdBy: context.user.id,
+                    status: 'draft',
+                    notes: data?.notes || null,
+                    items: {
+                        create: fabrics.map((fabric: any) => ({
+                            fabricId: fabric.id,
+                            systemQty: balanceMap.get(fabric.id)?.currentBalance || 0,
+                        })),
+                    },
+                },
+                include: {
+                    items: {
+                        include: {
+                            fabric: { include: { fabricType: true } },
+                        },
+                    },
+                },
+            });
+
+            return {
+                success: true,
+                data: {
+                    id: reconciliation.id,
+                    status: reconciliation.status,
+                    createdAt: reconciliation.createdAt,
+                    items: reconciliation.items.map((item: any) => ({
+                        id: item.id,
+                        fabricId: item.fabricId,
+                        fabricName: item.fabric.name,
+                        colorName: item.fabric.colorName,
+                        unit: item.fabric.fabricType.unit,
+                        systemQty: Number(item.systemQty),
+                        physicalQty: item.physicalQty !== null ? Number(item.physicalQty) : null,
+                        variance: item.variance !== null ? Number(item.variance) : null,
+                        adjustmentReason: item.adjustmentReason,
+                        notes: item.notes,
+                    })),
+                },
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Helper: Calculate fabric balances in batch from FabricTransaction
+ */
+async function calculateAllFabricBalances(
+    prisma: any,
+    fabricIds: string[]
+): Promise<Map<string, { currentBalance: number }>> {
+    const aggregations = await prisma.fabricTransaction.groupBy({
+        by: ['fabricId', 'txnType'],
+        where: { fabricId: { in: fabricIds } },
+        _sum: { qty: true },
+    });
+
+    const balanceMap = new Map<string, { currentBalance: number }>();
+
+    // Initialize all fabrics with zero balance
+    for (const fabricId of fabricIds) {
+        balanceMap.set(fabricId, { currentBalance: 0 });
+    }
+
+    // Calculate balances from aggregations
+    const fabricTotals = new Map<string, { inward: number; outward: number }>();
+    for (const agg of aggregations) {
+        if (!fabricTotals.has(agg.fabricId)) {
+            fabricTotals.set(agg.fabricId, { inward: 0, outward: 0 });
+        }
+        const totals = fabricTotals.get(agg.fabricId)!;
+        if (agg.txnType === 'inward') {
+            totals.inward = Number(agg._sum.qty) || 0;
+        } else if (agg.txnType === 'outward') {
+            totals.outward = Number(agg._sum.qty) || 0;
+        }
+    }
+
+    for (const [fabricId, totals] of fabricTotals) {
+        balanceMap.set(fabricId, { currentBalance: totals.inward - totals.outward });
+    }
+
+    return balanceMap;
+}
+
+/**
+ * Update reconciliation items (physical quantities, reasons, notes)
+ */
+export const updateFabricReconciliationItems = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateFabricReconciliationItemsInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const { reconciliationId, items } = data;
+
+            const reconciliation = await prisma.fabricReconciliation.findUnique({
+                where: { id: reconciliationId },
+            });
+
+            if (!reconciliation) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'NOT_FOUND' as const,
+                        message: 'Reconciliation not found',
+                    },
+                };
+            }
+
+            if (reconciliation.status !== 'draft') {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST' as const,
+                        message: 'Cannot update submitted reconciliation',
+                    },
+                };
+            }
+
+            // Update each item
+            for (const item of items) {
+                const variance =
+                    item.physicalQty !== null && item.physicalQty !== undefined
+                        ? item.physicalQty - item.systemQty
+                        : null;
+
+                await prisma.fabricReconciliationItem.update({
+                    where: { id: item.id },
+                    data: {
+                        physicalQty: item.physicalQty,
+                        variance,
+                        adjustmentReason: item.adjustmentReason || null,
+                        notes: item.notes || null,
+                    },
+                });
+            }
+
+            // Reload reconciliation with updated items
+            const updated = await prisma.fabricReconciliation.findUnique({
+                where: { id: reconciliationId },
+                include: {
+                    items: {
+                        include: {
+                            fabric: { include: { fabricType: true } },
+                        },
+                    },
+                },
+            });
+
+            return {
+                success: true,
+                data: {
+                    id: updated!.id,
+                    status: updated!.status,
+                    createdAt: updated!.createdAt,
+                    items: updated!.items.map((item: any) => ({
+                        id: item.id,
+                        fabricId: item.fabricId,
+                        fabricName: item.fabric.name,
+                        colorName: item.fabric.colorName,
+                        unit: item.fabric.fabricType.unit,
+                        systemQty: Number(item.systemQty),
+                        physicalQty: item.physicalQty !== null ? Number(item.physicalQty) : null,
+                        variance: item.variance !== null ? Number(item.variance) : null,
+                        adjustmentReason: item.adjustmentReason,
+                        notes: item.notes,
+                    })),
+                },
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Submit reconciliation and create adjustment transactions
+ *
+ * Creates FabricTransaction records for each variance:
+ * - Positive variance (more physical than system): inward transaction
+ * - Negative variance (less physical than system): outward transaction
+ */
+export const submitFabricReconciliation = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => submitFabricReconciliationInputSchema.parse(input))
+    .handler(async ({ data, context }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const { reconciliationId } = data;
+
+            const reconciliation = await prisma.fabricReconciliation.findUnique({
+                where: { id: reconciliationId },
+                include: {
+                    items: {
+                        include: {
+                            fabric: { include: { fabricType: true } },
+                        },
+                    },
+                },
+            });
+
+            if (!reconciliation) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'NOT_FOUND' as const,
+                        message: 'Reconciliation not found',
+                    },
+                };
+            }
+
+            if (reconciliation.status !== 'draft') {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST' as const,
+                        message: 'Reconciliation already submitted',
+                    },
+                };
+            }
+
+            // Process items with variances in a transaction
+            const itemsWithVariance = reconciliation.items.filter(
+                (item: any) => item.variance !== null && item.variance !== 0
+            );
+
+            let transactionsCreated = 0;
+
+            await prisma.$transaction(async (tx: any) => {
+                for (const item of itemsWithVariance) {
+                    const variance = Number(item.variance);
+                    const txnType = variance > 0 ? 'inward' : 'outward';
+                    const qty = Math.abs(variance);
+
+                    await tx.fabricTransaction.create({
+                        data: {
+                            fabricId: item.fabricId,
+                            txnType,
+                            qty,
+                            reason: `reconciliation_${item.adjustmentReason || 'adjustment'}`,
+                            referenceId: reconciliationId,
+                            notes: item.notes || `Reconciliation adjustment`,
+                            createdById: context.user.id,
+                        },
+                    });
+                    transactionsCreated++;
+                }
+
+                // Mark reconciliation as submitted
+                await tx.fabricReconciliation.update({
+                    where: { id: reconciliationId },
+                    data: { status: 'submitted' },
+                });
+            });
+
+            return {
+                success: true,
+                data: {
+                    reconciliationId,
+                    status: 'submitted',
+                    adjustmentsMade: transactionsCreated,
+                },
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Delete a draft reconciliation
+ */
+export const deleteFabricReconciliation = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => deleteFabricReconciliationInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const { reconciliationId } = data;
+
+            const reconciliation = await prisma.fabricReconciliation.findUnique({
+                where: { id: reconciliationId },
+            });
+
+            if (!reconciliation) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'NOT_FOUND' as const,
+                        message: 'Reconciliation not found',
+                    },
+                };
+            }
+
+            if (reconciliation.status !== 'draft') {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST' as const,
+                        message: 'Cannot delete submitted reconciliation',
+                    },
+                };
+            }
+
+            // Delete reconciliation (cascade deletes items)
+            await prisma.fabricReconciliation.delete({
+                where: { id: reconciliationId },
+            });
+
+            return {
+                success: true,
+                data: {
+                    reconciliationId,
+                    deleted: true,
                 },
             };
         } finally {

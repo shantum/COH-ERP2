@@ -1,14 +1,24 @@
 /**
- * FabricReconciliation - Physical inventory count reconciliation
+ * FabricReconciliation - Physical inventory count reconciliation for fabrics
+ *
+ * Migrated to use Server Functions for queries and mutations.
+ * CSV upload remains on Axios due to multipart/form-data requirements.
  */
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fabricsApi } from '../services/api';
+import { useServerFn } from '@tanstack/react-start';
 import {
     ClipboardCheck, RefreshCw, AlertTriangle, CheckCircle, Search,
     Plus, History, Send, Trash2
 } from 'lucide-react';
+import {
+    getFabricReconciliationHistory,
+    startFabricReconciliation,
+    updateFabricReconciliationItems,
+    submitFabricReconciliation,
+    deleteFabricReconciliation,
+} from '../server/functions/fabrics';
 
 interface ReconciliationItem {
     id: string;
@@ -26,7 +36,7 @@ interface ReconciliationItem {
 interface Reconciliation {
     id: string;
     status: string;
-    createdAt: string;
+    createdAt: string | Date;
     items: ReconciliationItem[];
 }
 
@@ -52,56 +62,117 @@ export default function FabricReconciliation() {
     const [searchTerm, setSearchTerm] = useState('');
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
 
-    // Fetch history
+    // Server Function wrappers
+    const getHistoryFn = useServerFn(getFabricReconciliationHistory);
+    const startReconFn = useServerFn(startFabricReconciliation);
+    const updateReconFn = useServerFn(updateFabricReconciliationItems);
+    const submitReconFn = useServerFn(submitFabricReconciliation);
+    const deleteReconFn = useServerFn(deleteFabricReconciliation);
+
+    // Fetch history using Server Functions
     const { data: history, isLoading: historyLoading } = useQuery({
-        queryKey: ['reconciliationHistory'],
-        queryFn: () => fabricsApi.getReconciliationHistory(20).then(r => r.data),
+        queryKey: ['fabricReconciliationHistory'],
+        queryFn: async () => {
+            const result = await getHistoryFn({ data: { limit: 20 } });
+            if (!result.success) {
+                throw new Error('Failed to fetch reconciliation history');
+            }
+            return result.history;
+        },
     });
 
     // Start new reconciliation
     const startMutation = useMutation({
-        mutationFn: () => fabricsApi.startReconciliation(),
-        onSuccess: (res) => {
-            setCurrentRecon(res.data);
-            setLocalItems(res.data.items);
-            queryClient.invalidateQueries({ queryKey: ['reconciliationHistory'] });
+        mutationFn: async () => {
+            const result = await startReconFn({ data: {} });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to start reconciliation');
+            }
+            return result.data;
+        },
+        onSuccess: (data) => {
+            if (data) {
+                const recon: Reconciliation = {
+                    id: data.id,
+                    status: data.status,
+                    createdAt: data.createdAt,
+                    items: data.items,
+                };
+                setCurrentRecon(recon);
+                setLocalItems(data.items);
+            }
+            queryClient.invalidateQueries({ queryKey: ['fabricReconciliationHistory'] });
         },
     });
 
     // Update reconciliation
     const updateMutation = useMutation({
-        mutationFn: (items: ReconciliationItem[]) =>
-            fabricsApi.updateReconciliation(currentRecon!.id, items.map(item => ({
-                id: item.id,
-                physicalQty: item.physicalQty,
-                systemQty: item.systemQty,
-                adjustmentReason: item.adjustmentReason || undefined,
-                notes: item.notes || undefined,
-            }))),
-        onSuccess: (res) => {
-            setCurrentRecon(res.data);
-            setLocalItems(res.data.items);
+        mutationFn: async (items: ReconciliationItem[]) => {
+            const result = await updateReconFn({
+                data: {
+                    reconciliationId: currentRecon!.id,
+                    items: items.map(item => ({
+                        id: item.id,
+                        physicalQty: item.physicalQty,
+                        systemQty: item.systemQty,
+                        adjustmentReason: item.adjustmentReason || null,
+                        notes: item.notes || null,
+                    })),
+                },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update reconciliation');
+            }
+            return result.data;
+        },
+        onSuccess: (data) => {
+            if (data) {
+                const recon: Reconciliation = {
+                    id: data.id,
+                    status: data.status,
+                    createdAt: data.createdAt,
+                    items: data.items,
+                };
+                setCurrentRecon(recon);
+                setLocalItems(data.items);
+            }
         },
     });
 
     // Submit reconciliation
     const submitMutation = useMutation({
-        mutationFn: () => fabricsApi.submitReconciliation(currentRecon!.id),
+        mutationFn: async () => {
+            const result = await submitReconFn({
+                data: { reconciliationId: currentRecon!.id },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to submit reconciliation');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             setCurrentRecon(null);
             setLocalItems([]);
-            queryClient.invalidateQueries({ queryKey: ['reconciliationHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricReconciliationHistory'] });
             queryClient.invalidateQueries({ queryKey: ['fabrics'] });
         },
     });
 
     // Delete draft
     const deleteMutation = useMutation({
-        mutationFn: () => fabricsApi.deleteReconciliation(currentRecon!.id),
+        mutationFn: async () => {
+            const result = await deleteReconFn({
+                data: { reconciliationId: currentRecon!.id },
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to delete reconciliation');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             setCurrentRecon(null);
             setLocalItems([]);
-            queryClient.invalidateQueries({ queryKey: ['reconciliationHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricReconciliationHistory'] });
         },
     });
 

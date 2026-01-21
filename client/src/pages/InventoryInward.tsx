@@ -2,16 +2,26 @@
  * Inventory Inward Page - Redesigned with Scan-First Workflow
  *
  * Flow:
- * 1. Scan SKU → instant inward as "received" (unallocated)
+ * 1. Scan SKU -> instant inward as "received" (unallocated)
  * 2. Recent inwards table shows all today's activity
  * 3. User can assign source later (Production/Repacking/Adjustment)
  *
  * Speed optimized for warehouse scanning operations.
+ *
+ * Migrated to Server Functions (Phase 4 TanStack Start migration)
  */
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getRecentInwards, type RecentInwardItem } from '@/server/functions/inventory';
+import {
+    instantInwardBySkuCode,
+    getTransactionMatches,
+    allocateTransactionFn,
+    type TransactionMatch,
+    type TransactionMatchesResult,
+} from '@/server/functions/inventoryMutations';
 import {
     Package,
     Scan,
@@ -23,7 +33,6 @@ import {
     X,
     ExternalLink,
 } from 'lucide-react';
-import type { RecentInward, AllocationMatch } from '../types';
 
 // Source type icons and colors
 const SOURCE_CONFIG = {
@@ -81,7 +90,7 @@ interface SuccessFlash {
 }
 
 interface SourceAssignmentModalProps {
-    transaction: RecentInward;
+    transaction: RecentInwardItem;
     onClose: () => void;
     onSuccess: () => void;
 }
@@ -92,18 +101,16 @@ function SourceAssignmentModal({ transaction, onClose, onSuccess }: SourceAssign
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [rtoCondition, setRtoCondition] = useState<string>('good');
 
+    // Server Functions
+    const getTransactionMatchesFn = useServerFn(getTransactionMatches);
+    const allocateTransactionMutation = useServerFn(allocateTransactionFn);
+
     // Fetch available matches
     const { data: matchData, isLoading } = useQuery({
         queryKey: ['transaction-matches', transaction.id],
         queryFn: async () => {
-            const res = await inventoryApi.getTransactionMatches(transaction.id);
-            return res.data as {
-                transactionId: string;
-                skuCode: string;
-                isAllocated: boolean;
-                currentAllocation: { type: string; referenceId: string | null } | null;
-                matches: AllocationMatch[];
-            };
+            const result = await getTransactionMatchesFn({ data: { transactionId: transaction.id } });
+            return result as TransactionMatchesResult;
         },
     });
 
@@ -111,12 +118,18 @@ function SourceAssignmentModal({ transaction, onClose, onSuccess }: SourceAssign
     const allocateMutation = useMutation({
         mutationFn: async () => {
             if (!selectedType) throw new Error('No allocation type selected');
-            return inventoryApi.allocateTransaction({
-                transactionId: transaction.id,
-                allocationType: selectedType,
-                allocationId: selectedId || undefined,
-                rtoCondition: selectedType === 'rto' ? rtoCondition : undefined,
+            const result = await allocateTransactionMutation({
+                data: {
+                    transactionId: transaction.id,
+                    allocationType: selectedType,
+                    allocationId: selectedId || undefined,
+                    rtoCondition: selectedType === 'rto' ? (rtoCondition as 'good' | 'unopened' | 'damaged' | 'wrong_product') : undefined,
+                },
             });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to allocate transaction');
+            }
+            return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
@@ -126,8 +139,8 @@ function SourceAssignmentModal({ transaction, onClose, onSuccess }: SourceAssign
         },
     });
 
-    const productionMatches = matchData?.matches?.filter(m => m.type === 'production') || [];
-    const rtoMatches = matchData?.matches?.filter(m => m.type === 'rto') || [];
+    const productionMatches = matchData?.matches?.filter((m: TransactionMatch) => m.type === 'production') || [];
+    const rtoMatches = matchData?.matches?.filter((m: TransactionMatch) => m.type === 'rto') || [];
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -216,7 +229,7 @@ function SourceAssignmentModal({ transaction, onClose, onSuccess }: SourceAssign
                                         </button>
                                         {selectedType === 'production' && (
                                             <div className="border-t border-gray-200 p-4 space-y-2 bg-gray-50">
-                                                {productionMatches.map((match) => (
+                                                {productionMatches.map((match: TransactionMatch) => (
                                                     <button
                                                         key={match.id}
                                                         onClick={() => setSelectedId(match.id)}
@@ -229,11 +242,11 @@ function SourceAssignmentModal({ transaction, onClose, onSuccess }: SourceAssign
                                                         <div className="font-medium text-sm">{match.label}</div>
                                                         <div className="text-xs text-gray-600 mt-1">
                                                             {match.detail}
-                                                            {match.pending && ` • ${match.pending} pending`}
+                                                            {match.pending && ` - ${match.pending} pending`}
                                                         </div>
                                                         {match.date && (
                                                             <div className="text-xs text-gray-500 mt-1">
-                                                                {new Date(match.date).toLocaleDateString()}
+                                                                {new Date(match.date as string).toLocaleDateString()}
                                                             </div>
                                                         )}
                                                     </button>
@@ -285,7 +298,7 @@ function SourceAssignmentModal({ transaction, onClose, onSuccess }: SourceAssign
 
                                                 {/* RTO Matches */}
                                                 <div className="space-y-2">
-                                                    {rtoMatches.map((match) => (
+                                                    {rtoMatches.map((match: TransactionMatch) => (
                                                         <button
                                                             key={match.id}
                                                             onClick={() => setSelectedId(match.id)}
@@ -359,7 +372,11 @@ export default function InventoryInward() {
     const [successFlash, setSuccessFlash] = useState<SuccessFlash | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [sourceFilter, setSourceFilter] = useState<string>('all');
-    const [selectedTransaction, setSelectedTransaction] = useState<RecentInward | null>(null);
+    const [selectedTransaction, setSelectedTransaction] = useState<RecentInwardItem | null>(null);
+
+    // Server Functions
+    const getRecentInwardsFn = useServerFn(getRecentInwards);
+    const instantInwardFn = useServerFn(instantInwardBySkuCode);
 
     // Focus input on mount and after operations
     useEffect(() => {
@@ -381,12 +398,17 @@ export default function InventoryInward() {
         }
     }, [error]);
 
-    // Fetch recent inwards
-    const { data: recentInwards = [], isLoading } = useQuery<RecentInward[]>({
+    // Fetch recent inwards using Server Function
+    const { data: recentInwards = [], isLoading } = useQuery<RecentInwardItem[]>({
         queryKey: ['recent-inwards', sourceFilter],
         queryFn: async () => {
-            const res = await inventoryApi.getRecentInwards(100, sourceFilter === 'all' ? undefined : sourceFilter);
-            return res.data;
+            const result = await getRecentInwardsFn({
+                data: {
+                    limit: 100,
+                    source: sourceFilter === 'all' ? undefined : sourceFilter as 'production' | 'returns' | 'rto' | 'repacking' | 'adjustments' | 'received' | 'adjustment',
+                },
+            });
+            return result;
         },
         refetchInterval: 10000,
     });
@@ -399,36 +421,31 @@ export default function InventoryInward() {
             .reduce((sum, i) => sum + i.qty, 0);
     }, [recentInwards]);
 
-    // Instant inward mutation
+    // Instant inward mutation using Server Function
     const instantInwardMutation = useMutation({
         mutationFn: async (skuCode: string) => {
-            return inventoryApi.instantInward(skuCode);
+            const result = await instantInwardFn({ data: { skuCode } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to inward SKU');
+            }
+            return result.data;
         },
-        onSuccess: (response) => {
-            const data = response.data as {
-                success: boolean;
-                transaction: {
-                    skuCode: string;
-                    productName: string;
-                    colorName: string;
-                    size: string;
-                    qty: number;
-                };
-                newBalance: number;
-            };
-            setSuccessFlash({
-                skuCode: data.transaction.skuCode,
-                productName: data.transaction.productName,
-                colorName: data.transaction.colorName,
-                size: data.transaction.size,
-                qty: data.transaction.qty,
-                newBalance: data.newBalance,
-            });
+        onSuccess: (data) => {
+            if (data) {
+                setSuccessFlash({
+                    skuCode: data.skuCode,
+                    productName: data.productName,
+                    colorName: data.colorName,
+                    size: data.size,
+                    qty: data.qty,
+                    newBalance: data.newBalance,
+                });
+            }
             setScanInput('');
             queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
         },
-        onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to inward SKU');
+        onError: (err: Error) => {
+            setError(err.message || 'Failed to inward SKU');
         },
         onSettled: () => {
             setIsScanning(false);

@@ -92,6 +92,21 @@ const rtoInwardLineSchema = z.object({
     notes: z.string().optional(),
 });
 
+const instantInwardBySkuCodeSchema = z.object({
+    skuCode: z.string().min(1, 'SKU code is required'),
+});
+
+const getTransactionMatchesSchema = z.object({
+    transactionId: z.string().uuid('Invalid transaction ID'),
+});
+
+const allocateTransactionFnSchema = z.object({
+    transactionId: z.string().uuid('Invalid transaction ID'),
+    allocationType: z.enum(['production', 'rto', 'adjustment']),
+    allocationId: z.string().uuid('Invalid allocation ID').optional(),
+    rtoCondition: z.enum(['good', 'unopened', 'damaged', 'wrong_product']).optional(),
+});
+
 // ============================================
 // RESULT TYPES
 // ============================================
@@ -187,6 +202,45 @@ export interface RtoInwardLineResult {
     qty: number;
     condition: string;
     newBalance: number;
+}
+
+export interface InstantInwardBySkuCodeResult {
+    transactionId: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    newBalance: number;
+}
+
+export interface TransactionMatch {
+    type: 'production' | 'rto';
+    id: string;
+    label: string;
+    detail: string;
+    date?: Date | string | null;
+    pending?: number;
+    orderId?: string;
+    atWarehouse?: boolean;
+}
+
+export interface TransactionMatchesResult {
+    transactionId: string;
+    skuCode: string;
+    isAllocated: boolean;
+    currentAllocation: {
+        type: string;
+        referenceId: string | null;
+    } | null;
+    matches: TransactionMatch[];
+}
+
+export interface AssignSourceResult {
+    type: string;
+    referenceId: string | null;
+    condition?: string;
 }
 
 // ============================================
@@ -1225,4 +1279,457 @@ export const rtoInwardLine = createServerFn({ method: 'POST' })
                 newBalance: result.balance.currentBalance,
             },
         };
+    });
+
+/**
+ * Instant inward by SKU code - ultra-fast scan workflow
+ *
+ * Looks up SKU by code and creates +1 inward transaction.
+ * Transaction is marked as 'received' (unallocated) and can be
+ * linked to a source later via allocateTransactionFn.
+ */
+export const instantInwardBySkuCode = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => instantInwardBySkuCodeSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<InstantInwardBySkuCodeResult>> => {
+        const prisma = await getPrisma();
+        const { skuCode } = data;
+
+        // Find SKU by code - minimal query for speed
+        const sku = await prisma.sku.findFirst({
+            where: { skuCode },
+            select: {
+                id: true,
+                skuCode: true,
+                size: true,
+                isActive: true,
+                variation: {
+                    select: {
+                        colorName: true,
+                        product: { select: { name: true } },
+                    },
+                },
+            },
+        });
+
+        if (!sku) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: `SKU not found: ${skuCode}` },
+            };
+        }
+
+        if (!sku.isActive) {
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message: 'Cannot inward to inactive SKU' },
+            };
+        }
+
+        // Create transaction and calculate balance in single DB transaction
+        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+            const transaction = await tx.inventoryTransaction.create({
+                data: {
+                    skuId: sku.id,
+                    txnType: TXN_TYPE.INWARD,
+                    qty: 1,
+                    reason: 'received', // Unallocated - can be linked to source later
+                    createdById: context.user.id,
+                },
+            });
+
+            const balance = await calculateInventoryBalance(tx, sku.id);
+            return { transaction, balance };
+        });
+
+        await invalidateCache([sku.id]);
+
+        return {
+            success: true,
+            data: {
+                transactionId: result.transaction.id,
+                skuId: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation.product.name,
+                colorName: sku.variation.colorName,
+                size: sku.size,
+                qty: 1,
+                newBalance: result.balance.currentBalance,
+            },
+        };
+    });
+
+/**
+ * Get transaction matches for allocation dropdown
+ *
+ * Returns available production batches and RTO orders that can
+ * be linked to an unallocated inward transaction.
+ */
+export const getTransactionMatches = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTransactionMatchesSchema.parse(input))
+    .handler(async ({ data }): Promise<TransactionMatchesResult> => {
+        const prisma = await getPrisma();
+        const { transactionId } = data;
+
+        // Get transaction with SKU info
+        const transaction = await prisma.inventoryTransaction.findUnique({
+            where: { id: transactionId },
+            select: {
+                id: true,
+                skuId: true,
+                reason: true,
+                referenceId: true,
+                sku: { select: { skuCode: true } },
+            },
+        });
+
+        if (!transaction) {
+            throw new Error('Transaction not found');
+        }
+
+        const isAllocated = transaction.reason !== 'received';
+        const currentAllocation = isAllocated
+            ? { type: transaction.reason || '', referenceId: transaction.referenceId }
+            : null;
+
+        // Find available matches for this SKU
+        const [productionBatches, rtoLines] = await Promise.all([
+            // Production batches with pending quantity
+            prisma.productionBatch.findMany({
+                where: {
+                    skuId: transaction.skuId,
+                    status: { in: ['planned', 'in_progress'] },
+                },
+                select: {
+                    id: true,
+                    batchCode: true,
+                    batchDate: true,
+                    qtyPlanned: true,
+                    qtyCompleted: true,
+                },
+                orderBy: { batchDate: 'asc' },
+                take: 5,
+            }),
+
+            // RTO order lines pending processing
+            prisma.orderLine.findMany({
+                where: {
+                    skuId: transaction.skuId,
+                    rtoCondition: null,
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    order: { isArchived: false },
+                },
+                select: {
+                    id: true,
+                    qty: true,
+                    trackingStatus: true,
+                    rtoInitiatedAt: true,
+                    order: {
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerName: true,
+                        },
+                    },
+                },
+                take: 5,
+            }),
+        ]);
+
+        const matches: TransactionMatch[] = [];
+
+        // Add production batch matches
+        for (const batch of productionBatches) {
+            const pending = batch.qtyPlanned - (batch.qtyCompleted || 0);
+            if (pending > 0) {
+                matches.push({
+                    type: 'production',
+                    id: batch.id,
+                    label: batch.batchCode || `Batch ${batch.id.slice(0, 8)}`,
+                    detail: `${batch.qtyCompleted || 0}/${batch.qtyPlanned} completed`,
+                    date: batch.batchDate,
+                    pending,
+                });
+            }
+        }
+
+        // Add RTO matches
+        for (const line of rtoLines) {
+            matches.push({
+                type: 'rto',
+                id: line.id,
+                orderId: line.order.id,
+                label: `RTO #${line.order.orderNumber}`,
+                detail: line.order.customerName || '',
+                date: line.rtoInitiatedAt,
+                atWarehouse: line.trackingStatus === 'rto_delivered',
+            });
+        }
+
+        return {
+            transactionId,
+            skuCode: transaction.sku?.skuCode || '',
+            isAllocated,
+            currentAllocation,
+            matches,
+        };
+    });
+
+/**
+ * Allocate transaction to a source
+ *
+ * Links an inward transaction to a production batch, RTO order,
+ * or marks it as a manual adjustment.
+ */
+export const allocateTransactionFn = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => allocateTransactionFnSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<AssignSourceResult>> => {
+        const prisma = await getPrisma();
+        const { transactionId, allocationType, allocationId, rtoCondition } = data;
+
+        // Get transaction
+        const transaction = await prisma.inventoryTransaction.findUnique({
+            where: { id: transactionId },
+            include: {
+                sku: {
+                    include: { variation: { include: { product: true } } },
+                },
+            },
+        });
+
+        if (!transaction) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Transaction not found' },
+            };
+        }
+
+        // Track previous allocation for reversion
+        const previousAllocation =
+            transaction.reason !== 'received'
+                ? { type: transaction.reason || '', referenceId: transaction.referenceId }
+                : null;
+
+        // Handle allocation based on type
+        if (allocationType === 'production') {
+            if (!allocationId) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'allocationId (batchId) is required for production allocation' },
+                };
+            }
+
+            await prisma.$transaction(async (tx: PrismaClientType) => {
+                // Revert previous production allocation
+                if (previousAllocation?.type === 'production' && previousAllocation.referenceId) {
+                    const prevBatch = await tx.productionBatch.findUnique({
+                        where: { id: previousAllocation.referenceId },
+                    });
+                    if (prevBatch) {
+                        const newQtyCompleted = Math.max(0, prevBatch.qtyCompleted - transaction.qty);
+                        const newStatus = newQtyCompleted === 0 ? 'planned' : 'in_progress';
+                        await tx.productionBatch.update({
+                            where: { id: previousAllocation.referenceId },
+                            data: { qtyCompleted: newQtyCompleted, status: newStatus, completedAt: null },
+                        });
+                    }
+                }
+
+                // Revert previous RTO allocation
+                if (previousAllocation?.type === 'rto_received' && previousAllocation.referenceId) {
+                    await tx.orderLine.update({
+                        where: { id: previousAllocation.referenceId },
+                        data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null, rtoReceivedAt: null },
+                    });
+                }
+
+                // Update transaction
+                await tx.inventoryTransaction.update({
+                    where: { id: transactionId },
+                    data: { reason: 'production', referenceId: allocationId },
+                });
+
+                // Update production batch
+                const batch = await tx.productionBatch.findUnique({
+                    where: { id: allocationId },
+                });
+
+                if (!batch) {
+                    throw new Error('Production batch not found');
+                }
+
+                if (batch.skuId !== transaction.skuId) {
+                    throw new Error('Batch SKU does not match transaction SKU');
+                }
+
+                const newCompleted = Math.min(batch.qtyCompleted + transaction.qty, batch.qtyPlanned);
+                const isComplete = newCompleted >= batch.qtyPlanned;
+
+                await tx.productionBatch.update({
+                    where: { id: allocationId },
+                    data: {
+                        qtyCompleted: newCompleted,
+                        status: isComplete ? 'completed' : 'in_progress',
+                        completedAt: isComplete ? new Date() : null,
+                    },
+                });
+            });
+
+            await invalidateCache([transaction.skuId]);
+
+            return {
+                success: true,
+                data: { type: 'production', referenceId: allocationId },
+            };
+
+        } else if (allocationType === 'rto') {
+            if (!allocationId) {
+                return {
+                    success: false,
+                    error: { code: 'BAD_REQUEST', message: 'allocationId (lineId) is required for RTO allocation' },
+                };
+            }
+
+            const condition = rtoCondition || 'good';
+
+            await prisma.$transaction(async (tx: PrismaClientType) => {
+                // Revert previous allocations
+                if (previousAllocation?.type === 'production' && previousAllocation.referenceId) {
+                    const prevBatch = await tx.productionBatch.findUnique({
+                        where: { id: previousAllocation.referenceId },
+                    });
+                    if (prevBatch) {
+                        const newQtyCompleted = Math.max(0, prevBatch.qtyCompleted - transaction.qty);
+                        const newStatus = newQtyCompleted === 0 ? 'planned' : 'in_progress';
+                        await tx.productionBatch.update({
+                            where: { id: previousAllocation.referenceId },
+                            data: { qtyCompleted: newQtyCompleted, status: newStatus, completedAt: null },
+                        });
+                    }
+                }
+
+                // Get order line
+                const orderLine = await tx.orderLine.findUnique({
+                    where: { id: allocationId },
+                    include: { order: { select: { id: true, orderNumber: true } } },
+                });
+
+                if (!orderLine) {
+                    throw new Error('Order line not found');
+                }
+
+                if (orderLine.skuId !== transaction.skuId) {
+                    throw new Error('Order line SKU does not match transaction SKU');
+                }
+
+                if (orderLine.rtoCondition) {
+                    throw new Error('RTO line already processed');
+                }
+
+                // For damaged/wrong_product, delete inward and create write-off
+                if (condition === 'damaged' || condition === 'wrong_product') {
+                    await tx.inventoryTransaction.delete({ where: { id: transactionId } });
+
+                    await tx.writeOffLog.create({
+                        data: {
+                            skuId: transaction.skuId,
+                            qty: transaction.qty,
+                            reason: condition === 'damaged' ? 'defective' : 'wrong_product',
+                            sourceType: 'rto',
+                            sourceId: allocationId,
+                            notes: `RTO write-off (${condition}) - Order ${orderLine.order.orderNumber}`,
+                            createdById: context.user.id,
+                        },
+                    });
+
+                    await tx.sku.update({
+                        where: { id: transaction.skuId },
+                        data: { writeOffCount: { increment: transaction.qty } },
+                    });
+                } else {
+                    // For good/unopened, just update the transaction
+                    await tx.inventoryTransaction.update({
+                        where: { id: transactionId },
+                        data: {
+                            reason: 'rto_received',
+                            referenceId: allocationId,
+                            notes: `RTO from order ${orderLine.order.orderNumber}`,
+                        },
+                    });
+                }
+
+                // Mark order line as processed
+                await tx.orderLine.update({
+                    where: { id: allocationId },
+                    data: {
+                        rtoCondition: condition,
+                        rtoInwardedAt: new Date(),
+                        rtoInwardedById: context.user.id,
+                    },
+                });
+
+                // Check if all lines processed
+                const allLines = await tx.orderLine.findMany({
+                    where: { orderId: orderLine.orderId },
+                    select: { rtoCondition: true },
+                });
+                const allProcessed = allLines.every((l: { rtoCondition: string | null }) => l.rtoCondition !== null);
+
+                if (allProcessed) {
+                    const now = new Date();
+                    await tx.orderLine.updateMany({
+                        where: { orderId: orderLine.orderId, rtoReceivedAt: null },
+                        data: { rtoReceivedAt: now },
+                    });
+                }
+            });
+
+            await invalidateCache([transaction.skuId]);
+
+            return {
+                success: true,
+                data: { type: 'rto', referenceId: allocationId, condition },
+            };
+
+        } else {
+            // adjustment - revert previous allocation if needed
+            await prisma.$transaction(async (tx: PrismaClientType) => {
+                // Revert previous production allocation
+                if (previousAllocation?.type === 'production' && previousAllocation.referenceId) {
+                    const prevBatch = await tx.productionBatch.findUnique({
+                        where: { id: previousAllocation.referenceId },
+                    });
+                    if (prevBatch) {
+                        const newQtyCompleted = Math.max(0, prevBatch.qtyCompleted - transaction.qty);
+                        const newStatus = newQtyCompleted === 0 ? 'planned' : 'in_progress';
+                        await tx.productionBatch.update({
+                            where: { id: previousAllocation.referenceId },
+                            data: { qtyCompleted: newQtyCompleted, status: newStatus, completedAt: null },
+                        });
+                    }
+                }
+
+                // Revert previous RTO allocation
+                if (previousAllocation?.type === 'rto_received' && previousAllocation.referenceId) {
+                    await tx.orderLine.update({
+                        where: { id: previousAllocation.referenceId },
+                        data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null, rtoReceivedAt: null },
+                    });
+                }
+
+                await tx.inventoryTransaction.update({
+                    where: { id: transactionId },
+                    data: { reason: 'adjustment', referenceId: null },
+                });
+            });
+
+            await invalidateCache([transaction.skuId]);
+
+            return {
+                success: true,
+                data: { type: 'adjustment', referenceId: null },
+            };
+        }
     });

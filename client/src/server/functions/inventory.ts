@@ -743,8 +743,8 @@ export const getInventoryTransactions = createServerFn({ method: 'GET' })
 // ============================================
 
 const recentInwardsSchema = z.object({
-    limit: z.number().int().positive().max(100).optional().default(50),
-    source: z.enum(['production', 'returns', 'rto', 'repacking', 'adjustments']).optional(),
+    limit: z.number().int().positive().max(200).optional().default(50),
+    source: z.enum(['all', 'production', 'returns', 'rto', 'repacking', 'adjustments', 'received', 'adjustment']).optional(),
 });
 
 export type RecentInwardsInput = z.infer<typeof recentInwardsSchema>;
@@ -790,6 +790,9 @@ export const getRecentInwards = createServerFn({ method: 'GET' })
             rto: ['rto_received'],
             repacking: ['repack_complete'],
             adjustments: ['adjustment', 'found_stock', 'correction', 'received'],
+            // Additional mappings for page compatibility
+            received: ['received'],
+            adjustment: ['adjustment', 'found_stock', 'correction'],
         };
 
         // Build where clause
@@ -799,8 +802,8 @@ export const getRecentInwards = createServerFn({ method: 'GET' })
             createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
         };
 
-        // Add reason filter if source specified
-        if (source && reasonMap[source]) {
+        // Add reason filter if source specified (skip 'all' or undefined)
+        if (source && source !== 'all' && reasonMap[source]) {
             where.reason = { in: reasonMap[source] };
         }
 
