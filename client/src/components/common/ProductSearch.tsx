@@ -24,9 +24,12 @@
  */
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Package, Search, Loader2 } from 'lucide-react';
 import { trpc } from '../../services/trpc';
 import { sortBySizeOrder } from '../../constants/sizes';
+import { getProductsList } from '../../server/functions/products';
 
 /** Balance info for a SKU */
 interface BalanceInfo {
@@ -99,15 +102,15 @@ export function ProductSearch({
   // Determine if we need to fetch SKUs internally
   const shouldFetchSkus = !propsSkus;
 
-  // Fetch SKUs from tRPC if not provided
-  const { data: productsData, isLoading: isLoadingProducts } = trpc.products.list.useQuery(
-    { limit: 1000 },
-    {
-      enabled: shouldFetchSkus,
-      staleTime: 60000, // SKU list doesn't change often
-      refetchOnWindowFocus: false,
-    }
-  );
+  // Fetch SKUs from Server Function if not provided
+  const getProductsListFn = useServerFn(getProductsList);
+  const { data: productsData, isLoading: isLoadingProducts } = useQuery({
+    queryKey: ['products', 'list', { limit: 1000 }],
+    queryFn: () => getProductsListFn({ data: { limit: 1000 } }),
+    enabled: shouldFetchSkus,
+    staleTime: 60000, // SKU list doesn't change often
+    refetchOnWindowFocus: false,
+  });
 
   // Transform products data into flat SKU list (for self-fetching mode)
   const fetchedSkus = useMemo(() => {

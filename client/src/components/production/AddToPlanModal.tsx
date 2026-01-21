@@ -1,5 +1,8 @@
 import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { trpc } from '@/services/trpc';
+import { getProductsList } from '@/server/functions/products';
 import {
     Dialog,
     DialogContent,
@@ -45,31 +48,31 @@ export function AddToPlanModal({
     const [sampleSize, setSampleSize] = useState('');
 
     // Fetch all SKUs when modal is open
-    const allSkusQueryResult = trpc.products.list.useQuery(
-        { limit: 1000 },
-        {
-            enabled: open,
-            staleTime: 60000,
-            select: (data) => {
-                const skus: any[] = [];
-                data.products.forEach((product: any) => {
-                    product.variations?.forEach((variation: any) => {
-                        variation.skus?.forEach((sku: any) => {
-                            skus.push({
-                                ...sku,
-                                // Include variation with product reference for display
-                                variation: {
-                                    ...variation,
-                                    product, // Add product for sku.variation.product.name access
-                                },
-                            });
+    const getProductsListFn = useServerFn(getProductsList);
+    const allSkusQueryResult = useQuery({
+        queryKey: ['products', 'list', { limit: 1000 }],
+        queryFn: () => getProductsListFn({ data: { limit: 1000 } }),
+        enabled: open,
+        staleTime: 60000,
+        select: (data) => {
+            const skus: any[] = [];
+            data.products.forEach((product: any) => {
+                product.variations?.forEach((variation: any) => {
+                    variation.skus?.forEach((sku: any) => {
+                        skus.push({
+                            ...sku,
+                            // Include variation with product reference for display
+                            variation: {
+                                ...variation,
+                                product, // Add product for sku.variation.product.name access
+                            },
                         });
                     });
                 });
-                return skus;
-            }
+            });
+            return skus;
         }
-    );
+    });
     const allSkus = allSkusQueryResult.data;
     const isLoadingSkus = allSkusQueryResult.isLoading;
 

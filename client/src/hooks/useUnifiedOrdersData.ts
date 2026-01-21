@@ -19,10 +19,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
-import { trpc } from '../services/trpc';
 import { getOrders } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
+import { getProductsList } from '../server/functions/products';
 
 // Server Function types only - actual function loaded dynamically if enabled
 // This prevents @tanstack/react-start from being bundled in SPA mode
@@ -194,27 +194,27 @@ export function useUnifiedOrdersData({
     // ==========================================
 
     // All SKUs for CreateOrderModal product search
-    const allSkusQuery = trpc.products.list.useQuery(
-        { limit: 1000 },
-        {
-            staleTime: 60000,
-            refetchOnWindowFocus: false,
-            select: (data) => {
-                const skus: any[] = [];
-                data.products.forEach((product: any) => {
-                    product.variations?.forEach((variation: any) => {
-                        variation.skus?.forEach((sku: any) => {
-                            skus.push({
-                                ...sku,
-                                variation: { ...variation, product },
-                            });
+    const getProductsListFn = useServerFn(getProductsList);
+    const allSkusQuery = useQuery({
+        queryKey: ['products', 'list', { limit: 1000 }],
+        queryFn: () => getProductsListFn({ data: { limit: 1000 } }),
+        staleTime: 60000,
+        refetchOnWindowFocus: false,
+        select: (data) => {
+            const skus: any[] = [];
+            data.products.forEach((product: any) => {
+                product.variations?.forEach((variation: any) => {
+                    variation.skus?.forEach((sku: any) => {
+                        skus.push({
+                            ...sku,
+                            variation: { ...variation, product },
                         });
                     });
                 });
-                return skus;
-            }
+            });
+            return skus;
         }
-    );
+    });
 
     // Check if server already included inventory in the response
     const hasInventoryFromServer = ordersQuery.data?.hasInventory ?? false;

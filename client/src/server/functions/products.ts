@@ -10,6 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
 
 // Input validation schema
 const productsTreeInputSchema = z.object({
@@ -399,4 +400,35 @@ export const getProductsTree = createServerFn({ method: 'GET' })
             console.error('[Server Function] Error in getProductsTree:', error);
             throw error;
         }
+    });
+
+// Input validation schema for getProductsList
+const getProductsListInputSchema = z.object({
+    search: z.string().optional(),
+    category: z.string().optional(),
+    isActive: z.boolean().optional(),
+    page: z.number().int().min(1).default(1),
+    limit: z.number().int().min(1).max(1000).default(50),
+});
+
+export type GetProductsListInput = z.infer<typeof getProductsListInputSchema>;
+
+/**
+ * Server Function: Get products list
+ *
+ * Fetches products list using Kysely query.
+ * Used by CreateOrderModal, ProductSearch, and AddToPlanModal.
+ */
+export const getProductsList = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getProductsListInputSchema.parse(input ?? {}))
+    .handler(async ({ data: input }) => {
+        const { listProductsKysely } = await import('../../../../server/src/db/queries/index.js');
+        return listProductsKysely({
+            search: input.search,
+            category: input.category,
+            isActive: input.isActive,
+            page: input.page,
+            limit: input.limit,
+        });
     });
