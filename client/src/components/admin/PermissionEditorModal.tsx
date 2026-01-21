@@ -3,13 +3,20 @@
  * Modal for viewing and editing user permissions
  * Shows role selection and permission matrix grouped by domain
  * Supports individual permission overrides from role defaults
+ *
+ * Uses Server Functions for data fetching (TanStack Start migration)
  */
 
 import { useState, useMemo, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, User, Mail, Check, Key, Eye, Edit3, RotateCcw } from 'lucide-react';
 import Modal from '../Modal';
-import { adminApi } from '../../services/api';
+import {
+    getUserPermissions,
+    updateUserPermissions,
+    assignUserRole,
+    type UserPermissionsData,
+} from '../../server/functions/admin';
 import type { User as UserType, Role } from '../../types';
 
 // Permission categories matching server/src/utils/permissions.js
@@ -145,17 +152,14 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
     const [isSaving, setIsSaving] = useState(false);
 
     // Fetch user's current permissions and overrides
-    const { data: permissionData, isLoading: isLoadingPermissions } = useQuery({
+    const { data: permissionData, isLoading: isLoadingPermissions } = useQuery<UserPermissionsData | null>({
         queryKey: ['user-permissions', user.id],
         queryFn: async () => {
-            const response = await adminApi.getUserPermissions(user.id);
-            return response.data as {
-                userId: string;
-                roleId: string | null;
-                roleName: string | null;
-                rolePermissions: string[];
-                overrides: Array<{ permission: string; granted: boolean }>;
-            };
+            const response = await getUserPermissions({ data: { userId: user.id } });
+            if (!response.success) {
+                throw new Error(response.error?.message || 'Failed to fetch permissions');
+            }
+            return response.data ?? null;
         },
         enabled: isOpen,
     });
@@ -253,8 +257,13 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
 
     // Update role mutation
     const updateRoleMutation = useMutation({
-        mutationFn: ({ userId, roleId }: { userId: string; roleId: string }) =>
-            adminApi.assignUserRole(userId, roleId),
+        mutationFn: async ({ userId, roleId }: { userId: string; roleId: string }) => {
+            const response = await assignUserRole({ data: { userId, roleId } });
+            if (!response.success) {
+                throw new Error(response.error?.message || 'Failed to assign role');
+            }
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
             queryClient.invalidateQueries({ queryKey: ['user-permissions', user.id] });
@@ -263,8 +272,13 @@ export default function PermissionEditorModal({ isOpen, onClose, user, roles }: 
 
     // Update permissions mutation
     const updatePermissionsMutation = useMutation({
-        mutationFn: ({ userId, overrides }: { userId: string; overrides: Array<{ permission: string; granted: boolean }> }) =>
-            adminApi.updateUserPermissions(userId, overrides),
+        mutationFn: async ({ userId, overrides }: { userId: string; overrides: Array<{ permission: string; granted: boolean }> }) => {
+            const response = await updateUserPermissions({ data: { userId, overrides } });
+            if (!response.success) {
+                throw new Error(response.error?.message || 'Failed to update permissions');
+            }
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
             queryClient.invalidateQueries({ queryKey: ['user-permissions', user.id] });

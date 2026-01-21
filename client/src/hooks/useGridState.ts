@@ -10,10 +10,19 @@
  * Features:
  * - All users can save their own preferences (auto-saves on change)
  * - Admins can save defaults that apply to all users
+ *
+ * Migrated to use Server Functions instead of Axios API calls.
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { adminApi } from '../services/api';
+import {
+    getAdminGridPreferences,
+    getUserPreferences,
+    updateUserPreferences,
+    deleteUserPreferences,
+    updateAdminGridPreferences,
+} from '../server/functions/admin';
+import type { UserPreferences, AdminGridPreferences } from '../server/functions/admin';
 import { usePermissions } from './usePermissions';
 
 interface UseGridStateOptions {
@@ -141,18 +150,23 @@ export function useGridState({
 
         const fetchPreferences = async () => {
             try {
-                // Fetch both in parallel
-                const [adminRes, userRes] = await Promise.all([
-                    adminApi.getGridPreferences(gridId).catch(() => ({ data: null })),
-                    adminApi.getUserGridPreferences(gridId).catch(() => ({ data: null })),
+                // Fetch both in parallel using Server Functions
+                const [adminResult, userResult] = await Promise.all([
+                    getAdminGridPreferences({ data: { gridId } }).catch(() => ({ success: true, data: null })),
+                    getUserPreferences({ data: { gridId } }).catch(() => ({ success: true, data: null })),
                 ]);
 
-                const adminPrefs = adminRes.data as AdminPrefs | null;
-                const userPrefs = userRes.data as UserPrefs | null;
+                const adminPrefs = adminResult.success ? adminResult.data as AdminGridPreferences | null : null;
+                const userPrefs = userResult.success ? userResult.data as UserPreferences | null : null;
 
                 // Store admin prefs for reference
                 if (adminPrefs && adminPrefs.visibleColumns?.length > 0) {
-                    setSavedAdminPrefs(adminPrefs);
+                    setSavedAdminPrefs({
+                        visibleColumns: adminPrefs.visibleColumns,
+                        columnOrder: adminPrefs.columnOrder,
+                        columnWidths: adminPrefs.columnWidths,
+                        updatedAt: adminPrefs.updatedAt || undefined,
+                    });
                 }
 
                 // Determine which preferences to apply
@@ -165,7 +179,12 @@ export function useGridState({
                     if (userPrefs.columnWidths && Object.keys(userPrefs.columnWidths).length > 0) {
                         setColumnWidths(userPrefs.columnWidths);
                     }
-                    setSavedUserPrefs(userPrefs);
+                    setSavedUserPrefs({
+                        visibleColumns: userPrefs.visibleColumns,
+                        columnOrder: userPrefs.columnOrder,
+                        columnWidths: userPrefs.columnWidths,
+                        adminVersion: userPrefs.adminVersion,
+                    });
 
                     // Persist to localStorage for offline use
                     localStorage.setItem(visibilityKey, JSON.stringify(userPrefs.visibleColumns));
@@ -266,23 +285,27 @@ export function useGridState({
     const saveUserPreferences = useCallback(async (): Promise<boolean> => {
         setIsSavingPrefs(true);
         try {
-            const newPrefs = {
-                visibleColumns: [...visibleColumns],
-                columnOrder,
-                columnWidths,
-                adminVersion: savedAdminPrefs?.updatedAt || undefined,
-            };
-            await adminApi.saveUserGridPreferences(gridId, newPrefs);
-
-            // Update saved reference
-            setSavedUserPrefs({
-                visibleColumns: newPrefs.visibleColumns,
-                columnOrder: newPrefs.columnOrder,
-                columnWidths: newPrefs.columnWidths,
-                adminVersion: newPrefs.adminVersion || null,
+            const result = await updateUserPreferences({
+                data: {
+                    gridId,
+                    visibleColumns: [...visibleColumns],
+                    columnOrder,
+                    columnWidths,
+                    adminVersion: savedAdminPrefs?.updatedAt || undefined,
+                },
             });
 
-            return true;
+            if (result.success) {
+                // Update saved reference
+                setSavedUserPrefs({
+                    visibleColumns: [...visibleColumns],
+                    columnOrder,
+                    columnWidths,
+                    adminVersion: savedAdminPrefs?.updatedAt || null,
+                });
+                return true;
+            }
+            return false;
         } catch (error) {
             console.error('Failed to save user preferences:', error);
             return false;
@@ -317,8 +340,8 @@ export function useGridState({
     const resetToDefaults = useCallback(async (): Promise<boolean> => {
         setIsSavingPrefs(true);
         try {
-            // Delete user preferences
-            await adminApi.deleteUserGridPreferences(gridId);
+            // Delete user preferences using Server Function
+            await deleteUserPreferences({ data: { gridId } });
 
             // Apply admin defaults or code defaults
             if (savedAdminPrefs) {
@@ -348,21 +371,26 @@ export function useGridState({
         if (!isManager) return false;
         setIsSavingPrefs(true);
         try {
-            const newPrefs = {
-                visibleColumns: [...visibleColumns],
-                columnOrder,
-                columnWidths,
-            };
-            await adminApi.saveGridPreferences(gridId, newPrefs);
-
-            // Update admin prefs reference with new timestamp
-            const now = new Date().toISOString();
-            setSavedAdminPrefs({
-                ...newPrefs,
-                updatedAt: now,
+            const result = await updateAdminGridPreferences({
+                data: {
+                    gridId,
+                    visibleColumns: [...visibleColumns],
+                    columnOrder,
+                    columnWidths,
+                },
             });
 
-            return true;
+            if (result.success && result.data) {
+                // Update admin prefs reference with new timestamp
+                setSavedAdminPrefs({
+                    visibleColumns: [...visibleColumns],
+                    columnOrder,
+                    columnWidths,
+                    updatedAt: result.data.updatedAt || new Date().toISOString(),
+                });
+                return true;
+            }
+            return false;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
             return false;
@@ -469,8 +497,10 @@ export function useGridState({
 /**
  * Helper to get column order from AG-Grid API
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getColumnOrderFromApi(api: any): string[] {
     return api.getAllDisplayedColumns()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((col: any) => col.getColId())
         .filter((id: string | undefined): id is string => id !== undefined);
 }

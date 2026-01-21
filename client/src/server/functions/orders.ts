@@ -1082,6 +1082,156 @@ export interface OrderDetail {
  * Fetches complete order details for the UnifiedOrderModal.
  * Includes all nested relations needed for view/edit/ship operations.
  */
+// ============================================
+// SEARCH UNIFIED - For useSearchOrders hook
+// ============================================
+
+const searchUnifiedInputSchema = z.object({
+    q: z.string().min(2, 'Search query must be at least 2 characters'),
+    page: z.number().int().positive().default(1),
+    pageSize: z.number().int().positive().max(500).default(100),
+});
+
+export type SearchUnifiedInput = z.infer<typeof searchUnifiedInputSchema>;
+
+export interface SearchUnifiedResponse {
+    data: FlattenedOrderRow[];
+    pagination: {
+        page: number;
+        pageSize: number;
+        total: number;
+        totalPages: number;
+    };
+    searchQuery: string;
+}
+
+/**
+ * Server Function: Search orders across all views
+ *
+ * Unified search that returns flattened rows for grid display.
+ * Searches across all order statuses (open, shipped, cancelled).
+ */
+export const searchUnifiedOrders = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => searchUnifiedInputSchema.parse(input))
+    .handler(async ({ data }): Promise<SearchUnifiedResponse> => {
+        console.log('[Server Function] searchUnifiedOrders called with:', data);
+
+        try {
+            // Dynamic import to prevent bundling Prisma into client
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // Use global singleton pattern
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            const { q, page, pageSize } = data;
+            const offset = (page - 1) * pageSize;
+            const searchTerm = q.trim();
+
+            // Build search where clause - search across all views
+            const where = {
+                OR: [
+                    { orderNumber: { contains: searchTerm, mode: 'insensitive' as const } },
+                    { customerName: { contains: searchTerm, mode: 'insensitive' as const } },
+                    { customerEmail: { contains: searchTerm, mode: 'insensitive' as const } },
+                    { customerPhone: { contains: searchTerm } },
+                    { orderLines: { some: { awbNumber: { contains: searchTerm } } } },
+                ],
+            };
+
+            // Execute count and data queries in parallel
+            const [totalCount, orders] = await Promise.all([
+                prisma.order.count({ where }),
+                prisma.order.findMany({
+                    where,
+                    include: {
+                        customer: {
+                            select: {
+                                tags: true,
+                                orderCount: true,
+                                ltv: true,
+                                tier: true,
+                                rtoCount: true,
+                            },
+                        },
+                        shopifyCache: {
+                            select: {
+                                fulfillmentStatus: true,
+                                discountCodes: true,
+                                customerNotes: true,
+                                tags: true,
+                                trackingNumber: true,
+                                trackingCompany: true,
+                                trackingUrl: true,
+                            },
+                        },
+                        orderLines: {
+                            include: {
+                                sku: {
+                                    include: {
+                                        variation: {
+                                            include: {
+                                                product: {
+                                                    select: {
+                                                        name: true,
+                                                        imageUrl: true,
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                productionBatch: {
+                                    select: {
+                                        id: true,
+                                        batchCode: true,
+                                        batchDate: true,
+                                        status: true,
+                                    },
+                                },
+                            },
+                            orderBy: { id: 'asc' },
+                        },
+                    },
+                    orderBy: { orderDate: 'desc' },
+                    skip: offset,
+                    take: pageSize,
+                }),
+            ]);
+
+            console.log('[Server Function] searchUnifiedOrders found', orders.length, 'orders, total:', totalCount);
+
+            // Transform to flattened rows for AG-Grid
+            const rows = flattenOrdersToRows(orders as PrismaOrder[]);
+
+            // Calculate pagination
+            const totalPages = Math.ceil(totalCount / pageSize);
+
+            return {
+                data: rows,
+                pagination: {
+                    page,
+                    pageSize,
+                    total: totalCount,
+                    totalPages,
+                },
+                searchQuery: searchTerm,
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in searchUnifiedOrders:', error);
+            throw error;
+        }
+    });
+
+// ============================================
+// GET ORDER BY ID - For UnifiedOrderModal
+// ============================================
+
 export const getOrderById = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getOrderByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<OrderDetail> => {
@@ -1232,6 +1382,314 @@ export const getOrderById = createServerFn({ method: 'GET' })
             };
         } catch (error) {
             console.error('[Server Function] Error in getOrderById:', error);
+            throw error;
+        }
+    });
+
+// ============================================
+// ORDERS ANALYTICS - Response Types
+// ============================================
+
+export interface CustomerStats {
+    newCustomers: number;
+    returningCustomers: number;
+    newPercent: number;
+    returningPercent: number;
+}
+
+export interface RevenueData {
+    total: number;
+    orderCount: number;
+    change: number | null;
+    customers?: CustomerStats;
+}
+
+export interface TopProduct {
+    id: string;
+    name: string;
+    imageUrl: string | null;
+    qty: number;
+    orderCount: number;
+    salesValue: number;
+    variants: Array<{ name: string; qty: number }>;
+}
+
+export interface OrdersAnalyticsResponse {
+    totalOrders: number;
+    pendingOrders: number;
+    allocatedOrders: number;
+    readyToShip: number;
+    totalUnits: number;
+    paymentSplit: {
+        cod: { count: number; amount: number };
+        prepaid: { count: number; amount: number };
+    };
+    topProducts: TopProduct[];
+    revenue: {
+        today: RevenueData;
+        yesterday: RevenueData;
+        last7Days: RevenueData;
+        last30Days: RevenueData;
+        lastMonth: RevenueData;
+        thisMonth: RevenueData;
+    };
+}
+
+// ============================================
+// ORDERS ANALYTICS - Server Function
+// ============================================
+
+/**
+ * Server Function: Get orders analytics
+ *
+ * Returns analytics data for the OrdersAnalyticsBar component.
+ * Includes pipeline counts, revenue data, payment split, and top products.
+ */
+export const getOrdersAnalytics = createServerFn({ method: 'GET' })
+    .handler(async (): Promise<OrdersAnalyticsResponse> => {
+        console.log('[Server Function] getOrdersAnalytics called');
+
+        try {
+            // Dynamic import to prevent bundling Prisma into client
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // Use global singleton pattern
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            // Calculate date ranges
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const yesterdayStart = new Date(todayStart);
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+            const yesterdayEnd = new Date(todayStart);
+            const last7DaysStart = new Date(todayStart);
+            last7DaysStart.setDate(last7DaysStart.getDate() - 7);
+            const last30DaysStart = new Date(todayStart);
+            last30DaysStart.setDate(last30DaysStart.getDate() - 30);
+            const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+            const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+            // Open orders base filter
+            const openFilter = {
+                isArchived: false,
+                OR: [
+                    { status: 'open' },
+                    {
+                        AND: [{ releasedToShipped: false }, { releasedToCancelled: false }],
+                    },
+                ],
+            };
+
+            // Get pipeline counts by line status
+            const [totalOrders, pendingLines, allocatedLines, readyLines, totalUnits] = await Promise.all([
+                prisma.order.count({ where: openFilter }),
+                prisma.orderLine.count({
+                    where: {
+                        order: openFilter,
+                        lineStatus: 'pending',
+                    },
+                }),
+                prisma.orderLine.count({
+                    where: {
+                        order: openFilter,
+                        lineStatus: 'allocated',
+                    },
+                }),
+                prisma.orderLine.count({
+                    where: {
+                        order: openFilter,
+                        lineStatus: 'packed',
+                    },
+                }),
+                prisma.orderLine.aggregate({
+                    where: { order: openFilter },
+                    _sum: { qty: true },
+                }),
+            ]);
+
+            // Get payment split
+            const [codOrders, prepaidOrders] = await Promise.all([
+                prisma.order.aggregate({
+                    where: { ...openFilter, paymentMethod: 'COD' },
+                    _count: true,
+                    _sum: { totalAmount: true },
+                }),
+                prisma.order.aggregate({
+                    where: { ...openFilter, paymentMethod: { not: 'COD' } },
+                    _count: true,
+                    _sum: { totalAmount: true },
+                }),
+            ]);
+
+            // Get revenue data for different periods
+            const getRevenueForPeriod = async (startDate: Date, endDate?: Date) => {
+                const dateFilter = endDate
+                    ? { orderDate: { gte: startDate, lt: endDate } }
+                    : { orderDate: { gte: startDate } };
+
+                const result = await prisma.order.aggregate({
+                    where: {
+                        ...dateFilter,
+                        releasedToCancelled: false,
+                    },
+                    _sum: { totalAmount: true },
+                    _count: true,
+                });
+
+                // Get customer breakdown (new vs returning)
+                const customerOrders = await prisma.order.findMany({
+                    where: {
+                        ...dateFilter,
+                        releasedToCancelled: false,
+                    },
+                    select: {
+                        customerId: true,
+                        customer: {
+                            select: { orderCount: true },
+                        },
+                    },
+                });
+
+                const newCustomers = customerOrders.filter((o: { customer: { orderCount: number } | null }) => o.customer?.orderCount === 1).length;
+                const returningCustomers = customerOrders.length - newCustomers;
+                const total = customerOrders.length || 1;
+
+                return {
+                    total: result._sum.totalAmount || 0,
+                    orderCount: result._count,
+                    change: null as number | null,
+                    customers: {
+                        newCustomers,
+                        returningCustomers,
+                        newPercent: Math.round((newCustomers / total) * 100),
+                        returningPercent: Math.round((returningCustomers / total) * 100),
+                    },
+                };
+            };
+
+            // Get all revenue data in parallel
+            const [today, yesterday, last7Days, last30Days, lastMonth, thisMonth] = await Promise.all([
+                getRevenueForPeriod(todayStart),
+                getRevenueForPeriod(yesterdayStart, yesterdayEnd),
+                getRevenueForPeriod(last7DaysStart),
+                getRevenueForPeriod(last30DaysStart),
+                getRevenueForPeriod(lastMonthStart, lastMonthEnd),
+                getRevenueForPeriod(thisMonthStart),
+            ]);
+
+            // Calculate change percentages
+            if (yesterday.total > 0) {
+                today.change = Math.round(((today.total - yesterday.total) / yesterday.total) * 100);
+            }
+
+            // Get top products from last 30 days
+            const topProductsData = await prisma.orderLine.groupBy({
+                by: ['skuId'],
+                where: {
+                    order: {
+                        orderDate: { gte: last30DaysStart },
+                        releasedToCancelled: false,
+                    },
+                },
+                _sum: { qty: true, unitPrice: true },
+                _count: { orderId: true },
+                orderBy: { _sum: { qty: 'desc' } },
+                take: 10,
+            });
+
+            // Get product details for top products
+            const skuIds = topProductsData.map((p: { skuId: string }) => p.skuId);
+            const skuDetails = await prisma.sku.findMany({
+                where: { id: { in: skuIds } },
+                include: {
+                    variation: {
+                        include: {
+                            product: {
+                                select: { id: true, name: true, imageUrl: true },
+                            },
+                        },
+                    },
+                },
+            });
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const skuMap = new Map<string, any>(skuDetails.map((s: any) => [s.id, s]));
+
+            // Aggregate by product
+            const productAggregates = new Map<string, TopProduct>();
+            for (const item of topProductsData) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const sku: any = skuMap.get(item.skuId);
+                if (!sku) continue;
+
+                const product = sku.variation.product;
+                const existing = productAggregates.get(product.id);
+                const qty = item._sum.qty || 0;
+                const salesValue = (item._sum.unitPrice || 0) * qty;
+
+                if (existing) {
+                    existing.qty += qty;
+                    existing.orderCount += item._count.orderId;
+                    existing.salesValue += salesValue;
+                    existing.variants.push({
+                        name: `${sku.variation.colorName} - ${sku.size}`,
+                        qty,
+                    });
+                } else {
+                    productAggregates.set(product.id, {
+                        id: product.id,
+                        name: product.name,
+                        imageUrl: product.imageUrl || sku.variation.imageUrl,
+                        qty,
+                        orderCount: item._count.orderId,
+                        salesValue,
+                        variants: [{
+                            name: `${sku.variation.colorName} - ${sku.size}`,
+                            qty,
+                        }],
+                    });
+                }
+            }
+
+            const topProducts = Array.from(productAggregates.values())
+                .sort((a, b) => b.qty - a.qty)
+                .slice(0, 6);
+
+            return {
+                totalOrders,
+                pendingOrders: pendingLines,
+                allocatedOrders: allocatedLines,
+                readyToShip: readyLines,
+                totalUnits: totalUnits._sum.qty || 0,
+                paymentSplit: {
+                    cod: {
+                        count: codOrders._count,
+                        amount: codOrders._sum.totalAmount || 0,
+                    },
+                    prepaid: {
+                        count: prepaidOrders._count,
+                        amount: prepaidOrders._sum.totalAmount || 0,
+                    },
+                },
+                topProducts,
+                revenue: {
+                    today,
+                    yesterday,
+                    last7Days,
+                    last30Days,
+                    lastMonth,
+                    thisMonth,
+                },
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in getOrdersAnalytics:', error);
             throw error;
         }
     });

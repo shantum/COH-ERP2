@@ -3,11 +3,20 @@
  * Handles column visibility, column order, column widths
  *
  * Adapted from useGridState.ts for TanStack Table
+ *
+ * Migrated to use Server Functions instead of Axios API calls.
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { ColumnOrderState, VisibilityState, ColumnSizingState } from '@tanstack/react-table';
-import { adminApi } from '../../../services/api';
+import {
+    getAdminGridPreferences,
+    getUserPreferences,
+    updateUserPreferences,
+    deleteUserPreferences,
+    updateAdminGridPreferences,
+} from '../../../server/functions/admin';
+import type { UserPreferences, AdminGridPreferences } from '../../../server/functions/admin';
 import { usePermissions } from '../../../hooks/usePermissions';
 import { ALL_COLUMN_IDS, DEFAULT_VISIBLE_COLUMNS, DEFAULT_COLUMN_WIDTHS, TABLE_ID } from './constants';
 
@@ -60,6 +69,7 @@ const SIZING_KEY = `${TABLE_ID}ColumnSizing`;
 function getDefaultVisibility(): VisibilityState {
     const visibility: VisibilityState = {};
     ALL_COLUMN_IDS.forEach(id => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         visibility[id] = DEFAULT_VISIBLE_COLUMNS.includes(id as any);
     });
     return visibility;
@@ -236,16 +246,22 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
 
         const fetchPreferences = async () => {
             try {
-                const [adminRes, userRes] = await Promise.all([
-                    adminApi.getGridPreferences(TABLE_ID).catch(() => ({ data: null })),
-                    adminApi.getUserGridPreferences(TABLE_ID).catch(() => ({ data: null })),
+                // Fetch both in parallel using Server Functions
+                const [adminResult, userResult] = await Promise.all([
+                    getAdminGridPreferences({ data: { gridId: TABLE_ID } }).catch(() => ({ success: true, data: null })),
+                    getUserPreferences({ data: { gridId: TABLE_ID } }).catch(() => ({ success: true, data: null })),
                 ]);
 
-                const adminPrefs = adminRes.data as AdminPrefs | null;
-                const userPrefs = userRes.data as UserPrefs | null;
+                const adminPrefs = adminResult.success ? adminResult.data as AdminGridPreferences | null : null;
+                const userPrefs = userResult.success ? userResult.data as UserPreferences | null : null;
 
                 if (adminPrefs && adminPrefs.visibleColumns?.length > 0) {
-                    setSavedAdminPrefs(adminPrefs);
+                    setSavedAdminPrefs({
+                        visibleColumns: adminPrefs.visibleColumns,
+                        columnOrder: adminPrefs.columnOrder,
+                        columnWidths: adminPrefs.columnWidths,
+                        updatedAt: adminPrefs.updatedAt || undefined,
+                    });
                 }
 
                 if (userPrefs && userPrefs.visibleColumns?.length > 0) {
@@ -260,9 +276,10 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
                         setColumnSizing(userPrefs.columnWidths);
                     }
                     setSavedUserPrefs({
-                        ...userPrefs,
                         visibleColumns: migratedVisible,
                         columnOrder: migratedOrder,
+                        columnWidths: userPrefs.columnWidths,
+                        adminVersion: userPrefs.adminVersion,
                     });
 
                     // Persist migrated values to localStorage (SSR-safe)
@@ -354,22 +371,26 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
     const saveUserPreferences = useCallback(async (): Promise<boolean> => {
         setIsSavingPrefs(true);
         try {
-            const newPrefs = {
-                visibleColumns: visibilityToArray(columnVisibility),
-                columnOrder,
-                columnWidths: columnSizing,
-                adminVersion: savedAdminPrefs?.updatedAt || undefined,
-            };
-            await adminApi.saveUserGridPreferences(TABLE_ID, newPrefs);
-
-            setSavedUserPrefs({
-                visibleColumns: newPrefs.visibleColumns,
-                columnOrder: newPrefs.columnOrder,
-                columnWidths: newPrefs.columnWidths,
-                adminVersion: newPrefs.adminVersion || null,
+            const result = await updateUserPreferences({
+                data: {
+                    gridId: TABLE_ID,
+                    visibleColumns: visibilityToArray(columnVisibility),
+                    columnOrder,
+                    columnWidths: columnSizing,
+                    adminVersion: savedAdminPrefs?.updatedAt || undefined,
+                },
             });
 
-            return true;
+            if (result.success) {
+                setSavedUserPrefs({
+                    visibleColumns: visibilityToArray(columnVisibility),
+                    columnOrder,
+                    columnWidths: columnSizing,
+                    adminVersion: savedAdminPrefs?.updatedAt || null,
+                });
+                return true;
+            }
+            return false;
         } catch (error) {
             console.error('Failed to save user preferences:', error);
             return false;
@@ -402,7 +423,7 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
     const resetToDefaults = useCallback(async (): Promise<boolean> => {
         setIsSavingPrefs(true);
         try {
-            await adminApi.deleteUserGridPreferences(TABLE_ID);
+            await deleteUserPreferences({ data: { gridId: TABLE_ID } });
 
             if (savedAdminPrefs) {
                 setColumnVisibility(arrayToVisibility(savedAdminPrefs.visibleColumns));
@@ -429,20 +450,25 @@ export function useOrdersTableState(): UseOrdersTableStateReturn {
         if (!isManager) return false;
         setIsSavingPrefs(true);
         try {
-            const newPrefs = {
-                visibleColumns: visibilityToArray(columnVisibility),
-                columnOrder,
-                columnWidths: columnSizing,
-            };
-            await adminApi.saveGridPreferences(TABLE_ID, newPrefs);
-
-            const now = new Date().toISOString();
-            setSavedAdminPrefs({
-                ...newPrefs,
-                updatedAt: now,
+            const result = await updateAdminGridPreferences({
+                data: {
+                    gridId: TABLE_ID,
+                    visibleColumns: visibilityToArray(columnVisibility),
+                    columnOrder,
+                    columnWidths: columnSizing,
+                },
             });
 
-            return true;
+            if (result.success && result.data) {
+                setSavedAdminPrefs({
+                    visibleColumns: visibilityToArray(columnVisibility),
+                    columnOrder,
+                    columnWidths: columnSizing,
+                    updatedAt: result.data.updatedAt || new Date().toISOString(),
+                });
+                return true;
+            }
+            return false;
         } catch (error) {
             console.error('Failed to save grid preferences:', error);
             return false;

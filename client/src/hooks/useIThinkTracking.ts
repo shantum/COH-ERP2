@@ -1,73 +1,31 @@
 /**
  * iThink Tracking Hook
  * TanStack Query hook for fetching iThink Logistics tracking data
+ *
+ * Migrated to use Server Functions instead of Axios API calls.
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { trackingApi } from '../services/api';
+import { getAwbTracking } from '../server/functions/tracking';
+import type { AwbTrackingResponse, TrackingLastScan, TrackingScan } from '../server/functions/tracking';
 
 /**
  * Last scan details from iThink tracking
+ * Re-export from server function types for backwards compatibility
  */
-export interface IThinkLastScan {
-    status: string;
-    statusCode: string;
-    location: string;
-    datetime: string;
-    remark?: string;
-    reason?: string;
-}
+export type IThinkLastScan = TrackingLastScan;
 
 /**
  * Scan history item from iThink tracking
+ * Re-export from server function types for backwards compatibility
  */
-export interface IThinkScanHistoryItem {
-    status: string;
-    statusCode: string;
-    location: string;
-    datetime: string;
-    remark?: string;
-    reason?: string;
-}
+export type IThinkScanHistoryItem = TrackingScan;
 
 /**
  * Full tracking data from iThink Logistics
+ * Re-export from server function types for backwards compatibility
  */
-export interface IThinkTrackingData {
-    awbNumber: string;
-    courier: string;
-    currentStatus: string;
-    statusCode: string;
-    expectedDeliveryDate: string | null;
-    promiseDeliveryDate: string | null;
-    ofdCount: number;
-    isRto: boolean;
-    rtoAwb: string | null;
-    orderType: string | null;
-    cancelStatus: string | null;
-    lastScan: IThinkLastScan | null;
-    orderDetails: {
-        orderNumber: string;
-        subOrderNumber: string;
-        orderType: string;
-        weight: string;
-        length: string;
-        breadth: string;
-        height: string;
-        netPayment: string;
-    } | null;
-    customerDetails: {
-        name: string;
-        phone: string;
-        address1: string;
-        address2: string;
-        city: string;
-        state: string;
-        country: string;
-        pincode: string;
-    } | null;
-    scanHistory: IThinkScanHistoryItem[];
-}
+export type IThinkTrackingData = AwbTrackingResponse;
 
 export interface UseIThinkTrackingOptions {
     /** AWB number to track */
@@ -92,8 +50,10 @@ export function useIThinkTracking({
     return useQuery<IThinkTrackingData>({
         queryKey: ['ithink-tracking', awbNumber],
         queryFn: async () => {
-            const response = await trackingApi.getAwbTracking(awbNumber);
-            return response.data;
+            const result = await getAwbTracking({
+                data: { awbNumber },
+            });
+            return result;
         },
         enabled: enabled && !!awbNumber,
         staleTime: 2 * 60 * 1000, // 2 minutes - tracking updates frequently

@@ -5,9 +5,29 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi, ordersApi, returnsApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getTransactionMatches, allocateTransactionFn } from '../../server/functions/inventoryMutations';
+import { searchRtoOrders, getReturnsAll } from '../../server/functions/returns';
 import { X, Search, Package, Truck, RotateCcw, Check, AlertTriangle } from 'lucide-react';
-import type { RecentInward, AllocationMatch } from '../../types';
+import type { TransactionMatchesResult, TransactionMatch } from '../../server/functions/inventoryMutations';
+
+interface AllocationMatch {
+    type: 'rto' | 'production';
+    id: string;
+    label: string;
+    detail: string;
+    date?: string | null;
+    orderId?: string;
+}
+
+interface RecentInward {
+    id: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+}
 
 interface AllocationModalProps {
     transaction: RecentInward;
@@ -25,8 +45,14 @@ export default function AllocationModal({
 
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedMatch, setSelectedMatch] = useState<AllocationMatch | null>(null);
-    const [rtoCondition, setRtoCondition] = useState<'unused' | 'used' | 'damaged'>('unused');
+    const [rtoCondition, setRtoCondition] = useState<'good' | 'unopened' | 'damaged' | 'wrong_product'>('good');
     const [error, setError] = useState<string | null>(null);
+
+    // Server functions
+    const getTransactionMatchesFn = useServerFn(getTransactionMatches);
+    const searchRtoOrdersFn = useServerFn(searchRtoOrders);
+    const getReturnsAllFn = useServerFn(getReturnsAll);
+    const allocateTransactionMutationFn = useServerFn(allocateTransactionFn);
 
     // Auto-focus search input
     useEffect(() => {
@@ -34,13 +60,20 @@ export default function AllocationModal({
     }, []);
 
     // Get suggested matches for this transaction
-    const { data: matches = [], isLoading: matchesLoading } = useQuery<AllocationMatch[]>({
+    const { data: matchesResult, isLoading: matchesLoading } = useQuery<TransactionMatchesResult>({
         queryKey: ['transaction-matches', transaction.id],
-        queryFn: async () => {
-            const res = await inventoryApi.getTransactionMatches(transaction.id);
-            return res.data;
-        },
+        queryFn: () => getTransactionMatchesFn({ data: { transactionId: transaction.id } }),
     });
+
+    // Transform matches to the UI format
+    const matches: AllocationMatch[] = (matchesResult?.matches || []).map((m: TransactionMatch) => ({
+        type: m.type as 'rto' | 'production',
+        id: m.id,
+        label: m.label,
+        detail: m.detail,
+        date: typeof m.date === 'string' ? m.date : m.date instanceof Date ? m.date.toISOString() : null,
+        orderId: m.orderId,
+    }));
 
     // Search for orders/returns by order number or AWB
     const { data: searchResults, isLoading: searchLoading } = useQuery<AllocationMatch[]>({
@@ -52,36 +85,42 @@ export default function AllocationModal({
 
             // Search RTO orders
             try {
-                const rtoRes = await ordersApi.getRto({ search: searchQuery, limit: 5 });
-                const rtoOrders = rtoRes.data.orders || [];
-                rtoOrders.forEach((order: any) => {
+                const rtoRes = await searchRtoOrdersFn({ data: { search: searchQuery, limit: 5 } });
+                const rtoOrders = rtoRes.orders || [];
+                rtoOrders.forEach((order) => {
                     results.push({
                         type: 'rto',
                         id: order.id,
                         label: `RTO Order ${order.orderNumber}`,
-                        detail: `${order.customer?.name || 'Unknown'} - AWB: ${order.awbNumber || 'N/A'}`,
+                        detail: `${order.customerName || 'Unknown'} - AWB: ${order.awbNumber || 'N/A'}`,
                         date: order.rtoInitiatedAt || order.orderDate,
                         orderId: order.id,
                     });
                 });
-            } catch (err) {
+            } catch {
                 // Ignore search errors
             }
 
             // Search return requests
             try {
-                const returnsRes = await returnsApi.getAll({ search: searchQuery });
-                const returns = returnsRes.data.requests || returnsRes.data || [];
-                returns.forEach((ret: any) => {
+                const returnsRes = await getReturnsAllFn();
+                const returns = returnsRes || [];
+                // Filter returns by search query
+                const filteredReturns = returns.filter(ret =>
+                    ret.requestNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    (ret.customerName && ret.customerName.toLowerCase().includes(searchQuery.toLowerCase()))
+                ).slice(0, 5);
+
+                filteredReturns.forEach((ret) => {
                     results.push({
-                        type: 'production',
+                        type: 'production', // Returns use 'production' type in backend
                         id: ret.id,
                         label: `Return ${ret.requestNumber}`,
-                        detail: `${ret.originalOrder?.customer?.name || 'Unknown'} - ${ret.status}`,
+                        detail: `${ret.customerName || 'Unknown'} - ${ret.status}`,
                         date: ret.createdAt,
                     });
                 });
-            } catch (err) {
+            } catch {
                 // Ignore search errors
             }
 
@@ -106,20 +145,28 @@ export default function AllocationModal({
             const allocationType = selectedMatch.type === 'rto' ? 'rto' : 'production';
             const allocationId = allocationType === 'rto' ? selectedMatch.orderId : selectedMatch.id;
 
-            return inventoryApi.allocateTransaction({
-                transactionId: transaction.id,
-                allocationType,
-                allocationId,
-                rtoCondition: allocationType === 'rto' ? rtoCondition : undefined,
+            const result = await allocateTransactionMutationFn({
+                data: {
+                    transactionId: transaction.id,
+                    allocationType,
+                    allocationId,
+                    rtoCondition: allocationType === 'rto' ? rtoCondition : undefined,
+                },
             });
+
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to allocate transaction');
+            }
+
+            return result;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['recent-inwards'] });
             queryClient.invalidateQueries({ queryKey: ['transaction-matches'] });
             onSuccess();
         },
-        onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to allocate transaction');
+        onError: (err: Error) => {
+            setError(err.message || 'Failed to allocate transaction');
         },
     });
 
@@ -289,9 +336,10 @@ export default function AllocationModal({
                             </label>
                             <div className="space-y-2">
                                 {[
-                                    { value: 'unused', label: 'Unused', color: 'green' },
-                                    { value: 'used', label: 'Used', color: 'yellow' },
+                                    { value: 'good', label: 'Good', color: 'green' },
+                                    { value: 'unopened', label: 'Unopened', color: 'blue' },
                                     { value: 'damaged', label: 'Damaged', color: 'red' },
+                                    { value: 'wrong_product', label: 'Wrong Product', color: 'yellow' },
                                 ].map((cond) => (
                                     <label
                                         key={cond.value}
@@ -307,7 +355,7 @@ export default function AllocationModal({
                                             value={cond.value}
                                             checked={rtoCondition === cond.value}
                                             onChange={(e) =>
-                                                setRtoCondition(e.target.value as any)
+                                                setRtoCondition(e.target.value as 'good' | 'unopened' | 'damaged' | 'wrong_product')
                                             }
                                         />
                                         <span className="text-sm font-medium">{cond.label}</span>

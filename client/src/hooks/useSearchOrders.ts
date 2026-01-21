@@ -2,10 +2,13 @@
  * useSearchOrders hook
  * Fetches search results across all order statuses for grid display
  * Returns same row format as useUnifiedOrdersData for seamless grid integration
+ *
+ * Migrated to use Server Functions instead of Axios API calls.
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi } from '../services/api';
+import { searchUnifiedOrders } from '../server/functions/orders';
+import type { SearchUnifiedResponse } from '../server/functions/orders';
 
 // Cache search results for 30 seconds
 const STALE_TIME = 30000;
@@ -17,28 +20,19 @@ interface UseSearchOrdersOptions {
     enabled?: boolean;
 }
 
-interface SearchResult {
-    data: any[];
-    pagination: {
-        page: number;
-        pageSize: number;
-        total: number;
-        totalPages: number;
-    };
-    searchQuery: string;
-}
-
 export function useSearchOrders({
     query,
     page = 1,
     pageSize = 100,
     enabled = true,
 }: UseSearchOrdersOptions) {
-    const searchQuery = useQuery<SearchResult>({
+    const searchQuery = useQuery<SearchUnifiedResponse>({
         queryKey: ['orders', 'search-unified', query, page, pageSize],
         queryFn: async () => {
-            const response = await ordersApi.searchUnified(query, page, pageSize);
-            return response.data;
+            const result = await searchUnifiedOrders({
+                data: { q: query, page, pageSize },
+            });
+            return result;
         },
         enabled: enabled && query.length >= 2,
         staleTime: STALE_TIME,

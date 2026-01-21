@@ -3,10 +3,13 @@
  *
  * Fetches and manages the hierarchical products tree data.
  * Uses TanStack Query for caching and state management.
+ *
+ * Migrated to use Server Functions instead of Axios API calls.
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { productsApi } from '../../../services/api';
+import { getProductsTree, getProductById } from '../../../server/functions/products';
+import type { ProductsTreeResponse } from '../../../server/functions/products';
 import type { ProductTreeResponse, ProductTreeNode } from '../types';
 
 // Query key factory
@@ -15,6 +18,14 @@ export const productsTreeKeys = {
     tree: () => [...productsTreeKeys.all, 'tree'] as const,
     detail: (id: string) => [...productsTreeKeys.all, 'detail', id] as const,
 };
+
+// Map Server Function response to legacy ProductTreeResponse type
+function mapToLegacyResponse(response: ProductsTreeResponse): ProductTreeResponse {
+    return {
+        items: response.items as unknown as ProductTreeNode[],
+        summary: response.summary,
+    };
+}
 
 /**
  * Hook to fetch the full products tree
@@ -30,8 +41,8 @@ export function useProductsTree(options?: {
     const query = useQuery<ProductTreeResponse>({
         queryKey: productsTreeKeys.tree(),
         queryFn: async () => {
-            const response = await productsApi.getTree();
-            return response.data;
+            const response = await getProductsTree({ data: {} });
+            return mapToLegacyResponse(response);
         },
         staleTime: 30 * 1000, // 30 seconds
         enabled: options?.enabled !== false,
@@ -57,8 +68,8 @@ export function useProductDetail(productId: string | null) {
         queryKey: productsTreeKeys.detail(productId ?? ''),
         queryFn: async () => {
             if (!productId) return null;
-            const response = await productsApi.getById(productId);
-            return response.data;
+            const response = await getProductById({ data: { id: productId } });
+            return response;
         },
         enabled: !!productId,
     });
@@ -66,14 +77,20 @@ export function useProductDetail(productId: string | null) {
 
 /**
  * Hook for products tree mutations
+ *
+ * NOTE: Mutations still use tRPC for now (to be migrated in a separate PR).
+ * Import the mutations from the tRPC router for now.
  */
 export function useProductsTreeMutations() {
     const queryClient = useQueryClient();
+    // Import tRPC for mutations (Server Functions for mutations TBD)
+    const { trpc } = require('../../../services/trpc');
 
     const updateProduct = useMutation({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const response = await productsApi.update(id, data);
-            return response.data;
+            const response = await trpc.products.update.mutate({ id, ...data });
+            return response;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });
@@ -81,9 +98,10 @@ export function useProductsTreeMutations() {
     });
 
     const updateVariation = useMutation({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const response = await productsApi.updateVariation(id, data);
-            return response.data;
+            const response = await trpc.products.updateVariation.mutate({ id, ...data });
+            return response;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });
@@ -91,9 +109,10 @@ export function useProductsTreeMutations() {
     });
 
     const updateSku = useMutation({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const response = await productsApi.updateSku(id, data);
-            return response.data;
+            const response = await trpc.products.updateSku.mutate({ id, ...data });
+            return response;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });
@@ -101,9 +120,10 @@ export function useProductsTreeMutations() {
     });
 
     const createProduct = useMutation({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async (data: any) => {
-            const response = await productsApi.create(data);
-            return response.data;
+            const response = await trpc.products.create.mutate(data);
+            return response;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });
@@ -111,9 +131,10 @@ export function useProductsTreeMutations() {
     });
 
     const createVariation = useMutation({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ productId, data }: { productId: string; data: any }) => {
-            const response = await productsApi.createVariation(productId, data);
-            return response.data;
+            const response = await trpc.products.createVariation.mutate({ productId, ...data });
+            return response;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });
@@ -121,9 +142,10 @@ export function useProductsTreeMutations() {
     });
 
     const createSku = useMutation({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ variationId, data }: { variationId: string; data: any }) => {
-            const response = await productsApi.createSku(variationId, data);
-            return response.data;
+            const response = await trpc.products.createSku.mutate({ variationId, ...data });
+            return response;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: productsTreeKeys.tree() });

@@ -3,12 +3,22 @@
  *
  * A single modal component that handles all material-related edit operations.
  * Uses `type` prop to determine which form fields to display.
+ *
+ * Uses Server Functions for data mutations (TanStack Start migration)
  */
 
 import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { materialsApi, fabricsApi } from '../../services/api';
+import {
+    updateMaterial as updateMaterialFn,
+    updateFabric as updateFabricFn,
+    updateColour as updateColourFn,
+    updateTrim as updateTrimFn,
+    updateService as updateServiceFn,
+    getSuppliers,
+    type Supplier,
+} from '../../server/functions/materialsMutations';
 
 // Types
 export type MaterialEditType = 'material' | 'fabric' | 'colour' | 'trim' | 'service';
@@ -40,9 +50,12 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
     const queryClient = useQueryClient();
 
     // Fetch suppliers
-    const { data: suppliers } = useQuery({
+    const { data: suppliers } = useQuery<Supplier[]>({
         queryKey: ['suppliers'],
-        queryFn: () => fabricsApi.getSuppliers().then(r => r.data),
+        queryFn: async () => {
+            const response = await getSuppliers();
+            return response.suppliers;
+        },
         enabled: isOpen && (type === 'colour' || type === 'trim'),
     });
 
@@ -136,54 +149,84 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
 
     // Mutations
     const updateMaterial = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateMaterial(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: { name: string; description: string } }) => {
+            const response = await updateMaterialFn({
+                data: { id, name: data.name, description: data.description },
+            });
+            if (!response.success) throw new Error('Failed to update material');
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsHierarchy'] });
             queryClient.invalidateQueries({ queryKey: ['materialsFilters'] });
             onSuccess?.();
             onClose();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update material'),
+        onError: (err: Error) => alert(err.message || 'Failed to update material'),
     });
 
     const updateFabric = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateFabric(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const response = await updateFabricFn({
+                data: { id, ...data },
+            });
+            if (!response.success) throw new Error('Failed to update fabric');
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsHierarchy'] });
             onSuccess?.();
             onClose();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update fabric'),
+        onError: (err: Error) => alert(err.message || 'Failed to update fabric'),
     });
 
     const updateColour = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateColour(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const response = await updateColourFn({
+                data: { id, ...data },
+            });
+            if (!response.success) throw new Error('Failed to update colour');
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['materialsHierarchy'] });
             onSuccess?.();
             onClose();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update colour'),
+        onError: (err: Error) => alert(err.message || 'Failed to update colour'),
     });
 
     const updateTrim = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateTrim(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const response = await updateTrimFn({
+                data: { id, ...data },
+            });
+            if (!response.success) throw new Error('Failed to update trim');
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['trimsCatalog'] });
             onSuccess?.();
             onClose();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update trim'),
+        onError: (err: Error) => alert(err.message || 'Failed to update trim'),
     });
 
     const updateService = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: any }) => materialsApi.updateService(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const response = await updateServiceFn({
+                data: { id, ...data },
+            });
+            if (!response.success) throw new Error('Failed to update service');
+            return response;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['servicesCatalog'] });
             onSuccess?.();
             onClose();
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to update service'),
+        onError: (err: Error) => alert(err.message || 'Failed to update service'),
     });
 
     // Check if any mutation is pending
@@ -538,7 +581,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                                     onChange={(e) => setColourForm(f => ({ ...f, supplierId: e.target.value }))}
                                 >
                                     <option value="">No supplier</option>
-                                    {suppliers?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                    {suppliers?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>
                             </div>
                             <div className="border-t pt-4">
@@ -667,7 +710,7 @@ export function MaterialEditModal({ type, item, isOpen, onClose, onSuccess }: Ma
                                         onChange={(e) => setTrimForm(f => ({ ...f, supplierId: e.target.value }))}
                                     >
                                         <option value="">No supplier</option>
-                                        {suppliers?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                        {suppliers?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                                     </select>
                                 </div>
                                 <div>

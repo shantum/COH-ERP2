@@ -1,61 +1,20 @@
 /**
  * OrdersAnalyticsBar - Clean, responsive dashboard metrics
  * Mobile-first design with collapsible sections
+ *
+ * Uses Server Functions for data fetching (TanStack Start migration)
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi } from '../../services/api';
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Users, UserPlus } from 'lucide-react';
-
-interface CustomerStats {
-    newCustomers: number;
-    returningCustomers: number;
-    newPercent: number;
-    returningPercent: number;
-}
-
-interface RevenueData {
-    total: number;
-    orderCount: number;
-    change: number | null;
-    customers?: CustomerStats;
-}
-
-interface AnalyticsData {
-    totalOrders: number;
-    pendingOrders: number;
-    allocatedOrders: number;
-    readyToShip: number;
-    totalUnits: number;
-    paymentSplit: {
-        cod: { count: number; amount: number };
-        prepaid: { count: number; amount: number };
-    };
-    topProducts: Array<{
-        id: string;
-        name: string;
-        imageUrl: string | null;
-        qty: number;
-        orderCount: number;
-        salesValue: number;
-        variants: Array<{ name: string; qty: number }>;
-    }>;
-    revenue: {
-        today: RevenueData;
-        yesterday: RevenueData;
-        last7Days: RevenueData;
-        last30Days: RevenueData;
-        lastMonth: RevenueData;
-        thisMonth: RevenueData;
-    };
-}
+import { getOrdersAnalytics, type OrdersAnalyticsResponse, type CustomerStats } from '../../server/functions/orders';
 
 export function OrdersAnalyticsBar() {
     const [isExpanded, setIsExpanded] = useState(true);
-    const { data: analytics, isLoading } = useQuery<AnalyticsData>({
+    const { data: analytics, isLoading } = useQuery<OrdersAnalyticsResponse>({
         queryKey: ['ordersAnalytics'],
-        queryFn: () => ordersApi.getAnalytics().then(r => r.data),
+        queryFn: () => getOrdersAnalytics(),
         staleTime: 30 * 1000,
         refetchInterval: 60 * 1000,
     });

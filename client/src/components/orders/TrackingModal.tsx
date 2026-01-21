@@ -1,10 +1,12 @@
 /**
  * TrackingModal - Shows real-time shipment tracking from logistics provider
+ *
+ * Uses Server Functions for data fetching (TanStack Start migration)
  */
 
 import { useQuery } from '@tanstack/react-query';
 import { X, Package, Truck, MapPin, Clock, CheckCircle, AlertTriangle, RotateCcw, RefreshCw } from 'lucide-react';
-import { trackingApi } from '../../services/api';
+import { getAwbTracking, type AwbTrackingResponse, type TrackingScan } from '../../server/functions/tracking';
 
 interface TrackingModalProps {
     awbNumber: string;
@@ -53,9 +55,9 @@ function getStatusColor(status: string): string {
 }
 
 export function TrackingModal({ awbNumber, orderNumber, onClose }: TrackingModalProps) {
-    const { data: tracking, isLoading, error, refetch, isFetching } = useQuery({
+    const { data: tracking, isLoading, error, refetch, isFetching } = useQuery<AwbTrackingResponse>({
         queryKey: ['tracking', awbNumber],
-        queryFn: () => trackingApi.getAwbTracking(awbNumber).then(r => r.data),
+        queryFn: () => getAwbTracking({ data: { awbNumber } }),
         staleTime: 60000, // Cache for 1 minute
     });
 
@@ -308,7 +310,7 @@ export function TrackingModal({ awbNumber, orderNumber, onClose }: TrackingModal
                                         <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-gray-200"></div>
 
                                         <div className="space-y-0">
-                                            {tracking.scanHistory.map((scan: any, index: number) => (
+                                            {tracking.scanHistory.map((scan: TrackingScan, index: number) => (
                                                 <div key={index} className="relative flex items-start gap-4 py-3">
                                                     {/* Timeline dot */}
                                                     <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center ${

@@ -1,13 +1,15 @@
 /**
  * Create User Modal
  * Form modal for creating new users with role assignment
+ *
+ * Uses Server Functions for data mutations (TanStack Start migration)
  */
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Eye, EyeOff, AlertCircle } from 'lucide-react';
 import Modal from '../Modal';
-import { adminApi } from '../../services/api';
+import { createUser } from '../../server/functions/admin';
 import type { Role } from '../../types';
 
 interface CreateUserModalProps {
@@ -32,14 +34,26 @@ export default function CreateUserModal({ isOpen, onClose, roles }: CreateUserMo
 
     // Create user mutation
     const createUserMutation = useMutation({
-        mutationFn: (data: { email: string; password: string; name: string; roleId?: string }) =>
-            adminApi.createUser(data),
+        mutationFn: async (data: { email: string; password: string; name: string; roleId?: string }) => {
+            const response = await createUser({
+                data: {
+                    email: data.email,
+                    password: data.password,
+                    name: data.name,
+                    roleId: data.roleId || null,
+                },
+            });
+            if (!response.success) {
+                throw new Error(response.error?.message || 'Failed to create user');
+            }
+            return response.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
             handleClose();
         },
-        onError: (error: any) => {
-            const message = error.response?.data?.error || 'Failed to create user';
+        onError: (error: Error) => {
+            const message = error.message || 'Failed to create user';
             setErrors({ submit: message });
         },
     });

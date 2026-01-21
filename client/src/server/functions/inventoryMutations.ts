@@ -1752,6 +1752,111 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
         }
     });
 
+// ============================================
+// UNDO TRANSACTION (By ID)
+// ============================================
+
+const undoTransactionSchema = z.object({
+    transactionId: z.string().uuid('Invalid transaction ID'),
+});
+
+export interface UndoTransactionResult {
+    transactionId: string;
+    skuId: string;
+    qty: number;
+    newBalance: number;
+}
+
+/**
+ * Undo a specific transaction by ID
+ *
+ * Deletes the transaction and recalculates balance.
+ * Used by RecentInwardsTable for undo functionality.
+ * Validates that the transaction is recent (24 hours).
+ */
+export const undoTransaction = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => undoTransactionSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<UndoTransactionResult>> => {
+        const prisma = await getPrisma();
+        const { transactionId } = data;
+
+        // Find transaction
+        const transaction = await prisma.inventoryTransaction.findUnique({
+            where: { id: transactionId },
+            include: {
+                sku: {
+                    include: {
+                        variation: { include: { product: true } },
+                    },
+                },
+            },
+        });
+
+        if (!transaction) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Transaction not found' },
+            };
+        }
+
+        // Check 24-hour window
+        const hoursSinceCreated = (Date.now() - new Date(transaction.createdAt).getTime()) / (1000 * 60 * 60);
+        if (hoursSinceCreated > 24) {
+            return {
+                success: false,
+                error: {
+                    code: 'BAD_REQUEST',
+                    message: `Transaction is too old to undo (${Math.round(hoursSinceCreated)} hours ago, max 24 hours)`,
+                },
+            };
+        }
+
+        // Handle return_receipt reversion
+        if (transaction.reason === 'return_receipt' && transaction.referenceId) {
+            const queueItem = await prisma.repackingQueueItem.findUnique({
+                where: { id: transaction.referenceId },
+            });
+
+            if (queueItem && queueItem.status === 'ready') {
+                await prisma.repackingQueueItem.update({
+                    where: { id: transaction.referenceId },
+                    data: {
+                        status: 'pending',
+                        qcComments: null,
+                        processedAt: null,
+                        processedById: null,
+                    },
+                });
+            }
+        }
+
+        await prisma.inventoryTransaction.delete({ where: { id: transactionId } });
+
+        await invalidateCache([transaction.skuId]);
+
+        const balance = await calculateInventoryBalance(prisma, transaction.skuId);
+
+        broadcastUpdate({
+            type: 'inventory_updated',
+            skuId: transaction.skuId,
+            changes: {
+                availableBalance: balance.availableBalance,
+                currentBalance: balance.currentBalance,
+            },
+        });
+
+        return {
+            success: true,
+            data: {
+                transactionId,
+                skuId: transaction.skuId,
+                qty: transaction.qty,
+                newBalance: balance.currentBalance,
+            },
+        };
+    });
+
 /**
  * Quick inward by SKU code - fast scan workflow with custom quantity
  *

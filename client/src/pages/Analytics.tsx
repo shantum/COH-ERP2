@@ -360,7 +360,7 @@ export default function Analytics() {
                                 </div>
                                 <div className="h-96">
                                     <AgGridReact
-                                        rowData={data.breakdown}
+                                        rowData={data.breakdown ?? []}
                                         columnDefs={columnDefs}
                                         theme={compactThemeSmall}
                                         defaultColDef={{

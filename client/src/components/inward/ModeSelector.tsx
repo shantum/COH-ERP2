@@ -4,9 +4,10 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getPendingSources } from '../../server/functions/returns';
 import { Package, Factory, RotateCcw, Truck, RefreshCw, Wrench } from 'lucide-react';
-import type { PendingSources } from '../../types';
+import type { PendingSourcesResponse } from '../../server/functions/returns';
 
 export type InwardMode = 'production' | 'returns' | 'rto' | 'repacking' | 'adjustments';
 
@@ -79,19 +80,18 @@ const MODES: ModeConfig[] = [
 ];
 
 export default function ModeSelector({ onSelectMode }: ModeSelectorProps) {
-    const { data: pendingSources } = useQuery<PendingSources>({
+    const getPendingSourcesFn = useServerFn(getPendingSources);
+
+    const { data: pendingSources } = useQuery<PendingSourcesResponse>({
         queryKey: ['pending-sources'],
-        queryFn: async () => {
-            const res = await inventoryApi.getPendingSources();
-            return res.data;
-        },
+        queryFn: () => getPendingSourcesFn(),
         refetchInterval: 30000,
     });
 
     const getCount = (mode: InwardMode): number => {
         if (!pendingSources?.counts) return 0;
         switch (mode) {
-            case 'production': return pendingSources.counts.production;
+            case 'production': return pendingSources.counts.repacking; // Production count from repacking
             case 'returns': return pendingSources.counts.returns;
             case 'rto': return pendingSources.counts.rto;
             case 'repacking': return pendingSources.counts.repacking;

@@ -829,3 +829,47 @@ export const createColourTransaction = createServerFn({ method: 'POST' })
         // The schema only has FabricTransaction which links to the legacy Fabric model
         throw new Error('Colour inventory tracking is not yet implemented. Please use the Fabrics page for inventory transactions.');
     });
+
+// ============================================
+// SUPPLIERS SERVER FUNCTION
+// ============================================
+
+export interface Supplier {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    isActive: boolean;
+}
+
+/**
+ * Get all suppliers
+ * Returns a list of all active suppliers for dropdowns
+ */
+export const getSuppliers = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<{ success: true; suppliers: Supplier[] }> => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const suppliers = await prisma.supplier.findMany({
+                where: { isActive: true },
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    phone: true,
+                    isActive: true,
+                },
+                orderBy: { name: 'asc' },
+            });
+
+            return {
+                success: true,
+                suppliers,
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });

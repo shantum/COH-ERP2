@@ -931,7 +931,7 @@ export const getReturnsBySkuCode = createServerFn({ method: 'GET' })
 // ============================================
 
 const getPendingQueueInputSchema = z.object({
-    source: z.enum(['repacking', 'returns', 'rto']),
+    source: z.enum(['production', 'repacking', 'returns', 'rto']),
     limit: z.number().int().positive().optional().default(200),
 });
 
@@ -974,7 +974,9 @@ export interface QueuePanelItemResponse {
     // For click-to-process
     lineId?: string;
     orderId?: string;
+    // Production-specific
     batchId?: string;
+    batchCode?: string;
 }
 
 export interface PendingQueueResponse {
@@ -1197,6 +1199,48 @@ export const getPendingQueue = createServerFn({ method: 'GET' })
                     customerName: line.order.customerName,
                     atWarehouse: line.trackingStatus === 'rto_out_for_delivery',
                     daysInRto,
+                });
+            }
+        } else if (source === 'production') {
+            // Get pending production batches
+            const batches = await prisma.productionBatch.findMany({
+                where: {
+                    status: { in: ['planned', 'in_progress'] },
+                    skuId: { not: null },
+                },
+                include: {
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: true,
+                                },
+                            },
+                        },
+                    },
+                },
+                orderBy: { batchDate: 'asc' },
+                take: limit,
+            });
+
+            for (const batch of batches) {
+                if (!batch.sku) continue;
+                const qtyPending = batch.qtyPlanned - (batch.qtyCompleted || 0);
+                if (qtyPending <= 0) continue;
+
+                items.push({
+                    id: batch.id,
+                    batchId: batch.id,
+                    skuId: batch.skuId!,
+                    skuCode: batch.sku.skuCode,
+                    productName: batch.sku.variation.product.name,
+                    colorName: batch.sku.variation.colorName,
+                    size: batch.sku.size,
+                    qty: qtyPending,
+                    imageUrl: batch.sku.variation.imageUrl || batch.sku.variation.product.imageUrl || undefined,
+                    contextLabel: 'Batch',
+                    contextValue: batch.batchCode || `Batch ${batch.id.slice(0, 8)}`,
+                    batchCode: batch.batchCode || undefined,
                 });
             }
         }
@@ -1438,5 +1482,95 @@ export const scanLookup = createServerFn({ method: 'GET' })
             availableBalance: balance.availableBalance,
             matches,
             recommendedSource: matches.length > 0 ? matches[0].source : 'adjustment',
+        };
+    });
+
+// ============================================
+// RTO ORDERS SEARCH (for AllocationModal)
+// ============================================
+
+const searchRtoOrdersInputSchema = z.object({
+    search: z.string().optional(),
+    limit: z.number().int().positive().max(50).optional().default(5),
+});
+
+export interface RtoOrderSearchResult {
+    id: string;
+    orderNumber: string;
+    customerName: string | null;
+    awbNumber: string | null;
+    rtoInitiatedAt: string | null;
+    orderDate: string;
+}
+
+export interface RtoOrdersSearchResponse {
+    orders: RtoOrderSearchResult[];
+}
+
+/**
+ * Search RTO orders for allocation
+ *
+ * Returns RTO orders matching search query (order number or AWB).
+ * Used by AllocationModal for finding RTO orders to link.
+ */
+export const searchRtoOrders = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => searchRtoOrdersInputSchema.parse(input))
+    .handler(async ({ data }): Promise<RtoOrdersSearchResponse> => {
+        const prisma = await getPrisma();
+        const { search, limit } = data;
+
+        // Build where clause for RTO orders
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const where: Record<string, any> = {
+            isArchived: false,
+            orderLines: {
+                some: {
+                    trackingStatus: { in: ['rto_in_transit', 'rto_out_for_delivery'] },
+                    rtoReceivedAt: null,
+                },
+            },
+        };
+
+        // Add search filter
+        if (search && search.length >= 3) {
+            where.OR = [
+                { orderNumber: { contains: search, mode: 'insensitive' } },
+                { orderLines: { some: { awbNumber: { contains: search, mode: 'insensitive' } } } },
+            ];
+        }
+
+        const orders = await prisma.order.findMany({
+            where,
+            select: {
+                id: true,
+                orderNumber: true,
+                customerName: true,
+                orderDate: true,
+                orderLines: {
+                    where: {
+                        trackingStatus: { in: ['rto_in_transit', 'rto_out_for_delivery'] },
+                        rtoReceivedAt: null,
+                    },
+                    select: {
+                        awbNumber: true,
+                        rtoInitiatedAt: true,
+                    },
+                    take: 1,
+                },
+            },
+            orderBy: { orderDate: 'desc' },
+            take: limit,
+        });
+
+        return {
+            orders: orders.map((order) => ({
+                id: order.id,
+                orderNumber: order.orderNumber,
+                customerName: order.customerName,
+                awbNumber: order.orderLines[0]?.awbNumber || null,
+                rtoInitiatedAt: order.orderLines[0]?.rtoInitiatedAt?.toISOString() || null,
+                orderDate: order.orderDate.toISOString(),
+            })),
         };
     });

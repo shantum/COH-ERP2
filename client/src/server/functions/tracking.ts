@@ -243,3 +243,104 @@ export const getShippingLabel = createServerFn({ method: 'POST' })
             throw error;
         }
     });
+
+// ============================================
+// AWB TRACKING - For TrackingModal
+// ============================================
+
+const getAwbTrackingInputSchema = z.object({
+    awbNumber: z.string().min(1, 'AWB number is required'),
+});
+
+export type GetAwbTrackingInput = z.infer<typeof getAwbTrackingInputSchema>;
+
+/** Tracking scan event from iThink */
+export interface TrackingScan {
+    status: string;
+    statusCode?: string;
+    datetime: string;
+    location: string;
+    remark?: string;
+    reason?: string;
+}
+
+/** Last scan information */
+export interface TrackingLastScan {
+    status: string;
+    location?: string;
+    datetime?: string;
+    remark?: string;
+    reason?: string;
+}
+
+/** Order details from tracking */
+export interface TrackingOrderDetails {
+    orderNumber?: string;
+    orderType?: string;
+    weight?: string;
+    length?: string;
+    breadth?: string;
+    height?: string;
+    netPayment?: string;
+}
+
+/** Customer details from tracking */
+export interface TrackingCustomerDetails {
+    name?: string;
+    phone?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    pincode?: string;
+}
+
+/** Full AWB tracking response from iThink - matches TrackingModal expectations */
+export interface AwbTrackingResponse {
+    awbNumber: string;
+    courier: string;
+    currentStatus: string;
+    statusCode: string;
+    expectedDeliveryDate?: string;
+    promiseDeliveryDate?: string;
+    ofdCount: number;
+    isRto: boolean;
+    rtoAwb?: string;
+    orderType?: string;
+    cancelStatus?: string;
+    lastScan?: TrackingLastScan;
+    scanHistory: TrackingScan[];
+    orderDetails?: TrackingOrderDetails;
+    customerDetails?: TrackingCustomerDetails;
+}
+
+/**
+ * Get AWB tracking details from iThink Logistics
+ *
+ * Returns tracking status, scans, and delivery information for an AWB.
+ * Used by TrackingModal for real-time tracking display.
+ */
+export const getAwbTracking = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getAwbTrackingInputSchema.parse(input))
+    .handler(async ({ data }): Promise<AwbTrackingResponse> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const response = await fetch(`${baseUrl}/tracking/awb/${encodeURIComponent(data.awbNumber)}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Failed to fetch tracking' }));
+                throw new Error(error.error || 'Failed to fetch AWB tracking');
+            }
+
+            // Return the response as-is, the API already returns the correct shape
+            return await response.json();
+        } catch (error) {
+            console.error('[Server Function] Error in getAwbTracking:', error);
+            throw error;
+        }
+    });

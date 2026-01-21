@@ -724,6 +724,117 @@ export const updateUserPreferences = createServerFn({ method: 'POST' })
         return { success: true, data: { updated: true } };
     });
 
+/**
+ * Delete user's grid preferences (reset to defaults)
+ */
+export const deleteUserPreferences = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getUserPreferencesSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<{ deleted: boolean }>> => {
+        const prisma = await getPrisma();
+        const { gridId } = data;
+        const userId = context.user.id;
+
+        try {
+            await prisma.userGridPreference.delete({
+                where: { userId_gridId: { userId, gridId } },
+            });
+            return { success: true, data: { deleted: true } };
+        } catch {
+            // No preference existed
+            return { success: true, data: { deleted: false } };
+        }
+    });
+
+// ============================================
+// ADMIN GRID PREFERENCES SERVER FUNCTIONS
+// ============================================
+
+const updateAdminGridPreferencesSchema = z.object({
+    gridId: z.string().min(1, 'Grid ID is required'),
+    visibleColumns: z.array(z.string()),
+    columnOrder: z.array(z.string()),
+    columnWidths: z.record(z.string(), z.number()).optional(),
+});
+
+export interface AdminGridPreferences {
+    visibleColumns: string[];
+    columnOrder: string[];
+    columnWidths: Record<string, number>;
+    updatedAt: string | null;
+}
+
+/**
+ * Get admin default grid preferences for all users
+ */
+export const getAdminGridPreferences = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getUserPreferencesSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<AdminGridPreferences | null>> => {
+        const prisma = await getPrisma();
+        const { gridId } = data;
+
+        const setting = await prisma.systemSetting.findUnique({
+            where: { key: `grid_prefs_${gridId}` },
+        });
+
+        if (!setting?.value) {
+            return { success: true, data: null };
+        }
+
+        try {
+            const prefs = JSON.parse(setting.value) as AdminGridPreferences;
+            return {
+                success: true,
+                data: {
+                    visibleColumns: prefs.visibleColumns || [],
+                    columnOrder: prefs.columnOrder || [],
+                    columnWidths: prefs.columnWidths || {},
+                    updatedAt: prefs.updatedAt || setting.updatedAt?.toISOString() || null,
+                },
+            };
+        } catch {
+            return { success: true, data: null };
+        }
+    });
+
+/**
+ * Save admin default grid preferences for all users
+ * Requires admin role
+ */
+export const updateAdminGridPreferences = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateAdminGridPreferencesSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<AdminGridPreferences>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const { gridId, visibleColumns, columnOrder, columnWidths } = data;
+        const now = new Date().toISOString();
+
+        const prefs: AdminGridPreferences = {
+            visibleColumns,
+            columnOrder,
+            columnWidths: columnWidths || {},
+            updatedAt: now,
+        };
+
+        await prisma.systemSetting.upsert({
+            where: { key: `grid_prefs_${gridId}` },
+            update: { value: JSON.stringify(prefs) },
+            create: { key: `grid_prefs_${gridId}`, value: JSON.stringify(prefs) },
+        });
+
+        return { success: true, data: prefs };
+    });
+
 // ============================================
 // SERVER LOGS SERVER FUNCTIONS
 // ============================================
@@ -1580,4 +1691,254 @@ export const inspectTable = createServerFn({ method: 'GET' })
                 };
             }
         }
+    });
+
+// ============================================
+// USER PERMISSIONS SERVER FUNCTIONS
+// ============================================
+
+const getUserPermissionsSchema = z.object({
+    userId: z.string().uuid('Invalid user ID'),
+});
+
+const updateUserPermissionsSchema = z.object({
+    userId: z.string().uuid('Invalid user ID'),
+    overrides: z.array(z.object({
+        permission: z.string().min(1, 'Permission key is required'),
+        granted: z.boolean(),
+    })),
+});
+
+const assignUserRoleSchema = z.object({
+    userId: z.string().uuid('Invalid user ID'),
+    roleId: z.string().uuid('Invalid role ID'),
+});
+
+export interface UserPermissionsData {
+    userId: string;
+    roleId: string | null;
+    roleName: string | null;
+    rolePermissions: string[];
+    overrides: Array<{ permission: string; granted: boolean }>;
+}
+
+/**
+ * Get user permissions with role data
+ * Returns the user's role permissions and any overrides
+ * Requires admin role
+ */
+export const getUserPermissions = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getUserPermissionsSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<UserPermissionsData>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const { userId } = data;
+
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                userRole: {
+                    select: {
+                        id: true,
+                        name: true,
+                        displayName: true,
+                        permissions: true,
+                    },
+                },
+                permissionOverrides: {
+                    select: {
+                        permission: true,
+                        granted: true,
+                    },
+                },
+            },
+        });
+
+        if (!user) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'User not found' },
+            };
+        }
+
+        return {
+            success: true,
+            data: {
+                userId: user.id,
+                roleId: user.roleId,
+                roleName: user.userRole?.displayName || null,
+                rolePermissions: user.userRole?.permissions || [],
+                overrides: user.permissionOverrides.map((o: { permission: string; granted: boolean }) => ({
+                    permission: o.permission,
+                    granted: o.granted,
+                })),
+            },
+        };
+    });
+
+/**
+ * Update user permission overrides
+ * Allows granting/revoking permissions beyond what the role provides
+ * Requires admin role
+ */
+export const updateUserPermissions = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateUserPermissionsSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const { userId, overrides } = data;
+
+        // Verify user exists
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                userRole: {
+                    select: { permissions: true },
+                },
+            },
+        });
+
+        if (!user) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'User not found' },
+            };
+        }
+
+        // Get the role's permissions as a Set for quick lookup
+        const rolePermissions = new Set(user.userRole?.permissions || []);
+
+        // Filter overrides to only include those that differ from role defaults
+        const effectiveOverrides = overrides.filter(o => {
+            const roleHasPermission = rolePermissions.has(o.permission);
+            // Only store override if it differs from role default
+            return o.granted !== roleHasPermission;
+        });
+
+        // Delete existing overrides and create new ones in a transaction
+        await prisma.$transaction([
+            prisma.userPermissionOverride.deleteMany({
+                where: { userId },
+            }),
+            ...effectiveOverrides.map(o =>
+                prisma.userPermissionOverride.create({
+                    data: {
+                        userId,
+                        permission: o.permission,
+                        granted: o.granted,
+                    },
+                })
+            ),
+        ]);
+
+        // Bump token version to force re-login
+        await prisma.user.update({
+            where: { id: userId },
+            data: { tokenVersion: { increment: 1 } },
+        });
+
+        return { success: true, data: { updated: true } };
+    });
+
+/**
+ * Assign a role to a user
+ * Requires admin role
+ */
+export const assignUserRole = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => assignUserRoleSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<{ updated: boolean }>> => {
+        try {
+            requireAdminRole(context.user.role);
+        } catch {
+            return {
+                success: false,
+                error: { code: 'FORBIDDEN', message: 'Admin access required' },
+            };
+        }
+
+        const prisma = await getPrisma();
+        const { userId, roleId } = data;
+
+        // Verify user exists
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'User not found' },
+            };
+        }
+
+        // Verify role exists
+        const role = await prisma.role.findUnique({ where: { id: roleId } });
+        if (!role) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Role not found' },
+            };
+        }
+
+        // Update user's role and bump token version
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                roleId,
+                tokenVersion: { increment: 1 },
+            },
+        });
+
+        return { success: true, data: { updated: true } };
+    });
+
+// ============================================
+// ROLES SERVER FUNCTIONS
+// ============================================
+
+export interface Role {
+    id: string;
+    name: string;
+    displayName: string;
+    description: string | null;
+    permissions: string[];
+}
+
+/**
+ * Get all roles
+ * Requires authentication
+ */
+export const getRoles = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<MutationResult<Role[]>> => {
+        const prisma = await getPrisma();
+
+        const roles = await prisma.role.findMany({
+            select: {
+                id: true,
+                name: true,
+                displayName: true,
+                description: true,
+                permissions: true,
+            },
+            orderBy: { displayName: 'asc' },
+        });
+
+        return { success: true, data: roles };
     });

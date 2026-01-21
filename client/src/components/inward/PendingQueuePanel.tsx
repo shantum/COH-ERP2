@@ -5,9 +5,10 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getPendingQueue } from '../../server/functions/returns';
 import { Package, Search, Clock, AlertTriangle } from 'lucide-react';
-import type { PendingQueueResponse, QueuePanelItem } from '../../types';
+import type { PendingQueueResponse, QueuePanelItemResponse } from '../../server/functions/returns';
 
 interface PendingQueuePanelProps {
     source: 'production' | 'returns' | 'rto' | 'repacking';
@@ -53,16 +54,15 @@ const DEFAULT_TITLES: Record<string, string> = {
 
 export default function PendingQueuePanel({ source, onSelectItem, title, className = '' }: PendingQueuePanelProps) {
     const [searchInput, setSearchInput] = useState('');
-    const styles = SOURCE_STYLES[source] || SOURCE_STYLES.production;
+    const styles = SOURCE_STYLES[source] || SOURCE_STYLES.returns;
     const displayTitle = title || DEFAULT_TITLES[source] || 'Pending Items';
+
+    const getPendingQueueFn = useServerFn(getPendingQueue);
 
     // Fetch pending queue
     const { data: queueData, isLoading } = useQuery<PendingQueueResponse>({
         queryKey: ['pendingQueue', source],
-        queryFn: async () => {
-            const res = await inventoryApi.getPendingQueue(source, { limit: 50 });
-            return res.data;
-        },
+        queryFn: () => getPendingQueueFn({ data: { source, limit: 50 } }),
         refetchInterval: 30000,
     });
 
@@ -81,7 +81,7 @@ export default function PendingQueuePanel({ source, onSelectItem, title, classNa
     }, [queueData?.items, searchInput]);
 
     // Get urgency styling for RTO items
-    const getUrgencyStyles = (item: QueuePanelItem) => {
+    const getUrgencyStyles = (item: QueuePanelItemResponse) => {
         if (source !== 'rto' || !item.daysInRto) return '';
         if (item.daysInRto > 14) return 'border-l-4 border-l-red-500';
         if (item.daysInRto > 7) return 'border-l-4 border-l-orange-400';

@@ -5,9 +5,11 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getRecentInwards } from '../../server/functions/inventory';
+import { editInward, undoTransaction } from '../../server/functions/inventoryMutations';
 import { ClipboardList, Undo2 } from 'lucide-react';
-import type { RecentInward } from '../../types';
+import type { RecentInwardItem } from '../../server/functions/inventory';
 
 interface RecentInwardsTableProps {
     source: string;
@@ -19,6 +21,7 @@ interface RecentInwardsTableProps {
 // Notes Cell Component
 function NotesCell({ transactionId, initialNotes, source }: { transactionId: string; initialNotes: string; source: string }) {
     const queryClient = useQueryClient();
+    const editInwardFn = useServerFn(editInward);
     const [isEditing, setIsEditing] = useState(false);
     const [notes, setNotes] = useState(initialNotes);
     const [saving, setSaving] = useState(false);
@@ -34,7 +37,7 @@ function NotesCell({ transactionId, initialNotes, source }: { transactionId: str
         }
         setSaving(true);
         try {
-            await inventoryApi.editInward(transactionId, { notes: notes || undefined });
+            await editInwardFn({ data: { transactionId, notes: notes || undefined } });
             queryClient.invalidateQueries({ queryKey: ['recent-inwards', source] });
             setIsEditing(false);
         } catch {
@@ -115,13 +118,16 @@ const getSourceColor = (reason: string): string => {
 
 export default function RecentInwardsTable({ source, title, onSuccess, onError }: RecentInwardsTableProps) {
     const queryClient = useQueryClient();
+    const getRecentInwardsFn = useServerFn(getRecentInwards);
+    const undoTransactionFn = useServerFn(undoTransaction);
 
     // Fetch recent inwards filtered by source
-    const { data: recentInwards = [], isLoading } = useQuery<RecentInward[]>({
+    const { data: recentInwards = [], isLoading } = useQuery<RecentInwardItem[]>({
         queryKey: ['recent-inwards', source],
         queryFn: async () => {
-            const res = await inventoryApi.getRecentInwards(50, source);
-            return res.data;
+            // Map source to the expected enum value
+            const sourceParam = source === 'all' ? undefined : source as 'production' | 'returns' | 'rto' | 'repacking' | 'adjustments' | 'received' | 'adjustment';
+            return getRecentInwardsFn({ data: { limit: 50, source: sourceParam } });
         },
         refetchInterval: 15000,
     });
@@ -129,23 +135,24 @@ export default function RecentInwardsTable({ source, title, onSuccess, onError }
     // Undo mutation
     const undoMutation = useMutation({
         mutationFn: async (id: string) => {
-            return inventoryApi.undoTransaction(id);
+            return undoTransactionFn({ data: { transactionId: id } });
         },
         onMutate: async (id: string) => {
             await queryClient.cancelQueries({ queryKey: ['recent-inwards', source] });
-            const previousRecent = queryClient.getQueryData<RecentInward[]>(['recent-inwards', source]);
+            const previousRecent = queryClient.getQueryData<RecentInwardItem[]>(['recent-inwards', source]);
 
-            queryClient.setQueryData<RecentInward[]>(['recent-inwards', source], (old) =>
+            queryClient.setQueryData<RecentInwardItem[]>(['recent-inwards', source], (old) =>
                 old ? old.filter(item => item.id !== id) : []
             );
 
             return { previousRecent };
         },
-        onError: (error: any, _, context) => {
+        onError: (error: unknown, _, context) => {
             if (context?.previousRecent) {
                 queryClient.setQueryData(['recent-inwards', source], context.previousRecent);
             }
-            onError?.(error.response?.data?.error || 'Failed to undo transaction');
+            const errorMsg = error instanceof Error ? error.message : 'Failed to undo transaction';
+            onError?.(errorMsg);
         },
         onSuccess: () => {
             onSuccess?.('Transaction undone');

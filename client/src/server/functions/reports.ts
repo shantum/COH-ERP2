@@ -969,3 +969,281 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
             lastOrderDate: customer.orders[0]?.orderDate.toISOString() || null,
         }));
     });
+
+// ============================================
+// SALES ANALYTICS - For useSalesAnalytics hook
+// ============================================
+
+const getSalesAnalyticsInputSchema = z.object({
+    dimension: z.enum([
+        'summary', 'product', 'category', 'gender', 'color',
+        'standardColor', 'fabricType', 'fabricColor', 'channel'
+    ]).optional().default('summary'),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    orderStatus: z.enum(['all', 'shipped', 'delivered']).optional().default('shipped'),
+});
+
+export type GetSalesAnalyticsInput = z.infer<typeof getSalesAnalyticsInputSchema>;
+
+/** Sales analytics data point */
+export interface SalesDataPoint {
+    key: string;
+    label: string;
+    units: number;
+    revenue: number;
+    orders: number;
+    avgOrderValue: number;
+}
+
+/** Time series point for summary view */
+export interface TimeSeriesPoint {
+    date: string;
+    revenue: number;
+    units: number;
+    orders: number;
+}
+
+/** Breakdown item for dimension views */
+export interface BreakdownItem {
+    key: string;
+    label: string;
+    revenue: number;
+    units: number;
+    orders: number;
+    avgOrderValue: number;
+    percentOfTotal: number;
+}
+
+/** Sales analytics response */
+export interface SalesAnalyticsResponse {
+    dimension: string;
+    startDate: string;
+    endDate: string;
+    data: SalesDataPoint[];
+    timeSeries?: TimeSeriesPoint[];
+    breakdown?: BreakdownItem[];
+    summary: {
+        totalUnits: number;
+        totalRevenue: number;
+        totalOrders: number;
+        avgOrderValue: number;
+    };
+}
+
+/**
+ * Get sales analytics
+ *
+ * Returns sales data aggregated by the specified dimension.
+ * Used by useSalesAnalytics hook and Analytics page.
+ */
+export const getSalesAnalytics = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getSalesAnalyticsInputSchema.parse(input))
+    .handler(async ({ data }): Promise<SalesAnalyticsResponse> => {
+        const prisma = await getPrisma();
+
+        const { dimension, startDate, endDate, orderStatus } = data;
+
+        // Parse dates (default to last 30 days)
+        const end = endDate ? new Date(endDate) : new Date();
+        const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+        // Build line status filter based on orderStatus
+        const lineStatusFilter = orderStatus === 'delivered'
+            ? ['delivered']
+            : orderStatus === 'shipped'
+                ? ['shipped', 'delivered']
+                : undefined;
+
+        // Fetch order lines
+        const orderLines = await prisma.orderLine.findMany({
+            where: {
+                order: {
+                    orderDate: {
+                        gte: start,
+                        lte: end,
+                    },
+                    status: { notIn: ['cancelled'] },
+                },
+                ...(lineStatusFilter ? { lineStatus: { in: lineStatusFilter } } : {}),
+            },
+            include: {
+                order: {
+                    include: {
+                        customer: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                                fabric: {
+                                    include: {
+                                        fabricType: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Aggregate based on dimension
+        const aggregateMap = new Map<
+            string,
+            {
+                key: string;
+                label: string;
+                units: number;
+                revenue: number;
+                orderIds: Set<string>;
+            }
+        >();
+
+        for (const line of orderLines) {
+            let key: string;
+            let label: string;
+
+            switch (dimension) {
+                case 'summary': {
+                    // For summary, aggregate by day for time series
+                    const date = line.order.orderDate;
+                    key = date.toISOString().split('T')[0];
+                    label = key;
+                    break;
+                }
+                case 'product': {
+                    key = line.sku.variation.product.id;
+                    label = line.sku.variation.product.name;
+                    break;
+                }
+                case 'category': {
+                    key = line.sku.variation.product.category || 'uncategorized';
+                    label = key.charAt(0).toUpperCase() + key.slice(1);
+                    break;
+                }
+                case 'gender': {
+                    key = line.sku.variation.product.gender || 'unspecified';
+                    label = key.charAt(0).toUpperCase() + key.slice(1);
+                    break;
+                }
+                case 'color': {
+                    key = line.sku.variation.colorName || 'no-color';
+                    label = key;
+                    break;
+                }
+                case 'standardColor': {
+                    key = line.sku.variation.standardColor || 'no-color';
+                    label = key;
+                    break;
+                }
+                case 'fabricType': {
+                    // Get fabric type from linked fabric if available
+                    const fabric = line.sku.variation.fabric;
+                    key = fabric?.fabricType?.name || 'no-fabric';
+                    label = key;
+                    break;
+                }
+                case 'fabricColor': {
+                    const fabric = line.sku.variation.fabric;
+                    key = fabric ? `${fabric.fabricType?.name || ''} - ${fabric.colorName}` : 'no-fabric';
+                    label = key;
+                    break;
+                }
+                case 'channel': {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    key = (line.order as any).source || 'direct';
+                    label = key.charAt(0).toUpperCase() + key.slice(1);
+                    break;
+                }
+                default:
+                    key = 'unknown';
+                    label = 'Unknown';
+            }
+
+            if (!aggregateMap.has(key)) {
+                aggregateMap.set(key, {
+                    key,
+                    label,
+                    units: 0,
+                    revenue: 0,
+                    orderIds: new Set(),
+                });
+            }
+
+            const stats = aggregateMap.get(key)!;
+            stats.units += line.qty;
+            stats.revenue += line.unitPrice * line.qty;
+            stats.orderIds.add(line.orderId);
+        }
+
+        // Convert to array and calculate final values
+        const dataPoints: SalesDataPoint[] = Array.from(aggregateMap.values())
+            .map((stats) => ({
+                key: stats.key,
+                label: stats.label,
+                units: stats.units,
+                revenue: Math.round(stats.revenue * 100) / 100,
+                orders: stats.orderIds.size,
+                avgOrderValue:
+                    stats.orderIds.size > 0
+                        ? Math.round((stats.revenue / stats.orderIds.size) * 100) / 100
+                        : 0,
+            }))
+            .sort((a, b) => {
+                // Sort by key for time dimensions, by revenue for others
+                if (['day', 'week', 'month'].includes(dimension)) {
+                    return a.key.localeCompare(b.key);
+                }
+                return b.revenue - a.revenue;
+            });
+
+        // Calculate summary
+        const totalUnits = dataPoints.reduce((sum, d) => sum + d.units, 0);
+        const totalRevenue = dataPoints.reduce((sum, d) => sum + d.revenue, 0);
+        const uniqueOrderIds = new Set(orderLines.map((l) => l.orderId));
+        const totalOrders = uniqueOrderIds.size;
+        const avgOrderValue = totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0;
+
+        // Build timeSeries only for summary dimension (shows daily trend)
+        const isTimeDimension = dimension === 'summary';
+        const timeSeries: TimeSeriesPoint[] | undefined = isTimeDimension
+            ? dataPoints.map(d => ({
+                date: d.key,
+                revenue: d.revenue,
+                units: d.units,
+                orders: d.orders,
+            }))
+            : undefined;
+
+        // Build breakdown for non-time dimensions
+        const breakdown: BreakdownItem[] | undefined = !isTimeDimension
+            ? dataPoints.map(d => ({
+                key: d.key,
+                label: d.label,
+                revenue: d.revenue,
+                units: d.units,
+                orders: d.orders,
+                avgOrderValue: d.avgOrderValue,
+                percentOfTotal: totalRevenue > 0 ? Math.round((d.revenue / totalRevenue) * 10000) / 100 : 0,
+            }))
+            : undefined;
+
+        return {
+            dimension,
+            startDate: start.toISOString(),
+            endDate: end.toISOString(),
+            data: dataPoints,
+            timeSeries,
+            breakdown,
+            summary: {
+                totalUnits,
+                totalRevenue: Math.round(totalRevenue * 100) / 100,
+                totalOrders,
+                avgOrderValue,
+            },
+        };
+    });
