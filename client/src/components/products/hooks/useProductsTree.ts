@@ -8,7 +8,16 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { getProductsTree, getProductById } from '../../../server/functions/products';
+import {
+    createProduct as createProductFn,
+    updateProduct as updateProductFn,
+    createVariation as createVariationFn,
+    updateVariation as updateVariationFn,
+    createSku as createSkuFn,
+    updateSku as updateSkuFn,
+} from '../../../server/functions/productsMutations';
 import type { ProductsTreeResponse } from '../../../server/functions/products';
 import type { ProductTreeResponse, ProductTreeNode } from '../types';
 
@@ -78,18 +87,23 @@ export function useProductDetail(productId: string | null) {
 /**
  * Hook for products tree mutations
  *
- * NOTE: Mutations still use tRPC for now (to be migrated in a separate PR).
- * Import the mutations from the tRPC router for now.
+ * Uses Server Functions for all mutations.
  */
 export function useProductsTreeMutations() {
     const queryClient = useQueryClient();
-    // Import tRPC for mutations (Server Functions for mutations TBD)
-    const { trpc } = require('../../../services/trpc');
+
+    // Server function hooks
+    const updateProductServerFn = useServerFn(updateProductFn);
+    const updateVariationServerFn = useServerFn(updateVariationFn);
+    const updateSkuServerFn = useServerFn(updateSkuFn);
+    const createProductServerFn = useServerFn(createProductFn);
+    const createVariationServerFn = useServerFn(createVariationFn);
+    const createSkuServerFn = useServerFn(createSkuFn);
 
     const updateProduct = useMutation({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const response = await trpc.products.update.mutate({ id, ...data });
+            const response = await updateProductServerFn({ data: { id, ...data } });
             return response;
         },
         onSuccess: () => {
@@ -100,7 +114,7 @@ export function useProductsTreeMutations() {
     const updateVariation = useMutation({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const response = await trpc.products.updateVariation.mutate({ id, ...data });
+            const response = await updateVariationServerFn({ data: { id, ...data } });
             return response;
         },
         onSuccess: () => {
@@ -111,7 +125,7 @@ export function useProductsTreeMutations() {
     const updateSku = useMutation({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ id, data }: { id: string; data: any }) => {
-            const response = await trpc.products.updateSku.mutate({ id, ...data });
+            const response = await updateSkuServerFn({ data: { id, ...data } });
             return response;
         },
         onSuccess: () => {
@@ -122,7 +136,7 @@ export function useProductsTreeMutations() {
     const createProduct = useMutation({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async (data: any) => {
-            const response = await trpc.products.create.mutate(data);
+            const response = await createProductServerFn({ data });
             return response;
         },
         onSuccess: () => {
@@ -133,7 +147,7 @@ export function useProductsTreeMutations() {
     const createVariation = useMutation({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ productId, data }: { productId: string; data: any }) => {
-            const response = await trpc.products.createVariation.mutate({ productId, ...data });
+            const response = await createVariationServerFn({ data: { productId, ...data } });
             return response;
         },
         onSuccess: () => {
@@ -144,7 +158,7 @@ export function useProductsTreeMutations() {
     const createSku = useMutation({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         mutationFn: async ({ variationId, data }: { variationId: string; data: any }) => {
-            const response = await trpc.products.createSku.mutate({ variationId, ...data });
+            const response = await createSkuServerFn({ data: { variationId, ...data } });
             return response;
         },
         onSuccess: () => {
