@@ -203,76 +203,21 @@ router.delete(
 // ============================================
 // DATA MIGRATION: Copy order tracking to lines
 // One-time migration for line-centric architecture
+// NOTE: Migration completed - tracking fields now only exist on OrderLine
 // ============================================
 
 /**
- * Migrate tracking data from Order to OrderLines
- * This is a one-time migration to support multi-AWB shipping
+ * @deprecated Migration completed - tracking data now lives on OrderLine only.
+ * This endpoint is retained for backward compatibility but returns a no-op message.
  */
 router.post(
     '/migrate-tracking-to-lines',
     authenticateToken,
-    asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        // Find all shipped/delivered orders that have AWB on order but not on lines
-        const ordersToMigrate = await req.prisma.order.findMany({
-            where: {
-                awbNumber: { not: null },
-                orderLines: {
-                    some: {
-                        awbNumber: null,
-                        lineStatus: { in: ['shipped', 'delivered'] },
-                    },
-                },
-            },
-            include: {
-                orderLines: {
-                    where: {
-                        awbNumber: null,
-                        lineStatus: { in: ['shipped', 'delivered'] },
-                    },
-                },
-            },
-        });
-
-        if (ordersToMigrate.length === 0) {
-            res.json({
-                message: 'No orders need migration',
-                migrated: 0,
-            });
-            return;
-        }
-
-        let migratedOrders = 0;
-        let migratedLines = 0;
-
-        for (const order of ordersToMigrate) {
-            await req.prisma.orderLine.updateMany({
-                where: {
-                    orderId: order.id,
-                    awbNumber: null,
-                    lineStatus: { in: ['shipped', 'delivered'] },
-                },
-                data: {
-                    awbNumber: order.awbNumber,
-                    courier: order.courier,
-                    trackingStatus: order.trackingStatus,
-                    deliveredAt: order.deliveredAt,
-                    rtoInitiatedAt: order.rtoInitiatedAt,
-                    rtoReceivedAt: order.rtoReceivedAt,
-                    lastTrackingUpdate: order.lastTrackingUpdate,
-                },
-            });
-
-            migratedOrders++;
-            migratedLines += order.orderLines.length;
-        }
-
-        orderLogger.info({ migratedOrders, migratedLines }, 'Tracking data migration completed');
-
+    asyncHandler(async (_req: Request, res: Response): Promise<void> => {
+        // Migration has been completed - tracking fields are now on OrderLine only
         res.json({
-            message: 'Migration completed',
-            migratedOrders,
-            migratedLines,
+            message: 'Migration already completed. Tracking data now lives on OrderLine.',
+            migrated: 0,
         });
     })
 );

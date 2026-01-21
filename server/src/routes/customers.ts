@@ -188,7 +188,17 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
         where,
         include: {
             orders: {
-                select: { id: true, totalAmount: true, orderDate: true, status: true, customerPhone: true, trackingStatus: true, paymentMethod: true },
+                select: {
+                    id: true,
+                    totalAmount: true,
+                    orderDate: true,
+                    status: true,
+                    customerPhone: true,
+                    paymentMethod: true,
+                    orderLines: {
+                        select: { trackingStatus: true },
+                    },
+                },
                 orderBy: { orderDate: 'desc' },
             },
             returnRequests: {
@@ -211,9 +221,10 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
         const exchanges = customer.returnRequests.filter((r) => r.requestType === 'exchange').length;
         const returnRate = totalOrders > 0 ? (returns / totalOrders) * 100 : 0;
 
-        // Calculate RTO count from actual order status (COD orders only - prepaid RTOs are refunded)
+        // Calculate RTO count from actual order lines status (COD orders only - prepaid RTOs are refunded)
         const rtoCount = customer.orders.filter((o) =>
-            o.trackingStatus?.startsWith('rto') && o.paymentMethod === 'COD'
+            o.paymentMethod === 'COD' &&
+            o.orderLines.some((line) => line.trackingStatus?.startsWith('rto'))
         ).length;
 
         // Use stored tier, or calculate if not set
@@ -433,9 +444,10 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
     const validOrders = customerWithRelations.orders.filter((o) => o.status !== 'cancelled');
     const totalOrders = validOrders.length;
 
-    // Calculate RTO count from actual order status (COD orders only - prepaid RTOs are refunded)
+    // Calculate RTO count from actual order lines status (COD orders only - prepaid RTOs are refunded)
     const rtoCount = customerWithRelations.orders.filter((o) =>
-        o.trackingStatus?.startsWith('rto') && o.paymentMethod === 'COD'
+        o.paymentMethod === 'COD' &&
+        o.orderLines.some((line) => line.trackingStatus?.startsWith('rto'))
     ).length;
 
     // Use stored tier, or calculate if not set

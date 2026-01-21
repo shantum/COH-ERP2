@@ -254,14 +254,15 @@ router.get(
         startDate.setDate(startDate.getDate() - Number(days));
 
         // Get order lines from shipped/delivered orders within the time period
+        // Filter on line-level trackingStatus (not order-level since tracking is per-line)
         const orderLines = await req.prisma.orderLine.findMany({
             where: {
                 order: {
                     orderDate: { gte: startDate },
                     status: { not: 'cancelled' },
-                    trackingStatus: {
-                        notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'],
-                    },
+                },
+                trackingStatus: {
+                    notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'],
                 },
             },
             include: {
@@ -420,14 +421,15 @@ router.get(
         }
 
         // Get order lines with customer data
+        // Filter on line-level trackingStatus (not order-level since tracking is per-line)
         const orderLines = await req.prisma.orderLine.findMany({
             where: {
                 order: {
                     orderDate: dateFilter,
                     status: { not: 'cancelled' },
-                    trackingStatus: {
-                        notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'],
-                    },
+                },
+                trackingStatus: {
+                    notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'],
                 },
             },
             include: {

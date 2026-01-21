@@ -1309,15 +1309,13 @@ const getPendingSources = protectedProcedure
             }),
             ctx.prisma.orderLine.findMany({
                 where: {
-                    order: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                        isArchived: false
-                    },
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    order: { isArchived: false },
                     rtoCondition: null
                 },
                 select: {
                     id: true,
-                    order: { select: { rtoInitiatedAt: true } }
+                    rtoInitiatedAt: true
                 }
             }),
             ctx.prisma.repackingQueueItem.count({
@@ -1330,8 +1328,8 @@ const getPendingSources = protectedProcedure
         let rtoWarning = 0;
 
         for (const line of rtoData) {
-            if (line.order.rtoInitiatedAt) {
-                const daysInRto = Math.floor((now - new Date(line.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24));
+            if (line.rtoInitiatedAt) {
+                const daysInRto = Math.floor((now - new Date(line.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24));
                 if (daysInRto > 14) rtoUrgent++;
                 else if (daysInRto > 7) rtoWarning++;
             }
@@ -1395,10 +1393,8 @@ const scanLookup = protectedProcedure
                 where: {
                     skuId: sku.id,
                     rtoCondition: null,
-                    order: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                        isArchived: false
-                    }
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    order: { isArchived: false }
                 },
                 include: {
                     order: {
@@ -1406,8 +1402,6 @@ const scanLookup = protectedProcedure
                             id: true,
                             orderNumber: true,
                             customerName: true,
-                            trackingStatus: true,
-                            rtoInitiatedAt: true,
                             _count: { select: { orderLines: true } },
                             orderLines: {
                                 where: { rtoCondition: { not: null } },
@@ -1479,9 +1473,9 @@ const scanLookup = protectedProcedure
                     orderId: rtoLine.orderId,
                     orderNumber: rtoLine.order.orderNumber,
                     customerName: rtoLine.order.customerName,
-                    trackingStatus: rtoLine.order.trackingStatus,
-                    atWarehouse: rtoLine.order.trackingStatus === 'rto_delivered',
-                    rtoInitiatedAt: rtoLine.order.rtoInitiatedAt,
+                    trackingStatus: rtoLine.trackingStatus,
+                    atWarehouse: rtoLine.trackingStatus === 'rto_delivered',
+                    rtoInitiatedAt: rtoLine.rtoInitiatedAt,
                     qty: rtoLine.qty,
                     progress: {
                         total: totalLines,
@@ -1577,21 +1571,19 @@ const getTransactionMatches = protectedProcedure
                 where: {
                     skuId: transaction.skuId,
                     rtoCondition: null,
-                    order: {
-                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                        isArchived: false
-                    }
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                    order: { isArchived: false }
                 },
                 select: {
                     id: true,
                     qty: true,
+                    trackingStatus: true,
+                    rtoInitiatedAt: true,
                     order: {
                         select: {
                             id: true,
                             orderNumber: true,
-                            customerName: true,
-                            trackingStatus: true,
-                            rtoInitiatedAt: true
+                            customerName: true
                         }
                     }
                 },
@@ -1633,8 +1625,8 @@ const getTransactionMatches = protectedProcedure
                 orderId: line.order.id,
                 label: `RTO #${line.order.orderNumber}`,
                 detail: line.order.customerName || '',
-                date: line.order.rtoInitiatedAt,
-                atWarehouse: line.order.trackingStatus === 'rto_delivered'
+                date: line.rtoInitiatedAt,
+                atWarehouse: line.trackingStatus === 'rto_delivered'
             });
         }
 
@@ -1679,10 +1671,8 @@ const getPendingQueue = protectedProcedure
         if (source === 'rto') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const baseWhere: any = {
-                order: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    isArchived: false
-                },
+                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                order: { isArchived: false },
                 rtoCondition: null
             };
 
@@ -1705,26 +1695,26 @@ const getPendingQueue = protectedProcedure
                         id: true,
                         skuId: true,
                         qty: true,
+                        trackingStatus: true,
+                        rtoInitiatedAt: true,
                         sku: { select: skuSelect },
                         order: {
                             select: {
                                 id: true,
                                 orderNumber: true,
-                                customerName: true,
-                                trackingStatus: true,
-                                rtoInitiatedAt: true
+                                customerName: true
                             }
                         }
                     },
-                    orderBy: [{ order: { rtoInitiatedAt: 'asc' } }],
+                    orderBy: [{ rtoInitiatedAt: 'asc' }],
                     skip: offset,
                     take: limit
                 })
             ]);
 
             const items = rtoPending.map(l => {
-                const daysInRto = l.order.rtoInitiatedAt
-                    ? Math.floor((Date.now() - new Date(l.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24))
+                const daysInRto = l.rtoInitiatedAt
+                    ? Math.floor((Date.now() - new Date(l.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24))
                     : 0;
 
                 return {
@@ -1743,9 +1733,9 @@ const getPendingQueue = protectedProcedure
                     orderId: l.order.id,
                     orderNumber: l.order.orderNumber,
                     customerName: l.order.customerName,
-                    trackingStatus: l.order.trackingStatus,
-                    atWarehouse: l.order.trackingStatus === 'rto_delivered',
-                    rtoInitiatedAt: l.order.rtoInitiatedAt,
+                    trackingStatus: l.trackingStatus,
+                    atWarehouse: l.trackingStatus === 'rto_delivered',
+                    rtoInitiatedAt: l.rtoInitiatedAt,
                     daysInRto,
                     urgency: daysInRto > 14 ? 'urgent' : daysInRto > 7 ? 'warning' : 'normal'
                 };
@@ -2038,14 +2028,8 @@ const allocateTransaction = protectedProcedure
                     if (orderLine) {
                         await tx.orderLine.update({
                             where: { id: previousAllocation.referenceId },
-                            data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null }
+                            data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null, rtoReceivedAt: null }
                         });
-                        if (orderLine.order.terminalStatus === 'rto_received') {
-                            await tx.order.update({
-                                where: { id: orderLine.orderId },
-                                data: { rtoReceivedAt: null, terminalStatus: null, terminalAt: null }
-                            });
-                        }
                     }
                 }
 
@@ -2175,19 +2159,11 @@ const allocateTransaction = protectedProcedure
                     }
                 });
 
-                const allLines = await tx.orderLine.findMany({ where: { orderId: orderLine.orderId } });
-                const allProcessed = allLines.every(l => l.rtoCondition !== null);
-
-                if (allProcessed) {
-                    await tx.order.update({
-                        where: { id: orderLine.orderId },
-                        data: {
-                            rtoReceivedAt: new Date(),
-                            terminalStatus: 'rto_received',
-                            terminalAt: new Date()
-                        }
-                    });
-                }
+                // Mark the order line as RTO received
+                await tx.orderLine.update({
+                    where: { id: allocationId },
+                    data: { rtoReceivedAt: new Date() }
+                });
             });
 
             return {
@@ -2231,20 +2207,13 @@ const allocateTransaction = protectedProcedure
 
             if (previousAllocation?.type === 'rto_received' && previousAllocation.referenceId) {
                 const orderLine = await tx.orderLine.findUnique({
-                    where: { id: previousAllocation.referenceId },
-                    include: { order: true }
+                    where: { id: previousAllocation.referenceId }
                 });
                 if (orderLine) {
                     await tx.orderLine.update({
                         where: { id: previousAllocation.referenceId },
-                        data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null }
+                        data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null, rtoReceivedAt: null }
                     });
-                    if (orderLine.order.terminalStatus === 'rto_received') {
-                        await tx.order.update({
-                            where: { id: orderLine.orderId },
-                            data: { rtoReceivedAt: null, terminalStatus: null, terminalAt: null }
-                        });
-                    }
                 }
             }
 
@@ -2282,7 +2251,6 @@ const rtoInwardLine = protectedProcedure
                     select: {
                         id: true,
                         orderNumber: true,
-                        trackingStatus: true,
                         isArchived: true
                     }
                 },
@@ -2332,10 +2300,10 @@ const rtoInwardLine = protectedProcedure
             };
         }
 
-        if (!orderLine.order.trackingStatus || !['rto_in_transit', 'rto_delivered'].includes(orderLine.order.trackingStatus)) {
+        if (!orderLine.trackingStatus || !['rto_in_transit', 'rto_delivered'].includes(orderLine.trackingStatus)) {
             throw new TRPCError({
                 code: 'BAD_REQUEST',
-                message: `Order is not in RTO status. Current status: ${orderLine.order.trackingStatus || 'unknown'}`,
+                message: `Order line is not in RTO status. Current status: ${orderLine.trackingStatus || 'unknown'}`,
             });
         }
 
@@ -2397,17 +2365,11 @@ const rtoInwardLine = protectedProcedure
             const pendingLines = allLines.filter(l => l.rtoCondition === null);
             const allLinesProcessed = pendingLines.length === 0;
 
-            if (allLinesProcessed) {
-                const now = new Date();
-                await tx.order.update({
-                    where: { id: orderLine.orderId },
-                    data: {
-                        rtoReceivedAt: now,
-                        terminalStatus: 'rto_received',
-                        terminalAt: now,
-                    }
-                });
-            }
+            // Mark the current line as RTO received
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: { rtoReceivedAt: new Date() }
+            });
 
             return {
                 inventoryTxn,

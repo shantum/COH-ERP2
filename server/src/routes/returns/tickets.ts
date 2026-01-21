@@ -426,13 +426,17 @@ router.get('/order/:orderId', authenticateToken, asyncHandler(async (req: Reques
         };
     });
 
+    // Get shippedAt and deliveredAt from first shipped/delivered line
+    const shippedLine = order.orderLines.find(l => l.shippedAt);
+    const deliveredLine = order.orderLines.find(l => l.deliveredAt);
+
     res.json({
         id: order.id,
         orderNumber: order.orderNumber,
         shopifyOrderNumber: order.shopifyOrderId, // Use shopifyOrderId as order number
         orderDate: order.orderDate,
-        shippedAt: order.shippedAt,
-        deliveredAt: order.deliveredAt,
+        shippedAt: shippedLine?.shippedAt || null,
+        deliveredAt: deliveredLine?.deliveredAt || null,
         customer: order.customer ? {
             id: order.customer.id,
             name: `${order.customer.firstName || ''} ${order.customer.lastName || ''}`.trim() || order.customer.email,

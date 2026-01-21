@@ -446,44 +446,18 @@ model Order {
   archivedAt           DateTime?
   releasedToShipped    Boolean            @default(false)
   releasedToCancelled  Boolean            @default(false)
-  // @deprecated Use OrderLine.awbNumber - kept for backward compat, may have different AWBs per line
-  awbNumber            String?
-  // @deprecated Use OrderLine.courier - kept for backward compat, may have different couriers per line
-  courier              String?
-  // @deprecated Use OrderLine.shippedAt - kept for backward compat, lines may ship at different times
-  shippedAt            DateTime?
-  // @deprecated Use OrderLine.deliveredAt - kept for backward compat, lines may deliver at different times
-  deliveredAt          DateTime?
   totalAmount          Float
   createdAt            DateTime           @default(now())
   syncedAt             DateTime?
-  // @deprecated Use OrderLine.rtoInitiatedAt - kept for backward compat, RTO is line-level
-  rtoInitiatedAt       DateTime?
-  // @deprecated Use OrderLine.rtoReceivedAt - kept for backward compat, RTO receipt is line-level
-  rtoReceivedAt        DateTime?
-  courierStatusCode    String?
-  deliveryAttempts     Int                @default(0)
-  expectedDeliveryDate DateTime?
-  lastScanAt           DateTime?
-  lastScanLocation     String?
-  lastScanStatus       String?
-  lastTrackingUpdate   DateTime?
-  trackingStatus       String?
   codRemittanceUtr     String?
   codRemittedAmount    Float?
   codRemittedAt        DateTime?
   codShopifySyncError  String?
   codShopifySyncStatus String?
   codShopifySyncedAt   DateTime?
-  holdAt               DateTime?
-  holdNotes            String?
-  holdReason           String?
-  isOnHold             Boolean            @default(false)
   isExchange           Boolean            @default(false)
   originalOrderId      String?
   shipByDate           DateTime?
-  terminalAt           DateTime?
-  terminalStatus       String?
   partiallyCancelled   Boolean            @default(false)
   paymentConfirmedAt   DateTime?
   paymentConfirmedBy   String?
@@ -505,25 +479,16 @@ model Order {
   @@index([originalOrderId])
   @@index([shipByDate])
   @@index([paymentStatus])
-  @@index([paymentMethod, paymentStatus]) // Compound: filter by payment method + status
-  @@index([status, orderDate])      // Compound: filter by status + sort by date
-  @@index([customerId, orderDate])  // Compound: customer order history
-  @@index([status, isArchived])     // Compound: open orders query (status='open', isArchived=false)
-  @@index([status, isArchived, orderDate]) // Compound: open orders with date sort
-  @@index([terminalStatus])         // Terminal status filtering
-  @@index([terminalAt])             // Terminal date filtering for archive
-  @@index([terminalStatus, terminalAt]) // Compound: archive queue queries
-  @@index([shippedAt])              // Shipped orders sorting
-  @@index([status, shippedAt])      // Compound: shipped view filtering
-  @@index([isArchived, releasedToShipped]) // Compound: open view filtering
-  @@index([isArchived, releasedToShipped, orderDate]) // Compound: open view with date sort
-  @@index([isArchived, releasedToCancelled]) // Compound: cancelled view filtering
-  // Performance: Tracking and COD views
-  @@index([trackingStatus, isArchived]) // RTO view filtering
-  @@index([paymentMethod, trackingStatus, codRemittedAt]) // COD pending view
-  // Performance: 3-way view filtering and customer payment tracking
-  @@index([status, terminalStatus, isArchived]) // 3-way view filter
-  @@index([customerId, paymentStatus]) // Customer payment tracking
+  @@index([paymentMethod, paymentStatus])
+  @@index([status, orderDate])
+  @@index([customerId, orderDate])
+  @@index([status, isArchived])
+  @@index([status, isArchived, orderDate])
+  @@index([isArchived, releasedToShipped])
+  @@index([isArchived, releasedToCancelled])
+  @@index([isArchived, releasedToShipped, orderDate])
+  @@index([customerId, paymentStatus])
+  @@index([paymentMethod, codRemittedAt])
 }
 
 // ============================================
@@ -551,53 +516,60 @@ model OrderPayment {
 }
 
 model OrderLine {
-  id                 String              @id @default(uuid())
-  orderId            String
-  shopifyLineId      String?
-  skuId              String
-  qty                Int
-  unitPrice          Float
-  lineStatus         String              @default("pending")
-  allocatedAt        DateTime?
-  pickedAt           DateTime?
-  packedAt           DateTime?
-  shippedAt          DateTime?
-  inventoryTxnId     String?
-  productionBatchId  String?
-  notes              String?
-  rtoCondition       String?
-  rtoInwardedAt      DateTime?
-  rtoInwardedById    String?
-  rtoNotes           String?
-  customizedAt       DateTime?
-  customizedById     String?
-  isCustomized       Boolean             @default(false)
-  isNonReturnable    Boolean             @default(false)
-  originalSkuId      String?
-  awbNumber          String?
-  courier            String?
-  deliveredAt        DateTime?
-  holdAt             DateTime?
-  holdNotes          String?
-  holdReason         String?
-  isOnHold           Boolean             @default(false)
-  lastTrackingUpdate DateTime?
-  refundAmount       Float?
-  refundNotes        String?
-  refundReason       String?
-  refundedAt         DateTime?
-  rtoInitiatedAt     DateTime?
-  rtoReceivedAt      DateTime?
-  trackingStatus     String?
-  shippingAddress    String?
-  customizedBy       User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
-  order              Order               @relation(fields: [orderId], references: [id])
-  productionBatch    ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
-  rtoInwardedBy      User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
-  sku                Sku                 @relation(fields: [skuId], references: [id])
-  repackingQueueItems RepackingQueueItem[] @relation("OrderLineToRepacking")
-  returnRequestLines ReturnRequestLine[]
-
+  id                   String              @id @default(uuid())
+  orderId              String
+  shopifyLineId        String?
+  skuId                String
+  qty                  Int
+  unitPrice            Float
+  lineStatus           String              @default("pending")
+  allocatedAt          DateTime?
+  pickedAt             DateTime?
+  packedAt             DateTime?
+  shippedAt            DateTime?
+  deliveredAt          DateTime?
+  inventoryTxnId       String?
+  productionBatchId    String?
+  notes                String?
+  // Tracking fields (single source of truth for each line)
+  awbNumber            String?
+  courier              String?
+  trackingStatus       String?
+  lastTrackingUpdate   DateTime?
+  lastScanAt           DateTime?
+  lastScanLocation     String?
+  lastScanStatus       String?
+  courierStatusCode    String?
+  deliveryAttempts     Int?
+  expectedDeliveryDate DateTime?
+  // RTO fields
+  rtoInitiatedAt       DateTime?
+  rtoReceivedAt        DateTime?
+  rtoCondition         String?
+  rtoInwardedAt        DateTime?
+  rtoInwardedById      String?
+  rtoNotes             String?
+  // Customization
+  customizedAt         DateTime?
+  customizedById       String?
+  isCustomized         Boolean             @default(false)
+  isNonReturnable      Boolean             @default(false)
+  originalSkuId        String?
+  // Refund
+  refundAmount         Float?
+  refundNotes          String?
+  refundReason         String?
+  refundedAt           DateTime?
+  // Custom shipping address (for multi-destination orders)
+  shippingAddress      String?
+  // Relations
+  customizedBy         User?               @relation("CustomizedBy", fields: [customizedById], references: [id])
+  order                Order               @relation(fields: [orderId], references: [id])
+  productionBatch      ProductionBatch?    @relation(fields: [productionBatchId], references: [id])
+  rtoInwardedBy        User?               @relation("RtoInwardedBy", fields: [rtoInwardedById], references: [id])
+  sku                  Sku                 @relation(fields: [skuId], references: [id])
+  repackingQueueItems  RepackingQueueItem[] @relation("OrderLineToRepacking")
+  returnRequestLines   ReturnRequestLine[]
 
   @@index([orderId])
   @@index([skuId])
@@ -609,13 +581,13 @@ model OrderLine {
   @@index([awbNumber])
   @@index([skuId, rtoCondition])
   @@index([orderId, rtoCondition])
-  // Performance: Line queries with SKU
-  @@index([lineStatus, skuId]) // Status + SKU lookups for inventory
-  @@index([skuId, lineStatus]) // SKU-first queries
-  // Performance: View filtering and allocation queries
-  @@index([orderId, lineStatus, shippedAt]) // View filtering with date
-  @@index([awbNumber, courier]) // Tracking batch lookups
-  @@index([lineStatus, allocatedAt]) // Analytics and allocation tracking
+  @@index([lineStatus, skuId])
+  @@index([skuId, lineStatus])
+  @@index([orderId, lineStatus, shippedAt])
+  @@index([awbNumber, courier])
+  @@index([lineStatus, allocatedAt])
+  @@index([trackingStatus])
+  @@index([orderId, trackingStatus])
 }
 
 model ReturnRequest {

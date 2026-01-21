@@ -32,7 +32,7 @@ export function createMiddleware() {
 }
 
 // Hook stub for client-side usage
-export function useServerFn(serverFn: unknown) {
+export function useServerFn(_serverFn: unknown) {
   // In SPA mode, return a function that throws an error
   return () => {
     throw new Error('Server Functions are not available in SPA mode. Use tRPC instead.');

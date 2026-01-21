@@ -67,14 +67,14 @@ router.get('/search-unified', async (req: Request, res: Response) => {
         const skip = (pageNum - 1) * pageSizeNum;
 
         // Build search WHERE clause - search across ALL orders (including archived)
+        // AWB numbers are now on OrderLine, not Order
         const searchWhere: Prisma.OrderWhereInput = {
             OR: [
                 { orderNumber: { contains: searchTerm, mode: 'insensitive' } },
                 { customerName: { contains: searchTerm, mode: 'insensitive' } },
                 { customerEmail: { contains: searchTerm, mode: 'insensitive' } },
                 { customerPhone: { contains: searchTerm } },
-                { awbNumber: { contains: searchTerm } },
-                // Also search line-level AWB numbers
+                // Search AWB numbers via order lines
                 {
                     orderLines: {
                         some: {

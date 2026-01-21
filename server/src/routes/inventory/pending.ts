@@ -68,17 +68,16 @@ router.get('/pending-sources', authenticateToken, asyncHandler(async (req: Reque
         }),
 
         // For RTO, we need urgency counts so fetch minimal data
+        // Note: trackingStatus and rtoInitiatedAt are on OrderLine, not Order
         req.prisma.orderLine.findMany({
             where: {
-                order: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    isArchived: false
-                },
+                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                order: { isArchived: false },
                 rtoCondition: null
             },
             select: {
                 id: true,
-                order: { select: { rtoInitiatedAt: true } }
+                rtoInitiatedAt: true
             }
         }),
 
@@ -89,13 +88,14 @@ router.get('/pending-sources', authenticateToken, asyncHandler(async (req: Reque
     ]);
 
     // Calculate RTO urgency from minimal data
+    // Note: rtoInitiatedAt is now on OrderLine, not Order
     const now = Date.now();
     let rtoUrgent = 0;
     let rtoWarning = 0;
 
     for (const line of rtoData) {
-        if (line.order.rtoInitiatedAt) {
-            const daysInRto = Math.floor((now - new Date(line.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24));
+        if (line.rtoInitiatedAt) {
+            const daysInRto = Math.floor((now - new Date(line.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24));
             if (daysInRto > 14) rtoUrgent++;
             else if (daysInRto > 7) rtoWarning++;
         }
@@ -162,15 +162,14 @@ router.get('/scan-lookup', authenticateToken, asyncHandler(async (req: Request, 
         }) as Promise<ReturnRequestLine | null>,
 
         // 3. RTO orders (includes both rto_in_transit and rto_delivered)
+        // Note: trackingStatus and rtoInitiatedAt are on OrderLine, not Order
         // Optimized: fetch both total count AND processed lines in one query
         req.prisma.orderLine.findFirst({
             where: {
                 skuId: sku.id,
                 rtoCondition: null,
-                order: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    isArchived: false
-                }
+                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                order: { isArchived: false }
             },
             include: {
                 order: {
@@ -178,8 +177,6 @@ router.get('/scan-lookup', authenticateToken, asyncHandler(async (req: Request, 
                         id: true,
                         orderNumber: true,
                         customerName: true,
-                        trackingStatus: true,
-                        rtoInitiatedAt: true,
                         // Total line count
                         _count: { select: { orderLines: true } },
                         // Processed lines (just IDs to count, avoids N+1 query)
@@ -257,9 +254,10 @@ router.get('/scan-lookup', authenticateToken, asyncHandler(async (req: Request, 
                 orderId: rtoLine.orderId,
                 orderNumber: rtoLine.order.orderNumber,
                 customerName: rtoLine.order.customerName,
-                trackingStatus: rtoLine.order.trackingStatus,
-                atWarehouse: rtoLine.order.trackingStatus === 'rto_delivered',
-                rtoInitiatedAt: rtoLine.order.rtoInitiatedAt,
+                // trackingStatus and rtoInitiatedAt are on OrderLine now
+                trackingStatus: rtoLine.trackingStatus,
+                atWarehouse: rtoLine.trackingStatus === 'rto_delivered',
+                rtoInitiatedAt: rtoLine.rtoInitiatedAt,
                 qty: rtoLine.qty,
                 // Progress as counts instead of full line array
                 progress: {
@@ -431,25 +429,24 @@ router.get('/transaction-matches/:transactionId', authenticateToken, asyncHandle
         }) as Promise<ProductionBatch[]>,
 
         // RTO order lines pending processing
+        // Note: trackingStatus and rtoInitiatedAt are on OrderLine, not Order
         req.prisma.orderLine.findMany({
             where: {
                 skuId: transaction.skuId,
                 rtoCondition: null,
-                order: {
-                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                    isArchived: false
-                }
+                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                order: { isArchived: false }
             },
             select: {
                 id: true,
                 qty: true,
+                trackingStatus: true,
+                rtoInitiatedAt: true,
                 order: {
                     select: {
                         id: true,
                         orderNumber: true,
-                        customerName: true,
-                        trackingStatus: true,
-                        rtoInitiatedAt: true
+                        customerName: true
                     }
                 }
             },
@@ -474,7 +471,7 @@ router.get('/transaction-matches/:transactionId', authenticateToken, asyncHandle
         }
     }
 
-    // Add RTO matches
+    // Add RTO matches (trackingStatus and rtoInitiatedAt are on OrderLine now)
     for (const line of rtoLines) {
         matches.push({
             type: 'rto',
@@ -482,8 +479,8 @@ router.get('/transaction-matches/:transactionId', authenticateToken, asyncHandle
             orderId: line.order.id,
             label: `RTO #${line.order.orderNumber}`,
             detail: line.order.customerName || '',
-            date: line.order.rtoInitiatedAt,
-            atWarehouse: line.order.trackingStatus === 'rto_delivered'
+            date: line.rtoInitiatedAt,
+            atWarehouse: line.trackingStatus === 'rto_delivered'
         });
     }
 
@@ -581,23 +578,12 @@ router.post('/allocate-transaction', authenticateToken, requirePermission('inven
             }
 
             // Revert previous RTO allocation
+            // Note: rtoReceivedAt is now on OrderLine, not Order (terminalStatus/terminalAt removed from Order)
             if (previousAllocation?.type === 'rto_received' && previousAllocation.referenceId) {
-                const orderLine = await tx.orderLine.findUnique({
+                await tx.orderLine.update({
                     where: { id: previousAllocation.referenceId },
-                    include: { order: true }
-                }) as RtoOrderLine | null;
-                if (orderLine) {
-                    await tx.orderLine.update({
-                        where: { id: previousAllocation.referenceId },
-                        data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null }
-                    });
-                    if (orderLine.order.terminalStatus === 'rto_received') {
-                        await tx.order.update({
-                            where: { id: orderLine.orderId },
-                            data: { rtoReceivedAt: null, terminalStatus: null, terminalAt: null }
-                        });
-                    }
-                }
+                    data: { rtoCondition: null, rtoInwardedAt: null, rtoInwardedById: null, rtoReceivedAt: null }
+                });
             }
 
             // Update transaction
@@ -745,20 +731,19 @@ router.post('/allocate-transaction', authenticateToken, requirePermission('inven
                 }
             });
 
-            // Check if all lines processed
+            // Check if all lines processed and mark rtoReceivedAt on each line
+            // Note: rtoReceivedAt is now on OrderLine, not Order (terminalStatus/terminalAt removed from Order)
             const allLines = await tx.orderLine.findMany({
                 where: { orderId: orderLine.orderId }
             });
             const allProcessed = allLines.every(l => l.rtoCondition !== null);
 
             if (allProcessed) {
-                await tx.order.update({
-                    where: { id: orderLine.orderId },
-                    data: {
-                        rtoReceivedAt: new Date(),
-                        terminalStatus: 'rto_received',
-                        terminalAt: new Date()
-                    }
+                // Mark all lines as RTO received
+                const now = new Date();
+                await tx.orderLine.updateMany({
+                    where: { orderId: orderLine.orderId, rtoReceivedAt: null },
+                    data: { rtoReceivedAt: now }
                 });
             }
         });
@@ -816,34 +801,18 @@ router.post('/allocate-transaction', authenticateToken, requirePermission('inven
             }
 
             // Revert previous RTO allocation
+            // Note: rtoReceivedAt is now on OrderLine, not Order (terminalStatus/terminalAt removed from Order)
             if (previousAllocation?.type === 'rto_received' && previousAllocation.referenceId) {
-                const orderLine = await tx.orderLine.findUnique({
+                // Clear RTO fields on order line
+                await tx.orderLine.update({
                     where: { id: previousAllocation.referenceId },
-                    include: { order: true }
-                }) as RtoOrderLine | null;
-                if (orderLine) {
-                    // Clear RTO fields on order line
-                    await tx.orderLine.update({
-                        where: { id: previousAllocation.referenceId },
-                        data: {
-                            rtoCondition: null,
-                            rtoInwardedAt: null,
-                            rtoInwardedById: null
-                        }
-                    });
-
-                    // If order was marked as fully RTO received, clear it
-                    if (orderLine.order.terminalStatus === 'rto_received') {
-                        await tx.order.update({
-                            where: { id: orderLine.orderId },
-                            data: {
-                                rtoReceivedAt: null,
-                                terminalStatus: null,
-                                terminalAt: null
-                            }
-                        });
+                    data: {
+                        rtoCondition: null,
+                        rtoInwardedAt: null,
+                        rtoInwardedById: null,
+                        rtoReceivedAt: null
                     }
-                }
+                });
             }
 
             await tx.inventoryTransaction.update({
@@ -887,11 +856,10 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
     };
 
     if (source === 'rto') {
+        // Note: trackingStatus and rtoInitiatedAt are on OrderLine, not Order
         const baseWhere = {
-            order: {
-                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                isArchived: false
-            },
+            trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+            order: { isArchived: false },
             rtoCondition: null
         };
 
@@ -916,18 +884,18 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
                     id: true,
                     skuId: true,
                     qty: true,
+                    trackingStatus: true,
+                    rtoInitiatedAt: true,
                     sku: { select: skuSelect },
                     order: {
                         select: {
                             id: true,
                             orderNumber: true,
-                            customerName: true,
-                            trackingStatus: true,
-                            rtoInitiatedAt: true
+                            customerName: true
                         }
                     }
                 },
-                orderBy: [{ order: { rtoInitiatedAt: 'asc' } }],
+                orderBy: [{ rtoInitiatedAt: 'asc' }],
                 skip,
                 take
             })
@@ -935,8 +903,9 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
 
         const items: PendingQueueItem[] = rtoPending.map(l => {
             const sku = l.sku as SkuWithRelations;
-            const daysInRto = l.order.rtoInitiatedAt
-                ? Math.floor((Date.now() - new Date(l.order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24))
+            // trackingStatus and rtoInitiatedAt are on OrderLine now
+            const daysInRto = l.rtoInitiatedAt
+                ? Math.floor((Date.now() - new Date(l.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24))
                 : 0;
 
             return {
@@ -955,9 +924,9 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
                 orderId: l.order.id,
                 orderNumber: l.order.orderNumber,
                 customerName: l.order.customerName,
-                trackingStatus: l.order.trackingStatus,
-                atWarehouse: l.order.trackingStatus === 'rto_delivered',
-                rtoInitiatedAt: l.order.rtoInitiatedAt,
+                trackingStatus: l.trackingStatus,
+                atWarehouse: l.trackingStatus === 'rto_delivered',
+                rtoInitiatedAt: l.rtoInitiatedAt,
                 daysInRto,
                 urgency: daysInRto > 14 ? 'urgent' : daysInRto > 7 ? 'warning' : 'normal'
             };
@@ -1192,7 +1161,7 @@ router.get('/pending-queue/:source', authenticateToken, asyncHandler(async (req:
  *
  * Side Effects:
  * - Updates OrderLine.rtoCondition, rtoInwardedAt, rtoInwardedById
- * - If all lines processed: Sets Order.rtoReceivedAt, terminalStatus='rto_received'
+ * - If all lines processed: Sets OrderLine.rtoReceivedAt on all lines
  * - Creates InventoryTransaction (if good/unopened) OR WriteOffLog (if damaged/wrong)
  */
 router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:inward'), asyncHandler(async (req: Request, res: Response) => {
@@ -1207,6 +1176,7 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
     }
 
     // Get the order line with order info
+    // Note: trackingStatus is on OrderLine, not Order
     const orderLine = await req.prisma.orderLine.findUnique({
         where: { id: lineId },
         include: {
@@ -1214,7 +1184,6 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
                 select: {
                     id: true,
                     orderNumber: true,
-                    trackingStatus: true,
                     isArchived: true
                 }
             },
@@ -1272,11 +1241,11 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
         });
     }
 
-    // Check if order is in RTO status
-    if (!['rto_in_transit', 'rto_delivered'].includes(orderLine.order.trackingStatus)) {
+    // Check if line is in RTO status (trackingStatus is on OrderLine now)
+    if (!['rto_in_transit', 'rto_delivered'].includes(orderLine.trackingStatus || '')) {
         return res.status(400).json({
-            error: 'Order is not in RTO status',
-            currentStatus: orderLine.order.trackingStatus
+            error: 'Order line is not in RTO status',
+            currentStatus: orderLine.trackingStatus
         });
     }
 
@@ -1348,16 +1317,13 @@ router.post('/rto-inward-line', authenticateToken, requirePermission('inventory:
         const pendingLines = allLines.filter(l => l.rtoCondition === null);
         const allLinesProcessed = pendingLines.length === 0;
 
-        // If all lines processed, update order's rtoReceivedAt and terminal status
+        // If all lines processed, mark rtoReceivedAt on all lines
+        // Note: rtoReceivedAt is now on OrderLine, not Order (terminalStatus/terminalAt removed from Order)
         if (allLinesProcessed) {
             const now = new Date();
-            await tx.order.update({
-                where: { id: orderLine.orderId },
-                data: {
-                    rtoReceivedAt: now,
-                    terminalStatus: 'rto_received',
-                    terminalAt: now,
-                }
+            await tx.orderLine.updateMany({
+                where: { orderId: orderLine.orderId, rtoReceivedAt: null },
+                data: { rtoReceivedAt: now }
             });
         }
 

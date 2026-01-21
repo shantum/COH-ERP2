@@ -32,8 +32,6 @@ interface SearchResultOrder {
     paymentMethod: string | null;
     totalAmount: number | null;
     orderDate: Date | null;
-    trackingStatus: string | null;
-    awbNumber: string | null;
 }
 
 interface TabNames {
@@ -78,17 +76,20 @@ router.get('/search-all', async (req: Request, res: Response) => {
         const take = Math.min(Number(limit), 20); // Cap at 20 per tab
 
         // Build search OR clause
+        // AWB is now on OrderLine, so search via nested relation
         const searchWhere: Prisma.OrderWhereInput = {
             OR: [
                 { orderNumber: { contains: searchTerm, mode: 'insensitive' } },
                 { customerName: { contains: searchTerm, mode: 'insensitive' } },
-                { awbNumber: { contains: searchTerm } },
                 { customerEmail: { contains: searchTerm, mode: 'insensitive' } },
                 { customerPhone: { contains: searchTerm } },
+                // Search AWB via order lines
+                { orderLines: { some: { awbNumber: { contains: searchTerm } } } },
             ]
         };
 
         // Define tab filters (matching ORDER_VIEWS)
+        // Note: trackingStatus is now on OrderLine, not Order
         const tabs: Record<string, Prisma.OrderWhereInput> = {
             open: {
                 AND: [
@@ -100,20 +101,43 @@ router.get('/search-all', async (req: Request, res: Response) => {
                 AND: [
                     searchWhere,
                     { status: { in: ['shipped', 'delivered'] }, isArchived: false },
-                    { NOT: { trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] } } },
-                    { NOT: { AND: [{ paymentMethod: 'COD' }, { trackingStatus: 'delivered' }, { codRemittedAt: null }] } }
+                    // Exclude RTO orders (check at line level)
+                    {
+                        NOT: {
+                            orderLines: {
+                                some: {
+                                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                                },
+                            },
+                        },
+                    },
                 ]
             },
             rto: {
                 AND: [
                     searchWhere,
-                    { trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] }, isArchived: false }
+                    {
+                        isArchived: false,
+                        orderLines: {
+                            some: {
+                                trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                            },
+                        },
+                    },
                 ]
             },
             cod_pending: {
                 AND: [
                     searchWhere,
-                    { paymentMethod: 'COD', trackingStatus: 'delivered', codRemittedAt: null, isArchived: false }
+                    {
+                        paymentMethod: 'COD',
+                        codRemittedAt: null,
+                        isArchived: false,
+                        // All lines delivered
+                        orderLines: {
+                            some: { deliveredAt: { not: null } },
+                        },
+                    },
                 ]
             },
             archived: {
@@ -136,8 +160,6 @@ router.get('/search-all', async (req: Request, res: Response) => {
                     paymentMethod: true,
                     totalAmount: true,
                     orderDate: true,
-                    trackingStatus: true,
-                    awbNumber: true,
                 },
                 orderBy: { orderDate: 'desc' },
                 take,
@@ -160,8 +182,6 @@ router.get('/search-all', async (req: Request, res: Response) => {
                     status: o.status,
                     paymentMethod: o.paymentMethod,
                     totalAmount: o.totalAmount,
-                    trackingStatus: o.trackingStatus,
-                    awbNumber: o.awbNumber,
                 }))
             }));
 

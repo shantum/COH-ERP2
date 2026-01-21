@@ -146,6 +146,26 @@ Login: `admin@coh.com` / `XOFiya@34`
 - Each row = one order line (server-flattened), `isFirstLine` marks header for grouping
 - Note: Archived view hidden from UI but auto-archive runs silently
 
+### Tracking Data Architecture (IMPORTANT)
+
+**OrderLine is the ONLY source of truth for tracking data.** Order-level tracking fields have been removed.
+
+| Field | Location | Notes |
+|-------|----------|-------|
+| awbNumber, courier | OrderLine | Each line can have different AWB (multi-AWB orders) |
+| shippedAt, deliveredAt | OrderLine | Line-level timestamps |
+| trackingStatus | OrderLine | `in_transit`, `delivered`, `rto_in_transit`, `rto_delivered` |
+| rtoInitiatedAt, rtoReceivedAt | OrderLine | RTO lifecycle timestamps |
+| lastScanAt, lastScanLocation | OrderLine | iThink tracking data |
+| expectedDeliveryDate | OrderLine | EDD from courier |
+
+**Key patterns:**
+- View filtering uses `EXISTS (SELECT 1 FROM OrderLine WHERE ...)` for "any line matches"
+- AWB search queries `OrderLine.awbNumber`, not Order
+- Tracking sync updates ALL OrderLines with same AWB
+- Terminal status (delivered, rto_delivered) derived from OrderLine statuses
+- **Hold functionality removed** - no isOnHold, holdReason, etc.
+
 ### Line Status State Machine
 
 Source: `server/src/utils/orderStateMachine.ts` (use `executeTransition` in transaction)

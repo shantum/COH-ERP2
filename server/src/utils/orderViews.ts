@@ -171,7 +171,12 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         name: 'RTO Orders',
         description: 'Return to origin orders',
         where: {
-            trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+            // Filter by line-level tracking status (has at least one RTO line)
+            orderLines: {
+                some: {
+                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                },
+            },
             isArchived: false,
         },
         orderBy: { orderDate: 'desc' },
@@ -184,7 +189,12 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         description: 'Delivered COD orders awaiting remittance',
         where: {
             paymentMethod: 'COD',
-            trackingStatus: 'delivered',
+            // Filter by line-level tracking status (has at least one delivered line)
+            orderLines: {
+                some: {
+                    trackingStatus: 'delivered',
+                },
+            },
             codRemittedAt: null,
             isArchived: false,
         },
@@ -236,14 +246,13 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
 
     /**
      * Ready to Ship: What can I ship now?
-     * Open orders not on hold, ready for fulfillment
+     * Open orders ready for fulfillment (at least one line not shipped/cancelled)
      */
     ready_to_ship: {
         name: 'Ready to Ship',
         description: 'Orders ready for fulfillment',
         where: {
             isArchived: false,
-            isOnHold: false,
             // At least one line is not shipped/cancelled
             orderLines: {
                 some: {
@@ -258,17 +267,18 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
 
     /**
      * Needs Attention: What's stuck or unusual?
-     * Orders on hold, or RTO awaiting processing
+     * Orders with RTO lines awaiting processing
      */
     needs_attention: {
         name: 'Needs Attention',
         description: 'Orders requiring manual attention',
         where: {
-            OR: [
-                { isOnHold: true },
-                // RTO delivered but not yet processed (terminalStatus still null)
-                { trackingStatus: 'rto_delivered', terminalStatus: null },
-            ],
+            // Has at least one RTO delivered line
+            orderLines: {
+                some: {
+                    trackingStatus: 'rto_delivered',
+                },
+            },
             isArchived: false,
         },
         orderBy: { orderDate: 'asc' },
@@ -284,15 +294,16 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         name: 'Watch List',
         description: 'At-risk orders requiring monitoring',
         where: {
-            OR: [
-                // RTO in progress (not yet received)
-                { trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] } },
-            ],
+            // Has at least one RTO in-progress line
+            orderLines: {
+                some: {
+                    trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] },
+                },
+            },
             isArchived: false,
-            terminalStatus: null,
         },
         // Note: COD >7 days requires runtime filter (see enrichment)
-        orderBy: { shippedAt: 'asc' }, // Oldest at-risk first
+        orderBy: { orderDate: 'asc' }, // Oldest at-risk first (use orderDate instead of removed shippedAt)
         enrichment: ['daysInTransit', 'customerStats'],
         runtimeFilters: ['codAtRisk'], // Applied after query
         defaultLimit: 200,
@@ -307,14 +318,16 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         description: 'Orders currently in transit',
         where: {
             status: 'shipped',
-            terminalStatus: null,
             isArchived: false,
+            // Has at least one shipped line that's in transit (not RTO, not delivered)
+            orderLines: {
+                some: {
+                    lineStatus: 'shipped',
+                    trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered', 'delivered'] },
+                },
+            },
         },
-        // Exclude RTO orders (they go to watch_list)
-        excludeWhere: {
-            trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
-        },
-        orderBy: { shippedAt: 'desc' },
+        orderBy: { orderDate: 'desc' }, // Use orderDate instead of removed shippedAt
         enrichment: ['daysInTransit', 'trackingStatus', 'customerStats'],
         defaultLimit: 200,
     },
@@ -327,28 +340,46 @@ export const ORDER_VIEWS: Record<ViewName, OrderViewConfig> = {
         name: 'Pending Payment',
         description: 'Delivered COD orders awaiting payment',
         where: {
-            terminalStatus: 'delivered',
             paymentMethod: 'COD',
             codRemittedAt: null,
             isArchived: false,
+            // Has at least one delivered line
+            orderLines: {
+                some: {
+                    trackingStatus: 'delivered',
+                },
+            },
         },
-        orderBy: { terminalAt: 'asc' }, // Oldest pending first
+        orderBy: { orderDate: 'asc' }, // Oldest pending first (use orderDate instead of removed terminalAt)
         enrichment: ['daysSinceDelivery', 'customerStats'],
         defaultLimit: 200,
     },
 
     /**
-     * Completed: All orders that reached terminal status
+     * Completed: All orders that reached terminal status (all lines delivered or RTO delivered)
      * Reference only - everything that's "done"
      */
     completed: {
         name: 'Completed',
         description: 'Orders that have reached a terminal state',
         where: {
-            terminalStatus: { not: null },
             isArchived: false,
+            // All lines are in terminal state (delivered or rto_delivered)
+            NOT: {
+                orderLines: {
+                    some: {
+                        trackingStatus: { notIn: ['delivered', 'rto_delivered'] },
+                    },
+                },
+            },
+            // Must have at least one terminal line
+            orderLines: {
+                some: {
+                    trackingStatus: { in: ['delivered', 'rto_delivered'] },
+                },
+            },
         },
-        orderBy: { terminalAt: 'desc' },
+        orderBy: { orderDate: 'desc' }, // Use orderDate instead of removed terminalAt
         enrichment: ['customerStats'],
         defaultLimit: 100,
     },
@@ -388,25 +419,8 @@ export function buildViewWhereClause(
         (where as Record<string, unknown>)[view.dateFilter.field] = { gte: sinceDate };
     }
 
-    // Apply exclusions for shipped view
-    if (view.excludeWhere) {
-        // Exclude orders matching excludeWhere
-        where.OR = [
-            { trackingStatus: null },
-            { trackingStatus: { notIn: view.excludeWhere.trackingStatus.in } },
-        ];
-    }
-
-    if (view.excludeCodPending) {
-        // Exclude delivered COD orders awaiting payment
-        where.NOT = {
-            AND: [
-                { paymentMethod: 'COD' },
-                { trackingStatus: 'delivered' },
-                { codRemittedAt: null },
-            ],
-        };
-    }
+    // Note: excludeWhere and excludeCodPending logic removed - tracking status is now at line level
+    // Views that need exclusions should define the full filter in their where clause
 
     // Apply search filter
     if (search && search.trim()) {
@@ -415,9 +429,10 @@ export function buildViewWhereClause(
             ...(where.OR || []),
             { orderNumber: { contains: searchTerm, mode: 'insensitive' } },
             { customerName: { contains: searchTerm, mode: 'insensitive' } },
-            { awbNumber: { contains: searchTerm } },
             { customerEmail: { contains: searchTerm, mode: 'insensitive' } },
             { customerPhone: { contains: searchTerm } },
+            // Search by AWB in order lines
+            { orderLines: { some: { awbNumber: { contains: searchTerm } } } },
         ] as Prisma.OrderWhereInput[];
     }
 
@@ -470,40 +485,14 @@ export const ORDER_UNIFIED_SELECT = {
     // Partial cancellation
     partiallyCancelled: true,
 
-    // Fulfillment fields
-    awbNumber: true,
-    courier: true,
-    shippedAt: true,
-    deliveredAt: true,
-
-    // Tracking fields (iThink)
-    trackingStatus: true,
-    expectedDeliveryDate: true,
-    deliveryAttempts: true,
-    lastScanStatus: true,
-    lastScanLocation: true,
-    lastScanAt: true,
-    lastTrackingUpdate: true,
-    courierStatusCode: true,
-
-    // RTO fields
-    rtoInitiatedAt: true,
-    rtoReceivedAt: true,
-
-    // Terminal status (zen philosophy: what's the final state?)
-    terminalStatus: true,
-    terminalAt: true,
-
     // COD fields
     codRemittedAt: true,
     codRemittanceUtr: true,
     codRemittedAmount: true,
 
-    // Hold fields
-    isOnHold: true,
-    holdReason: true,
-    holdNotes: true,
-    holdAt: true,
+    // Note: Fulfillment/tracking fields (awbNumber, courier, shippedAt, deliveredAt,
+    // trackingStatus, lastTrackingUpdate, rtoInitiatedAt, rtoReceivedAt, etc.)
+    // are now on OrderLine, not Order. Access via orderLines relation.
 
     // Relations - lightweight for list views
     customer: {
@@ -525,14 +514,25 @@ export const ORDER_UNIFIED_SELECT = {
             skuId: true,
             productionBatchId: true,
             notes: true,
+            // Line-level fulfillment fields
             awbNumber: true,
             courier: true,
             shippedAt: true,
             deliveredAt: true,
-            isCustomized: true,
-            rtoCondition: true,
+            // Line-level tracking fields
             trackingStatus: true,
             lastTrackingUpdate: true,
+            rtoInitiatedAt: true,
+            rtoReceivedAt: true,
+            lastScanAt: true,
+            lastScanLocation: true,
+            lastScanStatus: true,
+            courierStatusCode: true,
+            deliveryAttempts: true,
+            expectedDeliveryDate: true,
+            // Other line fields
+            isCustomized: true,
+            rtoCondition: true,
             shopifyLineId: true,
             // SKU with minimal nested data (includes customization fields)
             sku: {
@@ -859,11 +859,12 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 releasedToShipped: (order.releasedToShipped as boolean) || false,
                 releasedToCancelled: (order.releasedToCancelled as boolean) || false,
                 isExchange: (order.isExchange as boolean) || false,
-                isOnHold: (order.isOnHold as boolean) || false,
-                orderAwbNumber: (order.awbNumber as string) || null,
-                orderCourier: (order.courier as string) || null,
-                orderShippedAt: (order.shippedAt as string) || null,
-                orderTrackingStatus: (order.trackingStatus as string) || null,
+                // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus are now at line level
+                isOnHold: false,
+                orderAwbNumber: null, // No lines, so no AWB
+                orderCourier: null,
+                orderShippedAt: null,
+                orderTrackingStatus: null,
                 productName: '(no items)',
                 colorName: '-',
                 colorHex: null,
@@ -947,11 +948,13 @@ export function flattenOrdersToRows(orders: EnrichedOrder[]): FlattenedOrderRow[
                 releasedToShipped: (order.releasedToShipped as boolean) || false,
                 releasedToCancelled: (order.releasedToCancelled as boolean) || false,
                 isExchange: (order.isExchange as boolean) || false,
-                isOnHold: (order.isOnHold as boolean) || false,
-                orderAwbNumber: (order.awbNumber as string) || null,
-                orderCourier: (order.courier as string) || null,
-                orderShippedAt: (order.shippedAt as string) || null,
-                orderTrackingStatus: (order.trackingStatus as string) || null,
+                // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus are now at line level
+                // Use line-level values for "order" fields (for display purposes, use first line's values)
+                isOnHold: false,
+                orderAwbNumber: line.awbNumber || null,
+                orderCourier: line.courier || null,
+                orderShippedAt: line.shippedAt || null,
+                orderTrackingStatus: line.trackingStatus || null,
                 productName: sku?.variation?.product?.name || '-',
                 colorName: sku?.variation?.colorName || '-',
                 colorHex: (() => {
@@ -1106,11 +1109,8 @@ export const LINE_SSE_SELECT = {
             releasedToCancelled: true,
             internalNotes: true,
             isExchange: true,
-            isOnHold: true,
-            awbNumber: true,
-            courier: true,
-            shippedAt: true,
-            trackingStatus: true,
+            // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus removed from Order
+            // These fields are now at line level
             customer: {
                 select: {
                     tags: true,
@@ -1210,11 +1210,13 @@ export function flattenLineForSSE(
         releasedToCancelled: order.releasedToCancelled || false,
         internalNotes: order.internalNotes || null,
         isExchange: order.isExchange || false,
-        isOnHold: order.isOnHold || false,
-        orderAwbNumber: order.awbNumber || null,
-        orderCourier: order.courier || null,
-        orderShippedAt: order.shippedAt || null,
-        orderTrackingStatus: order.trackingStatus || null,
+        // Note: isOnHold, awbNumber, courier, shippedAt, trackingStatus are now at line level
+        // For SSE, use line-level values for these fields
+        isOnHold: false, // isOnHold no longer exists on Order
+        orderAwbNumber: line.awbNumber || null, // Use line-level AWB
+        orderCourier: line.courier || null, // Use line-level courier
+        orderShippedAt: line.shippedAt || null, // Use line-level shippedAt
+        orderTrackingStatus: line.trackingStatus || null, // Use line-level trackingStatus
 
         // Line-level fields
         lineStatus: line.lineStatus,

@@ -479,13 +479,18 @@ router.get('/top-fabrics', authenticateToken, asyncHandler(async (req: Request, 
     startDate.setDate(startDate.getDate() - Number(days));
 
     // Get order lines from non-cancelled, non-RTO orders within the time period
+    // Note: trackingStatus is now on OrderLine, not Order
     const orderLines = await req.prisma.orderLine.findMany({
         where: {
             order: {
                 orderDate: { gte: startDate },
                 status: { not: 'cancelled' },
-                trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
             },
+            // Exclude RTO lines (trackingStatus is now on OrderLine)
+            OR: [
+                { trackingStatus: null },
+                { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } },
+            ],
         },
         include: {
             sku: {

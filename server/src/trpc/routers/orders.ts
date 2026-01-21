@@ -43,7 +43,6 @@ import { inventoryBalanceCache } from '../../services/inventoryBalanceCache.js';
 import { broadcastOrderUpdate } from '../../routes/sse.js';
 import { deferredExecutor } from '../../services/deferredExecutor.js';
 import { enforceRulesInTrpc } from '../../rules/index.js';
-import { recomputeOrderStatus } from '../../utils/orderStatus.js';
 import { orderLogger } from '../../utils/logger.js';
 import { listOrdersKysely, transformKyselyToRows, type ViewName } from '../../db/queries/index.js';
 
@@ -63,7 +62,7 @@ const list = protectedProcedure
             limit: z.number().int().positive().max(2000).default(100),
             days: z.number().int().positive().optional(),
             search: z.string().optional(),
-            sortBy: z.enum(['orderDate', 'archivedAt', 'shippedAt', 'createdAt']).optional(),
+            sortBy: z.enum(['orderDate', 'archivedAt', 'createdAt']).optional(),
             // Shipped view sub-filters (rto, cod_pending) - replaces separate RTO/COD views
             shippedFilter: z.enum(['rto', 'cod_pending']).optional(),
         })
@@ -88,7 +87,7 @@ const list = protectedProcedure
         // ============================================
         const kyselyView = view as ViewName;
         const kyselyShippedFilter = shippedFilter as 'rto' | 'cod_pending' | undefined;
-        const kyselySortBy = sortBy as 'orderDate' | 'archivedAt' | 'shippedAt' | 'createdAt' | undefined;
+        const kyselySortBy = sortBy as 'orderDate' | 'archivedAt' | 'createdAt' | undefined;
 
         const { orders: kyselyOrders, totalCount } = await listOrdersKysely({
             view: kyselyView,
@@ -1015,8 +1014,6 @@ const cancelOrder = protectedProcedure
                 where: { id: orderId },
                 data: {
                     status: 'cancelled',
-                    terminalStatus: 'cancelled',
-                    terminalAt: new Date(),
                     internalNotes: reason
                         ? order.internalNotes
                             ? `${order.internalNotes}\n\nCancelled: ${reason}`
@@ -1091,8 +1088,6 @@ const uncancelOrder = protectedProcedure
                 where: { id: orderId },
                 data: {
                     status: 'open',
-                    terminalStatus: null,
-                    terminalAt: null,
                 },
             });
 
@@ -1201,14 +1196,10 @@ const markLineDelivered = protectedProcedure
 
             let orderTerminal = false;
             if (undeliveredShippedLines === 0) {
-                // All shipped lines are delivered - set order terminal status
+                // All shipped lines are delivered - update order status
                 await tx.order.update({
                     where: { id: line.orderId },
                     data: {
-                        terminalStatus: 'delivered',
-                        terminalAt: deliveryTime,
-                        // Also update order-level deliveredAt for backward compat
-                        deliveredAt: deliveryTime,
                         status: 'delivered',
                     },
                 });
@@ -1303,14 +1294,6 @@ const markLineRto = protectedProcedure
                     data: { rtoCount: { increment: 1 } },
                 });
             }
-
-            // Also update order-level rtoInitiatedAt for backward compat (if not already set)
-            await tx.order.update({
-                where: { id: line.orderId },
-                data: {
-                    rtoInitiatedAt: now,
-                },
-            });
         });
 
         // Broadcast SSE update
@@ -1420,16 +1403,7 @@ const receiveLineRto = protectedProcedure
 
             let orderTerminal = false;
             if (unreceived === 0) {
-                // All RTO lines received - set order terminal status
-                await tx.order.update({
-                    where: { id: line.orderId },
-                    data: {
-                        terminalStatus: 'rto_received',
-                        terminalAt: now,
-                        // Also update order-level for backward compat
-                        rtoReceivedAt: now,
-                    },
-                });
+                // All RTO lines received - terminal status is now derived
                 orderTerminal = true;
             }
 
@@ -1505,14 +1479,11 @@ const markDelivered = protectedProcedure
         const shippedLineIds = order.orderLines.map(l => l.id);
 
         if (shippedLineIds.length === 0) {
-            // No shipped lines to deliver - just update order status for backward compat
+            // No shipped lines to deliver - just update order status
             await ctx.prisma.order.update({
                 where: { id: orderId },
                 data: {
                     status: 'delivered',
-                    deliveredAt: now,
-                    terminalStatus: 'delivered',
-                    terminalAt: now,
                 },
             });
         } else {
@@ -1532,9 +1503,6 @@ const markDelivered = protectedProcedure
                     where: { id: orderId },
                     data: {
                         status: 'delivered',
-                        deliveredAt: now,
-                        terminalStatus: 'delivered',
-                        terminalAt: now,
                     },
                 });
             });
@@ -1572,7 +1540,6 @@ const markRto = protectedProcedure
                 id: true,
                 status: true,
                 customerId: true,
-                rtoInitiatedAt: true,
                 orderLines: {
                     where: { lineStatus: 'shipped', rtoInitiatedAt: null },
                     select: { id: true },
@@ -1596,7 +1563,7 @@ const markRto = protectedProcedure
         const shippedLineIds = order.orderLines.map(l => l.id);
         const linesInitiated = shippedLineIds.length;
 
-        const updated = await ctx.prisma.$transaction(async (tx) => {
+        await ctx.prisma.$transaction(async (tx) => {
             // Update all shipped lines to RTO initiated
             if (shippedLineIds.length > 0) {
                 await tx.orderLine.updateMany({
@@ -1608,12 +1575,6 @@ const markRto = protectedProcedure
                 });
             }
 
-            // Update order-level rtoInitiatedAt
-            const updatedOrder = await tx.order.update({
-                where: { id: orderId },
-                data: { rtoInitiatedAt: now },
-            });
-
             // Increment customer RTO count based on number of lines (not order)
             // Each line counts as one RTO for customer stats
             if (linesInitiated > 0 && order.customerId) {
@@ -1622,8 +1583,6 @@ const markRto = protectedProcedure
                     data: { rtoCount: { increment: linesInitiated } },
                 });
             }
-
-            return updatedOrder;
         });
 
         // Broadcast SSE update with new event type
@@ -1634,7 +1593,7 @@ const markRto = protectedProcedure
             changes: { rtoInitiatedAt: now.toISOString() },
         }, ctx.user.id);
 
-        return { orderId, rtoInitiatedAt: updated.rtoInitiatedAt, linesInitiated };
+        return { orderId, rtoInitiatedAt: now, linesInitiated };
     });
 
 // ============================================
@@ -1700,16 +1659,6 @@ const receiveRto = protectedProcedure
                     rtoReceivedAt: now,
                     rtoCondition: 'good', // Default condition
                     trackingStatus: 'rto_delivered',
-                },
-            });
-
-            // Update order-level for backward compat
-            await tx.order.update({
-                where: { id: orderId },
-                data: {
-                    rtoReceivedAt: now,
-                    terminalStatus: 'rto_received',
-                    terminalAt: now,
                 },
             });
 
@@ -2491,218 +2440,6 @@ const releaseToCancelled = protectedProcedure
     });
 
 // ============================================
-// HOLD OPERATIONS
-// ============================================
-
-/**
- * Hold entire order (blocks all lines from fulfillment)
- */
-const holdOrder = protectedProcedure
-    .input(z.object({
-        orderId: z.string().uuid('Invalid order ID'),
-        reason: z.string().min(1, 'Reason is required'),
-        notes: z.string().optional(),
-    }))
-    .mutation(async ({ input, ctx }) => {
-        const { orderId, reason, notes } = input;
-
-        const order = await ctx.prisma.order.findUnique({
-            where: { id: orderId },
-            include: { orderLines: true },
-        });
-
-        if (!order) {
-            throw new TRPCError({
-                code: 'NOT_FOUND',
-                message: 'Order not found',
-            });
-        }
-
-        // Enforce hold rules using rules engine
-        await enforceRulesInTrpc('holdOrder', ctx, {
-            data: { order, reason },
-            phase: 'pre',
-        });
-
-        const updated = await ctx.prisma.$transaction(async (tx) => {
-            await tx.order.update({
-                where: { id: orderId },
-                data: {
-                    isOnHold: true,
-                    holdReason: reason,
-                    holdNotes: notes || null,
-                    holdAt: new Date(),
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(orderId, tx);
-
-            return tx.order.findUnique({
-                where: { id: orderId },
-                include: { orderLines: true },
-            });
-        });
-
-        orderLogger.info({ orderNumber: order.orderNumber, reason }, 'Order placed on hold');
-        return updated;
-    });
-
-/**
- * Release order from hold
- */
-const releaseOrderHold = protectedProcedure
-    .input(z.object({ orderId: z.string().uuid('Invalid order ID') }))
-    .mutation(async ({ input, ctx }) => {
-        const { orderId } = input;
-
-        const order = await ctx.prisma.order.findUnique({
-            where: { id: orderId },
-            include: { orderLines: true },
-        });
-
-        if (!order) {
-            throw new TRPCError({
-                code: 'NOT_FOUND',
-                message: 'Order not found',
-            });
-        }
-
-        // Enforce release rules using rules engine
-        await enforceRulesInTrpc('releaseOrderHold', ctx, {
-            data: { order },
-            phase: 'pre',
-        });
-
-        const updated = await ctx.prisma.$transaction(async (tx) => {
-            await tx.order.update({
-                where: { id: orderId },
-                data: {
-                    isOnHold: false,
-                    holdReason: null,
-                    holdNotes: null,
-                    holdAt: null,
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(orderId, tx);
-
-            return tx.order.findUnique({
-                where: { id: orderId },
-                include: { orderLines: true },
-            });
-        });
-
-        orderLogger.info({ orderNumber: order.orderNumber }, 'Order released from hold');
-        return updated;
-    });
-
-/**
- * Hold a single order line
- */
-const holdLine = protectedProcedure
-    .input(z.object({
-        lineId: z.string().uuid('Invalid line ID'),
-        reason: z.string().min(1, 'Reason is required'),
-        notes: z.string().optional(),
-    }))
-    .mutation(async ({ input, ctx }) => {
-        const { lineId, reason, notes } = input;
-
-        const line = await ctx.prisma.orderLine.findUnique({
-            where: { id: lineId },
-            include: { order: true },
-        });
-
-        if (!line) {
-            throw new TRPCError({
-                code: 'NOT_FOUND',
-                message: 'Order line not found',
-            });
-        }
-
-        // Enforce hold line rules using rules engine
-        await enforceRulesInTrpc('holdLine', ctx, {
-            data: { line, order: line.order, reason },
-            phase: 'pre',
-        });
-
-        const updated = await ctx.prisma.$transaction(async (tx) => {
-            await tx.orderLine.update({
-                where: { id: lineId },
-                data: {
-                    isOnHold: true,
-                    holdReason: reason,
-                    holdNotes: notes || null,
-                    holdAt: new Date(),
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(line.orderId, tx);
-
-            return tx.orderLine.findUnique({
-                where: { id: lineId },
-                include: { order: true },
-            });
-        });
-
-        orderLogger.info({ lineId, reason }, 'Line placed on hold');
-        return updated;
-    });
-
-/**
- * Release a single order line from hold
- */
-const releaseLineHold = protectedProcedure
-    .input(z.object({ lineId: z.string().uuid('Invalid line ID') }))
-    .mutation(async ({ input, ctx }) => {
-        const { lineId } = input;
-
-        const line = await ctx.prisma.orderLine.findUnique({
-            where: { id: lineId },
-            include: { order: true },
-        });
-
-        if (!line) {
-            throw new TRPCError({
-                code: 'NOT_FOUND',
-                message: 'Order line not found',
-            });
-        }
-
-        // Enforce release line rules using rules engine
-        await enforceRulesInTrpc('releaseLineHold', ctx, {
-            data: { line },
-            phase: 'pre',
-        });
-
-        const updated = await ctx.prisma.$transaction(async (tx) => {
-            await tx.orderLine.update({
-                where: { id: lineId },
-                data: {
-                    isOnHold: false,
-                    holdReason: null,
-                    holdNotes: null,
-                    holdAt: null,
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(line.orderId, tx);
-
-            return tx.orderLine.findUnique({
-                where: { id: lineId },
-                include: { order: true },
-            });
-        });
-
-        orderLogger.info({ lineId }, 'Line released from hold');
-        return updated;
-    });
-
-// ============================================
 // CUSTOMIZATION OPERATIONS
 // ============================================
 
@@ -3021,11 +2758,6 @@ export const ordersRouter = router({
     // Release operations
     releaseToShipped,
     releaseToCancelled,
-    // Hold operations
-    holdOrder,
-    releaseOrderHold,
-    holdLine,
-    releaseLineHold,
     // Customization
     customizeLine,
     removeCustomization: removeLineCustomization,

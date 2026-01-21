@@ -176,21 +176,26 @@ export async function recalculateCustomerLtv(
 
     const oldTier = (customer.tier || 'bronze') as CustomerTier;
 
-    // Full aggregate - exclude cancelled and RTO orders
+    // Full aggregate - exclude cancelled orders and orders where ALL lines are RTO
+    // RTO status is now on OrderLine, not Order
     const stats = await prisma.order.aggregate({
         where: {
             customerId,
             status: { not: 'cancelled' },
-            OR: [
-                { trackingStatus: null },
-                { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
-            ],
+            // Exclude orders where ALL lines are RTO
+            NOT: {
+                orderLines: {
+                    every: {
+                        trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] }
+                    }
+                }
+            },
             totalAmount: { gt: 0 }
         },
         _sum: { totalAmount: true }
     });
 
-    const newLtv = stats._sum.totalAmount || 0;
+    const newLtv = stats._sum?.totalAmount || 0;
     const newTier = calculateTier(newLtv, thresholds);
 
     await prisma.customer.update({
@@ -297,15 +302,20 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
         // Get LTV and order counts in parallel
         const [ltvStats, countStats] = await Promise.all([
             // LTV: sum of non-cancelled, non-RTO orders
+            // RTO status is now on OrderLine, not Order
             prisma.order.groupBy({
                 by: ['customerId'],
                 where: {
                     customerId: { in: customerIds },
                     status: { not: 'cancelled' },
-                    OR: [
-                        { trackingStatus: null },
-                        { trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] } }
-                    ],
+                    // Exclude orders where ALL lines are RTO
+                    NOT: {
+                        orderLines: {
+                            every: {
+                                trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] }
+                            }
+                        }
+                    },
                     totalAmount: { gt: 0 }
                 },
                 _sum: { totalAmount: true }
@@ -325,7 +335,7 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
         const ltvMap = new Map<string, number>();
         for (const stat of ltvStats) {
             if (stat.customerId) {
-                ltvMap.set(stat.customerId, stat._sum.totalAmount || 0);
+                ltvMap.set(stat.customerId, stat._sum?.totalAmount || 0);
             }
         }
 

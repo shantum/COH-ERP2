@@ -239,13 +239,11 @@ async function shipLine(
             );
 
             if (allShipped) {
+                // Order-level status only (awbNumber, courier, shippedAt are on OrderLine)
                 await tx.order.update({
                     where: { id: order.id },
                     data: {
                         status: 'shipped',
-                        awbNumber,
-                        courier,
-                        shippedAt: now,
                     },
                 });
             }

@@ -1,6 +1,9 @@
 /**
  * Order Summaries
  * RTO summary, shipped summary, archived analytics, and status views
+ *
+ * NOTE: Tracking fields (trackingStatus, shippedAt, deliveredAt, awbNumber, courier,
+ * rtoInitiatedAt, rtoReceivedAt) are on OrderLine, NOT Order.
  */
 
 import { Router } from 'express';
@@ -26,22 +29,25 @@ interface ArchivedOrdersQuery {
     sortBy?: string;
 }
 
-interface RtoOrder {
+// RTO line with order payment info for aggregation
+interface RtoLineWithOrder {
     id: string;
     trackingStatus: string | null;
-    paymentMethod: string | null;
-    totalAmount: number | null;
     rtoInitiatedAt: Date | null;
     rtoReceivedAt: Date | null;
+    unitPrice: number;
+    qty: number;
+    order: {
+        paymentMethod: string | null;
+    };
 }
 
-interface ShippedOrder {
+// Shipped line with tracking info
+interface ShippedLineWithTracking {
     id: string;
-    status: string;
     trackingStatus: string | null;
     shippedAt: Date | null;
     deliveredAt: Date | null;
-    paymentMethod: string | null;
 }
 
 interface ArchivedOrder {
@@ -116,23 +122,29 @@ interface OrderWithCustomer {
 // SUMMARIES
 // ============================================
 
-// Get RTO orders summary
+// Get RTO orders summary (line-level: trackingStatus is on OrderLine)
 router.get('/rto/summary', async (req: Request, res: Response) => {
     try {
-        const orders = await req.prisma.order.findMany({
+        // Query OrderLine directly since trackingStatus is on OrderLine
+        const rtoLines = await req.prisma.orderLine.findMany({
             where: {
                 trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
-                isArchived: false,
+                order: { isArchived: false },
             },
             select: {
                 id: true,
                 trackingStatus: true,
-                paymentMethod: true,
-                totalAmount: true,
                 rtoInitiatedAt: true,
                 rtoReceivedAt: true,
+                unitPrice: true,
+                qty: true,
+                order: {
+                    select: {
+                        paymentMethod: true,
+                    },
+                },
             },
-        }) as RtoOrder[];
+        }) as RtoLineWithOrder[];
 
         const now = Date.now();
         let pendingReceipt = 0;
@@ -146,25 +158,26 @@ router.get('/rto/summary', async (req: Request, res: Response) => {
         let within14Days = 0;
         let over14Days = 0;
         let totalTransitDays = 0;
-        let transitOrderCount = 0;
+        let transitLineCount = 0;
 
-        for (const order of orders) {
-            const amount = order.totalAmount || 0;
+        for (const line of rtoLines) {
+            // Calculate line value
+            const amount = (line.unitPrice || 0) * (line.qty || 1);
             totalValue += amount;
 
             // Status classification
-            if (order.trackingStatus === 'rto_delivered' || order.rtoReceivedAt) {
+            if (line.trackingStatus === 'rto_delivered' || line.rtoReceivedAt) {
                 received++;
             } else {
                 pendingReceipt++;
 
-                // Transit duration calculation (only for pending orders)
-                if (order.rtoInitiatedAt) {
+                // Transit duration calculation (only for pending lines)
+                if (line.rtoInitiatedAt) {
                     const daysInRto = Math.floor(
-                        (now - new Date(order.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24)
+                        (now - new Date(line.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24)
                     );
                     totalTransitDays += daysInRto;
-                    transitOrderCount++;
+                    transitLineCount++;
 
                     if (daysInRto <= 7) within7Days++;
                     else if (daysInRto <= 14) within14Days++;
@@ -172,8 +185,8 @@ router.get('/rto/summary', async (req: Request, res: Response) => {
                 }
             }
 
-            // Payment method classification
-            const isPrepaid = order.paymentMethod?.toLowerCase() !== 'cod';
+            // Payment method classification (from parent order)
+            const isPrepaid = line.order.paymentMethod?.toLowerCase() !== 'cod';
             if (isPrepaid) {
                 prepaid++;
                 prepaidValue += amount;
@@ -186,10 +199,10 @@ router.get('/rto/summary', async (req: Request, res: Response) => {
         const summary = {
             pendingReceipt,
             received,
-            total: orders.length,
+            total: rtoLines.length,
             transitBreakdown: { within7Days, within14Days, over14Days },
-            avgDaysInTransit: transitOrderCount > 0
-                ? Math.round((totalTransitDays / transitOrderCount) * 10) / 10
+            avgDaysInTransit: transitLineCount > 0
+                ? Math.round((totalTransitDays / transitLineCount) * 10) / 10
                 : 0,
             paymentBreakdown: { prepaid, cod },
             totalValue,
@@ -207,41 +220,36 @@ router.get('/rto/summary', async (req: Request, res: Response) => {
     }
 });
 
-// Get shipped orders summary (status counts)
+// Get shipped orders summary (line-level: trackingStatus, shippedAt are on OrderLine)
 router.get('/shipped/summary', async (req: Request, res: Response) => {
     try {
         const { days = '30' } = req.query as SummaryQuery;
         const sinceDate = new Date();
         sinceDate.setDate(sinceDate.getDate() - Number(days));
 
-        const whereClause: Prisma.OrderWhereInput = {
-            status: { in: ['shipped', 'delivered'] },
+        // Query OrderLine directly since tracking fields are on OrderLine
+        const whereClause: Prisma.OrderLineWhereInput = {
+            lineStatus: 'shipped',
             shippedAt: { gte: sinceDate },
-            isArchived: false,
+            order: {
+                isArchived: false,
+            },
+            // Exclude RTO lines
             OR: [
                 { trackingStatus: null },
                 { trackingStatus: { notIn: ['rto_in_transit', 'rto_delivered'] } }
             ],
-            NOT: {
-                AND: [
-                    { paymentMethod: 'COD' },
-                    { trackingStatus: 'delivered' },
-                    { codRemittedAt: null }
-                ]
-            }
         };
 
-        const orders = await req.prisma.order.findMany({
+        const shippedLines = await req.prisma.orderLine.findMany({
             where: whereClause,
             select: {
                 id: true,
-                status: true,
                 trackingStatus: true,
                 shippedAt: true,
                 deliveredAt: true,
-                paymentMethod: true,
             },
-        }) as ShippedOrder[];
+        }) as ShippedLineWithTracking[];
 
         const now = Date.now();
         let inTransit = 0;
@@ -249,17 +257,17 @@ router.get('/shipped/summary', async (req: Request, res: Response) => {
         let delayed = 0;
         let rto = 0;
 
-        for (const order of orders) {
-            if (order.trackingStatus === 'delivered' || order.deliveredAt) {
+        for (const line of shippedLines) {
+            if (line.trackingStatus === 'delivered' || line.deliveredAt) {
                 delivered++;
-            } else if (order.trackingStatus && (
-                order.trackingStatus.includes('rto') ||
-                order.trackingStatus === 'cancelled'
+            } else if (line.trackingStatus && (
+                line.trackingStatus.includes('rto') ||
+                line.trackingStatus === 'cancelled'
             )) {
                 rto++;
             } else {
-                const daysInTransit = order.shippedAt
-                    ? Math.floor((now - new Date(order.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
+                const daysInTransit = line.shippedAt
+                    ? Math.floor((now - new Date(line.shippedAt).getTime()) / (1000 * 60 * 60 * 24))
                     : 0;
                 if (daysInTransit > 7) {
                     delayed++;
@@ -275,7 +283,7 @@ router.get('/shipped/summary', async (req: Request, res: Response) => {
             delayed,
             rto,
             needsAttention: delayed + rto,
-            total: orders.length,
+            total: shippedLines.length,
         });
     } catch (error) {
         orderLogger.error({ error: (error as Error).message }, 'Get shipped summary error');
@@ -371,6 +379,8 @@ router.get('/archived/analytics', async (req: Request, res: Response) => {
 });
 
 // Get archived orders (paginated, optionally filtered by days)
+// NOTE: Tracking fields (shippedAt, deliveredAt, courier, awbNumber, trackingStatus, etc.)
+// are now on OrderLine, not Order. We select them from orderLines.
 router.get('/status/archived', async (req: Request, res: Response) => {
     try {
         const { limit = '100', offset = '0', days, sortBy = 'archivedAt' } = req.query as ArchivedOrdersQuery;
@@ -398,8 +408,6 @@ router.get('/status/archived', async (req: Request, res: Response) => {
                     status: true,
                     channel: true,
                     orderDate: true,
-                    shippedAt: true,
-                    deliveredAt: true,
                     archivedAt: true,
                     totalAmount: true,
                     paymentMethod: true,
@@ -408,16 +416,6 @@ router.get('/status/archived', async (req: Request, res: Response) => {
                     customerPhone: true,
                     customerId: true,
                     shippingAddress: true,
-                    courier: true,
-                    awbNumber: true,
-                    trackingStatus: true,
-                    expectedDeliveryDate: true,
-                    deliveryAttempts: true,
-                    courierStatusCode: true,
-                    lastScanLocation: true,
-                    lastScanAt: true,
-                    lastScanStatus: true,
-                    lastTrackingUpdate: true,
                     codRemittedAt: true,
                     codRemittanceUtr: true,
                     codRemittedAmount: true,
@@ -428,10 +426,23 @@ router.get('/status/archived', async (req: Request, res: Response) => {
                             lastName: true,
                         }
                     },
+                    // Tracking fields are now on OrderLine
                     orderLines: {
                         select: {
                             id: true,
                             qty: true,
+                            shippedAt: true,
+                            deliveredAt: true,
+                            courier: true,
+                            awbNumber: true,
+                            trackingStatus: true,
+                            expectedDeliveryDate: true,
+                            deliveryAttempts: true,
+                            courierStatusCode: true,
+                            lastScanLocation: true,
+                            lastScanAt: true,
+                            lastScanStatus: true,
+                            lastTrackingUpdate: true,
                             sku: {
                                 select: {
                                     skuCode: true,
@@ -460,15 +471,31 @@ router.get('/status/archived', async (req: Request, res: Response) => {
         ]);
 
         const transformedOrders = orders.map((order) => {
+            // Get tracking info from the first shipped line (for backwards compatibility)
+            const firstShippedLine = order.orderLines.find(line => line.shippedAt);
+            const shippedDate = firstShippedLine?.shippedAt ? new Date(firstShippedLine.shippedAt) : null;
+            const deliveredDate = firstShippedLine?.deliveredAt ? new Date(firstShippedLine.deliveredAt) : null;
+
             let deliveryDays: number | null = null;
-            const shippedDate = order.shippedAt ? new Date(order.shippedAt) : null;
-            const deliveredDate = order.deliveredAt ? new Date(order.deliveredAt) : null;
             if (shippedDate && deliveredDate) {
                 deliveryDays = Math.round((deliveredDate.getTime() - shippedDate.getTime()) / (1000 * 60 * 60 * 24));
             }
 
             return {
                 ...order,
+                // Flatten first line's tracking fields for backwards compatibility
+                shippedAt: firstShippedLine?.shippedAt ?? null,
+                deliveredAt: firstShippedLine?.deliveredAt ?? null,
+                courier: firstShippedLine?.courier ?? null,
+                awbNumber: firstShippedLine?.awbNumber ?? null,
+                trackingStatus: firstShippedLine?.trackingStatus ?? null,
+                expectedDeliveryDate: firstShippedLine?.expectedDeliveryDate ?? null,
+                deliveryAttempts: firstShippedLine?.deliveryAttempts ?? null,
+                courierStatusCode: firstShippedLine?.courierStatusCode ?? null,
+                lastScanLocation: firstShippedLine?.lastScanLocation ?? null,
+                lastScanAt: firstShippedLine?.lastScanAt ?? null,
+                lastScanStatus: firstShippedLine?.lastScanStatus ?? null,
+                lastTrackingUpdate: firstShippedLine?.lastTrackingUpdate ?? null,
                 deliveryDays,
                 customerTier: (order.customer as { tier?: string } | null)?.tier,
                 customerLtv: (order.customer as { lifetimeValue?: number } | null)?.lifetimeValue,

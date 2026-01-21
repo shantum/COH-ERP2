@@ -94,8 +94,9 @@ async function markOldPrepaidShipped() {
     const orderIds = orders.map(o => o.id);
     const now = new Date();
 
-    // Update order lines to shipped
-    console.log('Updating order lines to shipped...');
+    // Update order lines to shipped with deliveredAt and trackingStatus
+    // Note: deliveredAt and trackingStatus are now on OrderLine, not Order
+    console.log('Updating order lines to shipped + delivered...');
     const lineResult = await prisma.orderLine.updateMany({
         where: {
             orderId: { in: orderIds },
@@ -104,18 +105,19 @@ async function markOldPrepaidShipped() {
         data: {
             lineStatus: 'shipped',
             shippedAt: now,
+            deliveredAt: now,
+            trackingStatus: 'delivered',
         },
     });
     console.log(`  Order lines updated: ${lineResult.count}`);
 
-    // Update orders: releasedToShipped = true, deliveredAt = now
-    console.log('Updating orders (released + delivered)...');
+    // Update orders: releasedToShipped = true
+    // Note: deliveredAt and trackingStatus removed from Order model
+    console.log('Updating orders (released)...');
     const orderResult = await prisma.order.updateMany({
         where: { id: { in: orderIds } },
         data: {
             releasedToShipped: true,
-            deliveredAt: now,
-            trackingStatus: 'delivered',
         },
     });
     console.log(`  Orders updated: ${orderResult.count}`);

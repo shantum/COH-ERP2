@@ -415,37 +415,76 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req: Request, 
 router.get('/pending', asyncHandler(async (req: Request, res: Response) => {
     const { limit = 100 } = req.query;
 
+    // Find COD orders where ALL lines are delivered and not yet remitted
     const orders = await req.prisma.order.findMany({
         where: {
             paymentMethod: 'COD',
-            trackingStatus: 'delivered',
             codRemittedAt: null,
             isArchived: false,
+            // All lines must be delivered
+            orderLines: {
+                every: {
+                    OR: [
+                        { trackingStatus: 'delivered' },
+                        { lineStatus: 'cancelled' }
+                    ]
+                },
+                some: {
+                    trackingStatus: 'delivered'
+                }
+            }
         },
         select: {
             id: true,
             orderNumber: true,
             customerName: true,
             totalAmount: true,
-            deliveredAt: true,
-            awbNumber: true,
-            courier: true,
+            orderLines: {
+                select: {
+                    deliveredAt: true,
+                    awbNumber: true,
+                    courier: true,
+                },
+                where: { trackingStatus: 'delivered' },
+                take: 1
+            }
         },
-        orderBy: { deliveredAt: 'asc' },
+        orderBy: { orderDate: 'asc' },
         take: Number(limit),
     });
 
     const total = await req.prisma.order.count({
         where: {
             paymentMethod: 'COD',
-            trackingStatus: 'delivered',
             codRemittedAt: null,
             isArchived: false,
+            orderLines: {
+                every: {
+                    OR: [
+                        { trackingStatus: 'delivered' },
+                        { lineStatus: 'cancelled' }
+                    ]
+                },
+                some: {
+                    trackingStatus: 'delivered'
+                }
+            }
         },
     });
 
+    // Flatten to include line-level tracking data
+    const flattenedOrders = orders.map(o => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        customerName: o.customerName,
+        totalAmount: o.totalAmount,
+        deliveredAt: o.orderLines[0]?.deliveredAt || null,
+        awbNumber: o.orderLines[0]?.awbNumber || null,
+        courier: o.orderLines[0]?.courier || null,
+    }));
+
     res.json({
-        orders,
+        orders: flattenedOrders,
         total,
         pendingAmount: orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
     });
@@ -462,15 +501,27 @@ router.get('/summary', asyncHandler(async (req: Request, res: Response) => {
     const fromDate = new Date();
     fromDate.setDate(fromDate.getDate() - Number(days));
 
-    // Get counts
+    // Get counts - use line-level trackingStatus
+    const deliveredCodWhere = {
+        paymentMethod: 'COD',
+        codRemittedAt: null,
+        isArchived: false,
+        orderLines: {
+            every: {
+                OR: [
+                    { trackingStatus: 'delivered' },
+                    { lineStatus: 'cancelled' }
+                ]
+            },
+            some: {
+                trackingStatus: 'delivered'
+            }
+        }
+    };
+
     const [pendingCount, paidCount, pendingAmount, paidAmount] = await Promise.all([
         req.prisma.order.count({
-            where: {
-                paymentMethod: 'COD',
-                trackingStatus: 'delivered',
-                codRemittedAt: null,
-                isArchived: false,
-            },
+            where: deliveredCodWhere,
         }),
         req.prisma.order.count({
             where: {
@@ -479,12 +530,7 @@ router.get('/summary', asyncHandler(async (req: Request, res: Response) => {
             },
         }),
         req.prisma.order.aggregate({
-            where: {
-                paymentMethod: 'COD',
-                trackingStatus: 'delivered',
-                codRemittedAt: null,
-                isArchived: false,
-            },
+            where: deliveredCodWhere,
             _sum: { totalAmount: true },
         }),
         req.prisma.order.aggregate({
@@ -505,11 +551,11 @@ router.get('/summary', asyncHandler(async (req: Request, res: Response) => {
     res.json({
         pending: {
             count: pendingCount,
-            amount: pendingAmount._sum.totalAmount || 0,
+            amount: pendingAmount._sum?.totalAmount || 0,
         },
         paid: {
             count: paidCount,
-            amount: paidAmount._sum.codRemittedAmount || 0,
+            amount: paidAmount._sum?.codRemittedAmount || 0,
             periodDays: Number(days),
         },
         processedRange: {

@@ -92,7 +92,7 @@ export interface OrderForProcessingTimes {
 
 /** Result of recomputing order status */
 export interface RecomputeResult {
-    order: Order & { orderLines: Pick<PrismaOrderLine, 'id' | 'lineStatus' | 'isOnHold'>[] };
+    order: Order & { orderLines: Pick<PrismaOrderLine, 'id' | 'lineStatus'>[] };
     previousStatus: string;
     newStatus: OrderStatus;
     changed: boolean;
@@ -231,7 +231,7 @@ export async function recomputeOrderStatus(
 ): Promise<RecomputeResult> {
     const client = tx || prisma;
 
-    // Fetch order with lines
+    // Fetch order with lines (isOnHold removed from OrderLine schema)
     const order = await client.order.findUnique({
         where: { id: orderId },
         include: {
@@ -239,7 +239,6 @@ export async function recomputeOrderStatus(
                 select: {
                     id: true,
                     lineStatus: true,
-                    isOnHold: true,
                 },
             },
         },
@@ -250,7 +249,12 @@ export async function recomputeOrderStatus(
     }
 
     const previousStatus = order.status;
-    const newStatus = computeOrderStatus(order);
+    // Map order lines to include isOnHold: false for compatibility
+    const orderForCompute = {
+        ...order,
+        orderLines: order.orderLines.map(l => ({ ...l, isOnHold: false }))
+    };
+    const newStatus = computeOrderStatus(orderForCompute);
     const changed = previousStatus !== newStatus;
 
     // Only update if status changed

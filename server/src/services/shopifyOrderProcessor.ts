@@ -182,6 +182,7 @@ interface TrackingInfo {
 
 /**
  * Order data object built for create/update operations
+ * Note: awbNumber, courier, shippedAt are now on OrderLine, not Order
  */
 interface OrderDataPayload {
     shopifyOrderId: string;
@@ -197,9 +198,6 @@ interface OrderDataPayload {
     orderDate: Date;
     internalNotes: string | null;
     paymentMethod: string;
-    awbNumber: string | null;
-    courier: string | null;
-    shippedAt: Date | null;
     syncedAt: Date;
 }
 
@@ -553,15 +551,18 @@ function determineOrderStatus(
 
 /**
  * Extract tracking info from Shopify fulfillments
- * Preserves existing tracking data if present
+ * Note: Tracking data is now stored at OrderLine level, not Order level.
+ * This function extracts from Shopify fulfillments for new orders or fallback.
  */
 function extractOrderTrackingInfo(
     shopifyOrder: ExtendedShopifyOrder,
     existingOrder: OrderWithLines | null
 ): TrackingInfo {
-    let awbNumber = existingOrder?.awbNumber || null;
-    let courier = existingOrder?.courier || null;
-    let shippedAt = existingOrder?.shippedAt || null;
+    // Tracking is now on OrderLine, get from first shipped line if exists
+    const existingShippedLine = existingOrder?.orderLines?.find(l => l.shippedAt || l.awbNumber);
+    let awbNumber = existingShippedLine?.awbNumber || null;
+    let courier = existingShippedLine?.courier || null;
+    let shippedAt = existingShippedLine?.shippedAt || null;
 
     if (shopifyOrder.fulfillments?.length && shopifyOrder.fulfillments.length > 0) {
         const fulfillment = shopifyOrder.fulfillments.find(f => f.tracking_number) || shopifyOrder.fulfillments[0];
@@ -593,11 +594,12 @@ function buildCustomerName(
 
 /**
  * Build complete order data payload for create/update
+ * Note: Tracking fields (awbNumber, courier, shippedAt) are synced to OrderLines via syncFulfillmentsToOrderLines
  */
 function buildOrderData(
     ctx: OrderBuildContext,
     status: string,
-    tracking: TrackingInfo
+    _tracking: TrackingInfo // Tracking is now on OrderLine, kept for signature compatibility
 ): OrderDataPayload {
     const { shopifyOrder, existingOrder, customerId } = ctx;
     const shopifyOrderId = String(shopifyOrder.id);
@@ -632,15 +634,13 @@ function buildOrderData(
         orderDate: shopifyOrder.created_at ? new Date(shopifyOrder.created_at) : new Date(),
         internalNotes,
         paymentMethod,
-        awbNumber: tracking.awbNumber,
-        courier: tracking.courier,
-        shippedAt: tracking.shippedAt,
         syncedAt: new Date(),
     };
 }
 
 /**
  * Detect if an existing order needs update and determine change type
+ * Note: awbNumber, courier are now on OrderLine, synced via syncFulfillmentsToOrderLines
  */
 function detectOrderChanges(
     existingOrder: OrderWithLines,
@@ -649,8 +649,6 @@ function detectOrderChanges(
 ): ChangeDetectionResult {
     const needsUpdate =
         existingOrder.status !== orderData.status ||
-        existingOrder.awbNumber !== orderData.awbNumber ||
-        existingOrder.courier !== orderData.courier ||
         existingOrder.paymentMethod !== orderData.paymentMethod ||
         existingOrder.customerEmail !== orderData.customerEmail ||
         existingOrder.customerPhone !== orderData.customerPhone ||

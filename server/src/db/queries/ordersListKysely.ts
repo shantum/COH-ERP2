@@ -29,8 +29,9 @@ export type ShippedFilter = 'all' | 'rto' | 'cod_pending';
 
 /**
  * Sort fields supported by the query
+ * Note: Order.shippedAt no longer exists (migrated to OrderLine level)
  */
-export type SortField = 'orderDate' | 'archivedAt' | 'shippedAt' | 'createdAt';
+export type SortField = 'orderDate' | 'archivedAt' | 'createdAt';
 
 /**
  * Query parameters
@@ -78,11 +79,21 @@ function applyViewWhereClause(
                 .where('Order.releasedToShipped', '=', true);
 
             if (shippedFilter === 'rto') {
-                return shippedQb.where('Order.trackingStatus', 'in', ['rto_in_transit', 'rto_delivered']);
+                // Filter orders that have at least one line with RTO tracking status
+                return shippedQb.where(
+                    sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" IN ('rto_in_transit', 'rto_delivered'))`,
+                    '=',
+                    sql`true`
+                );
             } else if (shippedFilter === 'cod_pending') {
+                // Filter COD orders with at least one delivered line awaiting remittance
                 return shippedQb
                     .where('Order.paymentMethod', '=', 'COD')
-                    .where('Order.trackingStatus', '=', 'delivered')
+                    .where(
+                        sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" = 'delivered')`,
+                        '=',
+                        sql`true`
+                    )
                     .where('Order.codRemittedAt', 'is', null);
             }
             return shippedQb;
@@ -124,11 +135,21 @@ function applyViewWhereClauseToFullQuery<T extends { where: (...args: unknown[])
                 .where('Order.releasedToShipped', '=', true);
 
             if (shippedFilter === 'rto') {
-                return shippedQb.where('Order.trackingStatus', 'in', ['rto_in_transit', 'rto_delivered']) as T;
+                // Filter orders that have at least one line with RTO tracking status
+                return shippedQb.where(
+                    sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" IN ('rto_in_transit', 'rto_delivered'))`,
+                    '=',
+                    sql`true`
+                ) as T;
             } else if (shippedFilter === 'cod_pending') {
+                // Filter COD orders with at least one delivered line awaiting remittance
                 return shippedQb
                     .where('Order.paymentMethod', '=', 'COD')
-                    .where('Order.trackingStatus', '=', 'delivered')
+                    .where(
+                        sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "trackingStatus" = 'delivered')`,
+                        '=',
+                        sql`true`
+                    )
                     .where('Order.codRemittedAt', 'is', null) as T;
             }
             return shippedQb as T;
@@ -209,11 +230,6 @@ export async function listOrdersKysely(params: OrdersListParams) {
             'Order.releasedToShipped',
             'Order.releasedToCancelled',
             'Order.isExchange',
-            'Order.isOnHold',
-            'Order.awbNumber as orderAwbNumber',
-            'Order.courier as orderCourier',
-            sql<string>`to_char("Order"."shippedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('orderShippedAt'),
-            'Order.trackingStatus as orderTrackingStatus',
             sql<string>`to_char("Order"."codRemittedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('codRemittedAt'),
             sql<string>`to_char("Order"."archivedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`.as('archivedAt'),
 
@@ -237,13 +253,13 @@ export async function listOrdersKysely(params: OrdersListParams) {
             'ShopifyOrderCache.trackingUrl as shopifyTrackingUrl',
             'ShopifyOrderCache.fulfillmentStatus as shopifyStatus',
 
-            // Enriched fields (computed in SQL)
-            sql<number>`EXTRACT(DAY FROM NOW() - "Order"."shippedAt")::int`.as('daysInTransit'),
-            sql<number>`EXTRACT(DAY FROM NOW() - "Order"."deliveredAt")::int`.as('daysSinceDelivery'),
-            sql<number>`EXTRACT(DAY FROM NOW() - "Order"."rtoInitiatedAt")::int`.as('daysInRto'),
+            // Enriched fields (computed from OrderLine subqueries)
+            sql<number>`EXTRACT(DAY FROM NOW() - (SELECT MIN("shippedAt") FROM "OrderLine" WHERE "orderId" = "Order".id))::int`.as('daysInTransit'),
+            sql<number>`EXTRACT(DAY FROM NOW() - (SELECT MAX("deliveredAt") FROM "OrderLine" WHERE "orderId" = "Order".id))::int`.as('daysSinceDelivery'),
+            sql<number>`EXTRACT(DAY FROM NOW() - (SELECT MIN("rtoInitiatedAt") FROM "OrderLine" WHERE "orderId" = "Order".id))::int`.as('daysInRto'),
             sql<string>`CASE
-                WHEN "Order"."rtoReceivedAt" IS NOT NULL THEN 'received'
-                WHEN "Order"."rtoInitiatedAt" IS NOT NULL THEN 'in_transit'
+                WHEN EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "rtoReceivedAt" IS NOT NULL) THEN 'received'
+                WHEN EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "rtoInitiatedAt" IS NOT NULL) THEN 'in_transit'
                 ELSE NULL
             END`.as('rtoStatus'),
 
@@ -310,7 +326,7 @@ export async function listOrdersKysely(params: OrdersListParams) {
             eb.or([
                 sql`LOWER("Order"."orderNumber") LIKE ${searchTerm}`,
                 sql`LOWER("Order"."customerName") LIKE ${searchTerm}`,
-                sql`"Order"."awbNumber" LIKE ${searchTerm}`,
+                sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "awbNumber" LIKE ${searchTerm})`,
                 sql`LOWER("Order"."customerEmail") LIKE ${searchTerm}`,
                 sql`"Order"."customerPhone" LIKE ${searchTerm}`,
             ])
@@ -322,9 +338,9 @@ export async function listOrdersKysely(params: OrdersListParams) {
         filteredQuery = filteredQuery.where('Order.orderDate', '>=', sinceDate) as typeof filteredQuery;
     }
 
-    // Determine sort field
+    // Determine sort field (shippedAt removed - now at OrderLine level)
     const sortField = sortBy || 'orderDate';
-    const sortColumn = `Order.${sortField}` as 'Order.orderDate' | 'Order.archivedAt' | 'Order.shippedAt' | 'Order.createdAt';
+    const sortColumn = `Order.${sortField}` as 'Order.orderDate' | 'Order.archivedAt' | 'Order.createdAt';
 
     // Apply sorting and pagination
     const paginatedQuery = filteredQuery
@@ -346,7 +362,7 @@ export async function listOrdersKysely(params: OrdersListParams) {
             eb.or([
                 sql`LOWER("Order"."orderNumber") LIKE ${searchTerm}`,
                 sql`LOWER("Order"."customerName") LIKE ${searchTerm}`,
-                sql`"Order"."awbNumber" LIKE ${searchTerm}`,
+                sql`EXISTS (SELECT 1 FROM "OrderLine" WHERE "orderId" = "Order".id AND "awbNumber" LIKE ${searchTerm})`,
                 sql`LOWER("Order"."customerEmail") LIKE ${searchTerm}`,
                 sql`"Order"."customerPhone" LIKE ${searchTerm}`,
             ])
@@ -468,11 +484,6 @@ export function transformKyselyToRows(orders: OrderRow[]) {
         releasedToShipped: boolean;
         releasedToCancelled: boolean;
         isExchange: boolean;
-        isOnHold: boolean;
-        orderAwbNumber: string | null;
-        orderCourier: string | null;
-        orderShippedAt: string | null;
-        orderTrackingStatus: string | null;
         productName: string;
         colorName: string;
         colorHex: string | null;
@@ -624,11 +635,6 @@ export function transformKyselyToRows(orders: OrderRow[]) {
                 releasedToShipped: order.releasedToShipped || false,
                 releasedToCancelled: order.releasedToCancelled || false,
                 isExchange: order.isExchange || false,
-                isOnHold: order.isOnHold || false,
-                orderAwbNumber: order.orderAwbNumber,
-                orderCourier: order.orderCourier,
-                orderShippedAt: order.orderShippedAt,
-                orderTrackingStatus: order.orderTrackingStatus,
                 productName: '(no items)',
                 colorName: '-',
                 colorHex: null,
@@ -706,11 +712,6 @@ export function transformKyselyToRows(orders: OrderRow[]) {
                 releasedToShipped: order.releasedToShipped || false,
                 releasedToCancelled: order.releasedToCancelled || false,
                 isExchange: order.isExchange || false,
-                isOnHold: order.isOnHold || false,
-                orderAwbNumber: order.orderAwbNumber,
-                orderCourier: order.orderCourier,
-                orderShippedAt: order.orderShippedAt,
-                orderTrackingStatus: order.orderTrackingStatus,
                 productName: line.product?.name || '(unknown)',
                 colorName: line.variation?.colorName || '-',
                 colorHex: line.variation?.colorHex || null,

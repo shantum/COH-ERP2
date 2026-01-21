@@ -415,6 +415,9 @@ router.get('/analytics', async (req: Request, res: Response) => {
 /**
  * GET /orders/dashboard-stats
  * Returns counts for all action queues (for dashboard summary)
+ *
+ * NOTE: After migration, tracking fields are on OrderLine, not Order.
+ * Dashboard stats now use line-level queries for accurate counts.
  */
 router.get('/dashboard-stats', async (req: Request, res: Response) => {
     try {
@@ -422,6 +425,7 @@ router.get('/dashboard-stats', async (req: Request, res: Response) => {
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
         // Run all count queries in parallel
+        // Use line-level fields for tracking data, order-level for status/payment
         const [
             readyToShip,
             needsAttention,
@@ -431,72 +435,105 @@ router.get('/dashboard-stats', async (req: Request, res: Response) => {
             pendingPayment,
             completed,
         ] = await Promise.all([
-            // Ready to ship: Open, not on hold, not archived
+            // Ready to ship: Open orders with at least one packed line
             req.prisma.order.count({
                 where: {
                     status: 'open',
                     isArchived: false,
-                    isOnHold: false,
-                },
-            }),
-
-            // Needs attention: On hold OR RTO delivered but not processed
-            req.prisma.order.count({
-                where: {
-                    OR: [
-                        { isOnHold: true },
-                        { trackingStatus: 'rto_delivered', terminalStatus: null },
-                    ],
-                    isArchived: false,
-                },
-            }),
-
-            // In transit: Shipped, no terminal status, not RTO
-            req.prisma.order.count({
-                where: {
-                    status: 'shipped',
-                    terminalStatus: null,
-                    isArchived: false,
-                    NOT: {
-                        trackingStatus: { in: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                    // Has at least one packed line
+                    orderLines: {
+                        some: { lineStatus: 'packed' },
                     },
                 },
             }),
 
-            // RTO in progress
+            // Needs attention: Orders with RTO delivered but not processed
             req.prisma.order.count({
                 where: {
-                    trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] },
                     isArchived: false,
+                    orderLines: {
+                        some: {
+                            trackingStatus: 'rto_delivered',
+                            rtoReceivedAt: null,
+                        },
+                    },
                 },
             }),
 
-            // COD at risk: COD shipped > 7 days ago, not terminal
+            // In transit: Shipped lines not yet delivered, not RTO
+            req.prisma.order.count({
+                where: {
+                    status: 'shipped',
+                    isArchived: false,
+                    orderLines: {
+                        some: {
+                            lineStatus: 'shipped',
+                            deliveredAt: null,
+                            trackingStatus: { notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'] },
+                        },
+                    },
+                },
+            }),
+
+            // RTO in progress: Lines with RTO status
+            req.prisma.order.count({
+                where: {
+                    isArchived: false,
+                    orderLines: {
+                        some: {
+                            trackingStatus: { in: ['rto_initiated', 'rto_in_transit'] },
+                        },
+                    },
+                },
+            }),
+
+            // COD at risk: COD shipped > 7 days ago, not delivered
             req.prisma.order.count({
                 where: {
                     status: 'shipped',
                     paymentMethod: 'COD',
-                    terminalStatus: null,
-                    shippedAt: { lt: sevenDaysAgo },
                     isArchived: false,
+                    orderLines: {
+                        some: {
+                            lineStatus: 'shipped',
+                            shippedAt: { lt: sevenDaysAgo },
+                            deliveredAt: null,
+                        },
+                    },
                 },
             }),
 
             // Pending payment: Delivered COD awaiting remittance
             req.prisma.order.count({
                 where: {
-                    terminalStatus: 'delivered',
                     paymentMethod: 'COD',
                     codRemittedAt: null,
                     isArchived: false,
+                    orderLines: {
+                        every: {
+                            OR: [
+                                { lineStatus: 'cancelled' },
+                                { deliveredAt: { not: null } },
+                            ],
+                        },
+                        some: { deliveredAt: { not: null } },
+                    },
                 },
             }),
 
-            // Completed (last 15 days for reference)
+            // Completed: Orders with all lines in terminal state
             req.prisma.order.count({
                 where: {
-                    terminalStatus: { not: null },
                     isArchived: false,
+                    orderLines: {
+                        every: {
+                            OR: [
+                                { deliveredAt: { not: null } },
+                                { rtoReceivedAt: { not: null } },
+                                { lineStatus: 'cancelled' },
+                            ],
+                        },
+                    },
                 },
             }),
         ]);

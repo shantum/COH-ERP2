@@ -51,8 +51,6 @@ interface OrderWithLines {
     orderNumber: string;
     status: string;
     customerId: string | null;
-    rtoInitiatedAt: Date | null;
-    rtoReceivedAt: Date | null;
     orderLines: OrderLine[];
 }
 
@@ -504,6 +502,7 @@ router.post('/:id/migration-ship',
 );
 
 // Mark order as delivered (with validation)
+// NOTE: deliveredAt is now on OrderLine, not Order. This endpoint marks all lines as delivered.
 router.post('/:id/mark-delivered', authenticateToken, deprecated({
     endpoint: 'POST /orders/:id/mark-delivered',
     trpcAlternative: 'orders.markDelivered',
@@ -513,6 +512,7 @@ router.post('/:id/mark-delivered', authenticateToken, deprecated({
 
     const order = await req.prisma.order.findUnique({
         where: { id: orderId },
+        include: { orderLines: true },
     });
 
     if (!order) {
@@ -526,18 +526,39 @@ router.post('/:id/mark-delivered', authenticateToken, deprecated({
         );
     }
 
-    const updated = await req.prisma.order.update({
+    const now = new Date();
+
+    // Mark all shipped lines as delivered
+    await req.prisma.$transaction(async (tx) => {
+        await tx.orderLine.updateMany({
+            where: {
+                orderId,
+                lineStatus: 'shipped',
+            },
+            data: {
+                deliveredAt: now,
+                trackingStatus: 'delivered',
+            },
+        });
+
+        await tx.order.update({
+            where: { id: orderId },
+            data: {
+                status: 'delivered',
+            },
+        });
+    });
+
+    const updated = await req.prisma.order.findUnique({
         where: { id: orderId },
-        data: {
-            status: 'delivered',
-            deliveredAt: new Date(),
-        },
+        include: { orderLines: true },
     });
 
     res.json(updated);
 }));
 
 // Initiate RTO for order
+// NOTE: rtoInitiatedAt is now on OrderLine, not Order. This endpoint marks all shipped lines as RTO initiated.
 router.post('/:id/mark-rto', authenticateToken, deprecated({
     endpoint: 'POST /orders/:id/mark-rto',
     trpcAlternative: 'orders.markRto',
@@ -547,7 +568,11 @@ router.post('/:id/mark-rto', authenticateToken, deprecated({
 
     const order = await req.prisma.order.findUnique({
         where: { id: orderId },
-        select: { id: true, status: true, customerId: true, rtoInitiatedAt: true },
+        include: {
+            orderLines: {
+                select: { id: true, lineStatus: true, rtoInitiatedAt: true },
+            },
+        },
     });
 
     if (!order) {
@@ -561,29 +586,43 @@ router.post('/:id/mark-rto', authenticateToken, deprecated({
         );
     }
 
+    const now = new Date();
+    // Check if any lines already have RTO initiated
+    const hasExistingRto = order.orderLines.some(l => l.rtoInitiatedAt !== null);
+
     const updated = await req.prisma.$transaction(async (tx) => {
-        const updatedOrder = await tx.order.update({
-            where: { id: orderId },
+        // Mark all shipped lines as RTO initiated
+        await tx.orderLine.updateMany({
+            where: {
+                orderId,
+                lineStatus: 'shipped',
+                rtoInitiatedAt: null,
+            },
             data: {
-                rtoInitiatedAt: new Date(),
+                rtoInitiatedAt: now,
+                trackingStatus: 'rto_initiated',
             },
         });
 
-        // Increment customer RTO count on first RTO initiation
-        if (!order.rtoInitiatedAt && order.customerId) {
+        // Increment customer RTO count on first RTO initiation for this order
+        if (!hasExistingRto && order.customerId) {
             await tx.customer.update({
                 where: { id: order.customerId },
                 data: { rtoCount: { increment: 1 } },
             });
         }
 
-        return updatedOrder;
+        return tx.order.findUnique({
+            where: { id: orderId },
+            include: { orderLines: true },
+        });
     });
 
     res.json(updated);
 }));
 
 // Receive RTO package (creates inventory inward)
+// NOTE: rtoInitiatedAt and rtoReceivedAt are now on OrderLine, not Order.
 router.post('/:id/receive-rto', authenticateToken, deprecated({
     endpoint: 'POST /orders/:id/receive-rto',
     trpcAlternative: 'orders.receiveRto',
@@ -600,21 +639,25 @@ router.post('/:id/receive-rto', authenticateToken, deprecated({
         throw new NotFoundError('Order not found', 'Order', orderId);
     }
 
-    if (!order.rtoInitiatedAt) {
-        throw new BusinessLogicError('RTO must be initiated first', 'RTO_NOT_INITIATED');
+    // Check if any line has RTO initiated
+    const rtoLines = order.orderLines.filter(l => l.lineStatus === 'shipped');
+    if (rtoLines.length === 0) {
+        throw new BusinessLogicError('No shipped lines found for RTO', 'NO_RTO_LINES');
     }
 
-    if (order.rtoReceivedAt) {
-        throw new ConflictError('RTO already received', 'RTO_ALREADY_RECEIVED');
-    }
+    const now = new Date();
 
     await req.prisma.$transaction(async (tx) => {
-        await tx.order.update({
-            where: { id: orderId },
-            data: { rtoReceivedAt: new Date() },
-        });
+        // Mark lines as RTO received and create inventory inward
+        for (const line of rtoLines) {
+            await tx.orderLine.update({
+                where: { id: line.id },
+                data: {
+                    rtoReceivedAt: now,
+                    trackingStatus: 'rto_delivered',
+                },
+            });
 
-        for (const line of order.orderLines) {
             await tx.inventoryTransaction.create({
                 data: {
                     skuId: line.skuId,

@@ -104,19 +104,22 @@ interface OrderTrackingResult {
 
 /** Backfill result statistics */
 interface BackfillResult {
-    ordersFound: number;
+    linesFound: number;
     updated: number;
     errors: number;
     apiCalls: number;
 }
 
-/** Order data for backfill with AWB mapping */
-interface BackfillOrder {
+/** Order line data for backfill with AWB mapping */
+interface BackfillOrderLine {
     id: string;
-    orderNumber: string;
+    orderId: string;
     awbNumber: string | null;
-    customerId: string | null;
     rtoInitiatedAt: Date | null;
+    order: {
+        orderNumber: string;
+        customerId: string | null;
+    };
 }
 
 /** Update data for order tracking fields */
@@ -408,7 +411,7 @@ router.post('/batch', authenticateToken, asyncHandler(async (req: Request, res: 
 }));
 
 /**
- * Track orders by order UUIDs (lookup AWB from DB, then fetch tracking)
+ * Track orders by order UUIDs (lookup AWB from order lines, then fetch tracking)
  * @route POST /api/tracking/orders
  * @param {string[]} body.orderIds - Array of order UUIDs
  * @returns {Object} { results: { orderId -> trackingData } }
@@ -423,24 +426,30 @@ router.post('/orders', authenticateToken, asyncHandler(async (req: Request, res:
         throw new ValidationError('orderIds array is required');
     }
 
-    // Fetch orders with AWB numbers
+    // Fetch orders with their order lines that have AWB numbers
     const orders = await req.prisma.order.findMany({
         where: { id: { in: orderIds } },
         select: {
             id: true,
             orderNumber: true,
-            awbNumber: true,
+            orderLines: {
+                where: { awbNumber: { not: null } },
+                select: { awbNumber: true },
+                distinct: ['awbNumber'],
+            },
         }
     });
 
-    // Collect AWBs to track (filter out nulls)
-    const awbToOrderMap: Record<string, { id: string; orderNumber: string; awbNumber: string | null }> = {};
+    // Collect AWBs to track (filter out nulls) - one order may have multiple AWBs
+    const awbToOrderMap: Record<string, { id: string; orderNumber: string }> = {};
     const awbsToTrack: string[] = [];
 
     for (const order of orders) {
-        if (order.awbNumber) {
-            awbToOrderMap[order.awbNumber] = order;
-            awbsToTrack.push(order.awbNumber);
+        for (const line of order.orderLines) {
+            if (line.awbNumber && !awbToOrderMap[line.awbNumber]) {
+                awbToOrderMap[line.awbNumber] = { id: order.id, orderNumber: order.orderNumber };
+                awbsToTrack.push(line.awbNumber);
+            }
         }
     }
 
@@ -571,12 +580,12 @@ router.post('/sync/trigger', authenticateToken, asyncHandler(async (req: Request
 }));
 
 /**
- * One-time backfill of tracking data for old shipped orders
+ * One-time backfill of tracking data for old shipped order lines
  * @route POST /api/tracking/sync/backfill?days=30&limit=100
- * @param {number} [query.days=30] - How far back to fetch orders
- * @param {number} [query.limit=100] - Max orders to process
- * @returns {Object} { ordersFound, updated, errors, apiCalls }
- * @description Updates trackingStatus, courierStatusCode, deliveredAt, and detects RTOs. Rate-limited (1s delay between batches).
+ * @param {number} [query.days=30] - How far back to fetch order lines
+ * @param {number} [query.limit=100] - Max order lines to process
+ * @returns {Object} { linesFound, updated, errors, apiCalls }
+ * @description Updates trackingStatus, courierStatusCode, deliveredAt, and detects RTOs on OrderLine. Rate-limited (1s delay between batches).
  */
 router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
     await ithinkLogistics.loadFromDatabase();
@@ -590,40 +599,47 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - days);
 
-    // Get shipped orders with AWB from last N days, newest first
-    const orders = await req.prisma.order.findMany({
+    // Get shipped order lines with AWB from last N days, newest first
+    const orderLines = await req.prisma.orderLine.findMany({
         where: {
-            status: { in: ['shipped', 'delivered'] },
+            lineStatus: { in: ['shipped', 'delivered'] },
             awbNumber: { not: null },
             shippedAt: { gte: sinceDate },
         },
         select: {
             id: true,
-            orderNumber: true,
+            orderId: true,
             awbNumber: true,
-            customerId: true,
             rtoInitiatedAt: true,
+            order: {
+                select: {
+                    orderNumber: true,
+                    customerId: true,
+                },
+            },
         },
         orderBy: { shippedAt: 'desc' },
         take: limit,
-    }) as BackfillOrder[];
+    }) as BackfillOrderLine[];
 
     const result: BackfillResult = {
-        ordersFound: orders.length,
+        linesFound: orderLines.length,
         updated: 0,
         errors: 0,
         apiCalls: 0,
     };
 
-    // Create AWB to order mapping
-    const awbToOrder = new Map<string, BackfillOrder>();
-    for (const order of orders) {
-        if (order.awbNumber) {
-            awbToOrder.set(order.awbNumber, order);
+    // Create AWB to order lines mapping (multiple lines can share same AWB)
+    const awbToLines = new Map<string, BackfillOrderLine[]>();
+    for (const line of orderLines) {
+        if (line.awbNumber) {
+            const existing = awbToLines.get(line.awbNumber) || [];
+            existing.push(line);
+            awbToLines.set(line.awbNumber, existing);
         }
     }
 
-    const awbNumbers = Array.from(awbToOrder.keys());
+    const awbNumbers = Array.from(awbToLines.keys());
 
     // Process in batches of 10
     for (let i = 0; i < awbNumbers.length; i += 10) {
@@ -634,79 +650,90 @@ router.post('/sync/backfill', authenticateToken, asyncHandler(async (req: Reques
             const trackingResults = await ithinkLogistics.trackShipments(batch) as Record<string, RawTrackingData>;
 
             for (const [awb, rawData] of Object.entries(trackingResults)) {
-                const order = awbToOrder.get(awb);
-                if (!order) continue;
+                const lines = awbToLines.get(awb);
+                if (!lines || lines.length === 0) continue;
                 if (!rawData || rawData.message !== 'success') continue;
 
-                try {
-                    // Determine internal status: check cancel_status first, then use text-based mapping
-                    const internalStatus = rawData.cancel_status?.toLowerCase() === 'approved'
-                        ? 'cancelled'
-                        : ithinkLogistics.mapToInternalStatus(rawData.current_status_code, rawData.current_status);
+                // Determine internal status: check cancel_status first, then use text-based mapping
+                const internalStatus = rawData.cancel_status?.toLowerCase() === 'approved'
+                    ? 'cancelled'
+                    : ithinkLogistics.mapToInternalStatus(rawData.current_status_code, rawData.current_status);
 
-                    const updateData: TrackingUpdateData = {
-                        trackingStatus: internalStatus,
-                        courierStatusCode: rawData.current_status_code || null,
-                        courier: rawData.logistic || null,
-                        deliveryAttempts: parseInt(rawData.ofd_count) || 0,
-                        lastTrackingUpdate: new Date(),
-                    };
+                const updateData: TrackingUpdateData = {
+                    trackingStatus: internalStatus,
+                    courierStatusCode: rawData.current_status_code || null,
+                    courier: rawData.logistic || null,
+                    deliveryAttempts: parseInt(rawData.ofd_count) || 0,
+                    lastTrackingUpdate: new Date(),
+                };
 
-                    // Expected delivery date
-                    if (rawData.expected_delivery_date && rawData.expected_delivery_date !== '0000-00-00') {
+                // Expected delivery date
+                if (rawData.expected_delivery_date && rawData.expected_delivery_date !== '0000-00-00') {
+                    try {
+                        updateData.expectedDeliveryDate = new Date(rawData.expected_delivery_date);
+                    } catch (e) {
+                        trackingLogger.debug({ awb, date: rawData.expected_delivery_date }, 'Invalid expected delivery date');
+                    }
+                }
+
+                // Last scan details - use correct field names from iThink API
+                if (rawData.last_scan_details) {
+                    updateData.lastScanStatus = rawData.last_scan_details.status || null;
+                    updateData.lastScanLocation = rawData.last_scan_details.scan_location || null;
+                    if (rawData.last_scan_details.status_date_time) {
                         try {
-                            updateData.expectedDeliveryDate = new Date(rawData.expected_delivery_date);
+                            updateData.lastScanAt = new Date(rawData.last_scan_details.status_date_time);
                         } catch (e) {
-                            trackingLogger.debug({ awb, date: rawData.expected_delivery_date }, 'Invalid expected delivery date');
+                            trackingLogger.debug({ awb, date: rawData.last_scan_details.status_date_time }, 'Invalid last scan date');
                         }
                     }
+                }
 
-                    // Last scan details - use correct field names from iThink API
-                    if (rawData.last_scan_details) {
-                        updateData.lastScanStatus = rawData.last_scan_details.status || null;
-                        updateData.lastScanLocation = rawData.last_scan_details.scan_location || null;
-                        if (rawData.last_scan_details.status_date_time) {
-                            try {
-                                updateData.lastScanAt = new Date(rawData.last_scan_details.status_date_time);
-                            } catch (e) {
-                                trackingLogger.debug({ awb, date: rawData.last_scan_details.status_date_time }, 'Invalid last scan date');
+                // Delivery date
+                if (updateData.trackingStatus === 'delivered' && rawData.last_scan_details?.status_date_time) {
+                    updateData.deliveredAt = new Date(rawData.last_scan_details.status_date_time);
+                }
+
+                // RTO detection - track which customers need tier updates
+                const customersToUpdateTier = new Set<string>();
+
+                // Update ALL order lines with this AWB
+                for (const line of lines) {
+                    try {
+                        const isNewRto = rawData.return_tracking_no && !line.rtoInitiatedAt;
+                        const lineUpdateData = { ...updateData };
+
+                        if (rawData.return_tracking_no) {
+                            lineUpdateData.rtoInitiatedAt = new Date();
+
+                            // Increment customer RTO count on first RTO initiation
+                            if (!line.rtoInitiatedAt && line.order.customerId) {
+                                await req.prisma.customer.update({
+                                    where: { id: line.order.customerId },
+                                    data: { rtoCount: { increment: 1 } },
+                                });
                             }
                         }
-                    }
 
-                    // Delivery date
-                    if (updateData.trackingStatus === 'delivered' && rawData.last_scan_details?.status_date_time) {
-                        updateData.deliveredAt = new Date(rawData.last_scan_details.status_date_time);
-                    }
+                        await req.prisma.orderLine.update({
+                            where: { id: line.id },
+                            data: lineUpdateData,
+                        });
+                        result.updated++;
 
-                    // RTO
-                    const isNewRto = rawData.return_tracking_no && !order.rtoInitiatedAt;
-                    if (rawData.return_tracking_no) {
-                        updateData.rtoInitiatedAt = new Date();
-
-                        // Increment customer RTO count on first RTO initiation
-                        if (!order.rtoInitiatedAt && order.customerId) {
-                            await req.prisma.customer.update({
-                                where: { id: order.customerId },
-                                data: { rtoCount: { increment: 1 } },
-                            });
+                        // Track customers needing tier update on RTO
+                        if (isNewRto && line.order.customerId) {
+                            customersToUpdateTier.add(line.order.customerId);
                         }
+                    } catch (e) {
+                        trackingLogger.warn({ awb, orderNumber: line.order.orderNumber, lineId: line.id, error: e instanceof Error ? e.message : String(e) }, 'Failed to update tracking for order line');
+                        result.errors++;
                     }
+                }
 
-                    await req.prisma.order.update({
-                        where: { id: order.id },
-                        data: updateData,
-                    });
-                    result.updated++;
-
-                    // Update customer tier on RTO (order no longer counts toward LTV)
-                    // Note: Delivery doesn't need tier update since order already counted at creation
-                    if (isNewRto && order.customerId) {
-                        await updateCustomerTier(req.prisma, order.customerId);
-                    }
-                } catch (e) {
-                    trackingLogger.warn({ awb, orderNumber: order.orderNumber, error: e instanceof Error ? e.message : String(e) }, 'Failed to update tracking for order');
-                    result.errors++;
+                // Update customer tiers for RTO (order no longer counts toward LTV)
+                for (const customerId of customersToUpdateTier) {
+                    await updateCustomerTier(req.prisma, customerId);
                 }
             }
 
@@ -777,9 +804,11 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
         throw new NotFoundError('Order not found', 'Order', orderId);
     }
 
-    if (order.awbNumber) {
+    // Check if any order line already has an AWB number
+    const existingAwb = order.orderLines.find(line => line.awbNumber);
+    if (existingAwb) {
         throw new BusinessLogicError(
-            `Order already has an AWB number: ${order.awbNumber}`,
+            `Order already has an AWB number: ${existingAwb.awbNumber}`,
             'duplicate_awb'
         );
     }
@@ -809,9 +838,11 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
     // Build products array from order lines - exclude cancelled lines
     // Use unknown cast to handle Prisma's complex inferred types
     const orderLines = order.orderLines as unknown as Array<{
-        status: string;
+        id: string;
+        awbNumber: string | null;
+        lineStatus: string;
         productName: string | null;
-        quantity: number;
+        qty: number;
         unitPrice: number | null;
         sku: {
             skuCode: string;
@@ -823,11 +854,11 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
         } | null;
     }>;
 
-    const activeLines = orderLines.filter(line => line.status !== 'cancelled');
+    const activeLines = orderLines.filter(line => line.lineStatus !== 'cancelled');
     const products = activeLines.map(line => ({
         name: line.sku?.variation?.product?.name || line.productName || 'Product',
         sku: line.sku?.skuCode || '',
-        quantity: line.quantity || 1,
+        quantity: line.qty || 1,
         price: Number(line.unitPrice) || 0,
     }));
 
@@ -838,7 +869,7 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
 
     // Calculate active order value (excluding cancelled lines)
     const activeOrderValue = activeLines.reduce((sum, line) => {
-        return sum + ((Number(line.unitPrice) || 0) * (line.quantity || 1));
+        return sum + ((Number(line.unitPrice) || 0) * (line.qty || 1));
     }, 0);
 
     console.log(`[Create Shipment] Order ${order.orderNumber} - ${products.length} products:`, JSON.stringify(products));
@@ -871,9 +902,11 @@ router.post('/create-shipment', authenticateToken, asyncHandler(async (req: Requ
             logistics: logistics || undefined,
         });
 
-        // Update order with AWB number
-        await req.prisma.order.update({
-            where: { id: orderId },
+        // Update all active order lines with AWB number
+        // Multiple lines share the same AWB when shipped together
+        const activeLineIds = activeLines.map(line => (line as unknown as { id: string }).id);
+        await req.prisma.orderLine.updateMany({
+            where: { id: { in: activeLineIds } },
             data: {
                 awbNumber: result.awbNumber,
                 courier: result.logistics,
@@ -924,22 +957,20 @@ router.post('/cancel-shipment', authenticateToken, asyncHandler(async (req: Requ
     else if (awbNumbers && Array.isArray(awbNumbers)) {
         awbsToCancel = awbNumbers;
     }
-    // Option 3: By order ID - lookup AWB from order
+    // Option 3: By order ID - lookup AWB from order lines
     else if (orderId) {
-        const order = await req.prisma.order.findUnique({
-            where: { id: orderId },
-            select: { id: true, orderNumber: true, awbNumber: true }
+        const orderLines = await req.prisma.orderLine.findMany({
+            where: { orderId, awbNumber: { not: null } },
+            select: { awbNumber: true },
+            distinct: ['awbNumber'],
         });
 
-        if (!order) {
-            throw new NotFoundError('Order not found', 'Order', orderId);
-        }
-
-        if (!order.awbNumber) {
+        if (orderLines.length === 0) {
             throw new BusinessLogicError('Order has no AWB number to cancel', 'no_awb');
         }
 
-        awbsToCancel = [order.awbNumber];
+        // Collect all unique AWBs from order lines
+        awbsToCancel = orderLines.map(line => line.awbNumber).filter((awb): awb is string => awb !== null);
     } else {
         throw new ValidationError('awbNumber, awbNumbers, or orderId is required');
     }
@@ -948,18 +979,19 @@ router.post('/cancel-shipment', authenticateToken, asyncHandler(async (req: Requ
         // Call iThink cancel API
         const result = await ithinkLogistics.cancelShipment(awbsToCancel);
 
-        // If cancelling by order ID, update the order status
+        // If cancelling by order ID, update all order lines with those AWBs
         if (orderId && result.results) {
-            const awb = awbsToCancel[0];
-            const cancelResult = result.results[awb];
+            for (const awb of awbsToCancel) {
+                const cancelResult = result.results[awb];
 
-            if (cancelResult?.success) {
-                await req.prisma.order.update({
-                    where: { id: orderId },
-                    data: {
-                        trackingStatus: 'cancelled',
-                    }
-                });
+                if (cancelResult?.success) {
+                    await req.prisma.orderLine.updateMany({
+                        where: { orderId, awbNumber: awb },
+                        data: {
+                            trackingStatus: 'cancelled',
+                        }
+                    });
+                }
             }
         }
 
@@ -1020,22 +1052,20 @@ router.post('/label', authenticateToken, asyncHandler(async (req: Request, res: 
     else if (awbNumbers && Array.isArray(awbNumbers)) {
         awbsForLabel = awbNumbers;
     }
-    // Option 3: By order ID - lookup AWB from order
+    // Option 3: By order ID - lookup AWB from order lines
     else if (orderId) {
-        const order = await req.prisma.order.findUnique({
-            where: { id: orderId },
-            select: { id: true, orderNumber: true, awbNumber: true }
+        const orderLines = await req.prisma.orderLine.findMany({
+            where: { orderId, awbNumber: { not: null } },
+            select: { awbNumber: true },
+            distinct: ['awbNumber'],
         });
 
-        if (!order) {
-            throw new NotFoundError('Order not found', 'Order', orderId);
-        }
-
-        if (!order.awbNumber) {
+        if (orderLines.length === 0) {
             throw new BusinessLogicError('Order has no AWB number', 'no_awb');
         }
 
-        awbsForLabel = [order.awbNumber];
+        // Collect all unique AWBs from order lines
+        awbsForLabel = orderLines.map(line => line.awbNumber).filter((awb): awb is string => awb !== null);
     } else {
         throw new ValidationError('awbNumber, awbNumbers, or orderId is required');
     }

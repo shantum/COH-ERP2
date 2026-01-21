@@ -10,7 +10,6 @@ import { asyncHandler } from '../../../middleware/asyncHandler.js';
 import { requirePermission } from '../../../middleware/permissions.js';
 import { deprecated } from '../../../middleware/deprecation.js';
 import { releaseReservedInventory } from '../../../utils/queryPatterns.js';
-import { recomputeOrderStatus } from '../../../utils/orderStatus.js';
 import {
     NotFoundError,
     ConflictError,
@@ -19,7 +18,6 @@ import {
 import { updateCustomerTier } from '../../../utils/tierUtils.js';
 import { orderLogger } from '../../../utils/logger.js';
 import { broadcastOrderUpdate } from '../../sse.js';
-import { enforceRulesInExpress } from '../../../rules/index.js';
 
 const router: Router = Router();
 
@@ -29,16 +27,6 @@ const router: Router = Router();
 
 interface CancelOrderBody {
     reason?: string;
-}
-
-interface HoldOrderBody {
-    reason: string;
-    notes?: string;
-}
-
-interface HoldLineBody {
-    reason: string;
-    notes?: string;
 }
 
 // ============================================
@@ -118,8 +106,6 @@ router.post(
                 where: { id: orderId },
                 data: {
                     status: 'cancelled',
-                    terminalStatus: 'cancelled',
-                    terminalAt: new Date(),
                     internalNotes: reason
                         ? order.internalNotes
                             ? `${order.internalNotes}\n\nCancelled: ${reason}`
@@ -176,13 +162,11 @@ router.post(
         }
 
         await req.prisma.$transaction(async (tx) => {
-            // Restore order to open status and clear terminal status
+            // Restore order to open status
             await tx.order.update({
                 where: { id: orderId },
                 data: {
                     status: 'open',
-                    terminalStatus: null,
-                    terminalAt: null,
                 },
             });
 
@@ -217,195 +201,56 @@ router.post(
 
 // ============================================
 // HOLD / RELEASE OPERATIONS
+// NOTE: Hold functionality has been removed from the schema.
+// These endpoints are deprecated and will return errors.
 // ============================================
 
-// Hold entire order (blocks all lines from fulfillment)
+// Hold entire order - DEPRECATED
 router.put(
     '/:id/hold',
     authenticateToken,
     requirePermission('orders:hold'),
-    asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const orderId = getParamString(req.params.id);
-        const { reason, notes } = req.body as HoldOrderBody;
-
-        const order = await req.prisma.order.findUnique({
-            where: { id: orderId },
-            include: { orderLines: true },
-        });
-
-        if (!order) {
-            throw new NotFoundError('Order not found', 'Order', orderId);
-        }
-
-        // Enforce hold rules using rules engine
-        await enforceRulesInExpress('holdOrder', req, {
-            data: { order, reason },
-            phase: 'pre',
-        });
-
-        const updated = await req.prisma.$transaction(async (tx) => {
-            await tx.order.update({
-                where: { id: orderId },
-                data: {
-                    isOnHold: true,
-                    holdReason: reason,
-                    holdNotes: notes || null,
-                    holdAt: new Date(),
-                },
-                include: { orderLines: true },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(orderId, tx);
-
-            return tx.order.findUnique({
-                where: { id: orderId },
-                include: { orderLines: true },
-            });
-        });
-
-        orderLogger.info({ orderNumber: order.orderNumber, reason }, 'Order placed on hold');
-        res.json(updated);
+    asyncHandler(async (_req: Request, _res: Response): Promise<void> => {
+        throw new BusinessLogicError(
+            'Hold functionality has been removed. Orders cannot be placed on hold.',
+            'FEATURE_REMOVED'
+        );
     })
 );
 
-// Release order from hold
+// Release order from hold - DEPRECATED
 router.put(
     '/:id/release',
     authenticateToken,
-    asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const orderId = getParamString(req.params.id);
-        const order = await req.prisma.order.findUnique({
-            where: { id: orderId },
-            include: { orderLines: true },
-        });
-
-        if (!order) {
-            throw new NotFoundError('Order not found', 'Order', orderId);
-        }
-
-        // Enforce release rules using rules engine
-        await enforceRulesInExpress('releaseOrderHold', req, {
-            data: { order },
-            phase: 'pre',
-        });
-
-        const updated = await req.prisma.$transaction(async (tx) => {
-            await tx.order.update({
-                where: { id: orderId },
-                data: {
-                    isOnHold: false,
-                    holdReason: null,
-                    holdNotes: null,
-                    holdAt: null,
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(orderId, tx);
-
-            return tx.order.findUnique({
-                where: { id: orderId },
-                include: { orderLines: true },
-            });
-        });
-
-        orderLogger.info({ orderNumber: order.orderNumber }, 'Order released from hold');
-        res.json(updated);
+    asyncHandler(async (_req: Request, _res: Response): Promise<void> => {
+        throw new BusinessLogicError(
+            'Hold functionality has been removed. Use release-to-shipped for releasing orders to shipped view.',
+            'FEATURE_REMOVED'
+        );
     })
 );
 
-// Hold a single order line
+// Hold a single order line - DEPRECATED
 router.put(
     '/lines/:lineId/hold',
     authenticateToken,
-    asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const lineId = getParamString(req.params.lineId);
-        const { reason, notes } = req.body as HoldLineBody;
-
-        const line = await req.prisma.orderLine.findUnique({
-            where: { id: lineId },
-            include: { order: true },
-        });
-
-        if (!line) {
-            throw new NotFoundError('Order line not found', 'OrderLine', lineId);
-        }
-
-        // Enforce hold line rules using rules engine
-        await enforceRulesInExpress('holdLine', req, {
-            data: { line, order: line.order, reason },
-            phase: 'pre',
-        });
-
-        const updated = await req.prisma.$transaction(async (tx) => {
-            await tx.orderLine.update({
-                where: { id: lineId },
-                data: {
-                    isOnHold: true,
-                    holdReason: reason,
-                    holdNotes: notes || null,
-                    holdAt: new Date(),
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(line.orderId, tx);
-
-            return tx.orderLine.findUnique({
-                where: { id: lineId },
-                include: { order: true },
-            });
-        });
-
-        orderLogger.info({ lineId, reason }, 'Line placed on hold');
-        res.json(updated);
+    asyncHandler(async (_req: Request, _res: Response): Promise<void> => {
+        throw new BusinessLogicError(
+            'Hold functionality has been removed. Lines cannot be placed on hold.',
+            'FEATURE_REMOVED'
+        );
     })
 );
 
-// Release a single order line from hold
+// Release a single order line from hold - DEPRECATED
 router.put(
     '/lines/:lineId/release',
     authenticateToken,
-    asyncHandler(async (req: Request, res: Response): Promise<void> => {
-        const lineId = getParamString(req.params.lineId);
-        const line = await req.prisma.orderLine.findUnique({
-            where: { id: lineId },
-            include: { order: true },
-        });
-
-        if (!line) {
-            throw new NotFoundError('Order line not found', 'OrderLine', lineId);
-        }
-
-        // Enforce release line rules using rules engine
-        await enforceRulesInExpress('releaseLineHold', req, {
-            data: { line },
-            phase: 'pre',
-        });
-
-        const updated = await req.prisma.$transaction(async (tx) => {
-            await tx.orderLine.update({
-                where: { id: lineId },
-                data: {
-                    isOnHold: false,
-                    holdReason: null,
-                    holdNotes: null,
-                    holdAt: null,
-                },
-            });
-
-            // Recompute order status
-            await recomputeOrderStatus(line.orderId, tx);
-
-            return tx.orderLine.findUnique({
-                where: { id: lineId },
-                include: { order: true },
-            });
-        });
-
-        orderLogger.info({ lineId }, 'Line released from hold');
-        res.json(updated);
+    asyncHandler(async (_req: Request, _res: Response): Promise<void> => {
+        throw new BusinessLogicError(
+            'Hold functionality has been removed.',
+            'FEATURE_REMOVED'
+        );
     })
 );
 

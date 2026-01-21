@@ -80,6 +80,7 @@ export interface SkuWithRelations {
 
 /**
  * Order line with RTO data
+ * Note: Tracking fields (trackingStatus, rtoInitiatedAt, etc.) are on OrderLine, not Order
  */
 export interface RtoOrderLine {
     id: string;
@@ -87,18 +88,17 @@ export interface RtoOrderLine {
     qty: number;
     orderId: string;
     rtoCondition: string | null;
+    // Tracking fields on OrderLine (not Order)
+    trackingStatus?: string | null;
+    rtoInitiatedAt?: Date | null;
+    rtoReceivedAt?: Date | null;
     order: {
         id: string;
         orderNumber: string;
         customerName?: string | null;
-        trackingStatus: string;
-        rtoInitiatedAt?: Date | null;
         isArchived?: boolean;
         _count?: { orderLines: number };
         orderLines?: Array<{ id: string }>;
-        rtoReceivedAt?: Date | null;
-        terminalStatus?: string | null;
-        terminalAt?: Date | null;
     };
     sku?: SkuWithRelations;
 }
