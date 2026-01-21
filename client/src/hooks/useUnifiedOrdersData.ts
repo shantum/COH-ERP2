@@ -21,6 +21,8 @@ import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
 import { trpc } from '../services/trpc';
 import { getOrders } from '../server/functions/orders';
+import { getInventoryBalances } from '../server/functions/inventory';
+import { getProductionLockedDates } from '../server/functions/production';
 
 // Server Function types only - actual function loaded dynamically if enabled
 // This prevents @tanstack/react-start from being bundled in SPA mode
@@ -232,14 +234,14 @@ export function useUnifiedOrdersData({
 
     // Inventory balance for SKUs in current orders
     // Skip this query if server already included inventory (saves round-trip)
-    const inventoryBalanceQuery = trpc.inventory.getBalances.useQuery(
-        { skuIds: orderSkuIds },
-        {
-            staleTime: 60000,
-            refetchOnWindowFocus: false,
-            enabled: orderSkuIds.length > 0 && !hasInventoryFromServer,
-        }
-    );
+    const getInventoryBalancesFn = useServerFn(getInventoryBalances);
+    const inventoryBalanceQuery = useQuery({
+        queryKey: ['inventory', 'balances', orderSkuIds],
+        queryFn: () => getInventoryBalancesFn({ data: { skuIds: orderSkuIds } }),
+        staleTime: 60000,
+        refetchOnWindowFocus: false,
+        enabled: orderSkuIds.length > 0 && !hasInventoryFromServer,
+    });
 
     // Fabric stock - only needed for Open view
     const fabricStockQuery = useQuery({
@@ -257,13 +259,13 @@ export function useUnifiedOrdersData({
     });
 
     // Locked production dates - only needed for Open view
-    const lockedDatesQuery = trpc.production.getLockedDates.useQuery(
-        undefined,
-        {
-            staleTime: 60000,
-            enabled: currentView === 'open',
-        }
-    );
+    const getLockedDatesFn = useServerFn(getProductionLockedDates);
+    const lockedDatesQuery = useQuery({
+        queryKey: ['production', 'lockedDates'],
+        queryFn: () => getLockedDatesFn(),
+        staleTime: 60000,
+        enabled: currentView === 'open',
+    });
 
     // Customer detail - only when selected
     const customerDetailQuery = useQuery({

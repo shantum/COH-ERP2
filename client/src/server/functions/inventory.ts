@@ -1,8 +1,8 @@
 /**
- * Inventory Server Functions
+ * Inventory Query Server Functions
  *
- * TanStack Start Server Functions for inventory data fetching.
- * Uses Prisma for database queries.
+ * TanStack Start Server Functions for inventory balance queries.
+ * Migrated from tRPC router: server/src/trpc/routers/inventory.ts
  *
  * IMPORTANT: All database imports are dynamic to prevent Node.js code
  * (pg, Buffer) from being bundled into the client.
@@ -10,8 +10,29 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
 
-// Input validation schema
+// ============================================
+// INPUT SCHEMAS
+// ============================================
+
+const getInventoryBalanceSchema = z.object({
+    skuId: z.string().min(1, 'SKU ID is required'),
+});
+
+const getInventoryBalancesSchema = z.object({
+    skuIds: z.array(z.string().min(1)).min(1, 'At least one SKU ID is required'),
+});
+
+const getInventoryAllSchema = z.object({
+    includeCustomSkus: z.boolean().optional().default(false),
+    belowTarget: z.boolean().optional(),
+    search: z.string().optional(),
+    limit: z.number().int().positive().optional().default(10000),
+    offset: z.number().int().nonnegative().optional().default(0),
+});
+
+// Legacy schema kept for backwards compatibility
 const inventoryListInputSchema = z.object({
     includeCustomSkus: z.boolean().optional().default(false),
     search: z.string().optional(),
@@ -22,9 +43,88 @@ const inventoryListInputSchema = z.object({
 
 export type InventoryListInput = z.infer<typeof inventoryListInputSchema>;
 
-/**
- * Inventory item returned by the Server Function
- */
+// ============================================
+// OUTPUT TYPES
+// ============================================
+
+/** Balance info for a single SKU with full details */
+export interface InventoryBalanceResult {
+    sku: {
+        id: string;
+        skuCode: string;
+        size: string;
+        isActive: boolean;
+        targetStockQty: number | null;
+        variation: {
+            id: string;
+            colorName: string;
+            product: {
+                id: string;
+                name: string;
+            };
+            fabric: {
+                id: string;
+                name: string;
+            } | null;
+        };
+    };
+    totalInward: number;
+    totalOutward: number;
+    currentBalance: number;
+    availableBalance: number;
+    hasDataIntegrityIssue: boolean;
+    targetStockQty: number | null;
+    status: 'below_target' | 'ok';
+}
+
+/** Balance info for batch lookup */
+export interface InventoryBalanceItem {
+    skuId: string;
+    skuCode: string;
+    totalInward: number;
+    totalOutward: number;
+    totalReserved: number;
+    currentBalance: number;
+    availableBalance: number;
+    hasDataIntegrityIssue: boolean;
+}
+
+/** Enriched SKU balance for inventory list */
+export interface InventoryAllItem {
+    skuId: string;
+    skuCode: string;
+    productId: string;
+    productName: string;
+    productType: string | null;
+    gender: string | null;
+    colorName: string;
+    variationId: string;
+    size: string;
+    category: string | null;
+    imageUrl: string | null;
+    currentBalance: number;
+    reservedBalance: number;
+    availableBalance: number;
+    totalInward: number;
+    totalOutward: number;
+    targetStockQty: number | null;
+    status: 'below_target' | 'ok';
+    mrp: number | null;
+    shopifyQty: number | null;
+    isCustomSku: boolean;
+}
+
+export interface InventoryAllResult {
+    items: InventoryAllItem[];
+    pagination: {
+        total: number;
+        limit: number;
+        offset: number;
+        hasMore: boolean;
+    };
+}
+
+// Legacy types kept for backwards compatibility
 export interface InventoryItem {
     skuId: string;
     skuCode: string;
@@ -49,9 +149,6 @@ export interface InventoryItem {
     isCustomSku: boolean;
 }
 
-/**
- * Response type matching the frontend hook expectations
- */
 export interface InventoryListResponse {
     items: InventoryItem[];
     pagination: {
@@ -62,7 +159,266 @@ export interface InventoryListResponse {
     };
 }
 
-// Internal types for Prisma query results (avoiding @prisma/client import)
+// ============================================
+// HELPER: LAZY DATABASE IMPORTS
+// ============================================
+
+/**
+ * Lazy import Prisma client to prevent bundling server code into client
+ */
+async function getPrisma() {
+    const { PrismaClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
+    const prisma = globalForPrisma.prisma ?? new PrismaClient();
+    if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+    }
+    return prisma;
+}
+
+// ============================================
+// SERVER FUNCTIONS
+// ============================================
+
+/**
+ * Get balance for a single SKU
+ *
+ * Returns SKU details with inventory balance and status indicator.
+ * Used for detailed SKU inventory view.
+ */
+export const getInventoryBalance = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof getInventoryBalanceSchema> =>
+            getInventoryBalanceSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<InventoryBalanceResult> => {
+        const { skuId } = data;
+
+        const prisma = await getPrisma();
+
+        // Fetch SKU with related data
+        const sku = await prisma.sku.findUnique({
+            where: { id: skuId },
+            include: {
+                variation: {
+                    include: {
+                        product: true,
+                        fabric: true,
+                    },
+                },
+            },
+        });
+
+        if (!sku) {
+            throw new Error('SKU not found');
+        }
+
+        // Calculate balance using query patterns
+        const { calculateInventoryBalance: calcBalance } = await import(
+            '../../../../server/src/utils/queryPatterns.js'
+        );
+
+        const balance = await calcBalance(prisma, skuId, {
+            allowNegative: true,
+        });
+
+        return {
+            sku: {
+                id: sku.id,
+                skuCode: sku.skuCode,
+                size: sku.size,
+                isActive: sku.isActive,
+                targetStockQty: sku.targetStockQty,
+                variation: {
+                    id: sku.variation.id,
+                    colorName: sku.variation.colorName,
+                    product: {
+                        id: sku.variation.product.id,
+                        name: sku.variation.product.name,
+                    },
+                    fabric: sku.variation.fabric
+                        ? {
+                              id: sku.variation.fabric.id,
+                              name: sku.variation.fabric.name,
+                          }
+                        : null,
+                },
+            },
+            ...balance,
+            targetStockQty: sku.targetStockQty,
+            status: balance.currentBalance < (sku.targetStockQty || 0) ? 'below_target' : 'ok',
+        };
+    });
+
+/**
+ * Get balances for multiple SKUs
+ *
+ * Efficient batch lookup using inventoryBalanceCache.
+ * Returns balance info for each requested SKU.
+ */
+export const getInventoryBalances = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof getInventoryBalancesSchema> =>
+            getInventoryBalancesSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<InventoryBalanceItem[]> => {
+        const { skuIds } = data;
+
+        const prisma = await getPrisma();
+
+        // Fetch SKUs to validate they exist
+        const skus = await prisma.sku.findMany({
+            where: { id: { in: skuIds } },
+            select: { id: true, skuCode: true, isActive: true },
+        });
+
+        const foundSkuIds = new Set(skus.map((s) => s.id));
+        const missingSkuIds = skuIds.filter((id) => !foundSkuIds.has(id));
+
+        if (missingSkuIds.length > 0) {
+            throw new Error(`SKUs not found: ${missingSkuIds.join(', ')}`);
+        }
+
+        // Get balances from cache
+        const { inventoryBalanceCache } = await import(
+            '../../../../server/src/services/inventoryBalanceCache.js'
+        );
+
+        const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
+        const skuCodeMap = new Map(skus.map((s) => [s.id, s.skuCode]));
+
+        return skuIds.map((skuId) => {
+            const balance = balanceMap.get(skuId);
+
+            return {
+                skuId,
+                skuCode: skuCodeMap.get(skuId) || '',
+                totalInward: balance?.totalInward ?? 0,
+                totalOutward: balance?.totalOutward ?? 0,
+                totalReserved: 0, // Reserved is no longer used, kept for backwards compatibility
+                currentBalance: balance?.currentBalance ?? 0,
+                availableBalance: balance?.availableBalance ?? 0,
+                hasDataIntegrityIssue: balance?.hasDataIntegrityIssue ?? false,
+            };
+        });
+    });
+
+/**
+ * Get all inventory balances (main inventory page query)
+ *
+ * Uses Kysely for high-performance SKU metadata fetch, combined with
+ * inventoryBalanceCache for efficient balance calculation.
+ *
+ * Features:
+ * - Optional filtering by custom SKUs, below-target status, and search
+ * - Server-side pagination
+ * - Sorted by status (below_target first) then by SKU code
+ */
+export const getInventoryAll = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof getInventoryAllSchema> =>
+            getInventoryAllSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<InventoryAllResult> => {
+        const { includeCustomSkus, belowTarget, search, limit, offset } = data;
+
+        const prisma = await getPrisma();
+
+        // Use Kysely for SKU metadata fetch (JOINs SKU/Variation/Product/Fabric)
+        const { listInventorySkusKysely } = await import(
+            '../../../../server/src/db/queries/index.js'
+        );
+
+        const skus = await listInventorySkusKysely({
+            includeCustomSkus,
+            search,
+        });
+
+        // Get balances from cache (already optimized with groupBy)
+        const { inventoryBalanceCache } = await import(
+            '../../../../server/src/services/inventoryBalanceCache.js'
+        );
+
+        const skuIds = skus.map((sku) => sku.skuId);
+        const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
+
+        // Map SKU metadata with balances
+        const balances: InventoryAllItem[] = skus.map((sku) => {
+            const balance = balanceMap.get(sku.skuId) || {
+                totalInward: 0,
+                totalOutward: 0,
+                currentBalance: 0,
+                availableBalance: 0,
+            };
+
+            const imageUrl = sku.variationImageUrl || sku.productImageUrl || null;
+
+            return {
+                skuId: sku.skuId,
+                skuCode: sku.skuCode,
+                productId: sku.productId,
+                productName: sku.productName,
+                productType: sku.productType,
+                gender: sku.gender,
+                colorName: sku.colorName,
+                variationId: sku.variationId,
+                size: sku.size,
+                category: sku.category,
+                imageUrl,
+                currentBalance: balance.currentBalance,
+                reservedBalance: 0,
+                availableBalance: balance.availableBalance,
+                totalInward: balance.totalInward,
+                totalOutward: balance.totalOutward,
+                targetStockQty: sku.targetStockQty,
+                status:
+                    balance.availableBalance < (sku.targetStockQty || 0)
+                        ? 'below_target'
+                        : 'ok',
+                mrp: sku.mrp,
+                shopifyQty: sku.shopifyAvailableQty ?? null,
+                isCustomSku: sku.isCustomSku || false,
+            };
+        });
+
+        // Filter by below-target status if requested
+        let filteredBalances = balances;
+        if (belowTarget === true) {
+            filteredBalances = balances.filter((b) => b.status === 'below_target');
+        }
+
+        // Sort: below_target first, then by SKU code
+        filteredBalances.sort((a, b) => {
+            if (a.status === 'below_target' && b.status !== 'below_target') return -1;
+            if (a.status !== 'below_target' && b.status === 'below_target') return 1;
+            return a.skuCode.localeCompare(b.skuCode);
+        });
+
+        // Apply pagination
+        const totalCount = filteredBalances.length;
+        const paginatedBalances = filteredBalances.slice(offset, offset + limit);
+
+        return {
+            items: paginatedBalances,
+            pagination: {
+                total: totalCount,
+                limit,
+                offset,
+                hasMore: offset + paginatedBalances.length < totalCount,
+            },
+        };
+    });
+
+// ============================================
+// LEGACY SERVER FUNCTION (Backwards Compatibility)
+// ============================================
+
+// Internal types for Prisma query results
 interface BalanceRow {
     skuId: string;
     totalInward: bigint;
@@ -110,33 +466,27 @@ interface SkuWithBalance {
 }
 
 /**
- * Server Function: Get inventory list
+ * Legacy Server Function: Get inventory list
  *
  * Fetches inventory directly from database using Prisma.
  * Returns paginated items with balance calculations.
+ *
+ * @deprecated Use getInventoryAll instead for new code
  */
 export const getInventoryList = createServerFn({ method: 'GET' })
-    .inputValidator((input: unknown) => inventoryListInputSchema.parse(input))
+    .inputValidator(
+        (input: unknown): z.infer<typeof inventoryListInputSchema> =>
+            inventoryListInputSchema.parse(input)
+    )
     .handler(async ({ data }): Promise<InventoryListResponse> => {
         console.log('[Server Function] getInventoryList called with:', data);
 
         try {
-            // Dynamic import to prevent bundling Prisma into client
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { PrismaClient } = await import('@prisma/client') as any;
-
-            // Use global singleton pattern
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const globalForPrisma = globalThis as any;
-            const prisma = globalForPrisma.prisma ?? new PrismaClient();
-            if (process.env.NODE_ENV !== 'production') {
-                globalForPrisma.prisma = prisma;
-            }
+            const prisma = await getPrisma();
 
             const { includeCustomSkus, search, stockFilter, limit, offset } = data;
 
             // Step 1: Get inventory balances by SKU using raw SQL for aggregation
-            // This calculates totalInward, totalOutward, and currentBalance per SKU
             const balances: BalanceRow[] = await prisma.$queryRaw`
                 SELECT
                     "skuId",
@@ -237,7 +587,7 @@ export const getInventoryList = createServerFn({ method: 'GET' })
                     category: sku.variation.product.category || '',
                     imageUrl,
                     currentBalance,
-                    reservedBalance: 0, // TODO: Calculate reserved from pending orders
+                    reservedBalance: 0,
                     availableBalance: currentBalance,
                     totalInward,
                     totalOutward,

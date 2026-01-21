@@ -11,17 +11,18 @@
  * - Auto-focus search on page load
  * - Analytics: Total pieces, most stocked products, highest demand products
  *
- * DATA SOURCE: tRPC inventory.getAllBalances + /reports/top-products
+ * DATA SOURCE: Server Function getInventoryList + /reports/top-products
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
-import { trpc } from '../services/trpc';
+import { getInventoryList } from '../server/functions/inventory';
 import { reportsApi } from '../services/api';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { Route } from '../routes/_authenticated/inventory';
@@ -72,25 +73,27 @@ export default function Inventory() {
         searchInputRef.current?.focus();
     }, []);
 
-    // Check if we have valid loader data (Server Function succeeded)
-    const hasLoaderData = !!loaderData?.inventory;
+    // Get Server Function reference
+    const getInventoryListFn = useServerFn(getInventoryList);
 
-    // Fetch inventory data via tRPC (with fallback when Server Function fails)
-    const { data: inventoryData, isLoading, refetch, isFetching } = trpc.inventory.getAllBalances.useQuery(
-        {
-            includeCustomSkus: false,
-            limit: 10000,
-        },
-        {
-            // Only skip tRPC when Server Function is enabled AND loader has data
-            enabled: !hasLoaderData,
-        }
-    );
+    // Query for inventory data using Server Function
+    // Uses loader data as initialData when available for instant hydration
+    const { data: inventoryData, isLoading, refetch, isFetching } = useQuery({
+        queryKey: ['inventory', 'all', { includeCustomSkus: false, limit: 10000 }],
+        queryFn: () => getInventoryListFn({
+            data: {
+                includeCustomSkus: false,
+                limit: 10000,
+            },
+        }),
+        // Use loader data for instant display, query will refetch in background if stale
+        initialData: loaderData?.inventory ?? undefined,
+        // Don't refetch on mount if we have fresh loader data
+        staleTime: loaderData?.inventory ? 30000 : 0,
+    });
 
-    // Use loader data when available, otherwise use tRPC data
-    const effectiveInventoryData = hasLoaderData && loaderData?.inventory
-        ? loaderData.inventory
-        : inventoryData;
+    // Use query data directly (initialData provides instant hydration)
+    const effectiveInventoryData = inventoryData;
 
     // Fetch demand data (top products by units sold)
     const { data: demandData, isLoading: demandLoading } = useQuery({
