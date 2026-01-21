@@ -573,3 +573,397 @@ export const getMaterialsFilters = createServerFn({ method: 'GET' })
             await prisma.$disconnect();
         }
     });
+
+// ============================================
+// MATERIALS TREE FUNCTIONS (for TanStack Table)
+// ============================================
+
+const getMaterialsTreeSchema = z.object({
+    lazyLoad: z.boolean().optional().default(false),
+});
+
+/**
+ * Get materials tree for TanStack Table display
+ *
+ * Returns the 3-tier hierarchy: Material → Fabric → Colour
+ * with counts and stock information for display.
+ */
+export const getMaterialsTree = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getMaterialsTreeSchema.parse(input ?? {}))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            // For lazy loading, only fetch top-level materials
+            if (data.lazyLoad) {
+                const materials = await prisma.material.findMany({
+                    include: {
+                        _count: {
+                            select: { fabrics: true },
+                        },
+                    },
+                    orderBy: { name: 'asc' },
+                });
+
+                const items = materials.map((m) => ({
+                    id: m.id,
+                    type: 'material' as const,
+                    name: m.name,
+                    description: m.description,
+                    isActive: m.isActive,
+                    fabricCount: m._count.fabrics,
+                    colourCount: 0, // Will be loaded lazily
+                    totalStock: 0,
+                    hasChildren: m._count.fabrics > 0,
+                    children: undefined,
+                }));
+
+                return {
+                    success: true,
+                    items,
+                    summary: {
+                        totalMaterials: materials.length,
+                        totalFabrics: 0,
+                        totalColours: 0,
+                    },
+                };
+            }
+
+            // Full tree load (non-lazy)
+            const materials = await prisma.material.findMany({
+                include: {
+                    fabrics: {
+                        include: {
+                            colours: {
+                                include: {
+                                    supplier: { select: { id: true, name: true } },
+                                },
+                                orderBy: { colourName: 'asc' },
+                            },
+                            supplier: { select: { id: true, name: true } },
+                        },
+                        orderBy: { name: 'asc' },
+                    },
+                },
+                orderBy: { name: 'asc' },
+            });
+
+            // Build tree - using inline type assertions for the response
+            const items = materials.map((material) => ({
+                id: material.id,
+                type: 'material' as const,
+                name: material.name,
+                description: material.description,
+                isActive: material.isActive,
+                fabricCount: material.fabrics.length,
+                colourCount: material.fabrics.reduce((sum, f) => sum + f.colours.length, 0),
+                totalStock: 0, // Could calculate from inventory if needed
+                hasChildren: material.fabrics.length > 0,
+                children: material.fabrics.map((fabric) => ({
+                    id: fabric.id,
+                    type: 'fabric' as const,
+                    name: fabric.name,
+                    materialId: fabric.materialId,
+                    materialName: material.name,
+                    constructionType: fabric.constructionType,
+                    pattern: fabric.pattern,
+                    weight: fabric.weight,
+                    weightUnit: fabric.weightUnit,
+                    composition: fabric.composition,
+                    avgShrinkagePct: fabric.avgShrinkagePct,
+                    unit: fabric.unit,
+                    costPerUnit: fabric.costPerUnit,
+                    leadTimeDays: fabric.defaultLeadTimeDays,
+                    minOrderQty: fabric.defaultMinOrderQty,
+                    supplierId: fabric.supplierId,
+                    supplierName: fabric.supplier?.name,
+                    isActive: fabric.isActive,
+                    colourCount: fabric.colours.length,
+                    hasChildren: fabric.colours.length > 0,
+                    children: fabric.colours.map((colour) => ({
+                        id: colour.id,
+                        type: 'colour' as const,
+                        name: colour.colourName,
+                        colourName: colour.colourName,
+                        fabricId: colour.fabricId,
+                        fabricName: fabric.name,
+                        materialId: fabric.materialId,
+                        materialName: material.name,
+                        standardColour: colour.standardColour,
+                        colourHex: colour.colourHex,
+                        costPerUnit: colour.costPerUnit,
+                        effectiveCostPerUnit: colour.costPerUnit ?? fabric.costPerUnit,
+                        costInherited: colour.costPerUnit === null,
+                        leadTimeDays: colour.leadTimeDays,
+                        effectiveLeadTimeDays: colour.leadTimeDays ?? fabric.defaultLeadTimeDays,
+                        leadTimeInherited: colour.leadTimeDays === null,
+                        minOrderQty: colour.minOrderQty,
+                        effectiveMinOrderQty: colour.minOrderQty ?? fabric.defaultMinOrderQty,
+                        minOrderInherited: colour.minOrderQty === null,
+                        supplierId: colour.supplierId,
+                        supplierName: colour.supplier?.name,
+                        isActive: colour.isActive,
+                        connectedProducts: 0, // Could count VariationBomLine references
+                    })),
+                })),
+            }));
+
+            return {
+                success: true,
+                items,
+                summary: {
+                    totalMaterials: materials.length,
+                    totalFabrics: materials.reduce((sum, m) => sum + m.fabrics.length, 0),
+                    totalColours: materials.reduce(
+                        (sum, m) => sum + m.fabrics.reduce((fSum, f) => fSum + f.colours.length, 0),
+                        0
+                    ),
+                },
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+const getMaterialsTreeChildrenSchema = z.object({
+    parentId: z.string().uuid('Invalid parent ID'),
+    parentType: z.enum(['material', 'fabric']),
+});
+
+/**
+ * Get children for lazy loading in tree view
+ */
+export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getMaterialsTreeChildrenSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            if (data.parentType === 'material') {
+                // Get fabrics under this material
+                const fabrics = await prisma.fabric.findMany({
+                    where: { materialId: data.parentId },
+                    include: {
+                        material: { select: { name: true } },
+                        supplier: { select: { id: true, name: true } },
+                        _count: { select: { colours: true } },
+                    },
+                    orderBy: { name: 'asc' },
+                });
+
+                const items = fabrics.map((fabric) => ({
+                    id: fabric.id,
+                    type: 'fabric' as const,
+                    name: fabric.name,
+                    materialId: fabric.materialId,
+                    materialName: fabric.material?.name,
+                    constructionType: fabric.constructionType,
+                    pattern: fabric.pattern,
+                    weight: fabric.weight,
+                    weightUnit: fabric.weightUnit,
+                    composition: fabric.composition,
+                    avgShrinkagePct: fabric.avgShrinkagePct,
+                    unit: fabric.unit,
+                    costPerUnit: fabric.costPerUnit,
+                    leadTimeDays: fabric.defaultLeadTimeDays,
+                    minOrderQty: fabric.defaultMinOrderQty,
+                    supplierId: fabric.supplierId,
+                    supplierName: fabric.supplier?.name,
+                    isActive: fabric.isActive,
+                    colourCount: fabric._count.colours,
+                    hasChildren: fabric._count.colours > 0,
+                }));
+
+                return { success: true, items };
+            } else {
+                // Get colours under this fabric
+                const colours = await prisma.fabricColour.findMany({
+                    where: { fabricId: data.parentId },
+                    include: {
+                        fabric: {
+                            include: {
+                                material: { select: { name: true } },
+                            },
+                        },
+                        supplier: { select: { id: true, name: true } },
+                    },
+                    orderBy: { colourName: 'asc' },
+                });
+
+                const items = colours.map((colour) => ({
+                    id: colour.id,
+                    type: 'colour' as const,
+                    name: colour.colourName,
+                    colourName: colour.colourName,
+                    fabricId: colour.fabricId,
+                    fabricName: colour.fabric.name,
+                    materialId: colour.fabric.materialId,
+                    materialName: colour.fabric.material?.name,
+                    standardColour: colour.standardColour,
+                    colourHex: colour.colourHex,
+                    costPerUnit: colour.costPerUnit,
+                    effectiveCostPerUnit: colour.costPerUnit ?? colour.fabric.costPerUnit,
+                    costInherited: colour.costPerUnit === null,
+                    leadTimeDays: colour.leadTimeDays,
+                    effectiveLeadTimeDays: colour.leadTimeDays ?? colour.fabric.defaultLeadTimeDays,
+                    leadTimeInherited: colour.leadTimeDays === null,
+                    minOrderQty: colour.minOrderQty,
+                    effectiveMinOrderQty: colour.minOrderQty ?? colour.fabric.defaultMinOrderQty,
+                    minOrderInherited: colour.minOrderQty === null,
+                    supplierId: colour.supplierId,
+                    supplierName: colour.supplier?.name,
+                    isActive: colour.isActive,
+                }));
+
+                return { success: true, items };
+            }
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// COLOUR TRANSACTIONS
+// ============================================
+
+const getColourTransactionsSchema = z.object({
+    colourId: z.string().uuid('Invalid colour ID'),
+    limit: z.number().int().positive().optional().default(50),
+});
+
+/**
+ * Get transactions for a fabric colour
+ *
+ * NOTE: FabricColour uses a different inventory model than legacy Fabric.
+ * This returns an empty result with a message as colour transactions
+ * are not yet implemented in the schema.
+ */
+export const getColourTransactions = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getColourTransactionsSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            // Verify colour exists
+            const colour = await prisma.fabricColour.findUnique({
+                where: { id: data.colourId },
+                select: { id: true, colourName: true },
+            });
+
+            if (!colour) {
+                return {
+                    success: false,
+                    error: 'Colour not found',
+                };
+            }
+
+            // FabricColour inventory transactions are not yet implemented
+            // Return empty items with a message
+            return {
+                success: true,
+                items: [],
+                message: 'Colour inventory tracking is not yet implemented',
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+// ============================================
+// VARIATION SEARCH (for LinkProductsModal)
+// ============================================
+
+const searchVariationsSchema = z.object({
+    q: z.string().optional().default(''),
+    limit: z.number().int().positive().optional().default(50),
+});
+
+/**
+ * Search product variations for fabric linking
+ */
+export const searchVariations = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => searchVariationsSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const where: Record<string, unknown> = { isActive: true };
+
+            if (data.q && data.q.length >= 2) {
+                where.OR = [
+                    { colorName: { contains: data.q, mode: 'insensitive' } },
+                    { product: { name: { contains: data.q, mode: 'insensitive' } } },
+                    { product: { styleCode: { contains: data.q, mode: 'insensitive' } } },
+                ];
+            }
+
+            const variations = await prisma.variation.findMany({
+                where,
+                include: {
+                    product: {
+                        select: { id: true, name: true, styleCode: true },
+                    },
+                    fabric: {
+                        select: { id: true, name: true },
+                    },
+                    bomLines: {
+                        where: {
+                            role: {
+                                code: 'main',
+                                type: { code: 'FABRIC' },
+                            },
+                        },
+                        include: {
+                            fabricColour: {
+                                select: { id: true, colourName: true },
+                            },
+                        },
+                        take: 1,
+                    },
+                },
+                orderBy: [
+                    { product: { name: 'asc' } },
+                    { colorName: 'asc' },
+                ],
+                take: data.limit,
+            });
+
+            const results = variations.map((v) => {
+                const mainFabricLine = v.bomLines[0];
+                return {
+                    id: v.id,
+                    colorName: v.colorName,
+                    imageUrl: v.imageUrl,
+                    product: {
+                        id: v.product.id,
+                        name: v.product.name,
+                        styleCode: v.product.styleCode,
+                    },
+                    currentFabric: v.fabric ? {
+                        id: v.fabric.id,
+                        name: v.fabric.name,
+                    } : null,
+                    currentFabricColour: mainFabricLine?.fabricColour ? {
+                        id: mainFabricLine.fabricColour.id,
+                        colourName: mainFabricLine.fabricColour.colourName,
+                    } : null,
+                    hasMainFabricAssignment: !!mainFabricLine?.fabricColourId,
+                };
+            });
+
+            return {
+                success: true,
+                items: results,
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });

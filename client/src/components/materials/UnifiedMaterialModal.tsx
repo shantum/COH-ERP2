@@ -10,14 +10,25 @@
  * - Tabbed interface for organized fields
  * - Inheritance display for colour fields (from fabric defaults)
  * - Form validation with react-hook-form
- * - Duplicate checking via API
+ * - Duplicate checking via Server Function
+ *
+ * NOTE: Uses Server Functions instead of Axios API calls.
  */
 
 import { useState, useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { X, Box, Layers, Palette, Loader2, AlertCircle } from 'lucide-react';
-import { materialsApi } from '../../services/api';
+import { getMaterialsFilters } from '../../server/functions/materials';
+import {
+    createMaterial as createMaterialFn,
+    updateMaterial as updateMaterialFn,
+    createFabric as createFabricFn,
+    updateFabric as updateFabricFn,
+    createColour as createColourFn,
+    updateColour as updateColourFn,
+} from '../../server/functions/materialsMutations';
 import type { MaterialNode, MaterialNodeType } from './types';
 import { materialsTreeKeys } from './hooks/useMaterialsTree';
 import { STANDARD_COLORS, STANDARD_COLOR_HEX, CONSTRUCTION_TYPES } from './types';
@@ -111,14 +122,26 @@ export function UnifiedMaterialModal({
     const [activeTab, setActiveTab] = useState<TabId>('basic');
     const [error, setError] = useState<string | null>(null);
 
-    // Fetch suppliers for dropdowns
+    // Server Functions
+    const getFiltersFn = useServerFn(getMaterialsFilters);
+    const createMaterialServerFn = useServerFn(createMaterialFn);
+    const updateMaterialServerFn = useServerFn(updateMaterialFn);
+    const createFabricServerFn = useServerFn(createFabricFn);
+    const updateFabricServerFn = useServerFn(updateFabricFn);
+    const createColourServerFn = useServerFn(createColourFn);
+    const updateColourServerFn = useServerFn(updateColourFn);
+
+    // Fetch suppliers for dropdowns using Server Function
     const { data: filtersData } = useQuery({
         queryKey: ['materialsFilters'],
-        queryFn: () => materialsApi.getFilters().then(r => r.data),
+        queryFn: async () => {
+            const result = await getFiltersFn({ data: undefined });
+            return result;
+        },
         enabled: isOpen && (type === 'fabric' || type === 'colour'),
     });
 
-    const suppliers = filtersData?.suppliers || [];
+    const suppliers = (filtersData?.success && 'filters' in filtersData ? filtersData.filters?.suppliers : []) || [];
 
     // Form setup with defaults
     const {
@@ -146,91 +169,143 @@ export function UnifiedMaterialModal({
         }
     }, [isOpen, type, item, parentNode, reset]);
 
-    // Mutations
+    // Helper to extract error message from Server Function response
+    const getErrorMessage = (result: { success: boolean; error?: { message?: string } }, defaultMsg: string) => {
+        if ('error' in result && result.error?.message) {
+            return result.error.message;
+        }
+        return defaultMsg;
+    };
+
+    // Mutations using Server Functions
     const createMaterial = useMutation({
-        mutationFn: (data: MaterialFormData) =>
-            materialsApi.createMaterial({ name: data.name, description: data.description || undefined }),
+        mutationFn: async (data: MaterialFormData) => {
+            const result = await createMaterialServerFn({
+                data: { name: data.name, description: data.description || undefined }
+            });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to create material'));
+            }
+            return result;
+        },
         onSuccess: handleMutationSuccess,
         onError: handleMutationError,
     });
 
     const updateMaterial = useMutation({
-        mutationFn: (data: MaterialFormData) =>
-            materialsApi.updateMaterial(item!.id, {
-                name: data.name,
-                description: data.description || undefined,
-                isActive: data.isActive,
-            }),
+        mutationFn: async (data: MaterialFormData) => {
+            const result = await updateMaterialServerFn({
+                data: {
+                    id: item!.id,
+                    name: data.name,
+                    description: data.description || undefined,
+                    isActive: data.isActive,
+                }
+            });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to update material'));
+            }
+            return result;
+        },
         onSuccess: handleMutationSuccess,
         onError: handleMutationError,
     });
 
     const createFabric = useMutation({
-        mutationFn: (data: FabricFormData) =>
-            materialsApi.createFabric({
-                materialId: parentId!,
-                name: data.name,
-                // fabricTypeId and colorName are now optional - backend uses defaults
-                constructionType: data.constructionType,
-                pattern: data.pattern || undefined,
-                weight: data.weight ? parseFloat(data.weight) : null,
-                weightUnit: data.weightUnit || 'gsm',
-                composition: data.composition || undefined,
-                defaultCostPerUnit: data.costPerUnit ? parseFloat(data.costPerUnit) : null,
-                defaultLeadTimeDays: data.leadTimeDays ? parseInt(data.leadTimeDays) : null,
-                defaultMinOrderQty: data.minOrderQty ? parseFloat(data.minOrderQty) : null,
-                avgShrinkagePct: data.avgShrinkagePct ? parseFloat(data.avgShrinkagePct) : undefined,
-            }),
+        mutationFn: async (data: FabricFormData) => {
+            const result = await createFabricServerFn({
+                data: {
+                    materialId: parentId!,
+                    name: data.name,
+                    constructionType: data.constructionType,
+                    pattern: data.pattern || undefined,
+                    weight: data.weight ? parseFloat(data.weight) : undefined,
+                    weightUnit: data.weightUnit || 'gsm',
+                    composition: data.composition || undefined,
+                    costPerUnit: data.costPerUnit ? parseFloat(data.costPerUnit) : undefined,
+                    defaultLeadTimeDays: data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined,
+                    defaultMinOrderQty: data.minOrderQty ? parseFloat(data.minOrderQty) : undefined,
+                    avgShrinkagePct: data.avgShrinkagePct ? parseFloat(data.avgShrinkagePct) : undefined,
+                }
+            });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to create fabric'));
+            }
+            return result;
+        },
         onSuccess: handleMutationSuccess,
         onError: handleMutationError,
     });
 
     const updateFabric = useMutation({
-        mutationFn: (data: FabricFormData) =>
-            materialsApi.updateFabric(item!.id, {
-                name: data.name,
-                constructionType: data.constructionType,
-                pattern: data.pattern || null,
-                weight: data.weight ? parseFloat(data.weight) : null,
-                weightUnit: data.weightUnit || 'gsm',
-                composition: data.composition || null,
-                costPerUnit: data.costPerUnit ? parseFloat(data.costPerUnit) : null,
-                leadTimeDays: data.leadTimeDays ? parseInt(data.leadTimeDays) : null,
-                minOrderQty: data.minOrderQty ? parseFloat(data.minOrderQty) : null,
-                avgShrinkagePct: data.avgShrinkagePct ? parseFloat(data.avgShrinkagePct) : 0,
-                supplierId: data.supplierId || null,
-            }),
+        mutationFn: async (data: FabricFormData) => {
+            const result = await updateFabricServerFn({
+                data: {
+                    id: item!.id,
+                    name: data.name,
+                    constructionType: data.constructionType,
+                    pattern: data.pattern || undefined,
+                    weight: data.weight ? parseFloat(data.weight) : undefined,
+                    weightUnit: data.weightUnit || 'gsm',
+                    composition: data.composition || undefined,
+                    costPerUnit: data.costPerUnit ? parseFloat(data.costPerUnit) : undefined,
+                    defaultLeadTimeDays: data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined,
+                    defaultMinOrderQty: data.minOrderQty ? parseFloat(data.minOrderQty) : undefined,
+                    avgShrinkagePct: data.avgShrinkagePct ? parseFloat(data.avgShrinkagePct) : undefined,
+                    supplierId: data.supplierId || undefined,
+                }
+            });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to update fabric'));
+            }
+            return result;
+        },
         onSuccess: handleMutationSuccess,
         onError: handleMutationError,
     });
 
     const createColour = useMutation({
-        mutationFn: (data: ColourFormData) =>
-            materialsApi.createColour({
-                fabricId: parentId!,
-                colourName: data.colourName,
-                standardColour: data.standardColour || null,
-                colourHex: data.colourHex || undefined,
-                costPerUnit: data.useInheritedCost ? null : (data.costPerUnit ? parseFloat(data.costPerUnit) : null),
-                leadTimeDays: data.useInheritedLeadTime ? null : (data.leadTimeDays ? parseInt(data.leadTimeDays) : null),
-                minOrderQty: data.useInheritedMinOrder ? null : (data.minOrderQty ? parseFloat(data.minOrderQty) : null),
-                supplierId: data.supplierId || null,
-            }),
+        mutationFn: async (data: ColourFormData) => {
+            const result = await createColourServerFn({
+                data: {
+                    fabricId: parentId!,
+                    colourName: data.colourName,
+                    standardColour: data.standardColour || undefined,
+                    colourHex: data.colourHex || undefined,
+                    costPerUnit: data.useInheritedCost ? undefined : (data.costPerUnit ? parseFloat(data.costPerUnit) : undefined),
+                    leadTimeDays: data.useInheritedLeadTime ? undefined : (data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined),
+                    minOrderQty: data.useInheritedMinOrder ? undefined : (data.minOrderQty ? parseFloat(data.minOrderQty) : undefined),
+                    supplierId: data.supplierId || undefined,
+                }
+            });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to create colour'));
+            }
+            return result;
+        },
         onSuccess: handleMutationSuccess,
         onError: handleMutationError,
     });
 
     const updateColour = useMutation({
-        mutationFn: (data: ColourFormData) =>
-            materialsApi.updateColour(item!.id, {
-                colourName: data.colourName,
-                standardColour: data.standardColour || null,
-                colourHex: data.colourHex || null,
-                costPerUnit: data.useInheritedCost ? null : (data.costPerUnit ? parseFloat(data.costPerUnit) : null),
-                leadTimeDays: data.useInheritedLeadTime ? null : (data.leadTimeDays ? parseInt(data.leadTimeDays) : null),
-                minOrderQty: data.useInheritedMinOrder ? null : (data.minOrderQty ? parseFloat(data.minOrderQty) : null),
-                supplierId: data.supplierId || null,
-            }),
+        mutationFn: async (data: ColourFormData) => {
+            const result = await updateColourServerFn({
+                data: {
+                    id: item!.id,
+                    colourName: data.colourName,
+                    standardColour: data.standardColour || undefined,
+                    colourHex: data.colourHex || undefined,
+                    costPerUnit: data.useInheritedCost ? undefined : (data.costPerUnit ? parseFloat(data.costPerUnit) : undefined),
+                    leadTimeDays: data.useInheritedLeadTime ? undefined : (data.leadTimeDays ? parseInt(data.leadTimeDays) : undefined),
+                    minOrderQty: data.useInheritedMinOrder ? undefined : (data.minOrderQty ? parseFloat(data.minOrderQty) : undefined),
+                    supplierId: data.supplierId || undefined,
+                }
+            });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to update colour'));
+            }
+            return result;
+        },
         onSuccess: handleMutationSuccess,
         onError: handleMutationError,
     });

@@ -2,31 +2,14 @@
  * TopFabricsCard - Configurable top fabrics display by sales value
  * Supports fabric type and specific color aggregation
  * Mobile-first responsive design
+ *
+ * Uses TanStack Start Server Functions for data fetching.
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fabricsApi } from '../../services/api';
+import { getTopFabricsForDashboard } from '../../server/functions/fabrics';
 import { Layers, Palette } from 'lucide-react';
-
-interface FabricData {
-    id: string;
-    name: string;
-    colorHex?: string | null;
-    typeName?: string;
-    composition?: string | null;
-    units: number;
-    revenue: number;
-    orderCount: number;
-    productCount: number;
-    topColors?: string[];
-}
-
-interface TopFabricsResponse {
-    level: 'type' | 'color';
-    days: number;
-    data: FabricData[];
-}
 
 const TIME_PERIODS = [
     { value: 7, label: '7d' },
@@ -45,9 +28,9 @@ export function TopFabricsCard() {
     const [days, setDays] = useState(30);
     const [level, setLevel] = useState<'type' | 'color'>('type');
 
-    const { data, isLoading } = useQuery<TopFabricsResponse>({
+    const { data, isLoading } = useQuery({
         queryKey: ['topFabrics', days, level],
-        queryFn: () => fabricsApi.getTopFabrics({ days, level, limit: 12 }).then(r => r.data),
+        queryFn: () => getTopFabricsForDashboard({ data: { days, level, limit: 12 } }),
         staleTime: 60 * 1000,
     });
 

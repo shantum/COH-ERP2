@@ -1,35 +1,14 @@
 /**
  * TopCustomersCard - Top customers by revenue with their favorite products
  * Mobile-first responsive design
+ *
+ * Uses TanStack Start Server Functions for data fetching.
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { reportsApi } from '../../services/api';
+import { getTopCustomersForDashboard } from '../../server/functions/reports';
 import { Users, Crown, Star, Award } from 'lucide-react';
-
-interface TopProduct {
-    name: string;
-    units: number;
-}
-
-interface CustomerData {
-    id: string;
-    name: string;
-    email?: string;
-    phone?: string;
-    city?: string;
-    tier?: string;
-    units: number;
-    revenue: number;
-    orderCount: number;
-    topProducts: TopProduct[];
-}
-
-interface TopCustomersResponse {
-    period: string;
-    data: CustomerData[];
-}
 
 const TIME_PERIODS = [
     { value: 'thisMonth', label: 'This Month' },
@@ -48,9 +27,9 @@ const TIER_STYLES: Record<string, { bg: string; text: string; icon: any }> = {
 export function TopCustomersCard() {
     const [period, setPeriod] = useState('3months');
 
-    const { data, isLoading } = useQuery<TopCustomersResponse>({
+    const { data, isLoading } = useQuery({
         queryKey: ['topCustomers', period],
-        queryFn: () => reportsApi.getTopCustomers({ period, limit: 10 }).then(r => r.data),
+        queryFn: () => getTopCustomersForDashboard({ data: { period, limit: 10 } }),
         staleTime: 60 * 1000,
     });
 

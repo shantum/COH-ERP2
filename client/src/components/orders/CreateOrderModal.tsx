@@ -15,10 +15,10 @@ import {
     Loader2,
     X,
 } from 'lucide-react';
-import { customersApi } from '../../services/api';
 import { CustomerSearch } from '../common/CustomerSearch';
 import { ProductSearch } from '../common/ProductSearch';
 import { getInventoryBalances } from '../../server/functions/inventory';
+import { getCustomerAddresses } from '../../server/functions/customers';
 
 // shadcn/ui components
 import {
@@ -273,15 +273,18 @@ export function CreateOrderModal({
         [fetchedBalances, fetchingSkuIds, getInventoryBalancesFn]
     );
 
+    // Server function for fetching customer addresses
+    const getCustomerAddressesFn = useServerFn(getCustomerAddresses);
+
     // Fetch past addresses when address section is expanded and customer exists
     const { data: pastAddressesData, isLoading: isLoadingAddresses } = useQuery({
         queryKey: ['customer-addresses', orderForm.customerId],
-        queryFn: () => customersApi.getAddresses(orderForm.customerId!),
+        queryFn: () => getCustomerAddressesFn({ data: { customerId: orderForm.customerId! } }),
         enabled: isAddressExpanded && !!orderForm.customerId,
         staleTime: 60 * 1000, // Cache for 1 minute
     });
 
-    const pastAddresses: AddressData[] = pastAddressesData?.data || [];
+    const pastAddresses: AddressData[] = pastAddressesData || [];
 
     const handleSelectPastAddress = (addr: AddressData) => {
         setAddressForm(addr);

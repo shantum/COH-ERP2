@@ -12,11 +12,12 @@
 
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import {
   Truck, Loader2, AlertCircle, CheckCircle2,
   XCircle, Printer
 } from 'lucide-react';
-import { trackingApi } from '../../../services/api';
+import { getShippingRates, createShipment, cancelShipment, getShippingLabel } from '../../../server/functions/tracking';
 import { getProductMrpForShipping } from '../../../utils/orderPricing';
 
 interface CourierRate {
@@ -58,6 +59,12 @@ export function BookShipmentSection({
   const [error, setError] = useState<string | null>(null);
   const [shipmentWeight, setShipmentWeight] = useState<string>('');
 
+  // Server Functions
+  const getShippingRatesFn = useServerFn(getShippingRates);
+  const createShipmentFn = useServerFn(createShipment);
+  const cancelShipmentFn = useServerFn(cancelShipment);
+  const getShippingLabelFn = useServerFn(getShippingLabel);
+
   // Check if order already has AWB
   const hasAwb = !!order.awbNumber;
   const canCancel = hasAwb && !['delivered', 'rto_delivered'].includes(order.trackingStatus);
@@ -85,14 +92,16 @@ export function BookShipmentSection({
       const originPincode = '400092'; // Mumbai warehouse
       const weightNum = parseFloat(shipmentWeight) || 0.5;
 
-      const result = await trackingApi.getRates({
-        fromPincode: originPincode,
-        toPincode: customerPincode,
-        weight: weightNum,
-        paymentMethod: isCod ? 'cod' : 'prepaid',
-        productMrp: orderTotal,
+      const result = await getShippingRatesFn({
+        data: {
+          fromPincode: originPincode,
+          toPincode: customerPincode,
+          weight: weightNum,
+          paymentMethod: isCod ? 'cod' : 'prepaid',
+          productMrp: orderTotal,
+        },
       });
-      return { data: result.data, weight: weightNum };
+      return { data: result, weight: weightNum };
     },
     onSuccess: ({ data, weight }) => {
       const targetSlab = getWeightSlab(weight);
@@ -123,8 +132,8 @@ export function BookShipmentSection({
       setStep('rates');
       setError(null);
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.error || err.message || 'Failed to fetch rates');
+    onError: (err: Error) => {
+      setError(err.message || 'Failed to fetch rates');
     },
   });
 
@@ -132,11 +141,13 @@ export function BookShipmentSection({
   const bookShipmentMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCourier) throw new Error('No courier selected');
-      const result = await trackingApi.createShipment({
-        orderId: order.id,
-        logistics: selectedCourier.logistics.toLowerCase(),
+      const result = await createShipmentFn({
+        data: {
+          orderId: order.id,
+          logistics: selectedCourier.logistics.toLowerCase(),
+        },
       });
-      return result.data;
+      return result;
     },
     onSuccess: () => {
       setStep('booked');
@@ -144,40 +155,49 @@ export function BookShipmentSection({
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       onShipmentBooked?.();
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.error || err.message || 'Failed to book shipment');
+    onError: (err: Error) => {
+      setError(err.message || 'Failed to book shipment');
     },
   });
 
   // Cancel shipment mutation
   const cancelShipmentMutation = useMutation({
     mutationFn: async () => {
-      const result = await trackingApi.cancelShipment({ orderId: order.id });
-      return result.data;
+      const result = await cancelShipmentFn({
+        data: {
+          orderId: order.id,
+        },
+      });
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       onShipmentBooked?.();
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.error || err.message || 'Failed to cancel shipment');
+    onError: (err: Error) => {
+      setError(err.message || 'Failed to cancel shipment');
     },
   });
 
   // Get label mutation
   const getLabelMutation = useMutation({
     mutationFn: async () => {
-      const result = await trackingApi.getLabel({ orderId: order.id, pageSize: 'A4' });
-      return result.data;
+      const result = await getShippingLabelFn({
+        data: {
+          orderId: order.id,
+          pageSize: 'A4',
+        },
+      });
+      return result;
     },
     onSuccess: (data) => {
       if (data.labelUrl) {
         window.open(data.labelUrl, '_blank');
       }
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.error || err.message || 'Failed to get label');
+    onError: (err: Error) => {
+      setError(err.message || 'Failed to get label');
     },
   });
 

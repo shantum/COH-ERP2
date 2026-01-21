@@ -8,19 +8,22 @@
  * - Search functionality
  *
  * Self-contained modal management - handles all add/edit operations internally
+ *
+ * NOTE: Uses Server Functions instead of Axios API calls.
  */
 
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Users, Search, LayoutGrid, Layers } from 'lucide-react';
 
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { MaterialNode, MaterialNodeType } from './types';
+import type { MaterialNode, MaterialNodeType, MaterialTreeResponse } from './types';
 import { MaterialsTreeTable } from './MaterialsTreeTable';
 import { UnifiedMaterialModal } from './UnifiedMaterialModal';
 import { LinkProductsModal } from './LinkProductsModal';
 import { QuickAddButtons } from './QuickAddButtons';
-import { materialsApi } from '../../services/api';
+import { getMaterialsTree } from '../../server/functions/materials';
 import { materialsTreeKeys, useMaterialsTreeMutations } from './hooks/useMaterialsTree';
 
 type ViewMode = 'fabric' | 'material';
@@ -64,12 +67,34 @@ export function MaterialsTreeView({
     // Link products modal state
     const [linkProductsColour, setLinkProductsColour] = useState<MaterialNode | null>(null);
 
-    // Fetch tree data for quick add buttons
+    // Server Function for tree data
+    const getTreeFn = useServerFn(getMaterialsTree);
+
+    // Fetch tree data for quick add buttons using Server Function
     const { data: treeData } = useQuery({
         queryKey: materialsTreeKeys.tree(),
-        queryFn: async () => {
-            const response = await materialsApi.getTree({ lazyLoad: false });
-            return response.data;
+        queryFn: async (): Promise<MaterialTreeResponse> => {
+            const response = await getTreeFn({ data: { lazyLoad: false } });
+            // Transform Server Function response to expected MaterialTreeResponse format
+            if ('success' in response && response.success && 'items' in response) {
+                const summary = 'summary' in response ? response.summary : null;
+                return {
+                    items: response.items as MaterialNode[],
+                    summary: {
+                        total: (summary?.totalMaterials ?? 0) + (summary?.totalFabrics ?? 0) + (summary?.totalColours ?? 0),
+                        materials: summary?.totalMaterials ?? 0,
+                        fabrics: summary?.totalFabrics ?? 0,
+                        colours: summary?.totalColours ?? 0,
+                        orderNow: 0,
+                        orderSoon: 0,
+                        ok: 0,
+                    },
+                };
+            }
+            return {
+                items: [],
+                summary: { total: 0, materials: 0, fabrics: 0, colours: 0, orderNow: 0, orderSoon: 0, ok: 0 },
+            };
         },
     });
 

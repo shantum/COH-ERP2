@@ -6,12 +6,26 @@
  * - Lazy-loading children on expand
  * - Merging loaded children into tree structure
  * - Optimistic updates for mutations
+ *
+ * NOTE: Uses Server Functions instead of Axios API calls.
  */
 
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useCallback, useState, useMemo } from 'react';
-import { materialsApi } from '../../../services/api';
-import type { MaterialNode, MaterialNodeType, MaterialTreeResponse, MaterialChildrenResponse } from '../types';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getMaterialsTree,
+    getMaterialsTreeChildren,
+} from '../../../server/functions/materials';
+import {
+    updateMaterial as updateMaterialFn,
+    deleteMaterial as deleteMaterialFn,
+    updateFabric as updateFabricFn,
+    deleteFabric as deleteFabricFn,
+    updateColour as updateColourFn,
+    deleteColour as deleteColourFn,
+} from '../../../server/functions/materialsMutations';
+import type { MaterialNode, MaterialNodeType, MaterialTreeResponse } from '../types';
 
 // Query keys for cache management
 export const materialsTreeKeys = {
@@ -120,6 +134,10 @@ export function useMaterialsTree(options: UseMaterialsTreeOptions = {}): UseMate
     const { lazyLoad = false, enabled = true } = options;
     const queryClient = useQueryClient();
 
+    // Server Functions
+    const getTreeFn = useServerFn(getMaterialsTree);
+    const getChildrenFn = useServerFn(getMaterialsTreeChildren);
+
     // Track expanded node IDs
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -136,8 +154,28 @@ export function useMaterialsTree(options: UseMaterialsTreeOptions = {}): UseMate
     } = useQuery({
         queryKey: materialsTreeKeys.tree(),
         queryFn: async () => {
-            const response = await materialsApi.getTree({ lazyLoad });
-            return response.data as MaterialTreeResponse;
+            const response = await getTreeFn({ data: { lazyLoad } });
+            // Transform Server Function response to expected MaterialTreeResponse format
+            if ('success' in response && response.success && 'items' in response) {
+                const summary = 'summary' in response ? response.summary : null;
+                return {
+                    items: response.items as MaterialNode[],
+                    summary: {
+                        total: (summary?.totalMaterials ?? 0) + (summary?.totalFabrics ?? 0) + (summary?.totalColours ?? 0),
+                        materials: summary?.totalMaterials ?? 0,
+                        fabrics: summary?.totalFabrics ?? 0,
+                        colours: summary?.totalColours ?? 0,
+                        orderNow: 0,
+                        orderSoon: 0,
+                        ok: 0,
+                    },
+                } satisfies MaterialTreeResponse;
+            }
+            // Return empty on error
+            return {
+                items: [],
+                summary: { total: 0, materials: 0, fabrics: 0, colours: 0, orderNow: 0, orderSoon: 0, ok: 0 },
+            } satisfies MaterialTreeResponse;
         },
         enabled,
         staleTime: 2 * 60 * 1000, // 2 minutes
@@ -154,18 +192,24 @@ export function useMaterialsTree(options: UseMaterialsTreeOptions = {}): UseMate
         }
 
         try {
-            const response = await materialsApi.getTreeChildren(parentId, parentType as 'material' | 'fabric');
-            const data = response.data as MaterialChildrenResponse;
+            const response = await getChildrenFn({
+                data: { parentId, parentType: parentType as 'material' | 'fabric' }
+            });
 
-            // Store loaded children
-            setLoadedChildren(prev => new Map(prev).set(parentId, data.items));
+            // Extract items from Server Function response
+            if ('success' in response && response.success && 'items' in response) {
+                const items = response.items as MaterialNode[];
+                // Store loaded children
+                setLoadedChildren(prev => new Map(prev).set(parentId, items));
+                return items;
+            }
 
-            return data.items;
+            return [];
         } catch (err) {
             console.error(`Failed to load children for ${parentType} ${parentId}:`, err);
             throw err;
         }
-    }, [loadedChildren]);
+    }, [loadedChildren, getChildrenFn]);
 
     // Build the final tree data with lazy-loaded children merged in
     // IMPORTANT: Must be memoized to prevent infinite re-renders
@@ -307,50 +351,100 @@ export function useMaterialsTree(options: UseMaterialsTreeOptions = {}): UseMate
 
 /**
  * Hook for mutations with optimistic updates
+ * Uses Server Functions instead of Axios API calls
  */
 export function useMaterialsTreeMutations() {
     const queryClient = useQueryClient();
 
+    // Server Functions
+    const updateMaterialServerFn = useServerFn(updateMaterialFn);
+    const deleteMaterialServerFn = useServerFn(deleteMaterialFn);
+    const updateFabricServerFn = useServerFn(updateFabricFn);
+    const deleteFabricServerFn = useServerFn(deleteFabricFn);
+    const updateColourServerFn = useServerFn(updateColourFn);
+    const deleteColourServerFn = useServerFn(deleteColourFn);
+
+    // Helper to extract error message from Server Function response
+    const getErrorMessage = (result: { success: boolean; error?: { message?: string } }, defaultMsg: string) => {
+        if ('error' in result && result.error?.message) {
+            return result.error.message;
+        }
+        return defaultMsg;
+    };
+
     const updateColour = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
-            materialsApi.updateColour(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const result = await updateColourServerFn({ data: { id, ...data } });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to update colour'));
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
         },
     });
 
     const updateFabric = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
-            materialsApi.updateFabric(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const result = await updateFabricServerFn({ data: { id, ...data } });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to update fabric'));
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
         },
     });
 
     const updateMaterial = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
-            materialsApi.updateMaterial(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
+            const result = await updateMaterialServerFn({ data: { id, ...data } });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to update material'));
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
         },
     });
 
     const deleteMaterial = useMutation({
-        mutationFn: (id: string) => materialsApi.deleteMaterial(id),
+        mutationFn: async (id: string) => {
+            const result = await deleteMaterialServerFn({ data: { id } });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to delete material'));
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
         },
     });
 
     const deleteFabric = useMutation({
-        mutationFn: (id: string) => materialsApi.deleteFabric(id),
+        mutationFn: async (id: string) => {
+            const result = await deleteFabricServerFn({ data: { id } });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to delete fabric'));
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
         },
     });
 
     const deleteColour = useMutation({
-        mutationFn: (id: string) => materialsApi.deleteColour(id),
+        mutationFn: async (id: string) => {
+            const result = await deleteColourServerFn({ data: { id } });
+            if (!result.success) {
+                throw new Error(getErrorMessage(result, 'Failed to delete colour'));
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: materialsTreeKeys.all });
         },

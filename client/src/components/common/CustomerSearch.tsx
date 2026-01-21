@@ -17,8 +17,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Search, User, Mail, Phone, Package } from 'lucide-react';
-import { customersApi, ordersApi } from '../../services/api';
+import { searchCustomers } from '../../server/functions/customers';
+import { searchAllOrders } from '../../server/functions/orders';
 
 export interface Customer {
   id: string;
@@ -78,6 +80,10 @@ export function CustomerSearch({
     return () => clearTimeout(timer);
   }, [query]);
 
+  // Server Functions
+  const searchCustomersFn = useServerFn(searchCustomers);
+  const searchAllOrdersFn = useServerFn(searchAllOrders);
+
   // Check if query looks like an order number
   const isOrderNumberQuery = (q: string) => {
     const trimmed = q.trim().toUpperCase();
@@ -90,43 +96,56 @@ export function CustomerSearch({
   // Fetch customers with server-side search
   const { data: customersData, isLoading: isLoadingCustomers } = useQuery({
     queryKey: ['customers-search', debouncedQuery],
-    queryFn: () => {
-      const params: Record<string, string> = { limit: '50' };
-      if (debouncedQuery.trim()) {
-        params.search = debouncedQuery.trim();
-      }
-      return customersApi.getAll(params);
-    },
+    queryFn: () => searchCustomersFn({
+      data: {
+        search: debouncedQuery.trim() || undefined,
+        limit: 50,
+      },
+    }),
     staleTime: 30 * 1000,
   });
 
   // Fetch orders when query looks like an order number
   const { data: ordersData, isLoading: isLoadingOrders } = useQuery({
     queryKey: ['orders-search', debouncedQuery],
-    queryFn: () => ordersApi.searchAll(debouncedQuery.trim().replace('#', ''), 10),
+    queryFn: () => searchAllOrdersFn({
+      data: {
+        q: debouncedQuery.trim().replace('#', ''),
+        limit: 10,
+      },
+    }),
     enabled: !!debouncedQuery.trim() && isOrderNumberQuery(debouncedQuery),
     staleTime: 30 * 1000,
   });
 
   const isLoading = isLoadingCustomers || isLoadingOrders;
 
-  // API returns array directly via axios .data
-  const customers: Customer[] = customersData?.data || [];
+  // Map Server Function response to Customer type
+  const customers: Customer[] = (customersData || []).map((c) => ({
+    id: c.id,
+    firstName: c.firstName ?? undefined,
+    lastName: c.lastName ?? undefined,
+    email: c.email ?? undefined,
+    phone: c.phone ?? undefined,
+    tags: c.tags ?? undefined,
+  }));
 
   // Extract customers from order results
-  const orderCustomers: (Customer & { orderNumber?: string })[] = (ordersData?.data || [])
-    .filter((order: any) => order.customerName || order.customerEmail)
-    .map((order: any) => ({
-      id: order.customerId || `order-${order.id}`,
+  // Server Function returns { results: TabResult[] } where each TabResult has { orders: SearchResultOrder[] }
+  const allOrders = ordersData?.results?.flatMap((tab) => tab.orders) || [];
+  const orderCustomers: (Customer & { orderNumber?: string })[] = allOrders
+    .filter((order: { customerName: string | null }) => order.customerName)
+    .map((order: { id: string; orderNumber: string; customerName: string | null }) => ({
+      id: `order-${order.id}`,
       firstName: order.customerName?.split(' ')[0] || '',
       lastName: order.customerName?.split(' ').slice(1).join(' ') || '',
-      email: order.customerEmail || '',
-      phone: order.customerPhone || '',
+      email: '',
+      phone: '',
       orderNumber: order.orderNumber,
     }))
-    // Remove duplicates by email or name
-    .filter((c: any, i: number, arr: any[]) =>
-      arr.findIndex((x: any) => x.email === c.email ||
+    // Remove duplicates by name
+    .filter((c, i, arr) =>
+      arr.findIndex((x) =>
         (x.firstName === c.firstName && x.lastName === c.lastName)) === i
     );
 

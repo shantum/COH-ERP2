@@ -58,6 +58,33 @@ const getTopFabricsInputSchema = z.object({
     limit: z.number().int().positive().optional().default(15),
 }).optional();
 
+// Dashboard-specific schema (matching dashboard card expected format)
+const getTopFabricsForDashboardInputSchema = z.object({
+    days: z.number().int().positive().optional().default(30),
+    level: z.enum(['type', 'color']).optional().default('type'),
+    limit: z.number().int().positive().optional().default(12),
+});
+
+// Dashboard-specific output types
+export interface DashboardFabricData {
+    id: string;
+    name: string;
+    colorHex?: string | null;
+    typeName?: string;
+    composition?: string | null;
+    units: number;
+    revenue: number;
+    orderCount: number;
+    productCount: number;
+    topColors?: string[];
+}
+
+export interface DashboardTopFabricsResponse {
+    level: 'type' | 'color';
+    days: number;
+    data: DashboardFabricData[];
+}
+
 const getReconciliationByIdInputSchema = z.object({
     id: z.string().uuid('Invalid reconciliation ID'),
 });
@@ -1012,6 +1039,203 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                     days,
                     data: result,
                 };
+            }
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Get top fabrics for dashboard card
+ *
+ * Returns top fabrics in the format expected by TopFabricsCard component.
+ * This is a wrapper that returns data without the success wrapper.
+ */
+export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTopFabricsForDashboardInputSchema.parse(input))
+    .handler(async ({ data }): Promise<DashboardTopFabricsResponse> => {
+        const { PrismaClient } = await import('@prisma/client');
+        const prisma = new PrismaClient();
+
+        try {
+            const { days, level, limit } = data;
+
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+
+            // Get order lines from non-cancelled, non-RTO orders
+            const orderLines = await prisma.orderLine.findMany({
+                where: {
+                    order: {
+                        orderDate: { gte: startDate },
+                        status: { not: 'cancelled' },
+                    },
+                    OR: [
+                        { trackingStatus: null },
+                        {
+                            trackingStatus: {
+                                notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'],
+                            },
+                        },
+                    ],
+                },
+                include: {
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: {
+                                        include: { fabricType: true },
+                                    },
+                                    fabric: {
+                                        include: { fabricType: true },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            if (level === 'color') {
+                // Aggregate at specific fabric color level
+                const fabricStats: Record<
+                    string,
+                    {
+                        id: string;
+                        name: string;
+                        colorHex: string | null;
+                        typeName: string;
+                        composition: string | null;
+                        units: number;
+                        revenue: number;
+                        orderCount: Set<string>;
+                        productCount: Set<string>;
+                    }
+                > = {};
+
+                for (const line of orderLines) {
+                    const fabric = (line as any).sku?.variation?.fabric;
+                    if (!fabric) continue;
+
+                    const key = fabric.id;
+                    if (!fabricStats[key]) {
+                        fabricStats[key] = {
+                            id: fabric.id,
+                            name: fabric.colorName,
+                            colorHex: fabric.colorHex || null,
+                            typeName: fabric.fabricType?.name || 'Unknown',
+                            composition: fabric.fabricType?.composition || null,
+                            units: 0,
+                            revenue: 0,
+                            orderCount: new Set(),
+                            productCount: new Set(),
+                        };
+                    }
+                    fabricStats[key].units += line.qty;
+                    fabricStats[key].revenue += line.qty * Number(line.unitPrice);
+                    fabricStats[key].orderCount.add(line.orderId);
+                    const productId = (line as any).sku?.variation?.product?.id;
+                    if (productId) {
+                        fabricStats[key].productCount.add(productId);
+                    }
+                }
+
+                const result: DashboardFabricData[] = Object.values(fabricStats)
+                    .map((f) => ({
+                        id: f.id,
+                        name: f.name,
+                        colorHex: f.colorHex,
+                        typeName: f.typeName,
+                        composition: f.composition,
+                        units: f.units,
+                        revenue: f.revenue,
+                        orderCount: f.orderCount.size,
+                        productCount: f.productCount.size,
+                    }))
+                    .sort((a, b) => b.revenue - a.revenue)
+                    .slice(0, limit);
+
+                return { level: 'color', days, data: result };
+            } else {
+                // Aggregate at fabric type level
+                const typeStats: Record<
+                    string,
+                    {
+                        id: string;
+                        name: string;
+                        composition: string | null;
+                        units: number;
+                        revenue: number;
+                        orderCount: Set<string>;
+                        productCount: Set<string>;
+                        colors: Record<string, { name: string; revenue: number }>;
+                    }
+                > = {};
+
+                for (const line of orderLines) {
+                    const fabricType =
+                        (line as any).sku?.variation?.fabric?.fabricType ||
+                        (line as any).sku?.variation?.product?.fabricType;
+                    if (!fabricType) continue;
+
+                    const key = fabricType.id;
+                    if (!typeStats[key]) {
+                        typeStats[key] = {
+                            id: fabricType.id,
+                            name: fabricType.name,
+                            composition: fabricType.composition,
+                            units: 0,
+                            revenue: 0,
+                            orderCount: new Set(),
+                            productCount: new Set(),
+                            colors: {},
+                        };
+                    }
+                    typeStats[key].units += line.qty;
+                    typeStats[key].revenue += line.qty * Number(line.unitPrice);
+                    typeStats[key].orderCount.add(line.orderId);
+                    const productId = (line as any).sku?.variation?.product?.id;
+                    if (productId) {
+                        typeStats[key].productCount.add(productId);
+                    }
+
+                    // Track top colors within this type
+                    const fabric = (line as any).sku?.variation?.fabric;
+                    if (fabric) {
+                        if (!typeStats[key].colors[fabric.id]) {
+                            typeStats[key].colors[fabric.id] = {
+                                name: fabric.colorName,
+                                revenue: 0,
+                            };
+                        }
+                        typeStats[key].colors[fabric.id].revenue +=
+                            line.qty * Number(line.unitPrice);
+                    }
+                }
+
+                const result: DashboardFabricData[] = Object.values(typeStats)
+                    .map((t) => {
+                        const topColors = Object.values(t.colors)
+                            .sort((a, b) => b.revenue - a.revenue)
+                            .slice(0, 3)
+                            .map((c) => c.name);
+                        return {
+                            id: t.id,
+                            name: t.name,
+                            composition: t.composition,
+                            units: t.units,
+                            revenue: t.revenue,
+                            orderCount: t.orderCount.size,
+                            productCount: t.productCount.size,
+                            topColors,
+                        };
+                    })
+                    .sort((a, b) => b.revenue - a.revenue)
+                    .slice(0, limit);
+
+                return { level: 'type', days, data: result };
             }
         } finally {
             await prisma.$disconnect();

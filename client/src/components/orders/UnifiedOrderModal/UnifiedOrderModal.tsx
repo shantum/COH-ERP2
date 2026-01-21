@@ -12,12 +12,14 @@
 
 import { useEffect, useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Save, Loader2 } from 'lucide-react';
 import type { Order } from '../../../types';
 import type { ModalMode } from './types';
 import { useUnifiedOrderModal } from './hooks/useUnifiedOrderModal';
 import { useOrdersMutations } from '../../../hooks/useOrdersMutations';
-import { ordersApi, customersApi } from '../../../services/api';
+import { getOrderById } from '../../../server/functions/orders';
+import { getCustomer } from '../../../server/functions/customers';
 import { ModalHeader } from './components/ModalHeader';
 import { CustomerSection } from './components/CustomerSection';
 import { ItemsSection } from './components/ItemsSection';
@@ -49,12 +51,15 @@ export function UnifiedOrderModal({
   // Keep track of last valid order for smooth transitions
   const [lastValidOrder, setLastValidOrder] = useState<Order>(initialOrder);
 
+  // Server function for fetching order
+  const getOrderByIdFn = useServerFn(getOrderById);
+
   // Fetch fresh order data to ensure we have all fields
   const { data: fetchedOrder, isLoading: isLoadingOrder, isFetching } = useQuery({
     queryKey: ['order', currentOrderId],
     queryFn: async () => {
-      const response = await ordersApi.getById(currentOrderId);
-      return response.data;
+      const result = await getOrderByIdFn({ data: { id: currentOrderId } });
+      return result as unknown as Order;
     },
     staleTime: 30 * 1000, // 30 seconds
   });
@@ -125,12 +130,15 @@ export function UnifiedOrderModal({
   // Ensure canShip is always boolean
   const canShip = modalState.canShip ?? false;
 
-  // Fetch customer data when Customer tab is active (using REST API for full affinity data)
+  // Server function for fetching customer
+  const getCustomerFn = useServerFn(getCustomer);
+
+  // Fetch customer data when Customer tab is active (using Server Function for full affinity data)
   const { data: customerResponse, isLoading: isLoadingCustomer } = useQuery({
     queryKey: ['customer', order?.customerId],
     queryFn: async () => {
-      const response = await customersApi.getById(order!.customerId!);
-      return response.data;
+      const result = await getCustomerFn({ data: { id: order!.customerId! } });
+      return result;
     },
     enabled: mode === 'customer' && !!order?.customerId,
     staleTime: 2 * 60 * 1000, // 2 min (matches server cache)

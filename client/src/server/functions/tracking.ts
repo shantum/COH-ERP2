@@ -1,0 +1,245 @@
+/**
+ * Tracking Server Functions
+ *
+ * TanStack Start Server Functions for iThink Logistics integration.
+ * Handles rate fetching, shipment booking, cancellation, and label generation.
+ *
+ * IMPORTANT: All external API calls are made server-side to keep API keys secure.
+ */
+
+import { createServerFn } from '@tanstack/react-start';
+import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
+
+// ============================================
+// INPUT SCHEMAS
+// ============================================
+
+const getRatesInputSchema = z.object({
+    fromPincode: z.string().length(6),
+    toPincode: z.string().length(6),
+    weight: z.number().positive().default(0.5),
+    paymentMethod: z.enum(['prepaid', 'cod']).default('prepaid'),
+    productMrp: z.number().nonnegative().default(0),
+});
+
+export type GetRatesInput = z.infer<typeof getRatesInputSchema>;
+
+const createShipmentInputSchema = z.object({
+    orderId: z.string().uuid(),
+    logistics: z.string().optional(),
+});
+
+export type CreateShipmentInput = z.infer<typeof createShipmentInputSchema>;
+
+const cancelShipmentInputSchema = z.object({
+    orderId: z.string().uuid().optional(),
+    awbNumber: z.string().optional(),
+}).refine((data) => data.orderId || data.awbNumber, {
+    message: 'Either orderId or awbNumber must be provided',
+});
+
+export type CancelShipmentInput = z.infer<typeof cancelShipmentInputSchema>;
+
+const getLabelInputSchema = z.object({
+    orderId: z.string().uuid().optional(),
+    awbNumber: z.string().optional(),
+    pageSize: z.enum(['A4', 'A6']).default('A4'),
+}).refine((data) => data.orderId || data.awbNumber, {
+    message: 'Either orderId or awbNumber must be provided',
+});
+
+export type GetLabelInput = z.infer<typeof getLabelInputSchema>;
+
+// ============================================
+// RESPONSE TYPES
+// ============================================
+
+export interface CourierRate {
+    logistics: string;
+    rate: number;
+    zone: string;
+    weightSlab: string;
+    deliveryTat?: string;
+    serviceType?: string;
+    supportsCod: boolean;
+    supportsPrepaid: boolean;
+    supportsReversePickup?: boolean;
+}
+
+export interface GetRatesResponse {
+    rates: CourierRate[];
+    fromPincode: string;
+    toPincode: string;
+}
+
+export interface CreateShipmentResponse {
+    success: boolean;
+    awbNumber: string;
+    courier: string;
+    orderId: string;
+    labelUrl?: string;
+}
+
+export interface CancelShipmentResponse {
+    success: boolean;
+    awbNumber: string;
+    message: string;
+}
+
+export interface GetLabelResponse {
+    labelUrl: string;
+    awbNumber: string;
+}
+
+// ============================================
+// HELPER: Get API Base URL
+// ============================================
+
+function getApiBaseUrl(): string {
+    return process.env.VITE_API_URL || 'http://localhost:3001/api';
+}
+
+// ============================================
+// SERVER FUNCTIONS
+// ============================================
+
+/**
+ * Get shipping rates from iThink Logistics
+ *
+ * Returns available couriers with rates, delivery times, and payment support.
+ * Called before booking a shipment to show rate comparison.
+ */
+export const getShippingRates = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getRatesInputSchema.parse(input))
+    .handler(async ({ data }): Promise<GetRatesResponse> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const response = await fetch(`${baseUrl}/tracking/rates`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Failed to fetch rates' }));
+                throw new Error(error.error || 'Failed to fetch shipping rates');
+            }
+
+            const result = await response.json();
+            return {
+                rates: result.rates || [],
+                fromPincode: data.fromPincode,
+                toPincode: data.toPincode,
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in getShippingRates:', error);
+            throw error;
+        }
+    });
+
+/**
+ * Create a shipment via iThink Logistics
+ *
+ * Books a shipment for the order with the selected courier.
+ * Updates order with AWB number and marks as shipped.
+ */
+export const createShipment = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createShipmentInputSchema.parse(input))
+    .handler(async ({ data }): Promise<CreateShipmentResponse> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const response = await fetch(`${baseUrl}/tracking/create-shipment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Failed to create shipment' }));
+                throw new Error(error.error || 'Failed to create shipment');
+            }
+
+            const result = await response.json();
+            return {
+                success: true,
+                awbNumber: result.awbNumber,
+                courier: result.courier,
+                orderId: data.orderId,
+                labelUrl: result.labelUrl,
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in createShipment:', error);
+            throw error;
+        }
+    });
+
+/**
+ * Cancel a shipment via iThink Logistics
+ *
+ * Cancels a booked shipment before pickup.
+ * Clears AWB from order and reverts status.
+ */
+export const cancelShipment = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => cancelShipmentInputSchema.parse(input))
+    .handler(async ({ data }): Promise<CancelShipmentResponse> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const response = await fetch(`${baseUrl}/tracking/cancel-shipment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Failed to cancel shipment' }));
+                throw new Error(error.error || 'Failed to cancel shipment');
+            }
+
+            const result = await response.json();
+            return {
+                success: true,
+                awbNumber: result.awbNumber || data.awbNumber || '',
+                message: result.message || 'Shipment cancelled successfully',
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in cancelShipment:', error);
+            throw error;
+        }
+    });
+
+/**
+ * Get shipping label for a shipment
+ *
+ * Returns the label URL for printing.
+ */
+export const getShippingLabel = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getLabelInputSchema.parse(input))
+    .handler(async ({ data }): Promise<GetLabelResponse> => {
+        try {
+            const baseUrl = getApiBaseUrl();
+            const response = await fetch(`${baseUrl}/tracking/label`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ error: 'Failed to get label' }));
+                throw new Error(error.error || 'Failed to get shipping label');
+            }
+
+            const result = await response.json();
+            return {
+                labelUrl: result.labelUrl,
+                awbNumber: result.awbNumber || data.awbNumber || '',
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in getShippingLabel:', error);
+            throw error;
+        }
+    });

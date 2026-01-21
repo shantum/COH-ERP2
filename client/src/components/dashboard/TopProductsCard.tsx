@@ -1,31 +1,14 @@
 /**
  * TopProductsCard - Configurable top products display
  * Mobile-first responsive design
+ *
+ * Uses TanStack Start Server Functions for data fetching.
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { reportsApi } from '../../services/api';
+import { getTopProductsForDashboard } from '../../server/functions/reports';
 import { TrendingUp, Package, Palette } from 'lucide-react';
-
-interface ProductData {
-    id: string;
-    name: string;
-    category?: string;
-    colorName?: string;
-    fabricName?: string | null;
-    imageUrl: string | null;
-    units: number;
-    revenue: number;
-    orderCount: number;
-    variations?: Array<{ colorName: string; units: number }>;
-}
-
-interface TopProductsResponse {
-    level: 'product' | 'variation';
-    days: number;
-    data: ProductData[];
-}
 
 const TIME_PERIODS = [
     { value: 7, label: '7d' },
@@ -43,9 +26,9 @@ export function TopProductsCard() {
     const [days, setDays] = useState(30);
     const [level, setLevel] = useState<'product' | 'variation'>('product');
 
-    const { data, isLoading } = useQuery<TopProductsResponse>({
+    const { data, isLoading } = useQuery({
         queryKey: ['topProducts', days, level],
-        queryFn: () => reportsApi.getTopProducts({ days, level, limit: 15 }).then(r => r.data),
+        queryFn: () => getTopProductsForDashboard({ data: { days, level, limit: 15 } }),
         staleTime: 60 * 1000,
     });
 

@@ -5,6 +5,8 @@
  * These are used to prefetch data before the component renders,
  * eliminating the waterfall loading pattern.
  *
+ * Uses TanStack Start Server Functions for data fetching.
+ *
  * Usage in route loader:
  *   await queryClient.ensureQueryData(ordersAnalyticsQueryOptions)
  *
@@ -13,10 +15,13 @@
  */
 
 import { queryOptions } from '@tanstack/react-query';
-import { ordersApi, reportsApi, fabricsApi } from '../services/api';
+import { ordersApi } from '../services/api';
+import { getTopProductsForDashboard, getTopCustomersForDashboard } from '../server/functions/reports';
+import { getTopFabricsForDashboard } from '../server/functions/fabrics';
 
 /**
  * Orders analytics (summary counts for analytics bar)
+ * NOTE: Still uses API until orders Server Functions are fully migrated
  */
 export const ordersAnalyticsQueryOptions = queryOptions({
   queryKey: ['ordersAnalytics'],
@@ -25,31 +30,31 @@ export const ordersAnalyticsQueryOptions = queryOptions({
 });
 
 /**
- * Top products report
+ * Top products report (Server Function)
  */
 export const topProductsQueryOptions = (days: number, level: 'product' | 'variation') =>
   queryOptions({
     queryKey: ['topProducts', days, level],
-    queryFn: () => reportsApi.getTopProducts({ days, level, limit: 15 }).then(r => r.data),
+    queryFn: () => getTopProductsForDashboard({ data: { days, level, limit: 15 } }),
     staleTime: 60 * 1000, // 1 minute
   });
 
 /**
- * Top fabrics report
+ * Top fabrics report (Server Function)
  */
 export const topFabricsQueryOptions = (days: number, level: 'type' | 'color') =>
   queryOptions({
     queryKey: ['topFabrics', days, level],
-    queryFn: () => fabricsApi.getTopFabrics({ days, level, limit: 12 }).then(r => r.data),
+    queryFn: () => getTopFabricsForDashboard({ data: { days, level, limit: 12 } }),
     staleTime: 60 * 1000, // 1 minute
   });
 
 /**
- * Top customers report
+ * Top customers report (Server Function)
  */
 export const topCustomersQueryOptions = (period: string) =>
   queryOptions({
     queryKey: ['topCustomers', period],
-    queryFn: () => reportsApi.getTopCustomers({ period, limit: 10 }).then(r => r.data),
+    queryFn: () => getTopCustomersForDashboard({ data: { period, limit: 10 } }),
     staleTime: 60 * 1000, // 1 minute
   });

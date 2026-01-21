@@ -27,6 +27,18 @@ const getTopCustomersInputSchema = z.object({
     limit: z.number().int().positive().optional().default(10),
 });
 
+// Dashboard-specific input schemas (matching API response format)
+const getTopProductsForDashboardInputSchema = z.object({
+    days: z.number().int().positive().optional().default(30),
+    level: z.enum(['product', 'variation']).optional().default('product'),
+    limit: z.number().int().positive().optional().default(15),
+});
+
+const getTopCustomersForDashboardInputSchema = z.object({
+    period: z.string().optional().default('3months'),
+    limit: z.number().int().positive().optional().default(10),
+});
+
 // ============================================
 // OUTPUT TYPES
 // ============================================
@@ -50,6 +62,49 @@ export interface TopCustomer {
     totalSpent: number;
     avgOrderValue: number;
     lastOrderDate: string | null;
+}
+
+// Dashboard-specific output types (matching existing API response format)
+export interface DashboardProductData {
+    id: string;
+    name: string;
+    category?: string;
+    colorName?: string;
+    fabricName?: string | null;
+    imageUrl: string | null;
+    units: number;
+    revenue: number;
+    orderCount: number;
+    variations?: Array<{ colorName: string; units: number }>;
+}
+
+export interface DashboardTopProductsResponse {
+    level: 'product' | 'variation';
+    days: number;
+    data: DashboardProductData[];
+}
+
+export interface DashboardTopProduct {
+    name: string;
+    units: number;
+}
+
+export interface DashboardCustomerData {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    city?: string;
+    tier?: string;
+    units: number;
+    revenue: number;
+    orderCount: number;
+    topProducts: DashboardTopProduct[];
+}
+
+export interface DashboardTopCustomersResponse {
+    period: string;
+    data: DashboardCustomerData[];
 }
 
 // ============================================
@@ -299,6 +354,307 @@ export const getTopCustomers = createServerFn({ method: 'GET' })
             .slice(0, limit);
 
         return topCustomers;
+    });
+
+// ============================================
+// DASHBOARD-SPECIFIC SERVER FUNCTIONS
+// ============================================
+// These functions return the exact format expected by dashboard card components,
+// matching the previous API response structure for backward compatibility.
+
+/**
+ * Get top products for dashboard card
+ *
+ * Returns top-selling products in the format expected by TopProductsCard component.
+ * Supports product or variation level aggregation with color/variation breakdown.
+ */
+export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTopProductsForDashboardInputSchema.parse(input))
+    .handler(async ({ data }): Promise<DashboardTopProductsResponse> => {
+        const prisma = await getPrisma();
+
+        const { days, level, limit } = data;
+
+        // Calculate date filter
+        const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+        // Get order lines with shipped status within the time period
+        const orderLines = await prisma.orderLine.findMany({
+            where: {
+                lineStatus: 'shipped',
+                order: {
+                    orderDate: { gte: startDate },
+                },
+            },
+            include: {
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                                fabric: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (level === 'variation') {
+            // Aggregate at variation level
+            const variationMap = new Map<
+                string,
+                {
+                    id: string;
+                    name: string;
+                    colorName: string;
+                    fabricName: string | null;
+                    imageUrl: string | null;
+                    units: number;
+                    revenue: number;
+                    orderIds: Set<string>;
+                }
+            >();
+
+            for (const line of orderLines) {
+                const variation = line.sku.variation;
+                const key = variation.id;
+
+                if (!variationMap.has(key)) {
+                    variationMap.set(key, {
+                        id: variation.id,
+                        name: variation.product.name,
+                        colorName: variation.colorName,
+                        fabricName: variation.fabric?.colorName || null,
+                        imageUrl: variation.imageUrl || variation.product.imageUrl,
+                        units: 0,
+                        revenue: 0,
+                        orderIds: new Set(),
+                    });
+                }
+
+                const stats = variationMap.get(key)!;
+                stats.units += line.qty;
+                stats.revenue += line.unitPrice * line.qty;
+                stats.orderIds.add(line.orderId);
+            }
+
+            const data: DashboardProductData[] = Array.from(variationMap.values())
+                .map((v) => ({
+                    id: v.id,
+                    name: v.name,
+                    colorName: v.colorName,
+                    fabricName: v.fabricName,
+                    imageUrl: v.imageUrl,
+                    units: v.units,
+                    revenue: Math.round(v.revenue * 100) / 100,
+                    orderCount: v.orderIds.size,
+                }))
+                .sort((a, b) => b.units - a.units)
+                .slice(0, limit);
+
+            return { level: 'variation', days, data };
+        } else {
+            // Aggregate at product level
+            const productMap = new Map<
+                string,
+                {
+                    id: string;
+                    name: string;
+                    category: string;
+                    imageUrl: string | null;
+                    units: number;
+                    revenue: number;
+                    orderIds: Set<string>;
+                    variations: Map<string, { colorName: string; units: number }>;
+                }
+            >();
+
+            for (const line of orderLines) {
+                const product = line.sku.variation.product;
+                const variation = line.sku.variation;
+                const key = product.id;
+
+                if (!productMap.has(key)) {
+                    productMap.set(key, {
+                        id: product.id,
+                        name: product.name,
+                        category: product.category || 'Uncategorized',
+                        imageUrl: product.imageUrl,
+                        units: 0,
+                        revenue: 0,
+                        orderIds: new Set(),
+                        variations: new Map(),
+                    });
+                }
+
+                const stats = productMap.get(key)!;
+                stats.units += line.qty;
+                stats.revenue += line.unitPrice * line.qty;
+                stats.orderIds.add(line.orderId);
+
+                // Track variation breakdown
+                if (!stats.variations.has(variation.id)) {
+                    stats.variations.set(variation.id, { colorName: variation.colorName, units: 0 });
+                }
+                stats.variations.get(variation.id)!.units += line.qty;
+            }
+
+            const data: DashboardProductData[] = Array.from(productMap.values())
+                .map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                    category: p.category,
+                    imageUrl: p.imageUrl,
+                    units: p.units,
+                    revenue: Math.round(p.revenue * 100) / 100,
+                    orderCount: p.orderIds.size,
+                    variations: Array.from(p.variations.values())
+                        .sort((a, b) => b.units - a.units)
+                        .slice(0, 5),
+                }))
+                .sort((a, b) => b.units - a.units)
+                .slice(0, limit);
+
+            return { level: 'product', days, data };
+        }
+    });
+
+/**
+ * Get top customers for dashboard card
+ *
+ * Returns top customers in the format expected by TopCustomersCard component.
+ * Includes customer details, stats, and their top purchased products.
+ */
+export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTopCustomersForDashboardInputSchema.parse(input))
+    .handler(async ({ data }): Promise<DashboardTopCustomersResponse> => {
+        const prisma = await getPrisma();
+
+        const { period, limit } = data;
+
+        // Parse period into date filter
+        let startDate: Date | null = null;
+        const now = new Date();
+
+        switch (period) {
+            case 'thisMonth':
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                break;
+            case 'lastMonth': {
+                const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                startDate = lastMonth;
+                break;
+            }
+            case '3months':
+                startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+                break;
+            case '6months':
+                startDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+                break;
+            case '1year':
+                startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+                break;
+            default:
+                startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        }
+
+        // Get orders with customer info and order lines
+        const orders = await prisma.order.findMany({
+            where: {
+                orderDate: { gte: startDate },
+                status: { notIn: ['cancelled'] },
+            },
+            include: {
+                customer: true,
+                orderLines: {
+                    where: { lineStatus: 'shipped' },
+                    include: {
+                        sku: {
+                            include: {
+                                variation: {
+                                    include: { product: true },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Aggregate by customer
+        const customerMap = new Map<
+            string,
+            {
+                id: string;
+                name: string;
+                email: string;
+                phone: string | null;
+                tier: string;
+                units: number;
+                revenue: number;
+                orderCount: number;
+                products: Map<string, { name: string; units: number }>;
+            }
+        >();
+
+        for (const order of orders) {
+            if (!order.customer) continue;
+
+            const customer = order.customer;
+            const customerId = customer.id;
+
+            if (!customerMap.has(customerId)) {
+                customerMap.set(customerId, {
+                    id: customer.id,
+                    name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
+                    email: customer.email,
+                    phone: customer.phone,
+                    tier: customer.tier || 'bronze',
+                    units: 0,
+                    revenue: 0,
+                    orderCount: 0,
+                    products: new Map(),
+                });
+            }
+
+            const stats = customerMap.get(customerId)!;
+            stats.orderCount++;
+
+            for (const line of order.orderLines) {
+                stats.units += line.qty;
+                stats.revenue += line.unitPrice * line.qty;
+
+                // Track product purchases
+                const productName = line.sku.variation.product.name;
+                if (!stats.products.has(productName)) {
+                    stats.products.set(productName, { name: productName, units: 0 });
+                }
+                stats.products.get(productName)!.units += line.qty;
+            }
+        }
+
+        // Convert to array and format
+        const customers: DashboardCustomerData[] = Array.from(customerMap.values())
+            .map((c) => ({
+                id: c.id,
+                name: c.name,
+                email: c.email,
+                phone: c.phone || undefined,
+                tier: c.tier,
+                units: c.units,
+                revenue: Math.round(c.revenue * 100) / 100,
+                orderCount: c.orderCount,
+                topProducts: Array.from(c.products.values())
+                    .sort((a, b) => b.units - a.units)
+                    .slice(0, 3),
+            }))
+            .sort((a, b) => b.revenue - a.revenue)
+            .slice(0, limit);
+
+        return { period, data: customers };
     });
 
 /**

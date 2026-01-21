@@ -192,3 +192,153 @@ export const getCustomer = createServerFn({ method: 'GET' })
 
         return customer;
     });
+
+// ============================================
+// CUSTOMER SEARCH - For CustomerSearch component
+// ============================================
+
+const searchCustomersInputSchema = z.object({
+    search: z.string().optional(),
+    limit: z.number().int().positive().max(100).optional().default(50),
+});
+
+export type SearchCustomersInput = z.infer<typeof searchCustomersInputSchema>;
+
+/**
+ * Customer search item for dropdown/autocomplete
+ */
+export interface CustomerSearchItem {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    tags: string | null;
+}
+
+/**
+ * Server Function: Search customers for autocomplete
+ *
+ * Lightweight search for customer selection dropdowns.
+ * Returns minimal fields needed for display.
+ */
+export const searchCustomers = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => searchCustomersInputSchema.parse(input))
+    .handler(async ({ data }): Promise<CustomerSearchItem[]> => {
+        // Dynamic import to prevent bundling Prisma into client
+        const { PrismaClient } = await import('@prisma/client');
+
+        // Use global singleton pattern
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        // Build where clause
+        const where: Prisma.CustomerWhereInput = {};
+
+        if (data.search && data.search.trim()) {
+            const term = data.search.trim();
+            where.OR = [
+                { email: { contains: term, mode: 'insensitive' } },
+                { firstName: { contains: term, mode: 'insensitive' } },
+                { lastName: { contains: term, mode: 'insensitive' } },
+                { phone: { contains: term } },
+            ];
+        }
+
+        const customers = await prisma.customer.findMany({
+            where,
+            select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+                tags: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: data.limit,
+        });
+
+        return customers;
+    });
+
+// ============================================
+// CUSTOMER ADDRESSES - For CreateOrderModal
+// ============================================
+
+const getCustomerAddressesInputSchema = z.object({
+    customerId: z.string().uuid(),
+});
+
+/**
+ * Address data from past orders
+ */
+export interface CustomerAddress {
+    first_name?: string;
+    last_name?: string;
+    address1?: string;
+    address2?: string;
+    city?: string;
+    province?: string;
+    zip?: string;
+    country?: string;
+    phone?: string;
+}
+
+/**
+ * Server Function: Get customer's past addresses
+ *
+ * Extracts unique addresses from the customer's order history.
+ * Returns deduplicated addresses sorted by most recent use.
+ */
+export const getCustomerAddresses = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => getCustomerAddressesInputSchema.parse(input))
+    .handler(async ({ data }): Promise<CustomerAddress[]> => {
+        // Dynamic import to prevent bundling Prisma into client
+        const { PrismaClient } = await import('@prisma/client');
+
+        // Use global singleton pattern
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        // Get orders with shipping addresses for this customer
+        const orders = await prisma.order.findMany({
+            where: {
+                customerId: data.customerId,
+                shippingAddress: { not: null },
+            },
+            select: {
+                shippingAddress: true,
+                orderDate: true,
+            },
+            orderBy: { orderDate: 'desc' },
+            take: 20, // Limit to recent orders
+        });
+
+        // Parse addresses and deduplicate by address1+zip combination
+        const addressMap = new Map<string, CustomerAddress>();
+
+        for (const order of orders) {
+            if (!order.shippingAddress) continue;
+
+            try {
+                const addr = JSON.parse(order.shippingAddress) as CustomerAddress;
+                // Use address1+zip as unique key
+                const key = `${addr.address1 || ''}|${addr.zip || ''}`;
+                if (key !== '|' && !addressMap.has(key)) {
+                    addressMap.set(key, addr);
+                }
+            } catch {
+                // Skip invalid JSON
+                continue;
+            }
+        }
+
+        return Array.from(addressMap.values()).slice(0, 5); // Return up to 5 unique addresses
+    });

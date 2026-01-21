@@ -1,10 +1,13 @@
 /**
  * Materials Detail Panel - Slide-out panel for viewing all properties of a material record
+ *
+ * NOTE: Uses Server Functions instead of Axios API calls.
  */
 
 import { X, Package, TrendingUp, TrendingDown, Clock, Info, DollarSign } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { materialsApi } from '../../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getColourTransactions } from '../../server/functions/materials';
 
 interface DetailPanelProps {
     item: any;
@@ -15,11 +18,17 @@ interface DetailPanelProps {
 }
 
 export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanelProps) {
-    // Fetch transaction history for colours
+    // Server Function for transactions
+    const getTransactionsFn = useServerFn(getColourTransactions);
+
+    // Fetch transaction history for colours using Server Function
     const { data: transactions } = useQuery({
-        queryKey: ['colourTransactions', item?.colourId],
-        queryFn: () => materialsApi.getColourTransactions(item.colourId).then(r => r.data),
-        enabled: isOpen && type === 'colour' && !!item?.colourId,
+        queryKey: ['colourTransactions', item?.id],
+        queryFn: async () => {
+            const result = await getTransactionsFn({ data: { colourId: item.id } });
+            return result;
+        },
+        enabled: isOpen && type === 'colour' && !!item?.id,
     });
 
     if (!isOpen || !item) return null;
@@ -164,7 +173,7 @@ export function DetailPanel({ item, type, isOpen, onClose, onEdit }: DetailPanel
                             </section>
 
                             {/* Recent Transactions */}
-                            {transactions?.items?.length > 0 && (
+                            {transactions?.success && 'items' in transactions && transactions.items && transactions.items.length > 0 && (
                                 <section>
                                     <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                                         <Clock size={14} />

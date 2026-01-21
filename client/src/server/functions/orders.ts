@@ -969,3 +969,269 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
             throw error;
         }
     });
+
+// ============================================
+// GET ORDER BY ID - For UnifiedOrderModal
+// ============================================
+
+const getOrderByIdInputSchema = z.object({
+    id: z.string().uuid('Invalid order ID'),
+});
+
+export type GetOrderByIdInput = z.infer<typeof getOrderByIdInputSchema>;
+
+/**
+ * Order detail for UnifiedOrderModal
+ * Includes all fields needed for view/edit/ship operations.
+ */
+export interface OrderDetail {
+    id: string;
+    orderNumber: string;
+    orderDate: string;
+    shipByDate: string | null;
+    customerName: string;
+    customerEmail: string | null;
+    customerPhone: string | null;
+    customerId: string | null;
+    shippingAddress: string | null;
+    totalAmount: number | null;
+    paymentMethod: string | null;
+    paymentStatus: string | null;
+    channel: string | null;
+    internalNotes: string | null;
+    status: string;
+    isArchived: boolean;
+    releasedToShipped: boolean;
+    releasedToCancelled: boolean;
+    isExchange: boolean;
+    codRemittedAt: string | null;
+    customer: {
+        id: string;
+        email: string;
+        firstName: string | null;
+        lastName: string | null;
+        phone: string | null;
+        tags: string | null;
+        orderCount: number;
+        ltv: number;
+        tier: string | null;
+        rtoCount: number;
+    } | null;
+    shopifyCache: {
+        fulfillmentStatus: string | null;
+        discountCodes: string | null;
+        customerNotes: string | null;
+        tags: string | null;
+        trackingNumber: string | null;
+        trackingCompany: string | null;
+        trackingUrl: string | null;
+    } | null;
+    orderLines: Array<{
+        id: string;
+        skuId: string;
+        qty: number;
+        unitPrice: number;
+        lineStatus: string | null;
+        notes: string | null;
+        awbNumber: string | null;
+        courier: string | null;
+        shippedAt: string | null;
+        deliveredAt: string | null;
+        trackingStatus: string | null;
+        rtoInitiatedAt: string | null;
+        rtoReceivedAt: string | null;
+        lastScanAt: string | null;
+        lastScanLocation: string | null;
+        expectedDeliveryDate: string | null;
+        isCustomized: boolean;
+        isNonReturnable: boolean;
+        productionBatchId: string | null;
+        sku: {
+            id: string;
+            skuCode: string;
+            size: string;
+            mrp: number | null;
+            isCustomSku: boolean;
+            customizationType: string | null;
+            customizationValue: string | null;
+            customizationNotes: string | null;
+            variation: {
+                id: string;
+                colorName: string;
+                colorHex: string | null;
+                imageUrl: string | null;
+                product: {
+                    id: string;
+                    name: string;
+                    imageUrl: string | null;
+                };
+            };
+        };
+        productionBatch: {
+            id: string;
+            batchCode: string | null;
+            batchDate: string | null;
+            status: string;
+        } | null;
+    }>;
+}
+
+/**
+ * Server Function: Get order by ID
+ *
+ * Fetches complete order details for the UnifiedOrderModal.
+ * Includes all nested relations needed for view/edit/ship operations.
+ */
+export const getOrderById = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => getOrderByIdInputSchema.parse(input))
+    .handler(async ({ data }): Promise<OrderDetail> => {
+        try {
+            // Dynamic import to prevent bundling Prisma into client
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // Use global singleton pattern
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            const order = await prisma.order.findUnique({
+                where: { id: data.id },
+                include: {
+                    customer: {
+                        select: {
+                            id: true,
+                            email: true,
+                            firstName: true,
+                            lastName: true,
+                            phone: true,
+                            tags: true,
+                            orderCount: true,
+                            ltv: true,
+                            tier: true,
+                            rtoCount: true,
+                        },
+                    },
+                    shopifyCache: {
+                        select: {
+                            fulfillmentStatus: true,
+                            discountCodes: true,
+                            customerNotes: true,
+                            tags: true,
+                            trackingNumber: true,
+                            trackingCompany: true,
+                            trackingUrl: true,
+                        },
+                    },
+                    orderLines: {
+                        include: {
+                            sku: {
+                                include: {
+                                    variation: {
+                                        include: {
+                                            product: true,
+                                        },
+                                    },
+                                },
+                            },
+                            productionBatch: {
+                                select: {
+                                    id: true,
+                                    batchCode: true,
+                                    batchDate: true,
+                                    status: true,
+                                },
+                            },
+                        },
+                        orderBy: { id: 'asc' },
+                    },
+                },
+            });
+
+            if (!order) {
+                throw new Error('Order not found');
+            }
+
+            // Transform dates to ISO strings
+            return {
+                id: order.id,
+                orderNumber: order.orderNumber,
+                orderDate: order.orderDate.toISOString(),
+                shipByDate: order.shipByDate ? order.shipByDate.toISOString() : null,
+                customerName: order.customerName,
+                customerEmail: order.customerEmail,
+                customerPhone: order.customerPhone,
+                customerId: order.customerId,
+                shippingAddress: order.shippingAddress,
+                totalAmount: order.totalAmount,
+                paymentMethod: order.paymentMethod,
+                paymentStatus: order.paymentStatus,
+                channel: order.channel,
+                internalNotes: order.internalNotes,
+                status: order.status,
+                isArchived: order.isArchived,
+                releasedToShipped: order.releasedToShipped,
+                releasedToCancelled: order.releasedToCancelled,
+                isExchange: order.isExchange,
+                codRemittedAt: order.codRemittedAt ? order.codRemittedAt.toISOString() : null,
+                customer: order.customer,
+                shopifyCache: order.shopifyCache,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                orderLines: order.orderLines.map((line: any) => ({
+                    id: line.id,
+                    skuId: line.skuId,
+                    qty: line.qty,
+                    unitPrice: line.unitPrice,
+                    lineStatus: line.lineStatus,
+                    notes: line.notes,
+                    awbNumber: line.awbNumber,
+                    courier: line.courier,
+                    shippedAt: line.shippedAt ? line.shippedAt.toISOString() : null,
+                    deliveredAt: line.deliveredAt ? line.deliveredAt.toISOString() : null,
+                    trackingStatus: line.trackingStatus,
+                    rtoInitiatedAt: line.rtoInitiatedAt ? line.rtoInitiatedAt.toISOString() : null,
+                    rtoReceivedAt: line.rtoReceivedAt ? line.rtoReceivedAt.toISOString() : null,
+                    lastScanAt: line.lastScanAt ? line.lastScanAt.toISOString() : null,
+                    lastScanLocation: line.lastScanLocation,
+                    expectedDeliveryDate: line.expectedDeliveryDate ? line.expectedDeliveryDate.toISOString() : null,
+                    isCustomized: line.isCustomized,
+                    isNonReturnable: line.isNonReturnable,
+                    productionBatchId: line.productionBatchId,
+                    sku: {
+                        id: line.sku.id,
+                        skuCode: line.sku.skuCode,
+                        size: line.sku.size,
+                        mrp: line.sku.mrp,
+                        isCustomSku: line.sku.isCustomSku,
+                        customizationType: line.sku.customizationType,
+                        customizationValue: line.sku.customizationValue,
+                        customizationNotes: line.sku.customizationNotes,
+                        variation: {
+                            id: line.sku.variation.id,
+                            colorName: line.sku.variation.colorName,
+                            colorHex: line.sku.variation.colorHex,
+                            imageUrl: line.sku.variation.imageUrl,
+                            product: {
+                                id: line.sku.variation.product.id,
+                                name: line.sku.variation.product.name,
+                                imageUrl: line.sku.variation.product.imageUrl,
+                            },
+                        },
+                    },
+                    productionBatch: line.productionBatch ? {
+                        id: line.productionBatch.id,
+                        batchCode: line.productionBatch.batchCode,
+                        batchDate: line.productionBatch.batchDate ?
+                            line.productionBatch.batchDate.toISOString().split('T')[0] : null,
+                        status: line.productionBatch.status,
+                    } : null,
+                })),
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in getOrderById:', error);
+            throw error;
+        }
+    });

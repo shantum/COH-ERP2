@@ -5,10 +5,13 @@
  * 1. Search for product variations
  * 2. Select multiple variations
  * 3. Link them to the current fabric colour
+ *
+ * NOTE: Uses Server Functions instead of Axios API calls.
  */
 
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { Search, X, Check, Package, Loader2, Link2, AlertCircle } from 'lucide-react';
 
 import {
@@ -22,7 +25,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { bomApi } from '../../services/api';
+import { searchVariations } from '../../server/functions/materials';
+import { linkFabricToVariation } from '../../server/functions/bomMutations';
 import { materialsTreeKeys } from './hooks/useMaterialsTree';
 import type { MaterialNode } from './types';
 
@@ -57,23 +61,38 @@ export function LinkProductsModal({ isOpen, onClose, colour }: LinkProductsModal
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-    // Search variations
+    // Server Functions
+    const searchVariationsFn = useServerFn(searchVariations);
+    const linkFabricFn = useServerFn(linkFabricToVariation);
+
+    // Search variations using Server Function
     const { data: searchResults, isLoading: isSearching } = useQuery({
         queryKey: ['variations-search', searchQuery],
         queryFn: async () => {
-            const response = await bomApi.searchVariations({ q: searchQuery, limit: 50 });
-            return response.data as VariationSearchResult[];
+            const response = await searchVariationsFn({ data: { q: searchQuery, limit: 50 } });
+            if (!response.success) {
+                throw new Error('Failed to search variations');
+            }
+            return response.items as VariationSearchResult[];
         },
         enabled: isOpen && searchQuery.length >= 2,
         staleTime: 30000,
     });
 
-    // Link mutation
+    // Link mutation using Server Function
     const linkMutation = useMutation({
         mutationFn: async (variationIds: string[]) => {
             if (!colour) throw new Error('No colour selected');
-            const response = await bomApi.linkVariationsToColour(colour.id, variationIds);
-            return response.data;
+            const result = await linkFabricFn({
+                data: {
+                    colourId: colour.id,
+                    variationIds,
+                }
+            });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to link variations');
+            }
+            return result.data!;
         },
         onSuccess: (data) => {
             // Invalidate materials tree to refresh product counts
@@ -82,8 +101,8 @@ export function LinkProductsModal({ isOpen, onClose, colour }: LinkProductsModal
             alert(`Successfully linked ${data.linked.total} variation(s) to ${data.fabricColour.fabricName} - ${data.fabricColour.name}`);
             handleClose();
         },
-        onError: (error: any) => {
-            alert(error?.response?.data?.error || 'Failed to link variations');
+        onError: (error: Error) => {
+            alert(error.message || 'Failed to link variations');
         },
     });
 
