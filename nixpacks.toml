@@ -2,7 +2,7 @@
 nixPkgs = ["nodejs_20"]
 
 [phases.install]
-cmds = ["cd shared && rm -rf node_modules package-lock.json && npm install", "cd client && npm install", "cd server && npm install"]
+cmds = ["cd shared && npm install", "cd client && npm install", "cd server && npm install"]
 dependsOn = ["setup"]
 
 [phases.build]
