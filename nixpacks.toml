@@ -6,7 +6,7 @@ cmds = ["cd shared && npm install", "cd client && npm install", "cd server && np
 dependsOn = ["setup"]
 
 [phases.build]
-cmds = ["cd shared && npx -y -p typescript tsc", "cd client && npm run build", "cd server && npx prisma generate"]
+cmds = ["cd shared && npm install && npx -y -p typescript tsc", "cd client && npm run build", "cd server && npx prisma generate"]
 dependsOn = ["install"]
 
 [start]
