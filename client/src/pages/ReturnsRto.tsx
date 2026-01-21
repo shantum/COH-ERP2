@@ -8,11 +8,27 @@
  * 4. Processing (QC) happens in Inventory Inward page
  *
  * This allows fast scanning without needing to match to orders upfront.
+ *
+ * MIGRATED TO SERVER FUNCTIONS: Uses TanStack Start Server Functions
+ * instead of Axios API calls.
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi, repackingApi } from '../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import {
+    getPendingSources,
+    getPendingQueue,
+    scanLookup,
+    type PendingQueueResponse,
+    type QueuePanelItemResponse,
+    type ScanLookupMatch,
+} from '@/server/functions/returns';
+import {
+    addToRepackingQueue,
+    updateRepackingQueueItem,
+    deleteRepackingQueueItem,
+} from '@/server/functions/returnsMutations';
 import {
     Search,
     PackageX,
@@ -26,7 +42,6 @@ import {
     X,
     Link,
 } from 'lucide-react';
-import type { ScanLookupResult, PendingQueueResponse, QueuePanelItem } from '../types';
 
 type TabType = 'repacking' | 'returns' | 'rto';
 
@@ -43,13 +58,19 @@ export default function ReturnsRto() {
     const [activeTab, setActiveTab] = useState<TabType>('repacking');
 
     // Selected item for allocation
-    const [selectedItem, setSelectedItem] = useState<QueuePanelItem | null>(null);
+    const [selectedItem, setSelectedItem] = useState<QueuePanelItemResponse | null>(null);
     const [showAllocateModal, setShowAllocateModal] = useState(false);
 
     // Pagination
     const [pageSize, setPageSize] = useState(50);
     const [currentPage, setCurrentPage] = useState(1);
     const [searchFilter, setSearchFilter] = useState('');
+
+    // Server Function hooks
+    const getPendingSourcesFn = useServerFn(getPendingSources);
+    const getPendingQueueFn = useServerFn(getPendingQueue);
+    const addToQueueFn = useServerFn(addToRepackingQueue);
+    const deleteFromQueueFn = useServerFn(deleteRepackingQueueItem);
 
     // Auto-focus input on mount
     useEffect(() => {
@@ -67,20 +88,14 @@ export default function ReturnsRto() {
     // Fetch pending counts for tabs
     const { data: pendingSources } = useQuery({
         queryKey: ['pending-sources'],
-        queryFn: async () => {
-            const res = await inventoryApi.getPendingSources();
-            return res.data;
-        },
+        queryFn: () => getPendingSourcesFn(),
         refetchInterval: 30000,
     });
 
     // Fetch queue data based on active tab
     const { data: queueData, isLoading: isLoadingQueue } = useQuery<PendingQueueResponse>({
         queryKey: ['pendingQueue', activeTab],
-        queryFn: async () => {
-            const res = await inventoryApi.getPendingQueue(activeTab, { limit: 200 });
-            return res.data;
-        },
+        queryFn: () => getPendingQueueFn({ data: { source: activeTab, limit: 200 } }),
         refetchInterval: 15000,
     });
 
@@ -107,9 +122,11 @@ export default function ReturnsRto() {
     // Add to repacking queue mutation (scan-first, no condition yet)
     const addToQueueMutation = useMutation({
         mutationFn: async (skuCode: string) => {
-            return repackingApi.addToQueue({
-                skuCode,
-                qty: 1,
+            return addToQueueFn({
+                data: {
+                    skuCode,
+                    qty: 1,
+                },
             });
         },
         onSuccess: (_, skuCode) => {
@@ -123,10 +140,10 @@ export default function ReturnsRto() {
             setScanInput('');
             inputRef.current?.focus();
         },
-        onError: (error: any) => {
+        onError: (error: Error) => {
             setScanFeedback({
                 type: 'error',
-                message: error.response?.data?.error || 'Failed to add to queue',
+                message: error.message || 'Failed to add to queue',
             });
             setScanInput('');
             inputRef.current?.focus();
@@ -136,7 +153,7 @@ export default function ReturnsRto() {
     // Delete from queue mutation
     const deleteFromQueueMutation = useMutation({
         mutationFn: async (itemId: string) => {
-            return repackingApi.deleteQueueItem(itemId);
+            return deleteFromQueueFn({ data: { id: itemId } });
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pendingQueue'] });
@@ -147,10 +164,10 @@ export default function ReturnsRto() {
                 message: 'Item removed from queue',
             });
         },
-        onError: (error: any) => {
+        onError: (error: Error) => {
             setScanFeedback({
                 type: 'error',
-                message: error.response?.data?.error || 'Failed to remove item',
+                message: error.message || 'Failed to remove item',
             });
         },
     });
@@ -181,20 +198,20 @@ export default function ReturnsRto() {
     };
 
     // Handle delete from queue
-    const handleDeleteClick = (item: QueuePanelItem) => {
+    const handleDeleteClick = (item: QueuePanelItemResponse) => {
         if (confirm(`Remove ${item.skuCode} from queue?`)) {
             deleteFromQueueMutation.mutate(item.queueItemId || item.id);
         }
     };
 
     // Handle allocate click from repacking queue
-    const handleAllocateClick = (item: QueuePanelItem) => {
+    const handleAllocateClick = (item: QueuePanelItemResponse) => {
         setSelectedItem(item);
         setShowAllocateModal(true);
     };
 
     // Get urgency badge for RTO items
-    const getUrgencyBadge = (item: QueuePanelItem) => {
+    const getUrgencyBadge = (item: QueuePanelItemResponse) => {
         if (!item.daysInRto) return null;
         if (item.daysInRto > 14) {
             return (
@@ -556,36 +573,43 @@ function AllocationModalContent({
     onClose,
     onSuccess,
 }: {
-    item: QueuePanelItem;
+    item: QueuePanelItemResponse;
     onClose: () => void;
     onSuccess: () => void;
 }) {
     const [isLoading, setIsLoading] = useState(false);
 
+    // Server Function hooks
+    const scanLookupFn = useServerFn(scanLookup);
+    const updateQueueItemFn = useServerFn(updateRepackingQueueItem);
+
     // Fetch matching returns and RTOs for this SKU
     const { data: matchData, isLoading: isLoadingMatches } = useQuery({
         queryKey: ['allocation-matches', item.skuId],
-        queryFn: async () => {
-            const res = await inventoryApi.scanLookup(item.skuCode);
-            return res.data as ScanLookupResult;
-        },
+        queryFn: () => scanLookupFn({ data: { code: item.skuCode } }),
     });
 
-    const returnMatches = matchData?.matches.filter(m => m.source === 'return') || [];
-    const rtoMatches = matchData?.matches.filter(m => m.source === 'rto') || [];
+    const returnMatches: ScanLookupMatch[] = matchData?.matches.filter((m: ScanLookupMatch) => m.source === 'return') || [];
+    const rtoMatches: ScanLookupMatch[] = matchData?.matches.filter((m: ScanLookupMatch) => m.source === 'rto') || [];
 
     const handleAllocate = async (type: 'return' | 'rto', lineId: string, requestId?: string) => {
         setIsLoading(true);
         try {
             if (type === 'return') {
-                await repackingApi.updateQueueItem(item.queueItemId || item.id, {
-                    returnRequestId: requestId,
-                    returnLineId: lineId,
+                await updateQueueItemFn({
+                    data: {
+                        id: item.queueItemId || item.id,
+                        returnRequestId: requestId,
+                        returnLineId: lineId,
+                    },
                 });
             } else {
                 // For RTO, use the proper orderLineId field
-                await repackingApi.updateQueueItem(item.queueItemId || item.id, {
-                    orderLineId: lineId,
+                await updateQueueItemFn({
+                    data: {
+                        id: item.queueItemId || item.id,
+                        orderLineId: lineId,
+                    },
                 });
             }
             onSuccess();
@@ -631,23 +655,20 @@ function AllocationModalContent({
                                         Pending Returns
                                     </h4>
                                     <div className="space-y-2">
-                                        {returnMatches.map((match) => {
-                                            const data = match.data as any; // Type assertion for return matches
-                                            return (
-                                                <button
-                                                    key={data.lineId}
-                                                    onClick={() => handleAllocate('return', data.lineId, data.requestId)}
-                                                    disabled={isLoading}
-                                                    className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
-                                                >
-                                                    <div className="flex justify-between">
-                                                        <span className="font-medium">{data.requestNumber}</span>
-                                                        <span className="text-sm text-gray-500">Qty: {data.qty}</span>
-                                                    </div>
-                                                    <p className="text-sm text-gray-600">{data.reasonCategory}</p>
-                                                </button>
-                                            );
-                                        })}
+                                        {returnMatches.map((match) => (
+                                            <button
+                                                key={match.data.lineId}
+                                                onClick={() => handleAllocate('return', match.data.lineId, match.data.requestId)}
+                                                disabled={isLoading}
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-orange-300 hover:bg-orange-50 transition-colors disabled:opacity-50"
+                                            >
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">{match.data.requestNumber}</span>
+                                                    <span className="text-sm text-gray-500">Qty: {match.data.qty}</span>
+                                                </div>
+                                                <p className="text-sm text-gray-600">{match.data.reasonCategory || ''}</p>
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
                             )}
@@ -660,28 +681,25 @@ function AllocationModalContent({
                                         Pending RTO Orders
                                     </h4>
                                     <div className="space-y-2">
-                                        {rtoMatches.map((match) => {
-                                            const data = match.data as any; // Type assertion for RTO matches
-                                            return (
-                                                <button
-                                                    key={data.lineId}
-                                                    onClick={() => handleAllocate('rto', data.lineId)}
-                                                    disabled={isLoading}
-                                                    className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
-                                                >
-                                                    <div className="flex justify-between">
-                                                        <span className="font-medium">Order #{data.orderNumber}</span>
-                                                        <span className="text-sm text-gray-500">Qty: {data.qty}</span>
-                                                    </div>
-                                                    <p className="text-sm text-gray-600">{data.customerName}</p>
-                                                    {data.atWarehouse && (
-                                                        <span className="inline-block mt-1 px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
-                                                            At Warehouse
-                                                        </span>
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
+                                        {rtoMatches.map((match) => (
+                                            <button
+                                                key={match.data.lineId}
+                                                onClick={() => handleAllocate('rto', match.data.lineId)}
+                                                disabled={isLoading}
+                                                className="w-full p-3 text-left border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors disabled:opacity-50"
+                                            >
+                                                <div className="flex justify-between">
+                                                    <span className="font-medium">Order #{match.data.orderNumber}</span>
+                                                    <span className="text-sm text-gray-500">Qty: {match.data.qty}</span>
+                                                </div>
+                                                <p className="text-sm text-gray-600">{match.data.customerName || ''}</p>
+                                                {match.data.atWarehouse && (
+                                                    <span className="inline-block mt-1 px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                                        At Warehouse
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
                                     </div>
                                 </div>
                             )}

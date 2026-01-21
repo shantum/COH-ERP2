@@ -480,3 +480,193 @@ export const receiveReturnItem = createServerFn({ method: 'POST' })
 
         return { success: true, message: 'Item received and added to QC queue' };
     });
+
+// ============================================
+// REPACKING QUEUE MUTATIONS
+// ============================================
+
+const addToQueueInputSchema = z.object({
+    skuId: z.string().uuid().optional(),
+    skuCode: z.string().optional(),
+    qty: z.number().int().positive().optional().default(1),
+    condition: z.string().optional(),
+    returnRequestId: z.string().uuid().optional(),
+    returnLineId: z.string().uuid().optional(),
+    inspectionNotes: z.string().optional(),
+});
+
+const updateQueueItemInputSchema = z.object({
+    id: z.string().uuid(),
+    status: z.string().optional(),
+    condition: z.string().optional(),
+    inspectionNotes: z.string().optional(),
+    returnRequestId: z.string().uuid().optional(),
+    returnLineId: z.string().uuid().optional(),
+    orderLineId: z.string().uuid().optional(),
+});
+
+const deleteQueueItemInputSchema = z.object({
+    id: z.string().uuid(),
+});
+
+// Type for queue item result
+export interface RepackingQueueItemResult {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    condition: string | null;
+    status: string;
+}
+
+/**
+ * Add item to repacking queue
+ * Supports: skuId or skuCode lookup
+ */
+export const addToRepackingQueue = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => addToQueueInputSchema.parse(input))
+    .handler(async ({ data }): Promise<{ success: boolean; queueItem: RepackingQueueItemResult }> => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        let skuId = data.skuId;
+
+        // If no skuId, try to find by skuCode
+        if (!skuId) {
+            if (!data.skuCode) {
+                throw new Error('Either skuId or skuCode is required');
+            }
+
+            const sku = await prisma.sku.findFirst({
+                where: { skuCode: data.skuCode },
+                select: { id: true, skuCode: true },
+            });
+
+            if (!sku) {
+                throw new Error(`SKU not found: ${data.skuCode}`);
+            }
+
+            skuId = sku.id;
+        }
+
+        // Create queue item
+        const queueItem = await prisma.repackingQueueItem.create({
+            data: {
+                skuId,
+                qty: data.qty,
+                condition: data.condition || 'pending_inspection', // Required field - default to pending
+                returnRequestId: data.returnRequestId || null,
+                returnLineId: data.returnLineId || null,
+                inspectionNotes: data.inspectionNotes || null,
+                status: 'pending',
+            },
+        });
+
+        // Fetch SKU details separately for the response
+        const sku = await prisma.sku.findUnique({
+            where: { id: skuId },
+            include: {
+                variation: {
+                    include: {
+                        product: true,
+                    },
+                },
+            },
+        });
+
+        return {
+            success: true,
+            queueItem: {
+                id: queueItem.id,
+                skuId: queueItem.skuId,
+                skuCode: sku?.skuCode || '',
+                productName: sku?.variation?.product?.name || '',
+                colorName: sku?.variation?.colorName || '',
+                size: sku?.size || '',
+                qty: queueItem.qty,
+                condition: queueItem.condition,
+                status: queueItem.status,
+            },
+        };
+    });
+
+/**
+ * Update repacking queue item
+ * Used for: linking to return/RTO, updating condition, etc.
+ */
+export const updateRepackingQueueItem = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateQueueItemInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const { id, ...updateData } = data;
+
+        // Verify item exists
+        const existing = await prisma.repackingQueueItem.findUnique({
+            where: { id },
+        });
+
+        if (!existing) {
+            throw new Error('Queue item not found');
+        }
+
+        // Build update object (only include defined fields)
+        const updateFields: Record<string, unknown> = {};
+        if (updateData.status !== undefined) updateFields.status = updateData.status;
+        if (updateData.condition !== undefined) updateFields.condition = updateData.condition;
+        if (updateData.inspectionNotes !== undefined) updateFields.inspectionNotes = updateData.inspectionNotes;
+        if (updateData.returnRequestId !== undefined) updateFields.returnRequestId = updateData.returnRequestId;
+        if (updateData.returnLineId !== undefined) updateFields.returnLineId = updateData.returnLineId;
+        if (updateData.orderLineId !== undefined) updateFields.orderLineId = updateData.orderLineId;
+
+        const updated = await prisma.repackingQueueItem.update({
+            where: { id },
+            data: updateFields,
+        });
+
+        return { success: true, queueItem: updated };
+    });
+
+/**
+ * Delete repacking queue item
+ */
+export const deleteRepackingQueueItem = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => deleteQueueItemInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        // Verify item exists
+        const existing = await prisma.repackingQueueItem.findUnique({
+            where: { id: data.id },
+        });
+
+        if (!existing) {
+            throw new Error('Queue item not found');
+        }
+
+        await prisma.repackingQueueItem.delete({
+            where: { id: data.id },
+        });
+
+        return { success: true };
+    });

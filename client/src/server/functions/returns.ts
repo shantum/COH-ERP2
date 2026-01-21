@@ -925,3 +925,441 @@ export const getReturnsBySkuCode = createServerFn({ method: 'GET' })
             })),
         };
     });
+
+// ============================================
+// PENDING SOURCES & QUEUE (for ReturnsRto page)
+// ============================================
+
+const getPendingQueueInputSchema = z.object({
+    source: z.enum(['repacking', 'returns', 'rto']),
+    limit: z.number().int().positive().optional().default(200),
+});
+
+export interface PendingSourcesCounts {
+    repacking: number;
+    returns: number;
+    rto: number;
+    rtoUrgent: number;
+}
+
+export interface PendingSourcesResponse {
+    counts: PendingSourcesCounts;
+}
+
+export interface QueuePanelItemResponse {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    imageUrl?: string;
+    contextLabel: string;
+    contextValue: string;
+    // RTO-specific
+    atWarehouse?: boolean;
+    daysInRto?: number;
+    customerName?: string;
+    orderNumber?: string;
+    // Returns-specific
+    requestNumber?: string;
+    // Repacking-specific
+    queueItemId?: string;
+    condition?: string;
+    inspectionNotes?: string;
+    returnRequestNumber?: string;
+    orderLineId?: string;
+    rtoOrderNumber?: string;
+    // For click-to-process
+    lineId?: string;
+    orderId?: string;
+    batchId?: string;
+}
+
+export interface PendingQueueResponse {
+    source: string;
+    items: QueuePanelItemResponse[];
+    total: number;
+}
+
+/**
+ * Get pending source counts for Returns RTO page tabs
+ */
+export const getPendingSources = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<PendingSourcesResponse> => {
+        const prisma = await getPrisma();
+
+        // Count repacking queue items (pending status)
+        const repackingCount = await prisma.repackingQueueItem.count({
+            where: { status: 'pending' },
+        });
+
+        // Count pending returns (not completed/cancelled)
+        const returnsCount = await prisma.returnRequest.count({
+            where: {
+                status: { notIn: ['completed', 'cancelled'] },
+                reverseReceived: false,
+            },
+        });
+
+        // Count RTO pending (rto_in_transit, at warehouse but not inwarded)
+        const rtoCount = await prisma.orderLine.count({
+            where: {
+                trackingStatus: { in: ['rto_in_transit', 'rto_out_for_delivery'] },
+                rtoReceivedAt: null,
+            },
+        });
+
+        // Count urgent RTOs (more than 7 days in RTO status)
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const rtoUrgentCount = await prisma.orderLine.count({
+            where: {
+                trackingStatus: { in: ['rto_in_transit', 'rto_out_for_delivery'] },
+                rtoReceivedAt: null,
+                rtoInitiatedAt: { lte: sevenDaysAgo },
+            },
+        });
+
+        return {
+            counts: {
+                repacking: repackingCount,
+                returns: returnsCount,
+                rto: rtoCount,
+                rtoUrgent: rtoUrgentCount,
+            },
+        };
+    });
+
+/**
+ * Get pending queue items by source
+ */
+export const getPendingQueue = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getPendingQueueInputSchema.parse(input))
+    .handler(async ({ data }): Promise<PendingQueueResponse> => {
+        const prisma = await getPrisma();
+        const { source, limit } = data;
+
+        const items: QueuePanelItemResponse[] = [];
+
+        if (source === 'repacking') {
+            // Get repacking queue items
+            const queueItems = await prisma.repackingQueueItem.findMany({
+                where: { status: 'pending' },
+                include: {
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: true,
+                                },
+                            },
+                        },
+                    },
+                    returnRequest: {
+                        select: { requestNumber: true },
+                    },
+                    orderLine: {
+                        select: {
+                            order: {
+                                select: { orderNumber: true },
+                            },
+                        },
+                    },
+                },
+                orderBy: { createdAt: 'asc' },
+                take: limit,
+            });
+
+            for (const item of queueItems) {
+                items.push({
+                    id: item.id,
+                    queueItemId: item.id,
+                    skuId: item.skuId,
+                    skuCode: item.sku.skuCode,
+                    productName: item.sku.variation.product.name,
+                    colorName: item.sku.variation.colorName,
+                    size: item.sku.size,
+                    qty: item.qty,
+                    imageUrl: item.sku.variation.imageUrl || item.sku.variation.product.imageUrl || undefined,
+                    contextLabel: item.returnRequest ? 'Return' : item.orderLine ? 'RTO' : 'Scan',
+                    contextValue: item.returnRequest?.requestNumber || item.orderLine?.order?.orderNumber || 'Unallocated',
+                    condition: item.condition || undefined,
+                    inspectionNotes: item.inspectionNotes || undefined,
+                    returnRequestNumber: item.returnRequest?.requestNumber || undefined,
+                    rtoOrderNumber: item.orderLine?.order?.orderNumber || undefined,
+                    orderLineId: item.orderLineId || undefined,
+                });
+            }
+        } else if (source === 'returns') {
+            // Get pending return request lines
+            const returnLines = await prisma.returnRequestLine.findMany({
+                where: {
+                    request: {
+                        status: { notIn: ['completed', 'cancelled'] },
+                        reverseReceived: false,
+                    },
+                },
+                include: {
+                    request: {
+                        select: {
+                            id: true,
+                            requestNumber: true,
+                            reasonCategory: true,
+                        },
+                    },
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: true,
+                                },
+                            },
+                        },
+                    },
+                },
+                orderBy: { request: { createdAt: 'asc' } },
+                take: limit,
+            });
+
+            for (const line of returnLines) {
+                items.push({
+                    id: line.id,
+                    skuId: line.skuId,
+                    skuCode: line.sku.skuCode,
+                    productName: line.sku.variation.product.name,
+                    colorName: line.sku.variation.colorName,
+                    size: line.sku.size,
+                    qty: line.qty,
+                    imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl || undefined,
+                    contextLabel: 'Ticket',
+                    contextValue: line.request.requestNumber,
+                    requestNumber: line.request.requestNumber,
+                });
+            }
+        } else if (source === 'rto') {
+            // Get RTO pending lines
+            const rtoLines = await prisma.orderLine.findMany({
+                where: {
+                    trackingStatus: { in: ['rto_in_transit', 'rto_out_for_delivery'] },
+                    rtoReceivedAt: null,
+                },
+                include: {
+                    order: {
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerName: true,
+                        },
+                    },
+                    sku: {
+                        include: {
+                            variation: {
+                                include: {
+                                    product: true,
+                                },
+                            },
+                        },
+                    },
+                },
+                orderBy: { rtoInitiatedAt: 'asc' },
+                take: limit,
+            });
+
+            for (const line of rtoLines) {
+                // Calculate days in RTO
+                let daysInRto: number | undefined;
+                if (line.rtoInitiatedAt) {
+                    const daysDiff = Math.floor(
+                        (Date.now() - new Date(line.rtoInitiatedAt).getTime()) / (1000 * 60 * 60 * 24)
+                    );
+                    daysInRto = daysDiff;
+                }
+
+                items.push({
+                    id: line.id,
+                    lineId: line.id,
+                    orderId: line.order.id,
+                    skuId: line.skuId,
+                    skuCode: line.sku.skuCode,
+                    productName: line.sku.variation.product.name,
+                    colorName: line.sku.variation.colorName,
+                    size: line.sku.size,
+                    qty: line.qty,
+                    imageUrl: line.sku.variation.imageUrl || line.sku.variation.product.imageUrl || undefined,
+                    contextLabel: 'Order',
+                    contextValue: line.order.orderNumber,
+                    orderNumber: line.order.orderNumber,
+                    customerName: line.order.customerName,
+                    atWarehouse: line.trackingStatus === 'rto_out_for_delivery',
+                    daysInRto,
+                });
+            }
+        }
+
+        return {
+            source,
+            items,
+            total: items.length,
+        };
+    });
+
+// Type for scan lookup match
+export interface ScanLookupMatch {
+    source: string;
+    priority: number;
+    data: {
+        lineId: string;
+        requestId?: string;
+        requestNumber?: string;
+        reasonCategory?: string | null;
+        orderId?: string;
+        orderNumber?: string;
+        customerName?: string;
+        qty: number;
+        atWarehouse?: boolean;
+    };
+}
+
+// Type for scan lookup result
+export interface ScanLookupResult {
+    sku: {
+        id: string;
+        skuCode: string;
+        productName: string;
+        colorName: string;
+        size: string;
+        mrp: number;
+        imageUrl: string | null;
+    };
+    currentBalance: number;
+    availableBalance: number;
+    matches: ScanLookupMatch[];
+    recommendedSource: string;
+}
+
+/**
+ * Scan lookup for SKU code (used in allocation modal)
+ */
+export const scanLookup = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => findBySkuCodeInputSchema.parse(input))
+    .handler(async ({ data }): Promise<ScanLookupResult> => {
+        const prisma = await getPrisma();
+        const { code } = data;
+
+        // Find SKU by code (SKU model doesn't have barcode field)
+        const sku = await prisma.sku.findFirst({
+            where: { skuCode: code },
+            include: {
+                variation: {
+                    include: {
+                        product: true,
+                    },
+                },
+            },
+        });
+
+        if (!sku) {
+            throw new Error('SKU not found');
+        }
+
+        // Get inventory balance
+        const { inventoryBalanceCache } = await import(
+            '../../../../server/src/services/inventoryBalanceCache.js'
+        );
+        const balanceMap = await inventoryBalanceCache.get(prisma, [sku.id]);
+        const balance = balanceMap.get(sku.id) || { currentBalance: 0, availableBalance: 0 };
+
+        // Find matching return requests
+        const returnMatches = await prisma.returnRequestLine.findMany({
+            where: {
+                skuId: sku.id,
+                request: {
+                    status: { notIn: ['completed', 'cancelled'] },
+                    reverseReceived: false,
+                },
+            },
+            include: {
+                request: {
+                    select: {
+                        id: true,
+                        requestNumber: true,
+                        reasonCategory: true,
+                    },
+                },
+            },
+            take: 10,
+        });
+
+        // Find matching RTO orders
+        const rtoMatches = await prisma.orderLine.findMany({
+            where: {
+                skuId: sku.id,
+                trackingStatus: { in: ['rto_in_transit', 'rto_out_for_delivery'] },
+                rtoReceivedAt: null,
+            },
+            include: {
+                order: {
+                    select: {
+                        id: true,
+                        orderNumber: true,
+                        customerName: true,
+                    },
+                },
+            },
+            take: 10,
+        });
+
+        // Build matches array
+        const matches: ScanLookupMatch[] = [];
+
+        for (const returnLine of returnMatches) {
+            matches.push({
+                source: 'return',
+                priority: 1,
+                data: {
+                    lineId: returnLine.id,
+                    requestId: returnLine.request.id,
+                    requestNumber: returnLine.request.requestNumber,
+                    reasonCategory: returnLine.request.reasonCategory,
+                    qty: returnLine.qty,
+                },
+            });
+        }
+
+        for (const rtoLine of rtoMatches) {
+            matches.push({
+                source: 'rto',
+                priority: 2,
+                data: {
+                    lineId: rtoLine.id,
+                    orderId: rtoLine.order.id,
+                    orderNumber: rtoLine.order.orderNumber,
+                    customerName: rtoLine.order.customerName,
+                    qty: rtoLine.qty,
+                    atWarehouse: rtoLine.trackingStatus === 'rto_out_for_delivery',
+                },
+            });
+        }
+
+        return {
+            sku: {
+                id: sku.id,
+                skuCode: sku.skuCode,
+                productName: sku.variation.product.name,
+                colorName: sku.variation.colorName,
+                size: sku.size,
+                mrp: Number(sku.mrp),
+                imageUrl: sku.variation.imageUrl || sku.variation.product.imageUrl,
+            },
+            currentBalance: balance.currentBalance,
+            availableBalance: balance.availableBalance,
+            matches,
+            recommendedSource: matches.length > 0 ? matches[0].source : 'adjustment',
+        };
+    });
