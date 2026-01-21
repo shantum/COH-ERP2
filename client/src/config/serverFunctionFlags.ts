@@ -16,29 +16,30 @@
  *   }
  */
 
+// SPA MODE: All Server Functions disabled - use tRPC instead
+// Server Functions require TanStack Start SSR runtime which isn't available in SPA builds
 export const USE_SERVER_FUNCTIONS = {
     /**
      * orders.list - Main orders listing endpoint
-     * Status: ENABLED - Using TanStack Start Server Function with Kysely
-     *         Vite SSR externals configured to prevent pg bundling in client.
+     * Status: DISABLED for SPA - uses tRPC
      */
-    ordersList: true,
+    ordersList: false,
 
     /**
      * orders.get - Single order detail
-     * Status: PENDING - Keep on tRPC
+     * Status: DISABLED - uses tRPC
      */
     ordersGet: false,
 
     /**
      * orders.* mutations - All order mutations
-     * Status: PENDING - Keep on tRPC (complex with optimistic updates)
+     * Status: DISABLED - uses tRPC
      */
     ordersMutations: false,
 
     /**
      * Simple line mutations (markLineDelivered, markLineRto, receiveLineRto, cancelLine)
-     * Status: PENDING - Server Functions available, waiting for testing
+     * Status: DISABLED - uses tRPC
      */
     lineDeliveryMutations: false,
     lineRtoMutations: false,
@@ -46,27 +47,27 @@ export const USE_SERVER_FUNCTIONS = {
 
     /**
      * inventory.getBalances - Inventory balance lookup
-     * Status: PENDING - Simple read, good candidate
+     * Status: DISABLED - uses tRPC
      */
     inventoryGetBalances: false,
 
     /**
      * inventory.list - Inventory listing page
-     * Status: ENABLED - Using TanStack Start Server Function with Kysely
+     * Status: DISABLED for SPA - uses tRPC
      */
-    inventoryList: true,
+    inventoryList: false,
 
     /**
      * customers.list - Customer listing
-     * Status: ENABLED - Using TanStack Start Server Function with Kysely
+     * Status: DISABLED for SPA - uses tRPC
      */
-    customersList: true,
+    customersList: false,
 
     /**
      * products.list - Product tree listing
-     * Status: ENABLED - Using TanStack Start Server Function with Kysely
+     * Status: DISABLED for SPA - uses tRPC
      */
-    productsList: true,
+    productsList: false,
 } as const;
 
 /**
