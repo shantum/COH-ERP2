@@ -230,30 +230,23 @@ async function generateSampleCode(prisma: PrismaClientType): Promise<string> {
 }
 
 /**
- * Get locked dates from config storage
+ * Get locked dates from SystemSetting table
  */
 async function getLockedDates(prisma: PrismaClientType): Promise<string[]> {
-    const config = await prisma.configStorage.findUnique({
-        where: { key: 'production_locked_dates' },
+    const setting = await prisma.systemSetting.findUnique({
+        where: { key: 'locked_production_dates' },
     });
-    if (config?.value) {
-        try {
-            return JSON.parse(config.value);
-        } catch {
-            return [];
-        }
-    }
-    return [];
+    return setting?.value ? JSON.parse(setting.value) : [];
 }
 
 /**
- * Save locked dates to config storage
+ * Save locked dates to SystemSetting table
  */
 async function saveLockedDates(prisma: PrismaClientType, dates: string[]): Promise<void> {
-    await prisma.configStorage.upsert({
-        where: { key: 'production_locked_dates' },
-        create: { key: 'production_locked_dates', value: JSON.stringify(dates) },
+    await prisma.systemSetting.upsert({
+        where: { key: 'locked_production_dates' },
         update: { value: JSON.stringify(dates) },
+        create: { key: 'locked_production_dates', value: JSON.stringify(dates) },
     });
 }
 
