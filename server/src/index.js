@@ -28,28 +28,23 @@ const __dirname = path.dirname(__filename);
 await initDb();
 
 // Import routes
-import productRoutes from './routes/products.js';
+// Products routes migrated to TanStack Start Server Functions
 import fabricRoutes from './routes/fabrics/index.js';
 import inventoryRoutes from './routes/inventory/index.js';
 import inventoryReconciliationRoutes from './routes/inventory-reconciliation.js';
 import orderRoutes from './routes/orders/index.js';
 import { autoArchiveOldOrders } from './routes/orders/mutations/index.js';
 import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
-import customerRoutes from './routes/customers.js';
 import returnRoutes from './routes/returns/index.js';
-import feedbackRoutes from './routes/feedback.js';
-// Production routes migrated to TanStack Start Server Functions
-import reportRoutes from './routes/reports.js';
-import salesAnalyticsRoutes from './routes/sales-analytics.js';
+// Feedback routes migrated to TanStack Start Server Functions
 import authRoutes from './routes/auth.js';
 import importExportRoutes from './routes/import-export.js';
 import shopifyRoutes from './routes/shopify/index.js';
 import adminRoutes from './routes/admin.js';
 import webhookRoutes from './routes/webhooks.js';
-import repackingRoutes from './routes/repacking.js';
-import trackingRoutes from './routes/tracking.js';
+// Repacking routes migrated to TanStack Start Server Functions
+// Tracking routes migrated to TanStack Start Server Functions
 import remittanceRoutes from './routes/remittance.js';
-import catalogRoutes from './routes/catalog.js';
 import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
 import pulseRoutes from './routes/pulse.js';
@@ -134,25 +129,20 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
+// Products routes migrated to TanStack Start Server Functions
 app.use('/api/fabrics', fabricRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/inventory', inventoryReconciliationRoutes);
 app.use('/api/orders', orderRoutes);
-app.use('/api/customers', customerRoutes);
 app.use('/api/returns', returnRoutes);
-app.use('/api/feedback', feedbackRoutes);
-// Production routes migrated to TanStack Start Server Functions
-app.use('/api/reports', reportRoutes);
-app.use('/api/reports/sales-analytics', salesAnalyticsRoutes);
+// Feedback routes migrated to TanStack Start Server Functions
 app.use('/api', importExportRoutes);
 app.use('/api/shopify', shopifyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/webhooks', webhookRoutes);
-app.use('/api/repacking', repackingRoutes);
-app.use('/api/tracking', trackingRoutes);
+// Repacking routes migrated to TanStack Start Server Functions
+// Tracking routes migrated to TanStack Start Server Functions
 app.use('/api/remittance', remittanceRoutes);
-app.use('/api/catalog', catalogRoutes);
 app.use('/api/pincodes', pincodeRoutes);
 app.use('/api/events', sseRoutes);
 app.use('/api/pulse', pulseRoutes);
