@@ -7,36 +7,26 @@
  * - Results grouped by status
  * - Navigate to correct page (Orders or Shipments) with tab and orderId
  * - Keyboard navigable (Enter to select first result)
+ *
+ * Uses Server Functions for data fetching (TanStack Start migration)
  */
 
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
-import { ordersApi } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
-// Tab types (previously from deprecated hooks)
+import {
+    searchAllOrders,
+    type SearchResultOrder,
+    type TabResult,
+    type SearchAllResponse,
+} from '../server/functions/orders';
+
+// Tab types for navigation
 type OrderTab = 'open' | 'cancelled';
 type ShipmentTab = 'shipped' | 'rto' | 'cod-pending' | 'archived';
 type AllTabs = OrderTab | ShipmentTab;
-
-interface SearchResult {
-    id: string;
-    orderNumber: string;
-    customerName: string;
-    status: string;
-    paymentMethod: string;
-    totalAmount: number;
-    trackingStatus?: string;
-    awbNumber?: string;
-}
-
-interface TabResult {
-    tab: string;
-    tabName: string;
-    count: number;
-    orders: SearchResult[];
-}
 
 // Map API tab names to tab types
 const tabMapping: Record<string, AllTabs> = {
@@ -75,10 +65,10 @@ export default function OrderSearch() {
         inputRef.current?.focus();
     }, []);
 
-    // Search query
-    const { data: searchResults, isLoading } = useQuery({
+    // Search query using Server Function
+    const { data: searchResults, isLoading } = useQuery<SearchAllResponse>({
         queryKey: ['orderSearchAll', searchQuery],
-        queryFn: () => ordersApi.searchAll(searchQuery, 50).then(r => r.data),
+        queryFn: () => searchAllOrders({ data: { q: searchQuery, limit: 50 } }),
         enabled: searchQuery.length >= 2,
         staleTime: 30000, // Cache for 30s
     });
@@ -95,7 +85,7 @@ export default function OrderSearch() {
 
     // Keyboard navigation: Enter to select first result
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter' && searchResults?.results?.length > 0) {
+        if (e.key === 'Enter' && searchResults?.results && searchResults.results.length > 0) {
             const firstTab = searchResults.results[0];
             const firstOrder = firstTab?.orders[0];
             if (firstOrder) {
@@ -104,7 +94,7 @@ export default function OrderSearch() {
         }
     };
 
-    const hasResults = searchResults?.results?.length > 0;
+    const hasResults = searchResults?.results && searchResults.results.length > 0;
     const showResults = searchQuery.length >= 2;
 
     return (
@@ -151,7 +141,7 @@ export default function OrderSearch() {
             )}
 
             {/* Results */}
-            {!isLoading && hasResults && (
+            {!isLoading && hasResults && searchResults && (
                 <div className="space-y-6">
                     {/* Total count */}
                     <div className="text-sm text-gray-600">
@@ -175,7 +165,7 @@ export default function OrderSearch() {
 
                             {/* Orders in this tab */}
                             <div className="divide-y divide-gray-100">
-                                {tabResult.orders.map((order: SearchResult) => (
+                                {tabResult.orders.map((order: SearchResultOrder) => (
                                     <button
                                         key={order.id}
                                         onClick={() => handleSelectOrder(order.id, tabResult.tab)}
@@ -186,18 +176,22 @@ export default function OrderSearch() {
                                                 <span className="font-semibold text-gray-900 text-lg">
                                                     #{order.orderNumber}
                                                 </span>
-                                                <span className={`text-xs px-2 py-1 rounded font-medium ${order.paymentMethod === 'COD'
-                                                        ? 'bg-amber-100 text-amber-700'
-                                                        : 'bg-green-100 text-green-700'
-                                                    }`}>
-                                                    {order.paymentMethod}
-                                                </span>
-                                                <span className="text-sm font-medium text-gray-900">
-                                                    ₹{order.totalAmount.toLocaleString('en-IN')}
-                                                </span>
+                                                {order.paymentMethod && (
+                                                    <span className={`text-xs px-2 py-1 rounded font-medium ${order.paymentMethod === 'COD'
+                                                            ? 'bg-amber-100 text-amber-700'
+                                                            : 'bg-green-100 text-green-700'
+                                                        }`}>
+                                                        {order.paymentMethod}
+                                                    </span>
+                                                )}
+                                                {order.totalAmount != null && (
+                                                    <span className="text-sm font-medium text-gray-900">
+                                                        ₹{order.totalAmount.toLocaleString('en-IN')}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="text-sm text-gray-600">
-                                                {order.customerName}
+                                                {order.customerName || '-'}
                                             </div>
                                             {order.awbNumber && (
                                                 <div className="text-xs text-gray-500 mt-1">

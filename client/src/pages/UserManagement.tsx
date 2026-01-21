@@ -1,10 +1,13 @@
 /**
  * User Management Page
  * Allows admins to view, create, and manage users and their roles
+ *
+ * Uses TanStack Start Server Functions for data fetching and mutations.
  */
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import type { ColDef, ICellRendererParams } from 'ag-grid-community';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
@@ -13,9 +16,15 @@ import { adminApi } from '../services/api';
 import { compactTheme, formatDateWithYear, formatRelativeTime } from '../utils/agGridHelpers';
 import { usePermissions } from '../hooks/usePermissions';
 import { PermissionGate, AccessDenied } from '../components/PermissionGate';
-import type { User, Role } from '../types';
+import type { Role } from '../types';
+import type { User } from '../types';
 import CreateUserModal from '../components/admin/CreateUserModal';
 import PermissionEditorModal from '../components/admin/PermissionEditorModal';
+import {
+    getUsers as getUsersFn,
+    updateUser as updateUserFn,
+    type User as AdminUser,
+} from '../server/functions/admin';
 
 // Register AG Grid modules
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -60,6 +69,10 @@ export default function UserManagement() {
     const gridRef = useRef<AgGridReact>(null);
     const { hasPermission } = usePermissions();
 
+    // Server Function wrappers
+    const getUsersServerFn = useServerFn(getUsersFn);
+    const updateUserServerFn = useServerFn(updateUserFn);
+
     // State
     const [searchInput, setSearchInput] = useState('');
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -74,31 +87,47 @@ export default function UserManagement() {
         );
     }
 
-    // Fetch users
+    // Fetch users using Server Function
     const { data: users, isLoading: usersLoading } = useQuery({
         queryKey: ['admin-users'],
-        queryFn: () => adminApi.getUsers().then(r => r.data),
+        queryFn: async () => {
+            const result = await getUsersServerFn();
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to fetch users');
+            }
+            return result.data;
+        },
     });
 
-    // Fetch roles for dropdown
+    // Fetch roles for dropdown (still using adminApi - no Server Function available yet)
     const { data: roles } = useQuery({
         queryKey: ['admin-roles'],
         queryFn: () => adminApi.getRoles().then(r => r.data),
     });
 
-    // Update user role mutation
+    // Update user role mutation using Server Function
     const updateRoleMutation = useMutation({
-        mutationFn: ({ userId, roleId }: { userId: string; roleId: string }) =>
-            adminApi.assignUserRole(userId, roleId),
+        mutationFn: async ({ userId, roleId }: { userId: string; roleId: string }) => {
+            const result = await updateUserServerFn({ data: { userId, roleId } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update user role');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
         },
     });
 
-    // Update user status mutation
+    // Update user status mutation using Server Function
     const updateUserMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: { isActive?: boolean } }) =>
-            adminApi.updateUser(id, data),
+        mutationFn: async ({ id, data }: { id: string; data: { isActive?: boolean } }) => {
+            const result = await updateUserServerFn({ data: { userId: id, ...data } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update user');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
         },
@@ -250,8 +279,8 @@ export default function UserManagement() {
         if (!users) return { total: 0, active: 0, inactive: 0 };
         return {
             total: users.length,
-            active: users.filter((u: User) => u.isActive).length,
-            inactive: users.filter((u: User) => !u.isActive).length,
+            active: users.filter((u: AdminUser) => u.isActive).length,
+            inactive: users.filter((u: AdminUser) => !u.isActive).length,
         };
     }, [users]);
 

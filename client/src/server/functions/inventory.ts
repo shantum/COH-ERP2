@@ -621,6 +621,124 @@ export const getInventoryList = createServerFn({ method: 'GET' })
     });
 
 // ============================================
+// INVENTORY TRANSACTIONS SERVER FUNCTION
+// ============================================
+
+const getInventoryTransactionsSchema = z.object({
+    skuId: z.string().uuid().optional(),
+    txnType: z.enum(['inward', 'outward']).optional(),
+    reason: z.string().optional(),
+    limit: z.number().int().positive().max(1000).optional().default(500),
+    offset: z.number().int().nonnegative().optional().default(0),
+    days: z.number().int().positive().optional(),
+}).optional();
+
+export type GetInventoryTransactionsInput = z.infer<typeof getInventoryTransactionsSchema>;
+
+/** Inventory transaction item */
+export interface InventoryTransactionItem {
+    id: string;
+    skuId: string;
+    txnType: 'inward' | 'outward';
+    qty: number;
+    reason: string | null;
+    referenceId: string | null;
+    notes: string | null;
+    createdAt: string;
+    createdBy: { id: string; name: string } | null;
+    sku: {
+        skuCode: string;
+        size: string;
+        isCustomSku: boolean;
+        variation: {
+            colorName: string;
+            product: { name: string };
+        };
+    } | null;
+}
+
+/**
+ * Get inventory transactions
+ *
+ * Returns inventory transactions with optional filtering by SKU, type, reason.
+ * Used by Ledgers page for SKU transaction history.
+ */
+export const getInventoryTransactions = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof getInventoryTransactionsSchema> =>
+            getInventoryTransactionsSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<InventoryTransactionItem[]> => {
+        const prisma = await getPrisma();
+
+        const { skuId, txnType, reason, limit, offset, days } = data ?? {};
+
+        // Build where clause
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const where: Record<string, any> = {};
+
+        if (skuId) {
+            where.skuId = skuId;
+        }
+        if (txnType) {
+            where.txnType = txnType;
+        }
+        if (reason) {
+            where.reason = reason;
+        }
+        if (days) {
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+            where.createdAt = { gte: startDate };
+        }
+
+        const transactions = await prisma.inventoryTransaction.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            take: limit ?? 500,
+            skip: offset ?? 0,
+            select: {
+                id: true,
+                skuId: true,
+                txnType: true,
+                qty: true,
+                reason: true,
+                referenceId: true,
+                notes: true,
+                createdAt: true,
+                sku: {
+                    select: {
+                        skuCode: true,
+                        size: true,
+                        isCustomSku: true,
+                        variation: {
+                            select: {
+                                colorName: true,
+                                product: { select: { name: true } },
+                            },
+                        },
+                    },
+                },
+                createdBy: { select: { id: true, name: true } },
+            },
+        });
+
+        return transactions.map((t) => ({
+            id: t.id,
+            skuId: t.skuId,
+            txnType: t.txnType as 'inward' | 'outward',
+            qty: t.qty,
+            reason: t.reason,
+            referenceId: t.referenceId,
+            notes: t.notes,
+            createdAt: t.createdAt.toISOString(),
+            createdBy: t.createdBy,
+            sku: t.sku,
+        }));
+    });
+
+// ============================================
 // RECENT INWARDS SERVER FUNCTION
 // ============================================
 

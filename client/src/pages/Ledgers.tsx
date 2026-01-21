@@ -1,8 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi, fabricsApi } from '../services/api';
 import { useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Search, Calendar, Trash2, Wrench } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+
+// Server Functions
+import { getInventoryTransactions, type InventoryTransactionItem } from '../server/functions/inventory';
+import { getAllFabricTransactions, getFabricTypes } from '../server/functions/fabrics';
+import { deleteTransaction as deleteInventoryTransaction } from '../server/functions/inventoryMutations';
+import { deleteFabricTransaction } from '../server/functions/fabricMutations';
 
 type Tab = 'inventory' | 'fabric';
 
@@ -14,38 +19,68 @@ export default function Ledgers() {
     const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '', customOnly: false });
     const [fabricFilter, setFabricFilter] = useState({ search: '', txnType: '' });
 
-    // Fetch all inventory transactions
+    // Fetch all inventory transactions using Server Function
     const { data: inventoryTxns, isLoading: invLoading } = useQuery({
         queryKey: ['allInventoryTransactions'],
-        queryFn: () => inventoryApi.getTransactions({ limit: '500' }).then(r => r.data),
+        queryFn: async () => {
+            const result = await getInventoryTransactions({ data: { limit: 500 } });
+            return result;
+        },
         enabled: activeTab === 'inventory'
     });
 
-    // Fetch fabric types (kept for potential future use)
-    const { data: _fabricTypes } = useQuery({
+    // Fetch fabric types (kept for potential future use) using Server Function
+    const { data: _fabricTypesData } = useQuery({
         queryKey: ['fabricTypes'],
-        queryFn: () => fabricsApi.getTypes().then(r => r.data),
+        queryFn: async () => {
+            const result = await getFabricTypes();
+            return result.types;
+        },
         enabled: activeTab === 'fabric'
     });
 
-    // Fetch all fabric transactions (single batch query - no more N+1)
-    const { data: fabricTxns, isLoading: fabLoading } = useQuery({
+    // FabricTransaction interface for typing
+    interface FabricTransaction {
+        id: string;
+        fabric?: { colorName?: string; colorHex?: string; fabricType?: { name: string } } | null;
+        fabricType?: { name?: string } | null;
+        txnType: string;
+        reason: string;
+        createdAt: string;
+        qty: number;
+        unit: string;
+        notes?: string | null;
+        costPerUnit?: number | null;
+        supplier?: { name: string } | null;
+        createdBy?: { name: string } | null;
+    }
+
+    // Fetch all fabric transactions using Server Function
+    const { data: fabricTxns, isLoading: fabLoading } = useQuery<FabricTransaction[]>({
         queryKey: ['allFabricTransactions'],
         queryFn: async () => {
-            const txns = await fabricsApi.getAllTransactions({ limit: 1000, days: 365 }).then(r => r.data);
+            const result = await getAllFabricTransactions({ data: { limit: 1000, days: 365 } });
             // Transform to expected format
-            return txns.map((t: any) => ({
-                ...t,
+            return result.transactions.map((t): FabricTransaction => ({
+                id: t.id,
+                txnType: t.txnType,
+                reason: t.reason,
+                createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt as Date).toISOString(),
+                qty: Number(t.qty),
+                unit: t.unit,
+                notes: t.notes,
+                costPerUnit: t.costPerUnit ? Number(t.costPerUnit) : null,
                 fabric: t.fabric,
-                fabricType: t.fabric?.fabricType
+                fabricType: t.fabric?.fabricType,
+                supplier: t.supplier,
+                createdBy: t.createdBy
             }));
         },
         enabled: activeTab === 'fabric'
     });
 
-    // Filter inventory transactions (exclude 'reserved' - temporary allocations)
-    const filteredInventory = inventoryTxns?.filter((txn: any) => {
-        if (txn.txnType === 'reserved') return false;
+    // Filter inventory transactions
+    const filteredInventory = inventoryTxns?.filter((txn: InventoryTransactionItem) => {
         if (inventoryFilter.search) {
             const search = inventoryFilter.search.toLowerCase();
             const skuMatch = txn.sku?.skuCode?.toLowerCase().includes(search);
@@ -63,13 +98,12 @@ export default function Ledgers() {
     });
 
     // Count custom transactions for badge
-    const customTxnCount = inventoryTxns?.filter((txn: any) => {
-        if (txn.txnType === 'reserved') return false;
+    const customTxnCount = inventoryTxns?.filter((txn: InventoryTransactionItem) => {
         return txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-');
     })?.length || 0;
 
     // Filter fabric transactions
-    const filteredFabric = fabricTxns?.filter((txn: any) => {
+    const filteredFabric = fabricTxns?.filter((txn: FabricTransaction) => {
         if (fabricFilter.search) {
             const search = fabricFilter.search.toLowerCase();
             const fabricMatch = txn.fabric?.colorName?.toLowerCase().includes(search);
@@ -81,8 +115,8 @@ export default function Ledgers() {
     });
 
     // Group transactions by date
-    const groupByDate = (txns: any[]) => {
-        const groups: { [key: string]: any[] } = {};
+    const groupByDate = <T extends { createdAt: string }>(txns: T[] | undefined) => {
+        const groups: { [key: string]: T[] } = {};
         txns?.forEach(txn => {
             const date = new Date(txn.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
             if (!groups[date]) groups[date] = [];
@@ -94,36 +128,48 @@ export default function Ledgers() {
     const inventoryGroups = groupByDate(filteredInventory || []);
     const fabricGroups = groupByDate(filteredFabric || []);
 
-    const deleteFabricTransaction = useMutation({
-        mutationFn: (txnId: string) => fabricsApi.deleteTransaction(txnId),
+    const deleteFabricTxnMutation = useMutation({
+        mutationFn: async (txnId: string) => {
+            const result = await deleteFabricTransaction({ data: { txnId } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to delete transaction');
+            }
+            return result;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
             queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
+        onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
     });
 
-    const deleteInventoryTransaction = useMutation({
-        mutationFn: (txnId: string) => inventoryApi.deleteTransaction(txnId),
-        onSuccess: (data: any) => {
+    const deleteInventoryTxnMutation = useMutation({
+        mutationFn: async (txnId: string) => {
+            const result = await deleteInventoryTransaction({ data: { transactionId: txnId } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to delete transaction');
+            }
+            return result;
+        },
+        onSuccess: (data) => {
             queryClient.invalidateQueries({ queryKey: ['allInventoryTransactions'] });
             queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
             // If production batch was reverted, also invalidate production queries
-            if (data?.data?.revertedProductionBatch) {
+            if (data?.data?.message?.includes('production')) {
                 queryClient.invalidateQueries({ queryKey: ['productionBatches'] });
                 queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
                 queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
             }
             // If allocation was reverted, also invalidate orders
-            if (data?.data?.revertedAllocation) {
+            if (data?.data?.message?.includes('allocation') || data?.data?.message?.includes('queue')) {
                 queryClient.invalidateQueries({ queryKey: ['orders'] });
             }
         },
-        onError: (err: any) => alert(err.response?.data?.error || 'Failed to delete transaction')
+        onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
     });
 
     // Get unique reasons for filter dropdown
-    const inventoryReasons = [...new Set(inventoryTxns?.map((t: any) => t.reason as string) || [])] as string[];
+    const inventoryReasons = [...new Set(inventoryTxns?.map((t: InventoryTransactionItem) => t.reason as string) || [])] as string[];
 
     return (
         <div className="space-y-4 md:space-y-6">
@@ -231,7 +277,7 @@ export default function Ledgers() {
                                         <span className="text-xs text-gray-400">({txns.length} transactions)</span>
                                     </div>
                                     <div className="card divide-y">
-                                        {txns.map((txn: any) => (
+                                        {txns.map((txn: InventoryTransactionItem) => (
                                             <div key={txn.id} className="py-3 flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
                                                     {txn.txnType === 'inward' ? (
@@ -259,7 +305,7 @@ export default function Ledgers() {
                                                             </span>
                                                         </p>
                                                         <div className="flex items-center gap-2 text-xs text-gray-500">
-                                                            <span className="capitalize">{txn.reason.replace(/_/g, ' ')}</span>
+                                                            <span className="capitalize">{txn.reason?.replace(/_/g, ' ')}</span>
                                                             <span>•</span>
                                                             <span>{new Date(txn.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                                                             <span>•</span>
@@ -276,7 +322,7 @@ export default function Ledgers() {
                                                         <button
                                                             onClick={() => {
                                                                 if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} units?`)) {
-                                                                    deleteInventoryTransaction.mutate(txn.id);
+                                                                    deleteInventoryTxnMutation.mutate(txn.id);
                                                                 }
                                                             }}
                                                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
@@ -342,7 +388,7 @@ export default function Ledgers() {
                                         <span className="text-xs text-gray-400">({txns.length} transactions)</span>
                                     </div>
                                     <div className="card divide-y">
-                                        {txns.map((txn: any) => (
+                                        {txns.map((txn: FabricTransaction) => (
                                             <div key={txn.id} className="py-3 flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
                                                     {txn.txnType === 'inward' ? (
@@ -397,7 +443,7 @@ export default function Ledgers() {
                                                         <button
                                                             onClick={() => {
                                                                 if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} ${txn.unit}?`)) {
-                                                                    deleteFabricTransaction.mutate(txn.id);
+                                                                    deleteFabricTxnMutation.mutate(txn.id);
                                                                 }
                                                             }}
                                                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"

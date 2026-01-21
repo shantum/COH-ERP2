@@ -12,8 +12,15 @@ import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 
 // ============================================
-// INPUT VALIDATION SCHEMA
+// INPUT VALIDATION SCHEMAS
 // ============================================
+
+const searchAllInputSchema = z.object({
+    q: z.string().min(2, 'Search query must be at least 2 characters'),
+    limit: z.number().int().positive().max(20).default(5),
+});
+
+export type SearchAllInput = z.infer<typeof searchAllInputSchema>;
 
 const ordersListInputSchema = z.object({
     view: z.enum(['open', 'shipped', 'cancelled'] as const),
@@ -730,6 +737,235 @@ export const getOrders = createServerFn({ method: 'GET' })
             };
         } catch (error) {
             console.error('[Server Function] Error in getOrders:', error);
+            throw error;
+        }
+    });
+
+// ============================================
+// SEARCH ALL ORDERS - RESPONSE TYPES
+// ============================================
+
+export interface SearchResultOrder {
+    id: string;
+    orderNumber: string;
+    customerName: string | null;
+    status: string;
+    paymentMethod: string | null;
+    totalAmount: number | null;
+    trackingStatus?: string;
+    awbNumber?: string;
+}
+
+export interface TabResult {
+    tab: string;
+    tabName: string;
+    count: number;
+    orders: SearchResultOrder[];
+}
+
+export interface SearchAllResponse {
+    query: string;
+    totalResults: number;
+    results: TabResult[];
+}
+
+// ============================================
+// SEARCH ALL ORDERS - SERVER FUNCTION
+// ============================================
+
+/**
+ * Helper to get tab display name
+ */
+function getTabDisplayName(tab: string): string {
+    const names: Record<string, string> = {
+        open: 'Open',
+        cancelled: 'Cancelled',
+        shipped: 'Shipped',
+        rto: 'RTO',
+        cod_pending: 'COD Pending',
+        archived: 'Archived',
+    };
+    return names[tab] || tab;
+}
+
+/**
+ * Server Function: Search all orders across tabs
+ *
+ * Searches across all order statuses (open, shipped, cancelled, RTO, COD pending, archived)
+ * and returns results grouped by tab.
+ */
+export const searchAllOrders = createServerFn({ method: 'GET' })
+    .inputValidator((input: unknown) => searchAllInputSchema.parse(input))
+    .handler(async ({ data }): Promise<SearchAllResponse> => {
+        console.log('[Server Function] searchAllOrders called with:', data);
+
+        try {
+            // Dynamic import to prevent bundling Prisma into client
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = (await import('@prisma/client')) as any;
+
+            // Use global singleton pattern
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalForPrisma = globalThis as any;
+            const prisma = globalForPrisma.prisma ?? new PrismaClient();
+            if (process.env.NODE_ENV !== 'production') {
+                globalForPrisma.prisma = prisma;
+            }
+
+            const { q, limit } = data;
+            const searchTerm = q.trim();
+            const take = Math.min(limit, 20); // Cap at 20 per tab
+
+            // Build search OR clause
+            // AWB is on OrderLine, so search via nested relation
+            const searchWhere = {
+                OR: [
+                    { orderNumber: { contains: searchTerm, mode: 'insensitive' as const } },
+                    { customerName: { contains: searchTerm, mode: 'insensitive' as const } },
+                    { customerEmail: { contains: searchTerm, mode: 'insensitive' as const } },
+                    { customerPhone: { contains: searchTerm } },
+                    // Search AWB via order lines
+                    { orderLines: { some: { awbNumber: { contains: searchTerm } } } },
+                ],
+            };
+
+            // Define tab filters (matching ORDER_VIEWS from server)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const tabs: Record<string, any> = {
+                open: {
+                    AND: [searchWhere, { status: 'open', isArchived: false }],
+                },
+                shipped: {
+                    AND: [
+                        searchWhere,
+                        { status: { in: ['shipped', 'delivered'] }, isArchived: false },
+                        // Exclude RTO orders (check at line level)
+                        {
+                            NOT: {
+                                orderLines: {
+                                    some: {
+                                        trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+                rto: {
+                    AND: [
+                        searchWhere,
+                        {
+                            isArchived: false,
+                            orderLines: {
+                                some: {
+                                    trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
+                                },
+                            },
+                        },
+                    ],
+                },
+                cod_pending: {
+                    AND: [
+                        searchWhere,
+                        {
+                            paymentMethod: 'COD',
+                            codRemittedAt: null,
+                            isArchived: false,
+                            // At least one delivered line
+                            orderLines: {
+                                some: { deliveredAt: { not: null } },
+                            },
+                        },
+                    ],
+                },
+                cancelled: {
+                    AND: [searchWhere, { releasedToCancelled: true, isArchived: false }],
+                },
+                archived: {
+                    AND: [searchWhere, { isArchived: true }],
+                },
+            };
+
+            // Query all tabs in parallel
+            const queries = Object.entries(tabs).map(([tabName, where]) =>
+                prisma.order
+                    .findMany({
+                        where,
+                        select: {
+                            id: true,
+                            orderNumber: true,
+                            customerName: true,
+                            status: true,
+                            paymentMethod: true,
+                            totalAmount: true,
+                            orderDate: true,
+                            // Get first line's AWB and tracking status for display
+                            orderLines: {
+                                select: {
+                                    awbNumber: true,
+                                    trackingStatus: true,
+                                },
+                                take: 1,
+                            },
+                        },
+                        orderBy: { orderDate: 'desc' },
+                        take,
+                    })
+                    .then(
+                        (
+                            orders: Array<{
+                                id: string;
+                                orderNumber: string;
+                                customerName: string | null;
+                                status: string;
+                                paymentMethod: string | null;
+                                totalAmount: number | null;
+                                orderLines: Array<{
+                                    awbNumber: string | null;
+                                    trackingStatus: string | null;
+                                }>;
+                            }>
+                        ) => ({
+                            tab: tabName,
+                            orders: orders.map((o) => ({
+                                id: o.id,
+                                orderNumber: o.orderNumber,
+                                customerName: o.customerName,
+                                status: o.status,
+                                paymentMethod: o.paymentMethod,
+                                totalAmount: o.totalAmount,
+                                awbNumber: o.orderLines[0]?.awbNumber ?? undefined,
+                                trackingStatus: o.orderLines[0]?.trackingStatus ?? undefined,
+                            })),
+                        })
+                    )
+            );
+
+            const tabResults = await Promise.all(queries);
+
+            // Format response - filter out empty tabs
+            const results = tabResults
+                .filter((r) => r.orders.length > 0)
+                .map((r) => ({
+                    tab: r.tab,
+                    tabName: getTabDisplayName(r.tab),
+                    count: r.orders.length,
+                    orders: r.orders,
+                }));
+
+            console.log(
+                '[Server Function] searchAllOrders found',
+                results.reduce((sum, r) => sum + r.count, 0),
+                'results'
+            );
+
+            return {
+                query: searchTerm,
+                totalResults: results.reduce((sum, r) => sum + r.count, 0),
+                results,
+            };
+        } catch (error) {
+            console.error('[Server Function] Error in searchAllOrders:', error);
             throw error;
         }
     });
