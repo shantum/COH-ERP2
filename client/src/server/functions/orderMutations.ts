@@ -2674,3 +2674,909 @@ export const removeLineCustomization = createServerFn({ method: 'POST' })
             },
         };
     });
+
+// ============================================
+// ADDITIONAL SHIPPING MUTATIONS
+// ============================================
+
+/**
+ * Ship multiple lines with tracking info
+ */
+const shipLinesSchema = z.object({
+    lineIds: z.array(z.string().uuid()).min(1, 'At least one line ID is required'),
+    awbNumber: z.string().min(1, 'AWB number is required').trim().transform((val) => val.toUpperCase()),
+    courier: z.string().min(1, 'Courier is required').trim(),
+});
+
+export interface ShipLinesResult {
+    shipped: Array<{ lineId: string; skuCode?: string; qty: number }>;
+    skipped: Array<{ lineId: string; reason: string }>;
+    errors: Array<{ lineId?: string; error: string; code: string }>;
+    orderUpdated: boolean;
+}
+
+export const shipLines = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => shipLinesSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<ShipLinesResult>> => {
+        const prisma = await getPrisma();
+        const { lineIds, awbNumber, courier } = data;
+
+        try {
+            // Import shipOrderLines dynamically
+            // @ts-expect-error - Dynamic import from server directory, types not available in client build
+            const { shipOrderLines } = await import('../../../server/src/services/shipOrderService.js');
+
+            const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+                return await shipOrderLines(tx, {
+                    orderLineIds: lineIds,
+                    awbNumber,
+                    courier,
+                    userId: context.user.id,
+                });
+            });
+
+            // Broadcast SSE update for shipped lines
+            if (result.shipped.length > 0) {
+                const orderId = result.orderId;
+                broadcastUpdate(
+                    {
+                        type: 'lines_shipped',
+                        orderId: orderId || undefined,
+                        affectedViews: ['open', 'shipped'],
+                        changes: {
+                            awbNumber,
+                            courier,
+                            shippedCount: result.shipped.length,
+                        },
+                    },
+                    context.user.id
+                );
+            }
+
+            return {
+                success: true,
+                data: result,
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return {
+                success: false,
+                error: {
+                    code: errorMessage.includes('AWB') ? 'CONFLICT' : 'BAD_REQUEST',
+                    message: errorMessage,
+                },
+            };
+        }
+    });
+
+/**
+ * Mark a single line as shipped with AWB
+ */
+const markShippedLineSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    awbNumber: z.string().min(1, 'AWB number is required').trim().transform((val) => val.toUpperCase()),
+    courier: z.string().min(1, 'Courier is required').trim(),
+});
+
+export interface MarkShippedLineResult {
+    lineId: string;
+    orderId: string;
+    shippedAt: string;
+    awbNumber: string;
+    courier: string;
+    orderUpdated: boolean;
+}
+
+export const markShippedLine = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markShippedLineSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<MarkShippedLineResult>> => {
+        const prisma = await getPrisma();
+        const { lineId, awbNumber, courier } = data;
+
+        try {
+            // Import shipOrderLines dynamically
+            // @ts-expect-error - Dynamic import from server directory, types not available in client build
+            const { shipOrderLines } = await import('../../../server/src/services/shipOrderService.js');
+
+            const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+                return await shipOrderLines(tx, {
+                    orderLineIds: [lineId],
+                    awbNumber,
+                    courier,
+                    userId: context.user.id,
+                });
+            });
+
+            if (result.errors.length > 0) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST',
+                        message: result.errors[0].error,
+                    },
+                };
+            }
+
+            if (result.skipped.length > 0) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST',
+                        message: result.skipped[0].reason || 'Line cannot be shipped',
+                    },
+                };
+            }
+
+            const shippedLine = result.shipped[0];
+            if (!shippedLine) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'BAD_REQUEST',
+                        message: 'Failed to ship line',
+                    },
+                };
+            }
+
+            // Fetch updated line for response
+            const line = await prisma.orderLine.findUnique({
+                where: { id: lineId },
+                select: { orderId: true, shippedAt: true },
+            });
+
+            if (!line) {
+                return {
+                    success: false,
+                    error: { code: 'NOT_FOUND', message: 'Line not found after shipping' },
+                };
+            }
+
+            // Broadcast SSE update
+            broadcastUpdate(
+                {
+                    type: 'line_shipped',
+                    lineId,
+                    orderId: line.orderId,
+                    affectedViews: ['open', 'shipped'],
+                    changes: {
+                        lineStatus: 'shipped',
+                        awbNumber,
+                        courier,
+                        shippedAt: line.shippedAt?.toISOString(),
+                    },
+                },
+                context.user.id
+            );
+
+            return {
+                success: true,
+                data: {
+                    lineId,
+                    orderId: line.orderId,
+                    shippedAt: line.shippedAt?.toISOString() || new Date().toISOString(),
+                    awbNumber,
+                    courier,
+                    orderUpdated: result.orderUpdated,
+                },
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            return {
+                success: false,
+                error: {
+                    code: errorMessage.includes('AWB') ? 'CONFLICT' : 'BAD_REQUEST',
+                    message: errorMessage,
+                },
+            };
+        }
+    });
+
+/**
+ * Revert shipped line back to packed
+ */
+const unmarkShippedLineSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+});
+
+export interface UnmarkShippedLineResult {
+    lineId: string;
+    orderId: string;
+    lineStatus: string;
+}
+
+export const unmarkShippedLine = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => unmarkShippedLineSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<UnmarkShippedLineResult>> => {
+        const prisma = await getPrisma();
+        const { lineId } = data;
+
+        // Fetch line
+        const line = await prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: {
+                id: true,
+                lineStatus: true,
+                orderId: true,
+                deliveredAt: true,
+                rtoInitiatedAt: true,
+            },
+        });
+
+        if (!line) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Order line not found' },
+            };
+        }
+
+        // Validate line is shipped and not delivered/RTO
+        if (line.lineStatus !== 'shipped') {
+            return {
+                success: false,
+                error: {
+                    code: 'BAD_REQUEST',
+                    message: `Cannot unship: line status is '${line.lineStatus}', must be 'shipped'`,
+                },
+            };
+        }
+
+        if (line.deliveredAt) {
+            return {
+                success: false,
+                error: {
+                    code: 'BAD_REQUEST',
+                    message: 'Cannot unship a delivered line',
+                },
+            };
+        }
+
+        if (line.rtoInitiatedAt) {
+            return {
+                success: false,
+                error: {
+                    code: 'BAD_REQUEST',
+                    message: 'Cannot unship a line with RTO initiated',
+                },
+            };
+        }
+
+        // Revert to packed status
+        await prisma.$transaction(async (tx: PrismaClientType) => {
+            await tx.orderLine.update({
+                where: { id: lineId },
+                data: {
+                    lineStatus: 'packed',
+                    shippedAt: null,
+                    awbNumber: null,
+                    courier: null,
+                    trackingStatus: null,
+                },
+            });
+
+            // Check if order status should be reverted
+            const remainingShippedLines = await tx.orderLine.count({
+                where: {
+                    orderId: line.orderId,
+                    lineStatus: 'shipped',
+                    id: { not: lineId },
+                },
+            });
+
+            if (remainingShippedLines === 0) {
+                await tx.order.update({
+                    where: { id: line.orderId },
+                    data: { status: 'open' },
+                });
+            }
+        });
+
+        // Broadcast SSE update
+        broadcastUpdate(
+            {
+                type: 'line_unshipped',
+                lineId,
+                orderId: line.orderId,
+                affectedViews: ['open', 'shipped'],
+                changes: {
+                    lineStatus: 'packed',
+                },
+            },
+            context.user.id
+        );
+
+        return {
+            success: true,
+            data: {
+                lineId,
+                orderId: line.orderId,
+                lineStatus: 'packed',
+            },
+        };
+    });
+
+/**
+ * Update tracking info on a line
+ */
+const updateLineTrackingSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    awbNumber: z.string().optional(),
+    courier: z.string().optional(),
+    trackingStatus: z.string().optional(),
+});
+
+export interface UpdateLineTrackingResult {
+    lineId: string;
+    orderId: string;
+    updated: {
+        awbNumber?: string | null;
+        courier?: string | null;
+        trackingStatus?: string | null;
+    };
+}
+
+export const updateLineTracking = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateLineTrackingSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<UpdateLineTrackingResult>> => {
+        const prisma = await getPrisma();
+        const { lineId, awbNumber, courier, trackingStatus } = data;
+
+        // Fetch line
+        const line = await prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: { id: true, orderId: true, lineStatus: true },
+        });
+
+        if (!line) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Order line not found' },
+            };
+        }
+
+        // Build update object
+        const updateData: Record<string, string | null> = {};
+        if (awbNumber !== undefined) {
+            updateData.awbNumber = awbNumber.trim() || null;
+        }
+        if (courier !== undefined) {
+            updateData.courier = courier.trim() || null;
+        }
+        if (trackingStatus !== undefined) {
+            updateData.trackingStatus = trackingStatus.trim() || null;
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return {
+                success: false,
+                error: {
+                    code: 'BAD_REQUEST',
+                    message: 'No tracking fields provided to update',
+                },
+            };
+        }
+
+        // Update line
+        await prisma.orderLine.update({
+            where: { id: lineId },
+            data: updateData,
+        });
+
+        // Broadcast SSE update
+        broadcastUpdate(
+            {
+                type: 'line_tracking_updated',
+                lineId,
+                orderId: line.orderId,
+                changes: updateData,
+            },
+            context.user.id
+        );
+
+        return {
+            success: true,
+            data: {
+                lineId,
+                orderId: line.orderId,
+                updated: updateData,
+            },
+        };
+    });
+
+/**
+ * Update notes on a line
+ */
+const updateLineNotesSchema = z.object({
+    lineId: z.string().uuid('Invalid line ID'),
+    notes: z.string(),
+});
+
+export interface UpdateLineNotesResult {
+    lineId: string;
+    orderId: string;
+    notes: string;
+}
+
+export const updateLineNotes = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateLineNotesSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<UpdateLineNotesResult>> => {
+        const prisma = await getPrisma();
+        const { lineId, notes } = data;
+
+        // Fetch line
+        const line = await prisma.orderLine.findUnique({
+            where: { id: lineId },
+            select: { id: true, orderId: true },
+        });
+
+        if (!line) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Order line not found' },
+            };
+        }
+
+        // Update notes
+        await prisma.orderLine.update({
+            where: { id: lineId },
+            data: { notes },
+        });
+
+        // Broadcast SSE update
+        broadcastUpdate(
+            {
+                type: 'line_notes_updated',
+                lineId,
+                orderId: line.orderId,
+                changes: { notes },
+            },
+            context.user.id
+        );
+
+        return {
+            success: true,
+            data: {
+                lineId,
+                orderId: line.orderId,
+                notes,
+            },
+        };
+    });
+
+// ============================================
+// ORDER-LEVEL DELIVERY/RTO MUTATIONS
+// ============================================
+
+/**
+ * Mark all shipped lines of an order as delivered
+ */
+const markDeliveredSchema = z.object({
+    orderId: z.string().uuid('Invalid order ID'),
+});
+
+export interface MarkDeliveredResult {
+    orderId: string;
+    status: 'delivered';
+    linesDelivered: number;
+}
+
+export const markDelivered = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markDeliveredSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<MarkDeliveredResult>> => {
+        const prisma = await getPrisma();
+        const { orderId } = data;
+        const now = new Date();
+
+        const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            select: {
+                id: true,
+                status: true,
+                orderLines: {
+                    where: { lineStatus: 'shipped', deliveredAt: null },
+                    select: { id: true },
+                },
+            },
+        });
+
+        if (!order) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Order not found' },
+            };
+        }
+
+        const shippedLineIds = order.orderLines.map((l: { id: string }) => l.id);
+
+        if (shippedLineIds.length === 0) {
+            // No shipped lines to deliver - just update order status
+            await prisma.order.update({
+                where: { id: orderId },
+                data: { status: 'delivered' },
+            });
+        } else {
+            // Update all shipped lines to delivered
+            await prisma.$transaction(async (tx: PrismaClientType) => {
+                await tx.orderLine.updateMany({
+                    where: { id: { in: shippedLineIds } },
+                    data: {
+                        deliveredAt: now,
+                        trackingStatus: 'delivered',
+                    },
+                });
+
+                await tx.order.update({
+                    where: { id: orderId },
+                    data: { status: 'delivered' },
+                });
+            });
+        }
+
+        // Broadcast SSE update
+        broadcastUpdate(
+            {
+                type: 'order_delivered',
+                orderId,
+                affectedViews: ['shipped', 'cod_pending'],
+                changes: { status: 'delivered', deliveredAt: now.toISOString() },
+            },
+            context.user.id
+        );
+
+        return {
+            success: true,
+            data: {
+                orderId,
+                status: 'delivered',
+                linesDelivered: shippedLineIds.length,
+            },
+        };
+    });
+
+/**
+ * Initiate RTO for all shipped lines of an order
+ */
+const markRtoSchema = z.object({
+    orderId: z.string().uuid('Invalid order ID'),
+});
+
+export interface MarkRtoResult {
+    orderId: string;
+    rtoInitiatedAt: string;
+    linesInitiated: number;
+}
+
+export const markRto = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markRtoSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<MarkRtoResult>> => {
+        const prisma = await getPrisma();
+        const { orderId } = data;
+        const now = new Date();
+
+        const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            select: {
+                id: true,
+                status: true,
+                customerId: true,
+                orderLines: {
+                    where: { lineStatus: 'shipped', rtoInitiatedAt: null },
+                    select: { id: true },
+                },
+            },
+        });
+
+        if (!order) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Order not found' },
+            };
+        }
+
+        const shippedLineIds = order.orderLines.map((l: { id: string }) => l.id);
+        const linesInitiated = shippedLineIds.length;
+
+        await prisma.$transaction(async (tx: PrismaClientType) => {
+            // Update all shipped lines to RTO initiated
+            if (shippedLineIds.length > 0) {
+                await tx.orderLine.updateMany({
+                    where: { id: { in: shippedLineIds } },
+                    data: {
+                        rtoInitiatedAt: now,
+                        trackingStatus: 'rto_initiated',
+                    },
+                });
+            }
+
+            // Increment customer RTO count based on number of lines
+            if (linesInitiated > 0 && order.customerId) {
+                await tx.customer.update({
+                    where: { id: order.customerId },
+                    data: { rtoCount: { increment: linesInitiated } },
+                });
+            }
+        });
+
+        // Broadcast SSE update
+        broadcastUpdate(
+            {
+                type: 'order_rto',
+                orderId,
+                affectedViews: ['shipped', 'rto'],
+                changes: { rtoInitiatedAt: now.toISOString() },
+            },
+            context.user.id
+        );
+
+        return {
+            success: true,
+            data: {
+                orderId,
+                rtoInitiatedAt: now.toISOString(),
+                linesInitiated,
+            },
+        };
+    });
+
+/**
+ * Receive RTO for all RTO-initiated lines of an order
+ */
+const receiveRtoSchema = z.object({
+    orderId: z.string().uuid('Invalid order ID'),
+    condition: z.enum(['good', 'damaged', 'missing']).optional().default('good'),
+    notes: z.string().optional(),
+});
+
+export interface ReceiveRtoResult {
+    orderId: string;
+    rtoReceivedAt: string;
+    linesReceived: number;
+    condition: string;
+}
+
+export const receiveRto = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => receiveRtoSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<ReceiveRtoResult>> => {
+        const prisma = await getPrisma();
+        const { orderId, condition, notes } = data;
+        const now = new Date();
+
+        const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            select: {
+                id: true,
+                orderLines: {
+                    where: {
+                        rtoInitiatedAt: { not: null },
+                        rtoReceivedAt: null,
+                    },
+                    select: { id: true, skuId: true, qty: true },
+                },
+            },
+        });
+
+        if (!order) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Order not found' },
+            };
+        }
+
+        const rtoLines = order.orderLines;
+        const affectedSkuIds = rtoLines.map((l: { skuId: string }) => l.skuId);
+        const lineIds = rtoLines.map((l: { id: string }) => l.id);
+
+        if (rtoLines.length === 0) {
+            return {
+                success: false,
+                error: {
+                    code: 'BAD_REQUEST',
+                    message: 'No RTO-initiated lines to receive',
+                },
+            };
+        }
+
+        await prisma.$transaction(async (tx: PrismaClientType) => {
+            // Update all RTO-initiated lines
+            const updateData: Record<string, unknown> = {
+                rtoReceivedAt: now,
+                rtoCondition: condition,
+                trackingStatus: 'rto_delivered',
+            };
+            if (notes) {
+                updateData.rtoNotes = notes;
+            }
+
+            await tx.orderLine.updateMany({
+                where: { id: { in: lineIds } },
+                data: updateData,
+            });
+
+            // Create inward transactions
+            if (rtoLines.length > 0) {
+                await tx.inventoryTransaction.createMany({
+                    data: rtoLines.map((line: { id: string; skuId: string; qty: number }) => ({
+                        skuId: line.skuId,
+                        txnType: TXN_TYPE.INWARD,
+                        qty: line.qty,
+                        reason: TXN_REASON.RTO_RECEIVED,
+                        referenceId: line.id,
+                        createdById: context.user.id,
+                    })),
+                });
+            }
+        });
+
+        // Invalidate inventory cache
+        if (affectedSkuIds.length > 0) {
+            try {
+                // @ts-expect-error - Dynamic import from server directory, types not available in client build
+                const { inventoryBalanceCache } = await import('../../../server/src/services/inventoryBalanceCache.js');
+                inventoryBalanceCache.invalidate(affectedSkuIds);
+            } catch {
+                // Non-critical
+            }
+        }
+
+        // Broadcast SSE update
+        broadcastUpdate(
+            {
+                type: 'order_rto_received',
+                orderId,
+                affectedViews: ['rto', 'open'],
+                changes: { rtoReceivedAt: now.toISOString() },
+            },
+            context.user.id
+        );
+
+        return {
+            success: true,
+            data: {
+                orderId,
+                rtoReceivedAt: now.toISOString(),
+                linesReceived: rtoLines.length,
+                condition,
+            },
+        };
+    });
+
+/**
+ * Admin migration helper - migrate Shopify fulfilled orders to shipped status
+ */
+const migrateShopifyFulfilledSchema = z.object({
+    limit: z.number().int().positive().max(500).optional().default(50),
+});
+
+export interface MigrateShopifyFulfilledResult {
+    migrated: number;
+    skipped: number;
+    remaining: number;
+    message: string;
+    errors?: Array<{ orderNumber: string; error: string }>;
+}
+
+export const migrateShopifyFulfilled = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => migrateShopifyFulfilledSchema.parse(input))
+    .handler(async ({ data, context }): Promise<MutationResult<MigrateShopifyFulfilledResult>> => {
+        const prisma = await getPrisma();
+        const { limit } = data;
+
+        // Admin only
+        if (context.user.role !== 'admin') {
+            return {
+                success: false,
+                error: {
+                    code: 'FORBIDDEN',
+                    message: 'Migration requires admin role',
+                },
+            };
+        }
+
+        // Only migrate OPEN orders
+        const whereClause = {
+            status: 'open',
+            shopifyCache: {
+                fulfillmentStatus: 'fulfilled',
+                trackingNumber: { not: null },
+                trackingCompany: { not: null },
+            },
+        };
+
+        // Count total eligible first
+        const totalEligible = await prisma.order.count({ where: whereClause });
+
+        if (totalEligible === 0) {
+            return {
+                success: true,
+                data: {
+                    migrated: 0,
+                    skipped: 0,
+                    remaining: 0,
+                    message: 'No eligible open orders found - migration complete!',
+                },
+            };
+        }
+
+        // Fetch batch of eligible orders
+        const eligibleOrders = await prisma.order.findMany({
+            where: whereClause,
+            include: {
+                orderLines: { select: { id: true } },
+                shopifyCache: {
+                    select: { trackingNumber: true, trackingCompany: true },
+                },
+            },
+            orderBy: { orderDate: 'asc' },
+            take: limit,
+        });
+
+        const results = {
+            migrated: [] as Array<{ orderNumber: string; linesShipped: number }>,
+            skipped: [] as Array<{ orderNumber: string; reason: string }>,
+            errors: [] as Array<{ orderNumber: string; error: string }>,
+        };
+
+        // Import shipping service
+        // @ts-expect-error - Dynamic import from server directory, types not available in client build
+        const { shipOrderLines } = await import('../../../server/src/services/shipOrderService.js');
+
+        for (const order of eligibleOrders) {
+            try {
+                const lineIds = order.orderLines.map((l: { id: string }) => l.id);
+                const awb = order.shopifyCache?.trackingNumber || 'MANUAL';
+                const courier = order.shopifyCache?.trackingCompany || 'Manual';
+
+                const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+                    return await shipOrderLines(tx, {
+                        orderLineIds: lineIds,
+                        awbNumber: awb,
+                        courier: courier,
+                        userId: context.user.id,
+                        skipStatusValidation: true,
+                        skipInventory: true,
+                    });
+                });
+
+                if (result.shipped.length > 0) {
+                    results.migrated.push({
+                        orderNumber: order.orderNumber,
+                        linesShipped: result.shipped.length,
+                    });
+                } else if (result.skipped.length > 0) {
+                    results.skipped.push({
+                        orderNumber: order.orderNumber,
+                        reason: result.skipped[0]?.reason || 'Already shipped',
+                    });
+                }
+            } catch (error) {
+                results.errors.push({
+                    orderNumber: order.orderNumber,
+                    error: (error as Error).message,
+                });
+            }
+        }
+
+        const remaining = totalEligible - results.migrated.length;
+
+        return {
+            success: true,
+            data: {
+                migrated: results.migrated.length,
+                skipped: results.skipped.length,
+                remaining: remaining,
+                message:
+                    remaining > 0
+                        ? `Migrated ${results.migrated.length} orders. ${remaining} remaining - click again to continue.`
+                        : `Migrated ${results.migrated.length} orders. Migration complete!`,
+                errors: results.errors.length > 0 ? results.errors : undefined,
+            },
+        };
+    });

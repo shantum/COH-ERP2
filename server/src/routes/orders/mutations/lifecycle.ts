@@ -49,7 +49,7 @@ router.post(
     requirePermission('orders:cancel'),
     deprecated({
         endpoint: 'POST /orders/:id/cancel',
-        trpcAlternative: 'orders.cancelOrder',
+        alternative: 'orders.cancelOrder',
         deprecatedSince: '2026-01-16',
     }),
     asyncHandler(async (req: Request, res: Response): Promise<void> => {
@@ -143,7 +143,7 @@ router.post(
     authenticateToken,
     deprecated({
         endpoint: 'POST /orders/:id/uncancel',
-        trpcAlternative: 'orders.uncancelOrder',
+        alternative: 'orders.uncancelOrder',
         deprecatedSince: '2026-01-16',
     }),
     asyncHandler(async (req: Request, res: Response): Promise<void> => {

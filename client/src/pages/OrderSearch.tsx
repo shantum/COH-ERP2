@@ -15,9 +15,9 @@ import { useNavigate } from '@tanstack/react-router';
 import { Search, Loader2, ChevronRight, Package } from 'lucide-react';
 import { ordersApi } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
-import type { OrderTab } from '../hooks/useOrdersData';
-import type { ShipmentTab } from '../hooks/useShipmentsData';
-
+// Tab types (previously from deprecated hooks)
+type OrderTab = 'open' | 'cancelled';
+type ShipmentTab = 'shipped' | 'rto' | 'cod-pending' | 'archived';
 type AllTabs = OrderTab | ShipmentTab;
 
 interface SearchResult {

@@ -11,7 +11,6 @@
 import { useMemo } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
@@ -37,10 +36,16 @@ export interface UseOrderStatusMutationsOptions {
     shippedFilter?: 'rto' | 'cod_pending';
 }
 
+/**
+ * Helper to build tRPC-compatible query key for orders.list
+ */
+function getOrdersListQueryKey(input: { view: string; page: number; limit: number; shippedFilter?: string }) {
+    return [['orders', 'list'], { input, type: 'query' }];
+}
+
 export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions = {}) {
     const { currentView = 'open', page = 1, shippedFilter } = options;
     const queryClient = useQueryClient();
-    const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders, invalidateCancelledOrders } = useOrderInvalidation();
 
     // Server Function wrappers
@@ -51,10 +56,11 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
 
     // Build query input for cache operations
     const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
+    const queryKey = getOrdersListQueryKey(queryInput);
 
     // Helper to get current cache data
     const getCachedData = (): OrdersListData | undefined => {
-        return trpcUtils.orders.list.getData(queryInput);
+        return queryClient.getQueryData<OrdersListData>(queryKey);
     };
 
     // ============================================
@@ -73,9 +79,9 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             const previousData = getCachedData();
 
             // Optimistically cancel all lines in the order
-            trpcUtils.orders.list.setData(
-                queryInput,
-                (old: any) => optimisticCancelOrder(old, orderId) as any
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticCancelOrder(old, orderId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
@@ -83,7 +89,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         onError: (err, _vars, context) => {
             // Rollback on error
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const rollbackKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(rollbackKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -122,19 +129,21 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         onMutate: async ({ orderId }) => {
             // For uncancel, we may be in cancelled view
             const cancelledQueryInput = getOrdersQueryInput('cancelled', page, undefined);
+            const cancelledQueryKey = getOrdersListQueryKey(cancelledQueryInput);
             await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = trpcUtils.orders.list.getData(cancelledQueryInput);
+            const previousData = queryClient.getQueryData<OrdersListData>(cancelledQueryKey);
 
-            trpcUtils.orders.list.setData(
-                cancelledQueryInput,
-                (old: any) => optimisticUncancelOrder(old, orderId) as any
+            queryClient.setQueryData<OrdersListData>(
+                cancelledQueryKey,
+                (old) => optimisticUncancelOrder(old, orderId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput: cancelledQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const rollbackKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(rollbackKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -175,9 +184,9 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             const previousData = getCachedData();
 
             // Optimistically update
-            trpcUtils.orders.list.setData(
-                queryInput,
-                (old: any) => optimisticCancelLine(old, lineId) as any
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticCancelLine(old, lineId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
@@ -185,7 +194,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         onError: (err, _vars, context) => {
             // Rollback on error
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const rollbackKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(rollbackKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -224,16 +234,17 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             const previousData = getCachedData();
 
             // Optimistically update
-            trpcUtils.orders.list.setData(
-                queryInput,
-                (old: any) => optimisticUncancelLine(old, lineId) as any
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticUncancelLine(old, lineId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const rollbackKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(rollbackKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();

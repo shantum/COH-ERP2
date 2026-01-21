@@ -2,7 +2,6 @@
  * Inventory Query Server Functions
  *
  * TanStack Start Server Functions for inventory balance queries.
- * Migrated from tRPC router: server/src/trpc/routers/inventory.ts
  *
  * IMPORTANT: All database imports are dynamic to prevent Node.js code
  * (pg, Buffer) from being bundled into the client.

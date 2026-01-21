@@ -6,13 +6,12 @@
 import { useQueryClient, QueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { orderTabInvalidationMap } from '../../constants/queryKeys';
-import { trpc } from '../../services/trpc';
 
 // Page size for orders pagination (must match useUnifiedOrdersData)
 export const PAGE_SIZE = 250;
 
-// Map view names to tRPC query input
-export const viewToTrpcInput: Record<string, { view: string; limit?: number }> = {
+// Map view names to query input
+export const viewToQueryInput: Record<string, { view: string; limit?: number }> = {
     open: { view: 'open', limit: PAGE_SIZE },
     shipped: { view: 'shipped', limit: PAGE_SIZE },
     rto: { view: 'rto', limit: PAGE_SIZE },
@@ -28,18 +27,22 @@ export type MutationOptions = {
     onError?: (err: unknown) => void;
 };
 
-// Type for tRPC utils
-type TRPCUtils = ReturnType<typeof trpc.useUtils>;
-
 // Interface for invalidation context
 export interface InvalidationContext {
     queryClient: QueryClient;
-    trpcUtils: TRPCUtils;
+}
+
+/**
+ * Helper to build query key for orders.list
+ * Uses Server Function format: ['orders', 'list', 'server-fn', params]
+ */
+export function getOrdersListQueryKey(input: { view: string; page?: number; limit?: number; shippedFilter?: string }) {
+    return ['orders', 'list', 'server-fn', input];
 }
 
 // Factory for creating invalidation functions
 export function createInvalidationHelpers(ctx: InvalidationContext) {
-    const { queryClient, trpcUtils } = ctx;
+    const { queryClient } = ctx;
 
     const invalidateTab = (tab: keyof typeof orderTabInvalidationMap) => {
         // Invalidate old Axios query keys (for any remaining Axios queries)
@@ -50,10 +53,11 @@ export function createInvalidationHelpers(ctx: InvalidationContext) {
             });
         }
 
-        // Invalidate tRPC query cache
-        const trpcInput = viewToTrpcInput[tab];
-        if (trpcInput) {
-            trpcUtils.orders.list.invalidate(trpcInput);
+        // Invalidate Server Function query cache
+        const queryInput = viewToQueryInput[tab];
+        if (queryInput) {
+            const queryKey = getOrdersListQueryKey(queryInput);
+            queryClient.invalidateQueries({ queryKey });
         }
     };
 
@@ -75,10 +79,9 @@ export function createInvalidationHelpers(ctx: InvalidationContext) {
 // Custom hook to get invalidation helpers
 export function useOrderInvalidation() {
     const queryClient = useQueryClient();
-    const trpcUtils = trpc.useUtils();
 
     return useMemo(
-        () => createInvalidationHelpers({ queryClient, trpcUtils }),
-        [queryClient, trpcUtils]
+        () => createInvalidationHelpers({ queryClient }),
+        [queryClient]
     );
 }

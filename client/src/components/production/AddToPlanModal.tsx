@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '@/services/trpc';
 import { getProductsList } from '@/server/functions/products';
+import { createBatch } from '@/server/functions/productionMutations';
 import {
     Dialog,
     DialogContent,
@@ -29,7 +29,7 @@ export function AddToPlanModal({
     defaultDate,
     lockedDates = [],
 }: AddToPlanModalProps) {
-    const trpcUtils = trpc.useUtils();
+    const queryClient = useQueryClient();
     const today = new Date().toISOString().split('T')[0];
 
     // State
@@ -81,16 +81,31 @@ export function AddToPlanModal({
         return sku.variation?.imageUrl || sku.variation?.product?.imageUrl || null;
     };
 
-    // Create batch mutation using tRPC
-    const createBatch = trpc.production.createBatch.useMutation({
+    // Create batch mutation using Server Function
+    const createBatchFn = useServerFn(createBatch);
+    const createBatchMutation = useMutation({
+        mutationFn: async (input: {
+            skuId?: string;
+            sampleName?: string;
+            sampleColour?: string;
+            sampleSize?: string;
+            quantity: number;
+            priority: 'low' | 'normal' | 'high' | 'urgent' | 'order_fulfillment';
+            batchDate: string;
+        }) => {
+            const result = await createBatchFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to create batch');
+            }
+            return result.data;
+        },
         onSuccess: () => {
-            trpcUtils.production.getBatches.invalidate();
-            trpcUtils.production.getCapacity.invalidate();
-            trpcUtils.production.getRequirements.invalidate();
+            queryClient.invalidateQueries({ queryKey: ['production'] });
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
             resetForm();
             onOpenChange(false);
         },
-        onError: (error: any) => {
+        onError: (error: Error) => {
             alert(error.message || 'Failed to add item');
         }
     });
@@ -141,9 +156,9 @@ export function AddToPlanModal({
                 alert('Please select a product');
                 return;
             }
-            createBatch.mutate({
+            createBatchMutation.mutate({
                 skuId,
-                qtyPlanned: qty,
+                quantity: qty,
                 priority: 'normal',
                 batchDate
             });
@@ -152,11 +167,11 @@ export function AddToPlanModal({
                 alert('Please enter a sample name');
                 return;
             }
-            createBatch.mutate({
+            createBatchMutation.mutate({
                 sampleName: sampleName.trim(),
                 sampleColour: sampleColour.trim() || undefined,
                 sampleSize: sampleSize.trim() || undefined,
-                qtyPlanned: qty,
+                quantity: qty,
                 priority: 'normal',
                 batchDate
             });
@@ -383,9 +398,9 @@ export function AddToPlanModal({
                         </Button>
                         <Button
                             type="submit"
-                            disabled={createBatch.isPending || lockedDates.includes(batchDate)}
+                            disabled={createBatchMutation.isPending || lockedDates.includes(batchDate)}
                         >
-                            {createBatch.isPending ? 'Adding...' : 'Add to Plan'}
+                            {createBatchMutation.isPending ? 'Adding...' : 'Add to Plan'}
                         </Button>
                     </DialogFooter>
                 </form>

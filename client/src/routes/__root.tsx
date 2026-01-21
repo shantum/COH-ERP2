@@ -19,7 +19,6 @@ import { RouteLoadingBar } from '../components/ui/RouteLoadingBar';
 import { CommandPalette } from '../components/CommandPalette';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { AuthProvider } from '../hooks/useAuth';
-import { TRPCProvider } from '../providers/TRPCProvider';
 import appCss from '../index.css?url';
 
 // Lazy load devtools for development only
@@ -82,13 +81,11 @@ function RootComponent() {
         <RootDocument>
             <ErrorBoundary>
                 <QueryClientProvider client={queryClient}>
-                    <TRPCProvider queryClient={queryClient}>
-                        <AuthProvider>
-                            <RouteLoadingBar />
-                            <CommandPalette />
-                            <Outlet />
-                        </AuthProvider>
-                    </TRPCProvider>
+                    <AuthProvider>
+                        <RouteLoadingBar />
+                        <CommandPalette />
+                        <Outlet />
+                    </AuthProvider>
                 </QueryClientProvider>
                 <Toaster
                     position="bottom-right"

@@ -7,7 +7,7 @@
  * - markLineRto: Initiate RTO for single line
  * - receiveLineRto: Receive RTO for single line
  *
- * Order-level mutations (backward compat) - tRPC only:
+ * Order-level mutations (backward compat) - Server Functions:
  * - markDelivered: Mark all shipped lines as delivered
  * - markRto: Initiate RTO for all shipped lines
  * - receiveRto: Receive RTO for all RTO-initiated lines
@@ -20,14 +20,18 @@
 
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
+    // Line-level mutations
     markLineDelivered as markLineDeliveredFn,
     markLineRto as markLineRtoFn,
     receiveLineRto as receiveLineRtoFn,
+    // Order-level mutations
+    markDelivered as markDeliveredFn,
+    markRto as markRtoFn,
+    receiveRto as receiveRtoFn,
 } from '../../server/functions/orderMutations';
 import {
     getOrdersQueryInput,
@@ -35,6 +39,7 @@ import {
     optimisticMarkRto,
     optimisticReceiveRto,
     type OptimisticUpdateContext,
+    type OrdersListData,
 } from './optimisticUpdateHelpers';
 
 export interface UseOrderDeliveryMutationsOptions {
@@ -56,44 +61,80 @@ export interface ReceiveLineRtoInput {
     notes?: string;
 }
 
+// Input types for order-level mutations
+interface MarkDeliveredInput {
+    orderId: string;
+}
+
+interface MarkRtoInput {
+    orderId: string;
+}
+
+interface ReceiveRtoInput {
+    orderId: string;
+    condition?: 'good' | 'damaged' | 'missing';
+    notes?: string;
+}
+
+/**
+ * Helper to build tRPC-compatible query key for orders.list
+ */
+function getOrdersListQueryKey(input: { view: string; page: number; limit: number; shippedFilter?: string }) {
+    return [['orders', 'list'], { input, type: 'query' }];
+}
+
 export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOptions = {}) {
     const { page = 1 } = options;
     const queryClient = useQueryClient();
-    const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders, invalidateShippedOrders, invalidateRtoOrders, invalidateCodPendingOrders } = useOrderInvalidation();
 
-    // Server Function wrappers
+    // Server Function wrappers - line-level
     const markLineDeliveredServerFn = useServerFn(markLineDeliveredFn);
     const markLineRtoServerFn = useServerFn(markLineRtoFn);
     const receiveLineRtoServerFn = useServerFn(receiveLineRtoFn);
 
+    // Server Function wrappers - order-level
+    const markDeliveredServerFn = useServerFn(markDeliveredFn);
+    const markRtoServerFn = useServerFn(markRtoFn);
+    const receiveRtoServerFn = useServerFn(receiveRtoFn);
+
     // ============================================
-    // ORDER-LEVEL MUTATIONS (backward compat, tRPC only)
+    // ORDER-LEVEL MUTATIONS (backward compat) - Server Functions
     // ============================================
 
-    // Mark delivered with optimistic update (order-level - backward compat, always tRPC)
-    const markDeliveredMutation = trpc.orders.markDelivered.useMutation({
+    // Mark delivered with optimistic update (order-level - backward compat)
+    const markDeliveredMutation = useMutation({
+        mutationFn: async (input: MarkDeliveredInput) => {
+            const result = await markDeliveredServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to mark as delivered');
+            }
+            return result.data;
+        },
         onMutate: async ({ orderId }) => {
             // For delivery operations, we're typically in shipped view
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await trpcUtils.orders.list.cancel(shippedQueryInput);
-            const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
+            const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
-            trpcUtils.orders.list.setData(
-                shippedQueryInput,
-                (old: any) => optimisticMarkDelivered(old, orderId, new Date().toISOString()) as any
+            await queryClient.cancelQueries({ queryKey });
+            const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
+
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticMarkDelivered(old, orderId, new Date().toISOString()) as OrdersListData | undefined
             );
 
             return { previousData, queryInput: shippedQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const queryKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(queryKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateShippedOrders();
             invalidateCodPendingOrders();
-            showError('Failed to mark as delivered', { description: err.message });
+            showError('Failed to mark as delivered', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it
@@ -108,29 +149,39 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         error: markDeliveredMutation.error,
     };
 
-    // Mark RTO with optimistic update (order-level - backward compat, always tRPC)
-    const markRtoMutation = trpc.orders.markRto.useMutation({
+    // Mark RTO with optimistic update (order-level - backward compat)
+    const markRtoMutation = useMutation({
+        mutationFn: async (input: MarkRtoInput) => {
+            const result = await markRtoServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to mark as RTO');
+            }
+            return result.data;
+        },
         onMutate: async ({ orderId }) => {
             // For RTO operations, we're typically in shipped view
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await trpcUtils.orders.list.cancel(shippedQueryInput);
-            const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
+            const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
-            trpcUtils.orders.list.setData(
-                shippedQueryInput,
-                (old: any) => optimisticMarkRto(old, orderId, new Date().toISOString()) as any
+            await queryClient.cancelQueries({ queryKey });
+            const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
+
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticMarkRto(old, orderId, new Date().toISOString()) as OrdersListData | undefined
             );
 
             return { previousData, queryInput: shippedQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const queryKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(queryKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateShippedOrders();
             invalidateRtoOrders();
-            showError('Failed to mark as RTO', { description: err.message });
+            showError('Failed to mark as RTO', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it
@@ -145,29 +196,39 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         error: markRtoMutation.error,
     };
 
-    // Receive RTO with optimistic update (order-level - backward compat, always tRPC)
-    const receiveRtoMutation = trpc.orders.receiveRto.useMutation({
+    // Receive RTO with optimistic update (order-level - backward compat)
+    const receiveRtoMutation = useMutation({
+        mutationFn: async (input: ReceiveRtoInput) => {
+            const result = await receiveRtoServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to receive RTO');
+            }
+            return result.data;
+        },
         onMutate: async ({ orderId }) => {
             // For receive RTO, we're typically in RTO view
             const rtoQueryInput = getOrdersQueryInput('rto', page, undefined);
-            await trpcUtils.orders.list.cancel(rtoQueryInput);
-            const previousData = trpcUtils.orders.list.getData(rtoQueryInput);
+            const queryKey = getOrdersListQueryKey(rtoQueryInput);
 
-            trpcUtils.orders.list.setData(
-                rtoQueryInput,
-                (old: any) => optimisticReceiveRto(old, orderId) as any
+            await queryClient.cancelQueries({ queryKey });
+            const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
+
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticReceiveRto(old, orderId) as OrdersListData | undefined
             );
 
             return { previousData, queryInput: rtoQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const queryKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(queryKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateRtoOrders();
             invalidateOpenOrders();
-            showError('Failed to receive RTO', { description: err.message });
+            showError('Failed to receive RTO', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance for RTO restore)
@@ -199,15 +260,17 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         onMutate: async ({ lineId }) => {
             // For line delivery, update shipped view optimistically
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
+            const queryKey = getOrdersListQueryKey(shippedQueryInput);
+
             await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
+            const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
 
             // Update the specific line in the cache
-            trpcUtils.orders.list.setData(shippedQueryInput, (old: any) => {
+            queryClient.setQueryData<OrdersListData>(queryKey, (old) => {
                 if (!old?.rows) return old;
                 return {
                     ...old,
-                    rows: old.rows.map((row: any) =>
+                    rows: old.rows.map((row) =>
                         row.lineId === lineId
                             ? { ...row, deliveredAt: new Date().toISOString(), trackingStatus: 'delivered' }
                             : row
@@ -219,7 +282,8 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const queryKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(queryKey, context.previousData);
             }
             invalidateShippedOrders();
             invalidateCodPendingOrders();
@@ -249,14 +313,16 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onMutate: async ({ lineId }) => {
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
+            const queryKey = getOrdersListQueryKey(shippedQueryInput);
 
-            trpcUtils.orders.list.setData(shippedQueryInput, (old: any) => {
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
+
+            queryClient.setQueryData<OrdersListData>(queryKey, (old) => {
                 if (!old?.rows) return old;
                 return {
                     ...old,
-                    rows: old.rows.map((row: any) =>
+                    rows: old.rows.map((row) =>
                         row.lineId === lineId
                             ? { ...row, rtoInitiatedAt: new Date().toISOString(), trackingStatus: 'rto_initiated' }
                             : row
@@ -268,7 +334,8 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const queryKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(queryKey, context.previousData);
             }
             invalidateShippedOrders();
             invalidateRtoOrders();
@@ -298,14 +365,16 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onMutate: async ({ lineId, condition }) => {
             const rtoQueryInput = getOrdersQueryInput('rto', page, undefined);
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = trpcUtils.orders.list.getData(rtoQueryInput);
+            const queryKey = getOrdersListQueryKey(rtoQueryInput);
 
-            trpcUtils.orders.list.setData(rtoQueryInput, (old: any) => {
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            const previousData = queryClient.getQueryData<OrdersListData>(queryKey);
+
+            queryClient.setQueryData<OrdersListData>(queryKey, (old) => {
                 if (!old?.rows) return old;
                 return {
                     ...old,
-                    rows: old.rows.map((row: any) =>
+                    rows: old.rows.map((row) =>
                         row.lineId === lineId
                             ? {
                                   ...row,
@@ -322,7 +391,8 @@ export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOpti
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const queryKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(queryKey, context.previousData);
             }
             invalidateRtoOrders();
             invalidateOpenOrders();

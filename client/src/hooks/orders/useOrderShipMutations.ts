@@ -7,14 +7,12 @@
  * 2. onError: Rollback to previous data + invalidate for consistency
  * 3. onSettled: Invalidate caches to confirm server state + trigger callbacks
  *
- * Server Functions: ship, adminShip, unship
- * tRPC only (no Server Function equivalent yet): shipLines, markShippedLine, unmarkShippedLine, updateLineTracking
+ * Server Functions: ship, adminShip, unship, shipLines, markShippedLine, unmarkShippedLine, updateLineTracking
  */
 
 import { useMemo } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
@@ -22,6 +20,10 @@ import {
     shipOrder as shipOrderFn,
     adminShipOrder as adminShipOrderFn,
     unshipOrder as unshipOrderFn,
+    shipLines as shipLinesFn,
+    markShippedLine as markShippedLineFn,
+    unmarkShippedLine as unmarkShippedLineFn,
+    updateLineTracking as updateLineTrackingFn,
 } from '../../server/functions/orderMutations';
 import {
     getOrdersQueryInput,
@@ -41,23 +43,42 @@ export interface UseOrderShipMutationsOptions {
     shippedFilter?: 'rto' | 'cod_pending';
 }
 
+/**
+ * Helper to build tRPC-compatible query keys for orders.list
+ * tRPC stores queries with this structure: [['router', 'procedure'], { input, type: 'query' }]
+ */
+function getOrdersListQueryKey(input: { view: string; page?: number; limit?: number; shippedFilter?: string }) {
+    return [['orders', 'list'], { input, type: 'query' }];
+}
+
 export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}) {
     const { currentView = 'open', page = 1, shippedFilter, onShipSuccess } = options;
     const queryClient = useQueryClient();
-    const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders, invalidateShippedOrders } = useOrderInvalidation();
 
     // Server Function wrappers
     const shipOrderServerFn = useServerFn(shipOrderFn);
     const adminShipOrderServerFn = useServerFn(adminShipOrderFn);
     const unshipOrderServerFn = useServerFn(unshipOrderFn);
+    const shipLinesServerFn = useServerFn(shipLinesFn);
+    const markShippedLineServerFn = useServerFn(markShippedLineFn);
+    const unmarkShippedLineServerFn = useServerFn(unmarkShippedLineFn);
+    const updateLineTrackingServerFn = useServerFn(updateLineTrackingFn);
 
     // Build query input for cache operations
     const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
 
     // Helper to get current cache data
     const getCachedData = (): OrdersListData | undefined => {
-        return trpcUtils.orders.list.getData(queryInput);
+        return queryClient.getQueryData(getOrdersListQueryKey(queryInput));
+    };
+
+    // Helper to set cache data with updater function
+    const setCachedData = (
+        input: { view: string; page?: number; limit?: number; shippedFilter?: string },
+        updater: (old: OrdersListData | undefined) => OrdersListData | undefined
+    ) => {
+        queryClient.setQueryData(getOrdersListQueryKey(input), updater);
     };
 
     // ============================================
@@ -72,18 +93,18 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ orderId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
             const previousData = getCachedData();
 
             // Optimistically update all lines to shipped
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 queryInput,
-                (old: any) => optimisticShipOrder(old, orderId, {
+                (old) => optimisticShipOrder(old, orderId, {
                     lineStatus: 'shipped',
                     awbNumber,
                     courier,
                     shippedAt: new Date().toISOString(),
-                }) as any
+                })
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
@@ -91,7 +112,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         onError: (err, _vars, context) => {
             // Rollback on error
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -124,35 +145,42 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     }), [shipOrderMutation.isPending, shipOrderMutation.isError, shipOrderMutation.error]);
 
     // ============================================
-    // SHIP LINES - Always tRPC (no Server Function equivalent yet)
+    // SHIP LINES - Server Function
     // ============================================
-    const shipLines = trpc.orders.ship.useMutation({
+    const shipLinesMutation = useMutation({
+        mutationFn: async (input: { lineIds: string[]; awbNumber: string; courier: string }) => {
+            const result = await shipLinesServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to ship lines');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
             const previousData = getCachedData();
 
             // Ship the specified lines
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 queryInput,
-                (old: any) => optimisticShipLines(old, lineIds, {
+                (old) => optimisticShipLines(old, lineIds, {
                     lineStatus: 'shipped',
                     awbNumber,
                     courier,
                     shippedAt: new Date().toISOString(),
-                }) as any
+                })
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
 
-            const errorMsg = err.message || '';
+            const errorMsg = err instanceof Error ? err.message : String(err);
             if (errorMsg.includes('not packed')) {
                 showError('Cannot ship', { description: 'Some lines are not packed yet' });
             } else if (errorMsg.includes('validation')) {
@@ -168,6 +196,17 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             onShipSuccess?.();
         }
     });
+
+    // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
+    const shipLines = useMemo(() => ({
+        mutate: (input: { lineIds: string[]; awbNumber: string; courier: string }) =>
+            shipLinesMutation.mutate(input),
+        mutateAsync: (input: { lineIds: string[]; awbNumber: string; courier: string }) =>
+            shipLinesMutation.mutateAsync(input),
+        isPending: shipLinesMutation.isPending,
+        isError: shipLinesMutation.isError,
+        error: shipLinesMutation.error,
+    }), [shipLinesMutation.isPending, shipLinesMutation.isError, shipLinesMutation.error]);
 
     // ============================================
     // ADMIN SHIP - Server Function
@@ -187,25 +226,25 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
             const previousData = getCachedData();
 
             // Ship the specified lines (provide defaults for optional fields)
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 queryInput,
-                (old: any) => optimisticShipLines(old, lineIds, {
+                (old) => optimisticShipLines(old, lineIds, {
                     lineStatus: 'shipped',
                     awbNumber: awbNumber || 'ADMIN-MANUAL',
                     courier: courier || 'Manual',
                     shippedAt: new Date().toISOString(),
-                }) as any
+                })
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -234,19 +273,19 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         onMutate: async ({ orderId }) => {
             // For unship, we may be in shipped view
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
-            const previousData = trpcUtils.orders.list.getData(shippedQueryInput);
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            const previousData = queryClient.getQueryData<OrdersListData>(getOrdersListQueryKey(shippedQueryInput));
 
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 shippedQueryInput,
-                (old: any) => optimisticUnshipOrder(old, orderId) as any
+                (old) => optimisticUnshipOrder(old, orderId)
             );
 
             return { previousData, queryInput: shippedQueryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -268,18 +307,24 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     }), [unshipMutation.isPending, unshipMutation.isError, unshipMutation.error]);
 
     // ============================================
-    // MARK SHIPPED LINE - Always tRPC (uses ship mutation)
+    // MARK SHIPPED LINE - Server Function
     // ============================================
-    const markShippedLineMutation = trpc.orders.ship.useMutation({
-        onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+    const markShippedLineMutation = useMutation({
+        mutationFn: async (input: { lineId: string; awbNumber: string; courier: string }) => {
+            const result = await markShippedLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to mark line as shipped');
+            }
+            return result.data;
+        },
+        onMutate: async ({ lineId, awbNumber, courier }) => {
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
             const previousData = getCachedData();
-            const lineId = lineIds[0];
 
             // Update line status to shipped
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 queryInput,
-                (old: any) => {
+                (old) => {
                     if (!old) return old;
 
                     return {
@@ -316,12 +361,12 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            showError('Failed to ship line', { description: err.message });
+            showError('Failed to ship line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)
@@ -333,37 +378,44 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const markShippedLine = useMemo(() => ({
         mutate: ({ lineId, data }: { lineId: string; data: { awbNumber: string; courier: string } }, mutationOptions?: Parameters<typeof markShippedLineMutation.mutate>[1]) =>
-            markShippedLineMutation.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }, mutationOptions),
+            markShippedLineMutation.mutate({ lineId, awbNumber: data.awbNumber, courier: data.courier }, mutationOptions),
         mutateAsync: ({ lineId, data }: { lineId: string; data: { awbNumber: string; courier: string } }, mutationOptions?: Parameters<typeof markShippedLineMutation.mutateAsync>[1]) =>
-            markShippedLineMutation.mutateAsync({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }, mutationOptions),
+            markShippedLineMutation.mutateAsync({ lineId, awbNumber: data.awbNumber, courier: data.courier }, mutationOptions),
         isPending: markShippedLineMutation.isPending,
         isError: markShippedLineMutation.isError,
         error: markShippedLineMutation.error,
     }), [markShippedLineMutation.isPending, markShippedLineMutation.isError, markShippedLineMutation.error]);
 
     // ============================================
-    // UNMARK SHIPPED LINE - Always tRPC (uses setLineStatus)
+    // UNMARK SHIPPED LINE - Server Function
     // ============================================
-    const unmarkShippedLineMutation = trpc.orders.setLineStatus.useMutation({
+    const unmarkShippedLineMutation = useMutation({
+        mutationFn: async (input: { lineId: string }) => {
+            const result = await unmarkShippedLineServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to unmark line as shipped');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
             const previousData = getCachedData();
 
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 queryInput,
-                (old: any) => optimisticLineStatusUpdate(old, lineId, 'packed') as any
+                (old) => optimisticLineStatusUpdate(old, lineId, 'packed')
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            showError('Failed to unship line', { description: err.message });
+            showError('Failed to unship line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
             // No invalidation needed - optimistic update + SSE handles it
@@ -372,36 +424,43 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively
     const unmarkShippedLine = useMemo(() => ({
-        mutate: (lineId: string, mutationOptions?: Parameters<typeof unmarkShippedLineMutation.mutate>[1]) => unmarkShippedLineMutation.mutate({ lineId, status: 'packed' }, mutationOptions),
-        mutateAsync: (lineId: string, mutationOptions?: Parameters<typeof unmarkShippedLineMutation.mutateAsync>[1]) => unmarkShippedLineMutation.mutateAsync({ lineId, status: 'packed' }, mutationOptions),
+        mutate: (lineId: string, mutationOptions?: Parameters<typeof unmarkShippedLineMutation.mutate>[1]) => unmarkShippedLineMutation.mutate({ lineId }, mutationOptions),
+        mutateAsync: (lineId: string, mutationOptions?: Parameters<typeof unmarkShippedLineMutation.mutateAsync>[1]) => unmarkShippedLineMutation.mutateAsync({ lineId }, mutationOptions),
         isPending: unmarkShippedLineMutation.isPending,
         isError: unmarkShippedLineMutation.isError,
         error: unmarkShippedLineMutation.error,
     }), [unmarkShippedLineMutation.isPending, unmarkShippedLineMutation.isError, unmarkShippedLineMutation.error]);
 
     // ============================================
-    // UPDATE LINE TRACKING - Always tRPC
+    // UPDATE LINE TRACKING - Server Function
     // ============================================
-    const updateLineTrackingMutation = trpc.orders.updateLine.useMutation({
+    const updateLineTrackingMutation = useMutation({
+        mutationFn: async (input: { lineId: string; awbNumber?: string; courier?: string; trackingStatus?: string }) => {
+            const result = await updateLineTrackingServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update line tracking');
+            }
+            return result.data;
+        },
         onMutate: async ({ lineId, awbNumber, courier }) => {
-            await trpcUtils.orders.list.cancel(queryInput);
+            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
             const previousData = getCachedData();
 
-            trpcUtils.orders.list.setData(
+            setCachedData(
                 queryInput,
-                (old: any) => optimisticUpdateLineTracking(old, lineId, { awbNumber, courier }) as any
+                (old) => optimisticUpdateLineTracking(old, lineId, { awbNumber, courier })
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                setCachedData(context.queryInput, () => context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
             invalidateShippedOrders();
-            console.error('Tracking update failed:', err.message);
+            console.error('Tracking update failed:', err instanceof Error ? err.message : String(err));
         },
         onSettled: () => {
             // Only invalidate non-SSE-synced data (inventory balance)

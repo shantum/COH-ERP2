@@ -79,7 +79,7 @@ const router: Router = Router();
  */
 router.post('/lines/:lineId/status', authenticateToken, deprecated({
     endpoint: 'POST /orders/lines/:lineId/status',
-    trpcAlternative: 'orders.setLineStatus',
+    alternative: 'orders.setLineStatus',
     deprecatedSince: '2026-01-16',
 }), asyncHandler(async (req: Request, res: Response) => {
     const lineId = req.params.lineId as string;

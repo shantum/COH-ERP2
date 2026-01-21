@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import {
     RefreshCw,
     Search,
@@ -15,9 +16,9 @@ import {
     X,
 } from 'lucide-react';
 import { customersApi } from '../../services/api';
-import { trpc } from '../../services/trpc';
 import { CustomerSearch } from '../common/CustomerSearch';
 import { ProductSearch } from '../common/ProductSearch';
+import { getInventoryBalances } from '../../server/functions/inventory';
 
 // shadcn/ui components
 import {
@@ -225,8 +226,8 @@ export function CreateOrderModal({
     // Track SKUs currently being fetched to avoid duplicate requests
     const [fetchingSkuIds, setFetchingSkuIds] = useState<Set<string>>(new Set());
 
-    // tRPC utilities for on-demand fetching
-    const trpcUtils = trpc.useUtils();
+    // Server function for fetching inventory balances
+    const getInventoryBalancesFn = useServerFn(getInventoryBalances);
 
     // Handler to fetch balances for SKUs on-demand
     const handleFetchBalances = useCallback(
@@ -245,9 +246,8 @@ export function CreateOrderModal({
                 return next;
             });
 
-            // Fetch balances using tRPC
-            trpcUtils.inventory.getBalances
-                .fetch({ skuIds: newSkuIds })
+            // Fetch balances using Server Function
+            getInventoryBalancesFn({ data: { skuIds: newSkuIds } })
                 .then((balances) => {
                     setFetchedBalances((prev) => {
                         const next = new Map(prev);
@@ -270,7 +270,7 @@ export function CreateOrderModal({
                     });
                 });
         },
-        [fetchedBalances, fetchingSkuIds, trpcUtils.inventory.getBalances]
+        [fetchedBalances, fetchingSkuIds, getInventoryBalancesFn]
     );
 
     // Fetch past addresses when address section is expanded and customer exists

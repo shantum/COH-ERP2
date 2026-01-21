@@ -75,7 +75,7 @@ router.post(
     authenticateToken,
     deprecated({
         endpoint: 'POST /orders',
-        trpcAlternative: 'orders.create',
+        alternative: 'orders.create',
         deprecatedSince: '2026-01-16',
     }),
     validateMiddleware(CreateOrderSchema),

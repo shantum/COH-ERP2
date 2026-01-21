@@ -13,7 +13,6 @@
 
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
@@ -39,10 +38,16 @@ export interface UseOrderWorkflowMutationsOptions {
     shippedFilter?: 'rto' | 'cod_pending';
 }
 
+/**
+ * Helper to build tRPC-compatible query key for orders.list
+ */
+function getOrdersListQueryKey(input: { view: string; page: number; limit: number; shippedFilter?: string }) {
+    return [['orders', 'list'], { input, type: 'query' }];
+}
+
 export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOptions = {}) {
     const { currentView = 'open', page = 1, shippedFilter } = options;
     const queryClient = useQueryClient();
-    const trpcUtils = trpc.useUtils();
     const { invalidateOpenOrders } = useOrderInvalidation();
 
     // Server Function wrappers
@@ -51,10 +56,11 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
 
     // Build query input for cache operations
     const queryInput = getOrdersQueryInput(currentView, page, shippedFilter);
+    const queryKey = getOrdersListQueryKey(queryInput);
 
     // Helper to get current cache data
     const getCachedData = (): OrdersListData | undefined => {
-        return trpcUtils.orders.list.getData(queryInput);
+        return queryClient.getQueryData<OrdersListData>(queryKey);
     };
 
     // ============================================
@@ -94,9 +100,9 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
 
             // Optimistically update the cache
-            trpcUtils.orders.list.setData(
-                queryInput,
-                (old: any) => optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas) as any
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticBatchLineStatusUpdate(old, lineIds, 'allocated', inventoryDeltas) as OrdersListData | undefined
             );
 
             // Return context with data for rollback
@@ -105,7 +111,8 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
         onError: (err, _vars, context) => {
             // Rollback to the previous value on error
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const rollbackKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(rollbackKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -147,16 +154,17 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
                 : 0;
 
             // Optimistically update
-            trpcUtils.orders.list.setData(
-                queryInput,
-                (old: any) => optimisticLineStatusUpdate(old, lineId, newStatus, inventoryDelta) as any
+            queryClient.setQueryData<OrdersListData>(
+                queryKey,
+                (old) => optimisticLineStatusUpdate(old, lineId, newStatus, inventoryDelta) as OrdersListData | undefined
             );
 
             return { previousData, queryInput } as OptimisticUpdateContext;
         },
         onError: (err, _vars, context) => {
             if (context?.previousData) {
-                trpcUtils.orders.list.setData(context.queryInput, context.previousData as any);
+                const rollbackKey = getOrdersListQueryKey(context.queryInput);
+                queryClient.setQueryData(rollbackKey, context.previousData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();

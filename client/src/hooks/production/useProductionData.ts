@@ -14,7 +14,6 @@
 import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 
 // Server Functions - Queries
 import {
@@ -175,7 +174,6 @@ interface LockDateInput {
  */
 export function useProductionMutations() {
     const queryClient = useQueryClient();
-    const trpcUtils = trpc.useUtils();
 
     // Get Server Function references at hook level
     const createBatchFn = useServerFn(createBatch);
@@ -195,10 +193,6 @@ export function useProductionMutations() {
         queryClient.invalidateQueries({ queryKey: ['production', 'capacity'] });
         queryClient.invalidateQueries({ queryKey: ['production', 'requirements'] });
         queryClient.invalidateQueries({ queryKey: ['production', 'pendingBySku'] });
-        // Also invalidate tRPC cache for backwards compatibility
-        trpcUtils.production.getBatches.invalidate();
-        trpcUtils.production.getCapacity.invalidate();
-        trpcUtils.production.getRequirements.invalidate();
     };
 
     /**
@@ -206,8 +200,6 @@ export function useProductionMutations() {
      */
     const invalidateInventory = () => {
         queryClient.invalidateQueries({ queryKey: ['inventory'] });
-        trpcUtils.inventory.getBalances.invalidate();
-        trpcUtils.inventory.getAllBalances.invalidate();
     };
 
     // ============================================
@@ -223,7 +215,6 @@ export function useProductionMutations() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['production', 'tailors'] });
-            trpcUtils.production.getTailors.invalidate();
         },
     });
 
@@ -377,7 +368,6 @@ export function useProductionMutations() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['production', 'lockedDates'] });
-            trpcUtils.production.getLockedDates.invalidate();
         },
     });
 
@@ -403,7 +393,6 @@ export function useProductionMutations() {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['production', 'lockedDates'] });
-            trpcUtils.production.getLockedDates.invalidate();
         },
     });
 

@@ -38,7 +38,7 @@ import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
 import customerRoutes from './routes/customers.js';
 import returnRoutes from './routes/returns/index.js';
 import feedbackRoutes from './routes/feedback.js';
-// Production routes migrated to tRPC - see trpc/routers/production.ts
+// Production routes migrated to TanStack Start Server Functions
 import reportRoutes from './routes/reports.js';
 import salesAnalyticsRoutes from './routes/sales-analytics.js';
 import authRoutes from './routes/auth.js';
@@ -63,12 +63,6 @@ import cacheDumpWorker from './services/cacheDumpWorker.js';
 import { runAllCleanup } from './utils/cacheCleanup.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import shutdownCoordinator from './utils/shutdownCoordinator.js';
-
-// tRPC setup
-import * as trpcExpress from '@trpc/server/adapters/express';
-import { appRouter } from './trpc/routers/_app.js';
-import { createContext } from './trpc/index.js';
-import { optionalAuth } from './middleware/auth.js';
 
 const app = express();
 
@@ -148,7 +142,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/returns', returnRoutes);
 app.use('/api/feedback', feedbackRoutes);
-// Production routes migrated to tRPC (/trpc/production.*)
+// Production routes migrated to TanStack Start Server Functions
 app.use('/api/reports', reportRoutes);
 app.use('/api/reports/sales-analytics', salesAnalyticsRoutes);
 app.use('/api', importExportRoutes);
@@ -164,20 +158,6 @@ app.use('/api/events', sseRoutes);
 app.use('/api/pulse', pulseRoutes);
 app.use('/api/materials', materialsRoutes);
 app.use('/api/bom', bomRoutes);
-
-// tRPC routes (mounted alongside Express for gradual migration)
-app.use(
-    '/trpc',
-    optionalAuth,
-    trpcExpress.createExpressMiddleware({
-        router: appRouter,
-        createContext,
-        onError({ error, path }) {
-            console.error(`[tRPC Error] ${path}:`, error.message);
-            console.error(error.stack);
-        },
-    })
-);
 
 // Health check
 app.get('/api/health', (req, res) => {

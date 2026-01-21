@@ -6,12 +6,12 @@
 import { useMemo } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError, showSuccess } from '../../utils/toast';
 import {
     releaseToShipped as releaseToShippedFn,
     releaseToCancelled as releaseToCancelledFn,
+    migrateShopifyFulfilled as migrateShopifyFulfilledFn,
 } from '../../server/functions/orderMutations';
 
 export function useOrderReleaseMutations() {
@@ -20,6 +20,7 @@ export function useOrderReleaseMutations() {
     // Server Function wrappers
     const releaseToShippedServerFn = useServerFn(releaseToShippedFn);
     const releaseToCancelledServerFn = useServerFn(releaseToCancelledFn);
+    const migrateShopifyFulfilledServerFn = useServerFn(migrateShopifyFulfilledFn);
 
     // ============================================
     // RELEASE TO SHIPPED
@@ -76,16 +77,25 @@ export function useOrderReleaseMutations() {
     }), [releaseToCancelledMutation.isPending, releaseToCancelledMutation.isError, releaseToCancelledMutation.error]);
 
     // ============================================
-    // MIGRATE SHOPIFY FULFILLED - Always tRPC (no Server Function equivalent)
+    // MIGRATE SHOPIFY FULFILLED
     // ============================================
-    const migrateShopifyFulfilledMutation = trpc.orders.migrateShopifyFulfilled.useMutation({
+    const migrateShopifyFulfilledMutation = useMutation({
+        mutationFn: async (input: { limit?: number }) => {
+            const result = await migrateShopifyFulfilledServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to migrate fulfilled orders');
+            }
+            return result.data;
+        },
         onSuccess: (data) => {
             invalidateOpenOrders();
             invalidateShippedOrders();
-            const { skipped, message } = data;
-            showSuccess(message, { description: skipped && skipped > 0 ? `${skipped} already shipped` : undefined });
+            if (data) {
+                const { skipped, message } = data;
+                showSuccess(message, { description: skipped && skipped > 0 ? `${skipped} already shipped` : undefined });
+            }
         },
-        onError: (err) => showError('Failed to migrate fulfilled orders', { description: err.message })
+        onError: (err) => showError('Failed to migrate fulfilled orders', { description: err instanceof Error ? err.message : String(err) })
     });
 
     // Wrapper for backward compatibility - useMemo ensures isPending updates reactively

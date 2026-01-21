@@ -1,8 +1,8 @@
 /**
  * Router Configuration for TanStack Start
  *
- * Creates the router instance with context for authentication,
- * QueryClient, and tRPC. Used by both client and server entries.
+ * Creates the router instance with context for authentication
+ * and QueryClient. Used by both client and server entries.
  */
 
 import { createRouter } from '@tanstack/react-router';
@@ -25,7 +25,6 @@ export const router = createRouter({
     routeTree,
     context: {
         queryClient,
-        trpc: undefined as any, // Set at runtime via RouterProvider
         auth: {
             user: null,
             isAuthenticated: false,

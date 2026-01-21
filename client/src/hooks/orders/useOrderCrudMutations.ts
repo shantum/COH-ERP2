@@ -4,9 +4,8 @@
  */
 
 import { useMemo } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { trpc } from '../../services/trpc';
 import { useOrderInvalidation } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
@@ -14,6 +13,7 @@ import {
     updateOrder as updateOrderFn,
     markPaid as markPaidFn,
     deleteOrder as deleteOrderFn,
+    updateLineNotes as updateLineNotesFn,
 } from '../../server/functions/orderMutations';
 
 export interface UseOrderCrudMutationsOptions {
@@ -49,7 +49,7 @@ interface CreateOrderInput {
 
 export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}) {
     const { invalidateOpenOrders, invalidateAll } = useOrderInvalidation();
-    const trpcUtils = trpc.useUtils();
+    const queryClient = useQueryClient();
 
     // Server Function wrappers
     const createOrderServerFn = useServerFn(createOrderFn);
@@ -57,6 +57,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
     // markPaidServerFn will be used when markPaid mutation is added
     void markPaidFn; // Prevent unused import warning
     const deleteOrderServerFn = useServerFn(deleteOrderFn);
+    const updateLineNotesServerFn = useServerFn(updateLineNotesFn);
 
     // ============================================
     // CREATE ORDER
@@ -165,16 +166,22 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
     }), [updateOrderNotesMutation.isPending, updateOrderNotesMutation.isError, updateOrderNotesMutation.error]);
 
     // ============================================
-    // UPDATE LINE NOTES - Always tRPC (no Server Function equivalent)
+    // UPDATE LINE NOTES
     // ============================================
-    const updateLineNotesMutation = trpc.orders.updateLine.useMutation({
+    const updateLineNotesMutation = useMutation({
+        mutationFn: async (input: { lineId: string; notes: string }) => {
+            const result = await updateLineNotesServerFn({ data: input });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update line notes');
+            }
+            return result.data;
+        },
         onSuccess: () => {
-            // Simple: invalidate current view's cache, let it refetch
-            trpcUtils.orders.list.invalidate();
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
             options.onNotesSuccess?.();
         },
         onError: (err) => {
-            showError('Failed to update line notes', { description: err.message });
+            showError('Failed to update line notes', { description: err instanceof Error ? err.message : String(err) });
         }
     });
 
@@ -202,7 +209,7 @@ export function useOrderCrudMutations(options: UseOrderCrudMutationsOptions = {}
             return result.data;
         },
         onSuccess: () => {
-            trpcUtils.orders.list.invalidate();
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
         },
         onError: (err) => {
             showError('Failed to update ship by date', { description: err instanceof Error ? err.message : String(err) });

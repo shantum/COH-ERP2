@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { fabricsApi, adminApi, customersApi } from '../services/api';
 import { inventoryQueryKeys } from '../constants/queryKeys';
+import { getOrdersListQueryKey } from './orders/orderMutationUtils';
 import { getOrders } from '../server/functions/orders';
 import { getInventoryBalances } from '../server/functions/inventory';
 import { getProductionLockedDates } from '../server/functions/production';
@@ -153,7 +154,7 @@ export function useUnifiedOrdersData({
         if (currentView === 'open' && page === 1 && ordersQuery.isSuccess) {
             // Prefetch shipped view page 1 in background
             queryClient.prefetchQuery({
-                queryKey: [['orders', 'list'], { input: { view: 'shipped', page: 1, limit: getPageSize('shipped') }, type: 'query' }],
+                queryKey: getOrdersListQueryKey({ view: 'shipped', page: 1, limit: getPageSize('shipped') }),
                 staleTime: STALE_TIME,
             });
         }
@@ -175,7 +176,7 @@ export function useUnifiedOrdersData({
         // Prefetch next page if it exists
         if (page < totalPages) {
             queryClient.prefetchQuery({
-                queryKey: [['orders', 'list'], { input: { ...baseInput, page: page + 1 }, type: 'query' }],
+                queryKey: getOrdersListQueryKey({ ...baseInput, page: page + 1 }),
                 staleTime: STALE_TIME,
             });
         }
@@ -183,7 +184,7 @@ export function useUnifiedOrdersData({
         // Prefetch previous page if it exists
         if (page > 1) {
             queryClient.prefetchQuery({
-                queryKey: [['orders', 'list'], { input: { ...baseInput, page: page - 1 }, type: 'query' }],
+                queryKey: getOrdersListQueryKey({ ...baseInput, page: page - 1 }),
                 staleTime: STALE_TIME,
             });
         }

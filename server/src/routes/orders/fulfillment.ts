@@ -93,7 +93,7 @@ interface EligibleOrder {
  */
 router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), deprecated({
     endpoint: 'POST /orders/:id/ship',
-    trpcAlternative: 'orders.ship',
+    alternative: 'orders.ship',
     deprecatedSince: '2026-01-16',
 }), validate(ShipOrderSchema) as RequestHandler, asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
@@ -181,7 +181,7 @@ router.post('/:id/ship', authenticateToken, requirePermission('orders:ship'), de
  */
 router.post('/:id/ship-lines', authenticateToken, requirePermission('orders:ship'), deprecated({
     endpoint: 'POST /orders/:id/ship-lines',
-    trpcAlternative: 'orders.ship',
+    alternative: 'orders.ship',
     deprecatedSince: '2026-01-16',
 }), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
@@ -460,7 +460,7 @@ router.post('/:id/migration-ship',
     requirePermission('orders:ship'),
     deprecated({
         endpoint: 'POST /orders/:id/migration-ship',
-        trpcAlternative: 'orders.adminShip',
+        alternative: 'orders.adminShip',
         deprecatedSince: '2026-01-16',
     }),
     asyncHandler(async (req: Request, res: Response) => {
@@ -505,7 +505,7 @@ router.post('/:id/migration-ship',
 // NOTE: deliveredAt is now on OrderLine, not Order. This endpoint marks all lines as delivered.
 router.post('/:id/mark-delivered', authenticateToken, deprecated({
     endpoint: 'POST /orders/:id/mark-delivered',
-    trpcAlternative: 'orders.markDelivered',
+    alternative: 'orders.markDelivered',
     deprecatedSince: '2026-01-16',
 }), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
@@ -561,7 +561,7 @@ router.post('/:id/mark-delivered', authenticateToken, deprecated({
 // NOTE: rtoInitiatedAt is now on OrderLine, not Order. This endpoint marks all shipped lines as RTO initiated.
 router.post('/:id/mark-rto', authenticateToken, deprecated({
     endpoint: 'POST /orders/:id/mark-rto',
-    trpcAlternative: 'orders.markRto',
+    alternative: 'orders.markRto',
     deprecatedSince: '2026-01-16',
 }), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;
@@ -625,7 +625,7 @@ router.post('/:id/mark-rto', authenticateToken, deprecated({
 // NOTE: rtoInitiatedAt and rtoReceivedAt are now on OrderLine, not Order.
 router.post('/:id/receive-rto', authenticateToken, deprecated({
     endpoint: 'POST /orders/:id/receive-rto',
-    trpcAlternative: 'orders.receiveRto',
+    alternative: 'orders.receiveRto',
     deprecatedSince: '2026-01-16',
 }), asyncHandler(async (req: Request, res: Response) => {
     const orderId = req.params.id as string;

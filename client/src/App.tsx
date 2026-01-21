@@ -4,7 +4,6 @@
  * This file sets up the provider hierarchy for the application:
  * - ErrorBoundary for error handling
  * - QueryClientProvider for TanStack Query
- * - TRPCProvider for tRPC client
  * - AuthProvider for authentication state
  * - RouterProvider for TanStack Router
  */
@@ -14,9 +13,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { Toaster } from 'sonner';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './hooks/useAuth';
-import { TRPCProvider } from './providers/TRPCProvider';
 import { router } from './router';
-import { trpc } from './services/trpc';
 import './index.css';
 
 // QueryClient configuration
@@ -54,7 +51,6 @@ function InnerApp() {
             router={router}
             context={{
                 queryClient,
-                trpc,
                 auth: {
                     user: auth.user,
                     isAuthenticated: auth.isAuthenticated,
@@ -72,11 +68,9 @@ function App() {
     return (
         <ErrorBoundary>
             <QueryClientProvider client={queryClient}>
-                <TRPCProvider queryClient={queryClient}>
-                    <AuthProvider>
-                        <InnerApp />
-                    </AuthProvider>
-                </TRPCProvider>
+                <AuthProvider>
+                    <InnerApp />
+                </AuthProvider>
             </QueryClientProvider>
             <Toaster
                 position="bottom-right"

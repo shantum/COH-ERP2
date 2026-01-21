@@ -54,7 +54,7 @@ interface OrderWithLines {
  */
 router.get('/', deprecated({
     endpoint: 'GET /orders',
-    trpcAlternative: 'orders.list',
+    alternative: 'orders.list',
     deprecatedSince: '2026-01-16',
 }), async (req: Request, res: Response) => {
     try {
@@ -158,7 +158,7 @@ router.get('/', deprecated({
 // Get single order
 router.get('/:id', deprecated({
     endpoint: 'GET /orders/:id',
-    trpcAlternative: 'orders.get',
+    alternative: 'orders.get',
     deprecatedSince: '2026-01-16',
 }), async (req: Request, res: Response) => {
     try {

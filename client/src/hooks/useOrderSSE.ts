@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { trpc } from '../services/trpc';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Event types from server (expanded)
 interface SSEEvent {
@@ -85,7 +85,7 @@ export function useOrderSSE({
     page = 1,
     enabled = true,
 }: UseOrderSSEOptions) {
-    const trpcUtils = trpc.useUtils();
+    const queryClient = useQueryClient();
     const eventSourceRef = useRef<EventSource | null>(null);
     const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const reconnectAttempts = useRef(0);
@@ -138,17 +138,20 @@ export function useOrderSSE({
             // Handle buffer overflow - server lost events, need full refetch
             if (data.type === 'buffer_overflow') {
                 console.log('SSE: Buffer overflow detected, triggering full refetch');
-                trpcUtils.orders.list.invalidate();
+                queryClient.invalidateQueries({ queryKey: ['orders'] });
                 return;
             }
 
-            // Build query input for cache operations (using refs to avoid reconnection on view/page change)
-            const queryInput = { view: currentViewRef.current, page: pageRef.current, limit: PAGE_SIZE };
+            // Build query key for cache operations (using refs to avoid reconnection on view/page change)
+            const queryKey = ['orders', { view: currentViewRef.current, page: pageRef.current, limit: PAGE_SIZE }];
+
+            // Type for order list cache data
+            type OrderListData = { rows: any[]; orders: any[] };
 
             // Handle line status changes
             // Now supports full rowData for complete row replacement (no merge needed)
             if (data.type === 'line_status' && data.lineId) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
 
                     const newRows = old.rows.map((row: any) =>
@@ -177,7 +180,7 @@ export function useOrderSSE({
             // Handle batch line updates
             if (data.type === 'lines_batch_update' && data.lineIds && data.changes) {
                 const lineIdSet = new Set(data.lineIds);
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
 
                     const newRows = old.rows.map((row: any) =>
@@ -202,12 +205,12 @@ export function useOrderSSE({
             // Handle new order created
             if (data.type === 'order_created') {
                 // Just invalidate - new orders should trigger a refetch
-                trpcUtils.orders.list.invalidate({ view: 'open' });
+                queryClient.invalidateQueries({ queryKey: ['orders', { view: 'open' }] });
             }
 
             // Handle order deleted
             if (data.type === 'order_deleted' && data.orderId) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
                     return {
                         ...old,
@@ -219,7 +222,7 @@ export function useOrderSSE({
 
             // Handle inventory updates - update skuStock in-place instead of full refetch
             if (data.type === 'inventory_updated' && data.skuId && data.changes) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
                     const newRows = old.rows.map((row: any) =>
                         row.skuId === data.skuId
@@ -232,7 +235,7 @@ export function useOrderSSE({
 
             // Handle order updates (cancel/uncancel/general updates)
             if (data.type === 'order_updated' && data.orderId && data.changes) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
 
                     const newRows = old.rows.map((row: any) => {
@@ -264,7 +267,7 @@ export function useOrderSSE({
             if (data.type === 'order_shipped' && data.orderId) {
                 // Remove from open view cache (order moved to shipped)
                 if (currentViewRef.current === 'open') {
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                    queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
@@ -279,7 +282,7 @@ export function useOrderSSE({
             // Handle lines shipped
             if (data.type === 'lines_shipped' && data.lineIds && data.changes) {
                 const lineIdSet = new Set(data.lineIds);
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
 
                     const newRows = old.rows.map((row: any) =>
@@ -294,7 +297,7 @@ export function useOrderSSE({
 
             // Handle order delivered - update tracking status in current view
             if (data.type === 'order_delivered' && data.orderId && data.changes) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
                     const newRows = old.rows.map((row: any) =>
                         row.orderId === data.orderId ? { ...row, ...data.changes } : row
@@ -305,7 +308,7 @@ export function useOrderSSE({
 
             // Handle order RTO - update tracking status in current view
             if (data.type === 'order_rto' && data.orderId && data.changes) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
                     const newRows = old.rows.map((row: any) =>
                         row.orderId === data.orderId ? { ...row, ...data.changes } : row
@@ -317,7 +320,7 @@ export function useOrderSSE({
             // Handle order RTO received - remove from shipped/rto view
             if (data.type === 'order_rto_received' && data.orderId) {
                 if (currentViewRef.current === 'shipped') {
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                    queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
@@ -332,7 +335,7 @@ export function useOrderSSE({
             // Handle order cancelled - remove from open view
             if (data.type === 'order_cancelled' && data.orderId) {
                 if (currentViewRef.current === 'open') {
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                    queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
@@ -347,7 +350,7 @@ export function useOrderSSE({
             // Handle order uncancelled - remove from cancelled view
             if (data.type === 'order_uncancelled' && data.orderId) {
                 if (currentViewRef.current === 'cancelled') {
-                    trpcUtils.orders.list.setData(queryInput, (old) => {
+                    queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                         if (!old) return old;
                         return {
                             ...old,
@@ -367,7 +370,7 @@ export function useOrderSSE({
                 data.lineId &&
                 data.changes
             ) {
-                trpcUtils.orders.list.setData(queryInput, (old) => {
+                queryClient.setQueryData<OrderListData>(queryKey, (old) => {
                     if (!old) return old;
 
                     const newRows = old.rows.map((row: any) =>
@@ -393,7 +396,7 @@ export function useOrderSSE({
             console.error('SSE: Failed to parse event', err);
         }
     // Using refs for currentView/page to avoid reconnection on navigation (Issue 3 fix)
-    }, [trpcUtils]);
+    }, [queryClient]);
 
     const connect = useCallback(() => {
         // Skip during SSR (no window/EventSource available)

@@ -2,9 +2,6 @@
  * Inventory Reconciliation Routes (Express)
  *
  * CSV upload endpoint only - requires multer for multipart/form-data handling.
- * All other reconciliation endpoints have been migrated to tRPC (inventoryReconciliation router).
- *
- * @see server/src/trpc/routers/inventoryReconciliation.ts for main CRUD operations
  */
 
 import { Router } from 'express';

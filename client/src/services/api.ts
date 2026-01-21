@@ -545,9 +545,8 @@ export const repackingApi = {
     }) => api.post('/repacking/write-offs', data),
 };
 
-// Production - MIGRATED TO tRPC
-// All production endpoints are now in server/src/trpc/routers/production.ts
-// Use trpc.production.* hooks from client/src/hooks/production/
+// Production - Uses Server Functions
+// See client/src/server/functions/production.ts and client/src/hooks/production/
 
 // Reports
 export const reportsApi = {

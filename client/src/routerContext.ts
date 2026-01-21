@@ -2,11 +2,10 @@
  * Router Context Types for TanStack Router
  *
  * This file defines the context that is passed to all routes via TanStack Router.
- * It includes QueryClient, tRPC client, and authentication state.
+ * It includes QueryClient and authentication state.
  */
 
 import type { QueryClient } from '@tanstack/react-query';
-import type { trpc } from './services/trpc';
 import type { AuthState } from './types';
 
 /**
@@ -19,8 +18,6 @@ import type { AuthState } from './types';
 export interface RouterContext {
     /** TanStack Query client for cache management */
     queryClient: QueryClient;
-    /** tRPC client for API calls */
-    trpc: typeof trpc;
     /** Authentication state */
     auth: AuthState;
 }

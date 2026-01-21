@@ -6,23 +6,6 @@
  *
  * @example
  * ```typescript
- * // In tRPC procedure
- * import { enforceRulesInTrpc } from '../rules/index.js';
- *
- * const cancelOrder = protectedProcedure.mutation(async ({ input, ctx }) => {
- *     const order = await ctx.prisma.order.findUnique({ ... });
- *
- *     await enforceRulesInTrpc('cancelOrder', ctx, {
- *         data: { order },
- *         phase: 'pre',
- *     });
- *
- *     // Proceed with cancellation...
- * });
- * ```
- *
- * @example
- * ```typescript
  * // In Express route
  * import { enforceRulesInExpress } from '../rules/index.js';
  *
@@ -92,14 +75,6 @@ export type { ExecuteRulesInput } from './core/executor.js';
 // ============================================
 // ADAPTERS
 // ============================================
-
-// tRPC adapter
-export {
-    enforceRulesInTrpc,
-    executeRulesInTrpc,
-    checkRulesInTrpc,
-    createTrpcErrorFromRule,
-} from './adapters/trpc.js';
 
 // Express adapter
 export {
