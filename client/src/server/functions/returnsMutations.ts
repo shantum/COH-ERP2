@@ -185,3 +185,298 @@ export const updateReturnStatus = createServerFn({ method: 'POST' })
             };
         }
     );
+
+// ============================================
+// Additional Return Request Mutations
+// ============================================
+
+const createReturnRequestInputSchema = z.object({
+    requestType: z.enum(['return', 'exchange']),
+    resolution: z.string(),
+    originalOrderId: z.string().uuid(),
+    reasonCategory: z.string(),
+    reasonDetails: z.string().optional(),
+    lines: z.array(
+        z.object({
+            skuId: z.string().uuid(),
+            qty: z.number().int().positive(),
+            unitPrice: z.number().optional(),
+        })
+    ),
+    returnValue: z.number().optional(),
+    courier: z.string().optional(),
+    awbNumber: z.string().optional(),
+});
+
+/**
+ * Create a new return request
+ */
+export const createReturnRequest = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => createReturnRequestInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        // Get order to extract customer
+        const order = await prisma.order.findUnique({
+            where: { id: data.originalOrderId },
+            select: { customerId: true },
+        });
+
+        if (!order || !order.customerId) {
+            throw new Error('Order not found or has no customer');
+        }
+
+        // Generate request number
+        const count = await prisma.returnRequest.count();
+        const requestNumber = `RET${String(count + 1).padStart(5, '0')}`;
+
+        // Create return request with lines
+        const returnRequest = await prisma.returnRequest.create({
+            data: {
+                requestNumber,
+                requestType: data.requestType,
+                resolution: data.resolution,
+                originalOrderId: data.originalOrderId,
+                customerId: order.customerId,
+                status: 'requested',
+                reasonCategory: data.reasonCategory,
+                reasonDetails: data.reasonDetails || null,
+                returnValue: data.returnValue || null,
+                lines: {
+                    create: data.lines.map((line) => ({
+                        skuId: line.skuId,
+                        qty: line.qty,
+                        unitPrice: line.unitPrice || null,
+                    })),
+                },
+            },
+            include: {
+                lines: true,
+            },
+        });
+
+        return { success: true, returnRequest };
+    });
+
+const updateReturnRequestInputSchema = z.object({
+    id: z.string().uuid(),
+    reasonCategory: z.string().optional(),
+    reasonDetails: z.string().optional(),
+    courier: z.string().optional(),
+    awbNumber: z.string().optional(),
+});
+
+/**
+ * Update a return request
+ */
+export const updateReturnRequest = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateReturnRequestInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const { id, ...updateData } = data;
+
+        const returnRequest = await prisma.returnRequest.update({
+            where: { id },
+            data: updateData,
+        });
+
+        return { success: true, returnRequest };
+    });
+
+const deleteReturnRequestInputSchema = z.object({
+    id: z.string().uuid(),
+});
+
+/**
+ * Delete a return request
+ */
+export const deleteReturnRequest = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => deleteReturnRequestInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        await prisma.returnRequest.delete({
+            where: { id: data.id },
+        });
+
+        return { success: true };
+    });
+
+const markReverseReceivedInputSchema = z.object({
+    id: z.string().uuid(),
+});
+
+/**
+ * Mark return as reverse received
+ */
+export const markReverseReceived = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const returnRequest = await prisma.returnRequest.update({
+            where: { id: data.id },
+            data: {
+                reverseReceived: true,
+                reverseReceivedAt: new Date(),
+            },
+        });
+
+        return { success: true, returnRequest };
+    });
+
+/**
+ * Unmark return as reverse received
+ */
+export const unmarkReverseReceived = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const returnRequest = await prisma.returnRequest.update({
+            where: { id: data.id },
+            data: {
+                reverseReceived: false,
+                reverseReceivedAt: null,
+            },
+        });
+
+        return { success: true, returnRequest };
+    });
+
+/**
+ * Mark forward as delivered (for exchanges)
+ */
+export const markForwardDelivered = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const returnRequest = await prisma.returnRequest.update({
+            where: { id: data.id },
+            data: {
+                forwardDelivered: true,
+                forwardDeliveredAt: new Date(),
+            },
+        });
+
+        return { success: true, returnRequest };
+    });
+
+/**
+ * Unmark forward as delivered
+ */
+export const unmarkForwardDelivered = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => markReverseReceivedInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        const returnRequest = await prisma.returnRequest.update({
+            where: { id: data.id },
+            data: {
+                forwardDelivered: false,
+                forwardDeliveredAt: null,
+            },
+        });
+
+        return { success: true, returnRequest };
+    });
+
+const receiveReturnItemInputSchema = z.object({
+    requestId: z.string().uuid(),
+    lineId: z.string().uuid(),
+    condition: z.enum(['good', 'damaged', 'defective', 'wrong_item']),
+});
+
+/**
+ * Receive a return item and add to repacking queue
+ */
+export const receiveReturnItem = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => receiveReturnItemInputSchema.parse(input))
+    .handler(async ({ data }) => {
+        const { PrismaClient } = await import('@prisma/client');
+        const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+        const prisma = globalForPrisma.prisma ?? new PrismaClient();
+        if (process.env.NODE_ENV !== 'production') {
+            globalForPrisma.prisma = prisma;
+        }
+
+        // Get return line
+        const returnLine = await prisma.returnRequestLine.findUnique({
+            where: { id: data.lineId },
+            include: {
+                request: true,
+            },
+        });
+
+        if (!returnLine) {
+            throw new Error('Return line not found');
+        }
+
+        // Update return line with condition
+        await prisma.returnRequestLine.update({
+            where: { id: data.lineId },
+            data: {
+                itemCondition: data.condition,
+            },
+        });
+
+        // Add to repacking queue
+        await prisma.repackingQueueItem.create({
+            data: {
+                skuId: returnLine.skuId,
+                qty: returnLine.qty,
+                returnRequestId: returnLine.requestId,
+                returnLineId: returnLine.id,
+                condition: data.condition,
+                inspectionNotes: null,
+                status: 'pending',
+            },
+        });
+
+        return { success: true, message: 'Item received and added to QC queue' };
+    });

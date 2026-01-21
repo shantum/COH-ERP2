@@ -1,0 +1,615 @@
+/**
+ * Reports Server Functions
+ *
+ * TanStack Start Server Functions for analytics and reporting queries.
+ * Uses Prisma and Kysely for database access.
+ *
+ * IMPORTANT: All database imports are dynamic to prevent Node.js code
+ * from being bundled into the client.
+ */
+
+import { createServerFn } from '@tanstack/react-start';
+import { z } from 'zod';
+import { authMiddleware } from '../middleware/auth';
+
+// ============================================
+// INPUT SCHEMAS
+// ============================================
+
+const getTopProductsInputSchema = z.object({
+    days: z.number().int().positive().optional(),
+    level: z.enum(['product', 'variation', 'sku']).optional().default('product'),
+    limit: z.number().int().positive().optional().default(10),
+});
+
+const getTopCustomersInputSchema = z.object({
+    months: z.union([z.number().int().positive(), z.literal('all')]).optional().default('all'),
+    limit: z.number().int().positive().optional().default(10),
+});
+
+// ============================================
+// OUTPUT TYPES
+// ============================================
+
+export interface TopProduct {
+    id: string;
+    name: string;
+    category: string;
+    imageUrl: string | null;
+    unitsSold: number;
+    revenue: number;
+    avgPrice: number;
+}
+
+export interface TopCustomer {
+    id: string;
+    email: string;
+    name: string;
+    tier: string;
+    totalOrders: number;
+    totalSpent: number;
+    avgOrderValue: number;
+    lastOrderDate: string | null;
+}
+
+// ============================================
+// HELPER: LAZY DATABASE IMPORTS
+// ============================================
+
+/**
+ * Lazy import Prisma client to prevent bundling server code into client
+ */
+async function getPrisma() {
+    const { PrismaClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
+    const prisma = globalForPrisma.prisma ?? new PrismaClient();
+    if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+    }
+    return prisma;
+}
+
+// ============================================
+// SERVER FUNCTIONS
+// ============================================
+
+/**
+ * Get top products by units sold
+ *
+ * Returns top-selling products within specified time period.
+ * Supports product, variation, or SKU-level aggregation.
+ */
+export const getTopProducts = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTopProductsInputSchema.parse(input))
+    .handler(async ({ data }): Promise<TopProduct[]> => {
+        const prisma = await getPrisma();
+
+        const { days, level, limit } = data;
+
+        // Calculate date filter
+        const dateFilter = days
+            ? {
+                  orderDate: {
+                      gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+                  },
+              }
+            : {};
+
+        // Get order lines with shipped status
+        const orderLines = await prisma.orderLine.findMany({
+            where: {
+                lineStatus: 'shipped',
+                order: dateFilter,
+            },
+            include: {
+                sku: {
+                    include: {
+                        variation: {
+                            include: {
+                                product: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Aggregate by level
+        const aggregateMap = new Map<
+            string,
+            {
+                id: string;
+                name: string;
+                category: string;
+                imageUrl: string | null;
+                unitsSold: number;
+                revenue: number;
+                prices: number[];
+            }
+        >();
+
+        for (const line of orderLines) {
+            let key: string;
+            let name: string;
+            let category: string;
+            let imageUrl: string | null;
+
+            if (level === 'product') {
+                key = line.sku.variation.product.id;
+                name = line.sku.variation.product.name;
+                category = line.sku.variation.product.category || 'Uncategorized';
+                imageUrl = line.sku.variation.product.imageUrl;
+            } else if (level === 'variation') {
+                key = line.sku.variation.id;
+                name = `${line.sku.variation.product.name} - ${line.sku.variation.colorName}`;
+                category = line.sku.variation.product.category || 'Uncategorized';
+                imageUrl = line.sku.variation.imageUrl || line.sku.variation.product.imageUrl;
+            } else {
+                // SKU level
+                key = line.sku.id;
+                name = `${line.sku.variation.product.name} - ${line.sku.variation.colorName} - ${line.sku.size}`;
+                category = line.sku.variation.product.category || 'Uncategorized';
+                imageUrl = line.sku.variation.imageUrl || line.sku.variation.product.imageUrl;
+            }
+
+            if (!aggregateMap.has(key)) {
+                aggregateMap.set(key, {
+                    id: key,
+                    name,
+                    category,
+                    imageUrl,
+                    unitsSold: 0,
+                    revenue: 0,
+                    prices: [],
+                });
+            }
+
+            const stats = aggregateMap.get(key)!;
+            stats.unitsSold += line.qty;
+            stats.revenue += line.unitPrice * line.qty;
+            stats.prices.push(line.unitPrice);
+        }
+
+        // Convert to array and calculate averages
+        const topProducts: TopProduct[] = Array.from(aggregateMap.values())
+            .map((stats) => ({
+                id: stats.id,
+                name: stats.name,
+                category: stats.category,
+                imageUrl: stats.imageUrl,
+                unitsSold: stats.unitsSold,
+                revenue: Math.round(stats.revenue * 100) / 100,
+                avgPrice:
+                    stats.prices.length > 0
+                        ? Math.round((stats.prices.reduce((a, b) => a + b, 0) / stats.prices.length) * 100) / 100
+                        : 0,
+            }))
+            .sort((a, b) => b.unitsSold - a.unitsSold)
+            .slice(0, limit);
+
+        return topProducts;
+    });
+
+/**
+ * Get top customers by total spend
+ *
+ * Returns top customers within specified time period.
+ */
+export const getTopCustomers = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getTopCustomersInputSchema.parse(input))
+    .handler(async ({ data }): Promise<TopCustomer[]> => {
+        const prisma = await getPrisma();
+
+        const { months, limit } = data;
+
+        // Calculate date filter
+        const dateFilter =
+            months !== 'all'
+                ? {
+                      orderDate: {
+                          gte: new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000),
+                      },
+                  }
+                : {};
+
+        // Get orders with customer info
+        const orders = await prisma.order.findMany({
+            where: {
+                ...dateFilter,
+                status: {
+                    notIn: ['cancelled'],
+                },
+            },
+            include: {
+                customer: true,
+                orderLines: {
+                    where: {
+                        lineStatus: 'shipped',
+                    },
+                },
+            },
+        });
+
+        // Aggregate by customer
+        const customerMap = new Map<
+            string,
+            {
+                id: string;
+                email: string;
+                name: string;
+                tier: string;
+                totalOrders: number;
+                totalSpent: number;
+                orderDates: Date[];
+            }
+        >();
+
+        for (const order of orders) {
+            if (!order.customer) continue;
+
+            const customerId = order.customer.id;
+            const customerName = [order.customer.firstName, order.customer.lastName]
+                .filter(Boolean)
+                .join(' ') || 'Unknown';
+
+            if (!customerMap.has(customerId)) {
+                customerMap.set(customerId, {
+                    id: customerId,
+                    email: order.customer.email,
+                    name: customerName,
+                    tier: order.customer.tier || 'bronze',
+                    totalOrders: 0,
+                    totalSpent: 0,
+                    orderDates: [],
+                });
+            }
+
+            const stats = customerMap.get(customerId)!;
+            stats.totalOrders++;
+            stats.orderDates.push(order.orderDate);
+
+            // Calculate order total from orderLines
+            const orderTotal = order.orderLines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
+            stats.totalSpent += orderTotal;
+        }
+
+        // Convert to array and calculate averages
+        const topCustomers: TopCustomer[] = Array.from(customerMap.values())
+            .map((stats) => ({
+                id: stats.id,
+                email: stats.email,
+                name: stats.name,
+                tier: stats.tier,
+                totalOrders: stats.totalOrders,
+                totalSpent: Math.round(stats.totalSpent * 100) / 100,
+                avgOrderValue:
+                    stats.totalOrders > 0
+                        ? Math.round((stats.totalSpent / stats.totalOrders) * 100) / 100
+                        : 0,
+                lastOrderDate:
+                    stats.orderDates.length > 0
+                        ? new Date(Math.max(...stats.orderDates.map((d) => d.getTime()))).toISOString()
+                        : null,
+            }))
+            .sort((a, b) => b.totalSpent - a.totalSpent)
+            .slice(0, limit);
+
+        return topCustomers;
+    });
+
+/**
+ * Get customer overview stats
+ *
+ * Returns aggregated customer statistics for the specified time period.
+ */
+export const getCustomerOverviewStats = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown) =>
+            z
+                .object({
+                    months: z.union([z.number().int().positive(), z.literal('all')]).optional().default('all'),
+                })
+                .parse(input)
+    )
+    .handler(
+        async ({
+            data,
+        }): Promise<{
+            totalCustomers: number;
+            activeCustomers: number;
+            newCustomers: number;
+            repeatCustomers: number;
+            repeatRate: number;
+            totalOrders: number;
+            totalRevenue: number;
+            avgOrderValue: number;
+            avgOrdersPerCustomer: number;
+            avgOrderFrequency: number;
+            avgLTV: number;
+        }> => {
+            const prisma = await getPrisma();
+
+            const { months } = data;
+
+            // Calculate date filter
+            const dateFilter =
+                months !== 'all'
+                    ? {
+                          gte: new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000),
+                      }
+                    : undefined;
+
+            // Get customer stats
+            const [totalCustomers, recentOrders, newCustomers, allCustomers] = await Promise.all([
+                prisma.customer.count(),
+                prisma.order.findMany({
+                    where: {
+                        ...(dateFilter ? { orderDate: dateFilter } : {}),
+                        status: {
+                            notIn: ['cancelled'],
+                        },
+                    },
+                    include: {
+                        customer: {
+                            select: {
+                                id: true,
+                                ltv: true,
+                            },
+                        },
+                        orderLines: {
+                            where: {
+                                lineStatus: 'shipped',
+                            },
+                        },
+                    },
+                }),
+                dateFilter
+                    ? prisma.customer.count({
+                          where: {
+                              createdAt: dateFilter,
+                          },
+                      })
+                    : 0,
+                prisma.customer.findMany({
+                    where: {
+                        orderCount: {
+                            gt: 0,
+                        },
+                    },
+                    select: {
+                        id: true,
+                        orderCount: true,
+                        ltv: true,
+                    },
+                }),
+            ]);
+
+            // Calculate active customers and totals
+            const customerOrderCounts = new Map<string, number>();
+            let totalRevenue = 0;
+
+            for (const order of recentOrders) {
+                if (order.customerId) {
+                    customerOrderCounts.set(
+                        order.customerId,
+                        (customerOrderCounts.get(order.customerId) || 0) + 1
+                    );
+                }
+
+                const orderTotal = order.orderLines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0);
+                totalRevenue += orderTotal;
+            }
+
+            const activeCustomers = customerOrderCounts.size;
+            const avgOrderValue = recentOrders.length > 0 ? totalRevenue / recentOrders.length : 0;
+            const avgOrdersPerCustomer = activeCustomers > 0 ? recentOrders.length / activeCustomers : 0;
+
+            // Calculate repeat customers (customers with more than 1 order)
+            const repeatCustomers = Array.from(customerOrderCounts.values()).filter((count) => count > 1)
+                .length;
+            const repeatRate =
+                activeCustomers > 0 ? Math.round((repeatCustomers / activeCustomers) * 100) : 0;
+
+            // Calculate average order frequency (orders per customer per month)
+            const timeWindowMonths = months === 'all' ? 12 : months; // Default to 12 months for 'all'
+            const avgOrderFrequency =
+                activeCustomers > 0
+                    ? Math.round((recentOrders.length / activeCustomers / timeWindowMonths) * 100) / 100
+                    : 0;
+
+            // Calculate average LTV from all customers
+            const totalLTV = allCustomers.reduce((sum, c) => sum + (c.ltv || 0), 0);
+            const avgLTV = allCustomers.length > 0 ? Math.round(totalLTV / allCustomers.length) : 0;
+
+            return {
+                totalCustomers,
+                activeCustomers,
+                newCustomers,
+                repeatCustomers,
+                repeatRate,
+                totalOrders: recentOrders.length,
+                totalRevenue: Math.round(totalRevenue * 100) / 100,
+                avgOrderValue: Math.round(avgOrderValue * 100) / 100,
+                avgOrdersPerCustomer: Math.round(avgOrdersPerCustomer * 100) / 100,
+                avgOrderFrequency,
+                avgLTV,
+            };
+        }
+    );
+
+/**
+ * Get high-value customers
+ *
+ * Returns customers with highest lifetime value.
+ */
+export const getHighValueCustomers = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown) =>
+            z
+                .object({
+                    limit: z.number().int().positive().optional().default(100),
+                })
+                .parse(input)
+    )
+    .handler(async ({ data }): Promise<TopCustomer[]> => {
+        const prisma = await getPrisma();
+
+        const customers = await prisma.customer.findMany({
+            where: {
+                ltv: {
+                    gt: 0,
+                },
+            },
+            orderBy: {
+                ltv: 'desc',
+            },
+            take: data.limit,
+            include: {
+                orders: {
+                    where: {
+                        status: {
+                            notIn: ['cancelled'],
+                        },
+                    },
+                    orderBy: {
+                        orderDate: 'desc',
+                    },
+                    take: 1,
+                    select: {
+                        orderDate: true,
+                    },
+                },
+            },
+        });
+
+        return customers.map((customer) => ({
+            id: customer.id,
+            email: customer.email,
+            name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
+            tier: customer.tier || 'bronze',
+            totalOrders: customer.orderCount || 0,
+            totalSpent: customer.ltv || 0,
+            avgOrderValue:
+                customer.orderCount && customer.ltv
+                    ? Math.round((customer.ltv / customer.orderCount) * 100) / 100
+                    : 0,
+            lastOrderDate: customer.orders[0]?.orderDate.toISOString() || null,
+        }));
+    });
+
+/**
+ * Get at-risk customers
+ *
+ * Returns customers who haven't ordered recently.
+ */
+export const getAtRiskCustomers = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<TopCustomer[]> => {
+        const prisma = await getPrisma();
+
+        // Get customers with orders but no recent orders (90+ days)
+        const cutoffDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+        const customers = await prisma.customer.findMany({
+            where: {
+                orderCount: {
+                    gt: 0,
+                },
+                lastOrderDate: {
+                    lt: cutoffDate,
+                },
+            },
+            orderBy: {
+                lastOrderDate: 'asc',
+            },
+            take: 100,
+        });
+
+        return customers.map((customer) => ({
+            id: customer.id,
+            email: customer.email,
+            name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
+            tier: customer.tier || 'bronze',
+            totalOrders: customer.orderCount || 0,
+            totalSpent: customer.ltv || 0,
+            avgOrderValue:
+                customer.orderCount && customer.ltv
+                    ? Math.round((customer.ltv / customer.orderCount) * 100) / 100
+                    : 0,
+            lastOrderDate: customer.lastOrderDate?.toISOString() || null,
+        }));
+    });
+
+/**
+ * Get frequent returners
+ *
+ * Returns customers with high return rates.
+ */
+export const getFrequentReturners = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<TopCustomer[]> => {
+        const prisma = await getPrisma();
+
+        // Get customers with return requests
+        const returners = await prisma.customer.findMany({
+            where: {
+                returnRequests: {
+                    some: {},
+                },
+            },
+            include: {
+                returnRequests: true,
+                orders: {
+                    where: {
+                        status: {
+                            notIn: ['cancelled'],
+                        },
+                    },
+                    orderBy: {
+                        orderDate: 'desc',
+                    },
+                    take: 1,
+                    select: {
+                        orderDate: true,
+                    },
+                },
+            },
+            orderBy: {
+                orderCount: 'desc',
+            },
+            take: 100,
+        });
+
+        // Filter to customers with return rate > 10%
+        const frequentReturners = returners
+            .filter((customer) => {
+                const returnCount = customer.returnRequests.length;
+                const orderCount = customer.orderCount || 0;
+                return orderCount > 0 && returnCount / orderCount > 0.1;
+            })
+            .sort((a, b) => {
+                const aRate = a.returnRequests.length / (a.orderCount || 1);
+                const bRate = b.returnRequests.length / (b.orderCount || 1);
+                return bRate - aRate;
+            });
+
+        return frequentReturners.map((customer) => ({
+            id: customer.id,
+            email: customer.email,
+            name: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || 'Unknown',
+            tier: customer.tier || 'bronze',
+            totalOrders: customer.orderCount || 0,
+            totalSpent: customer.ltv || 0,
+            avgOrderValue:
+                customer.orderCount && customer.ltv
+                    ? Math.round((customer.ltv / customer.orderCount) * 100) / 100
+                    : 0,
+            lastOrderDate: customer.orders[0]?.orderDate.toISOString() || null,
+        }));
+    });

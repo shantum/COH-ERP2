@@ -4,7 +4,35 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { returnsApi, customersApi, ordersApi, repackingApi } from '../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getCustomer } from '../server/functions/customers';
+import { getOrders } from '../server/functions/orders';
+import {
+    getReturnsAll,
+    getReturnsPending,
+    getReturnsActionQueue,
+    getReturnsAnalyticsByProduct,
+    getReturnsOrder,
+    getReturnsBySkuCode,
+} from '../server/functions/returns';
+import {
+    createReturnRequest,
+    updateReturnRequest,
+    deleteReturnRequest,
+    markReverseReceived,
+    unmarkReverseReceived,
+    markForwardDelivered,
+    unmarkForwardDelivered,
+    receiveReturnItem,
+} from '../server/functions/returnsMutations';
+import {
+    getRepackingQueue,
+    getRepackingQueueHistory,
+    processRepackingItem,
+    undoRepackingProcess,
+    deleteRepackingQueueItem,
+    type QueueItem as RepackingQueueItem,
+} from '../server/functions/repacking';
 import { useState, useRef, useEffect } from 'react';
 import {
     AlertTriangle, Plus, X, Search, Package, Truck, Check, Trash2,
@@ -22,7 +50,6 @@ interface OrderItem {
     orderLineId: string;
     skuId: string;
     skuCode: string;
-    barcode: string | null;
     productName: string;
     colorName: string;
     size: string;
@@ -118,33 +145,7 @@ interface ReturnRequest {
     matchingLine?: ReturnLine;
 }
 
-interface QueueItem {
-    id: string;
-    skuId: string;
-    qty: number;
-    condition: string;
-    status: string;
-    inspectionNotes: string | null;
-    qcComments: string | null;
-    writeOffReason: string | null;
-    createdAt: string;
-    processedAt: string | null;
-    returnRequestId: string | null;
-    returnRequest: {
-        requestNumber: string;
-        requestType: string;
-        reasonCategory: string;
-    } | null;
-    processedBy: {
-        id: string;
-        name: string;
-    } | null;
-    skuCode: string;
-    productName: string;
-    colorName: string;
-    size: string;
-    imageUrl: string | null;
-}
+// Use RepackingQueueItem from server functions
 
 interface SkuInfo {
     id: string;
@@ -271,7 +272,7 @@ export default function Returns() {
     const inputRef = useRef<HTMLInputElement>(null);
 
     // QC Modal state
-    const [qcModalItem, setQcModalItem] = useState<QueueItem | null>(null);
+    const [qcModalItem, setQcModalItem] = useState<RepackingQueueItem | null>(null);
     const [qcAction, setQcAction] = useState<'ready' | 'write_off'>('ready');
     const [qcComments, setQcComments] = useState('');
     const [writeOffReason, setWriteOffReason] = useState('');
@@ -279,60 +280,90 @@ export default function Returns() {
     const [queueSearchTerm, setQueueSearchTerm] = useState('');
 
     // ============================================
-    // QUERIES
+    // QUERIES - Server Functions
     // ============================================
+
+    // Get Server Function references
+    const getReturnsAllFn = useServerFn(getReturnsAll);
+    const getReturnsPendingFn = useServerFn(getReturnsPending);
+    const getRepackingQueueFn = useServerFn(getRepackingQueue);
+    const getRepackingQueueHistoryFn = useServerFn(getRepackingQueueHistory);
+    const getReturnsAnalyticsFn = useServerFn(getReturnsAnalyticsByProduct);
+    const getReturnsActionQueueFn = useServerFn(getReturnsActionQueue);
+    const getCustomerFn = useServerFn(getCustomer);
+    const getOrdersFn = useServerFn(getOrders);
 
     const { data: returns = [], isLoading } = useQuery({
         queryKey: ['returns'],
-        queryFn: () => returnsApi.getAll().then((r) => r.data),
+        queryFn: () => getReturnsAllFn(),
     });
 
     const { data: pendingTickets = [], isLoading: loadingTickets } = useQuery({
         queryKey: ['returns', 'pending'],
-        queryFn: () => returnsApi.getPending().then((r) => r.data),
+        queryFn: () => getReturnsPendingFn(),
     });
 
-    const { data: queueItems = [], isLoading: loadingQueue } = useQuery({
+    const { data: queueResponse, isLoading: loadingQueue } = useQuery({
         queryKey: ['repacking-queue'],
-        queryFn: async () => {
-            const res = await repackingApi.getQueue({ limit: 100 });
-            return (res.data as QueueItem[]).filter(item => item.returnRequestId);
-        },
+        queryFn: () => getRepackingQueueFn({ data: { limit: 100 } }),
     });
+    const queueItems = queueResponse?.items || [];
 
-    const { data: historyItems = [], isLoading: loadingHistory } = useQuery({
+    const { data: historyResponse, isLoading: loadingHistory } = useQuery({
         queryKey: ['repacking-history', historyFilter],
-        queryFn: async () => {
-            const params = historyFilter === 'all' ? {} : { status: historyFilter as 'ready' | 'write_off' };
-            const res = await repackingApi.getQueueHistory({ ...params, limit: 100 });
-            return (res.data as QueueItem[]).filter(item => item.returnRequestId);
-        },
+        queryFn: () =>
+            getRepackingQueueHistoryFn({
+                data: {
+                    limit: 100,
+                    status: historyFilter === 'all' ? 'all' : historyFilter === 'ready' ? 'approved' : 'written_off',
+                },
+            }),
         enabled: tab === 'queue',
     });
+    const historyItems = historyResponse?.items || [];
 
     const { data: analytics } = useQuery({
         queryKey: ['returnAnalytics'],
-        queryFn: () => returnsApi.getAnalyticsByProduct().then((r) => r.data),
+        queryFn: () => getReturnsAnalyticsFn(),
         enabled: tab === 'analytics',
     });
 
-    // Action queue dashboard data
-    const { data: actionQueue } = useQuery({
+    // Action queue dashboard data - Server Function returns ActionQueueItem[]
+    const { data: actionQueueItems = [] } = useQuery({
         queryKey: ['actionQueue'],
-        queryFn: () => returnsApi.getActionQueue().then((r) => r.data),
+        queryFn: () => getReturnsActionQueueFn(),
         enabled: tab === 'actions',
         refetchInterval: 30000, // Refresh every 30 seconds
     });
 
     const { data: customerDetail, isLoading: loadingCustomer } = useQuery({
         queryKey: ['customer', selectedCustomerId],
-        queryFn: () => customersApi.getById(selectedCustomerId!).then((r) => r.data),
+        queryFn: () => getCustomerFn({ data: { id: selectedCustomerId! } }),
         enabled: !!selectedCustomerId,
     });
 
     const { data: orderDetail, isLoading: loadingOrder } = useQuery({
         queryKey: ['order', selectedOrderId],
-        queryFn: () => ordersApi.getById(selectedOrderId!).then((r) => r.data),
+        queryFn: async () => {
+            const response = await getOrdersFn({
+                data: {
+                    view: 'open',
+                    orderId: selectedOrderId!,
+                },
+            });
+            // Extract first order from response
+            if (response.rows.length > 0) {
+                const orderLines = response.rows.filter((line) => line.order.id === selectedOrderId!);
+                if (orderLines.length > 0) {
+                    const order = orderLines[0].order;
+                    return {
+                        ...order,
+                        lines: orderLines,
+                    };
+                }
+            }
+            return null;
+        },
         enabled: !!selectedOrderId,
     });
 
@@ -342,17 +373,32 @@ export default function Returns() {
 
     // Action queue items
     const qcPendingCount = queueItems.length;
-    const exchangesReadyToShip = returns?.filter((r: ReturnRequest) =>
+    const exchangesReadyToShip = returns?.filter((r: any) =>
         (r.resolution?.startsWith('exchange') || r.requestType === 'exchange') &&
         r.reverseInTransitAt &&
         !r.forwardShippedAt &&
         !r.forwardDelivered
     ) || [];
-    const refundsPending = returns?.filter((r: ReturnRequest) =>
+    const refundsPending = returns?.filter((r: any) =>
         (r.resolution === 'refund' || r.requestType === 'return') &&
         r.status === 'received' &&
         !r.refundAmount
     ) || [];
+
+    // Compute actionQueue structure from actionQueueItems array
+    const actionQueue = {
+        summary: {
+            pendingPickup: actionQueueItems.filter(item => item.actionType === 'reverse_receive').length,
+            inTransit: 0, // Would need additional data from returns
+            qcPending: qcPendingCount,
+            exchangesReadyToShip: exchangesReadyToShip.length,
+            refundsPending: refundsPending.length,
+        },
+        actions: {
+            shipReplacements: actionQueueItems.filter(item => item.actionType === 'forward_ship'),
+            processRefunds: refundsPending, // Use computed refundsPending
+        },
+    };
 
     const filteredQueueItems = queueSearchTerm.trim()
         ? queueItems.filter((item) => {
@@ -361,17 +407,25 @@ export default function Returns() {
                 item.skuCode?.toLowerCase().includes(term) ||
                 item.productName?.toLowerCase().includes(term) ||
                 item.colorName?.toLowerCase().includes(term) ||
-                item.returnRequest?.requestNumber?.toLowerCase().includes(term)
+                item.sourceReference?.toLowerCase().includes(term)
             );
         })
         : queueItems;
 
     // ============================================
-    // MUTATIONS
+    // MUTATIONS - Server Functions
     // ============================================
 
+    // Get Server Function references for mutations
+    const deleteReturnRequestFn = useServerFn(deleteReturnRequest);
+    const getReturnsBySkuCodeFn = useServerFn(getReturnsBySkuCode);
+    const receiveReturnItemFn = useServerFn(receiveReturnItem);
+    const processRepackingItemFn = useServerFn(processRepackingItem);
+    const undoRepackingProcessFn = useServerFn(undoRepackingProcess);
+    const deleteRepackingQueueItemFn = useServerFn(deleteRepackingQueueItem);
+
     const deleteMutation = useMutation({
-        mutationFn: (id: string) => returnsApi.delete(id),
+        mutationFn: (id: string) => deleteReturnRequestFn({ data: { id } }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['returns'] });
             setDeleteRequest(null);
@@ -379,24 +433,27 @@ export default function Returns() {
     });
 
     const searchMutation = useMutation({
-        mutationFn: (code: string) => returnsApi.findBySkuCode(code),
-        onSuccess: (res) => {
-            const { sku, tickets } = res.data;
-            setScannedSku(sku);
-            setMatchingTickets(tickets);
-            setError('');
+        mutationFn: (code: string) => getReturnsBySkuCodeFn({ data: { code } }),
+        onSuccess: (returnRequest, code) => {
+            if (returnRequest) {
+                // Found a matching return request
+                setMatchingTickets([returnRequest as any]);
+                setSelectedTicket(returnRequest as any);
 
-            if (tickets.length === 0) {
+                // Find the line with this SKU
+                const matchingLine = (returnRequest as any).returnLines.find(
+                    (line: any) => line.sku.skuCode === code || line.sku.barcode === code
+                );
+                setSelectedLine(matchingLine || null);
+                setError('');
+            } else {
                 setError('No pending return tickets found for this item. Create a return request first.');
-            } else if (tickets.length === 1) {
-                const ticket = tickets[0];
-                const line = ticket.matchingLine || ticket.lines.find((l: ReturnLine) => l.skuId === sku.id && !l.itemCondition);
-                setSelectedTicket(ticket);
-                setSelectedLine(line);
+                setMatchingTickets([]);
+                setScannedSku(null);
             }
         },
         onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to search');
+            setError(err?.message || 'Failed to search');
             setScannedSku(null);
             setMatchingTickets([]);
         },
@@ -404,16 +461,22 @@ export default function Returns() {
 
     const receiveMutation = useMutation({
         mutationFn: ({ requestId, lineId, condition }: { requestId: string; lineId: string; condition: string }) =>
-            returnsApi.receiveItem(requestId, { lineId, condition: condition as any }),
-        onSuccess: (res) => {
-            setSuccessMessage(`${res.data.sku.skuCode} received and added to QC queue`);
+            receiveReturnItemFn({
+                data: {
+                    requestId,
+                    lineId,
+                    condition: condition as 'good' | 'damaged' | 'defective' | 'wrong_item',
+                },
+            }),
+        onSuccess: () => {
+            setSuccessMessage(`Item received and added to QC queue`);
             queryClient.invalidateQueries({ queryKey: ['returns'] });
             queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
             resetReceiveState();
             inputRef.current?.focus();
         },
         onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to receive item');
+            setError(err?.message || 'Failed to receive item');
         },
     });
 
@@ -423,7 +486,15 @@ export default function Returns() {
             action: 'ready' | 'write_off';
             qcComments?: string;
             writeOffReason?: string
-        }) => repackingApi.process({ itemId, action, qcComments, writeOffReason }),
+        }) =>
+            processRepackingItemFn({
+                data: {
+                    itemId,
+                    action: action === 'ready' ? 'approve' : 'write_off',
+                    qcComments,
+                    writeOffReason,
+                },
+            }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
             queryClient.invalidateQueries({ queryKey: ['repacking-history'] });
@@ -431,31 +502,31 @@ export default function Returns() {
             closeQcModal();
         },
         onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to process item');
+            setError(err?.message || 'Failed to process item');
         },
     });
 
     const undoMutation = useMutation({
-        mutationFn: (itemId: string) => repackingApi.undoProcess(itemId),
+        mutationFn: (itemId: string) => undoRepackingProcessFn({ data: { itemId } }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
             queryClient.invalidateQueries({ queryKey: ['repacking-history'] });
             setSuccessMessage('Item moved back to QC queue');
         },
         onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to undo');
+            setError(err?.message || 'Failed to undo');
         },
     });
 
     const removeFromQueueMutation = useMutation({
-        mutationFn: (itemId: string) => repackingApi.deleteQueueItem(itemId),
+        mutationFn: (itemId: string) => deleteRepackingQueueItemFn({ data: { itemId } }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['repacking-queue'] });
             queryClient.invalidateQueries({ queryKey: ['returns', 'pending'] });
             setSuccessMessage('Item removed from QC queue');
         },
         onError: (err: any) => {
-            setError(err.response?.data?.error || 'Failed to remove item');
+            setError(err?.message || 'Failed to remove item');
         },
     });
 
@@ -513,7 +584,7 @@ export default function Returns() {
         setError('');
     };
 
-    const openQcModal = (item: QueueItem, action: 'ready' | 'write_off') => {
+    const openQcModal = (item: RepackingQueueItem, action: 'ready' | 'write_off') => {
         setQcModalItem(item);
         setQcAction(action);
         setQcComments('');
@@ -675,7 +746,7 @@ export default function Returns() {
                                 <span className="text-xs font-normal text-gray-500">Reverse pickup confirmed</span>
                             </h3>
                             <div className="space-y-3">
-                                {(actionQueue?.actions?.shipReplacements || []).slice(0, 5).map((item: { id: string; requestNumber: string; resolution: string; valueDifference?: number; customer?: { name: string }; originalOrder?: { orderNumber: string }; reverseAwb?: string }) => (
+                                {(actionQueue?.actions?.shipReplacements || []).slice(0, 5).map((item: any) => (
                                     <div key={item.id} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-100">
                                         <div className="flex items-center gap-3">
                                             <div>
@@ -699,8 +770,8 @@ export default function Returns() {
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => {
-                                                    const r = returns?.find((ret: ReturnRequest) => ret.id === item.id);
-                                                    if (r) setSelectedRequest(r);
+                                                    const r = returns?.find((ret: any) => ret.id === item.id);
+                                                    if (r) setSelectedRequest(r as any);
                                                 }}
                                                 className="btn-sm bg-blue-600 text-white hover:bg-blue-700"
                                             >
@@ -742,7 +813,7 @@ export default function Returns() {
                                 Process Refunds ({actionQueue?.actions?.processRefunds?.length || refundsPending.length} pending)
                             </h3>
                             <div className="space-y-3">
-                                {(actionQueue?.actions?.processRefunds || []).slice(0, 5).map((item: { id: string; requestNumber: string; returnValue?: number; customer?: { name: string }; originalOrder?: { orderNumber: string; totalAmount?: number }; lines?: Array<{ skuCode?: string; productName?: string; qty?: number; mrp?: number }> }) => (
+                                {(actionQueue?.actions?.processRefunds || []).slice(0, 5).map((item: any) => (
                                     <div key={item.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-100">
                                         <div className="flex items-center gap-3">
                                             <div>
@@ -752,18 +823,18 @@ export default function Returns() {
                                                 </div>
                                                 {item.lines && item.lines.length > 0 && (
                                                     <div className="text-xs text-gray-500">
-                                                        {item.lines.map(l => `${l.skuCode} (${l.qty})`).join(', ')}
+                                                        {item.lines.map((l: any) => `${l.skuCode} (${l.qty})`).join(', ')}
                                                     </div>
                                                 )}
                                             </div>
                                             <span className="text-sm font-medium text-green-700">
-                                                ₹{item.returnValue || item.lines?.reduce((sum, l) => sum + ((l.mrp || 0) * (l.qty || 1)), 0) || 0}
+                                                ₹{item.returnValue || item.lines?.reduce((sum: number, l: any) => sum + ((l.mrp || 0) * (l.qty || 1)), 0) || 0}
                                             </span>
                                         </div>
                                         <button
                                             onClick={() => {
-                                                const r = returns?.find((ret: ReturnRequest) => ret.id === item.id);
-                                                if (r) setSelectedRequest(r);
+                                                const r = returns?.find((ret: any) => ret.id === item.id);
+                                                if (r) setSelectedRequest(r as any);
                                             }}
                                             className="btn-sm bg-green-600 text-white hover:bg-green-700"
                                         >
@@ -807,11 +878,11 @@ export default function Returns() {
                             </tr>
                         </thead>
                         <tbody>
-                            {returns?.map((r: ReturnRequest) => (
+                            {returns?.map((r: any) => (
                                 <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
                                     <td className="table-cell">
                                         <button
-                                            onClick={() => setSelectedRequest(r)}
+                                            onClick={() => setSelectedRequest(r as any)}
                                             className="font-medium text-primary-600 hover:text-primary-800 hover:underline"
                                         >
                                             {r.requestNumber}
@@ -849,7 +920,7 @@ export default function Returns() {
                                         )}
                                     </td>
                                     <td className="table-cell">
-                                        {r.lines?.slice(0, 1).map((l, i) => {
+                                        {r.lines?.slice(0, 1).map((l: any, i: number) => {
                                             const imageUrl = l.sku?.variation?.imageUrl || l.sku?.variation?.product?.imageUrl;
                                             return (
                                                 <div key={i} className="flex items-center gap-2">
@@ -1002,7 +1073,7 @@ export default function Returns() {
                                         <p className="text-center py-8 text-gray-500">No pending tickets</p>
                                     ) : (
                                         <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                                            {pendingTickets?.map((ticket: ReturnRequest) => (
+                                            {pendingTickets?.map((ticket: any) => (
                                                 <div key={ticket.id} className="p-3 border border-gray-200 rounded-lg">
                                                     <div className="flex items-center justify-between mb-2">
                                                         <span className="font-semibold">{ticket.requestNumber}</span>
@@ -1196,7 +1267,7 @@ export default function Returns() {
                                                         </div>
                                                     </td>
                                                     <td className="table-cell font-mono text-sm">{item.skuCode}</td>
-                                                    <td className="table-cell text-sm">{item.returnRequest?.requestNumber || '-'}</td>
+                                                    <td className="table-cell text-sm">{item.sourceReference || '-'}</td>
                                                     <td className="table-cell">
                                                         <span className={`badge ${
                                                             item.condition === 'good' ? 'bg-green-100 text-green-800' :
@@ -1308,9 +1379,9 @@ export default function Returns() {
                                                     </div>
                                                 </td>
                                                 <td className="table-cell font-mono text-sm">{item.skuCode}</td>
-                                                <td className="table-cell text-sm">{item.returnRequest?.requestNumber || '-'}</td>
+                                                <td className="table-cell text-sm">{item.sourceReference || '-'}</td>
                                                 <td className="table-cell">
-                                                    {item.status === 'ready' ? (
+                                                    {item.status === 'approved' ? (
                                                         <span className="badge bg-green-100 text-green-800">
                                                             <Check size={12} className="inline mr-1" />
                                                             Accepted
@@ -1324,7 +1395,6 @@ export default function Returns() {
                                                 </td>
                                                 <td className="table-cell text-sm text-gray-500">
                                                     <div>{item.processedAt ? formatDate(item.processedAt) : '-'}</div>
-                                                    {item.processedBy && <div className="text-xs">{item.processedBy.name}</div>}
                                                 </td>
                                                 <td className="table-cell">
                                                     <button
@@ -1462,10 +1532,10 @@ export default function Returns() {
                             ) : (
                                 <div className="space-y-4">
                                     <div className="grid grid-cols-2 gap-4 text-sm">
-                                        <div><span className="text-gray-500">Customer:</span> <span className="ml-2 font-medium">{orderDetail.customerName}</span></div>
-                                        <div><span className="text-gray-500">Date:</span> <span className="ml-2">{new Date(orderDetail.orderDate).toLocaleDateString()}</span></div>
-                                        <div><span className="text-gray-500">Status:</span> <span className="ml-2 capitalize">{orderDetail.status}</span></div>
-                                        <div><span className="text-gray-500">Total:</span> <span className="ml-2 font-medium">₹{orderDetail.totalAmount?.toLocaleString()}</span></div>
+                                        <div><span className="text-gray-500">Customer:</span> <span className="ml-2 font-medium">{(orderDetail as any).customerName}</span></div>
+                                        <div><span className="text-gray-500">Date:</span> <span className="ml-2">{new Date((orderDetail as any).orderDate).toLocaleDateString()}</span></div>
+                                        <div><span className="text-gray-500">Status:</span> <span className="ml-2 capitalize">{(orderDetail as any).status}</span></div>
+                                        <div><span className="text-gray-500">Total:</span> <span className="ml-2 font-medium">₹{(orderDetail as any).totalAmount?.toLocaleString()}</span></div>
                                     </div>
                                     <div className="border-t pt-4">
                                         <h3 className="font-medium mb-3">Items</h3>
@@ -1605,16 +1675,19 @@ function NewReturnModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
         if (step === 1) inputRef.current?.focus();
     }, [step]);
 
+    const getReturnsOrderFn = useServerFn(getReturnsOrder);
+    const createReturnRequestFn = useServerFn(createReturnRequest);
+
     const searchOrder = async () => {
         if (!orderNumber.trim()) return;
         setLoading(true);
         setError('');
         try {
-            const res = await returnsApi.getOrder(orderNumber.trim());
-            setOrder(res.data);
+            const orderData = await getReturnsOrderFn({ data: { orderNumber: orderNumber.trim() } });
+            setOrder(orderData);
             setStep(2);
         } catch (err: any) {
-            setError(err.response?.data?.error || 'Order not found');
+            setError(err?.message || 'Order not found');
         } finally {
             setLoading(false);
         }
@@ -1625,9 +1698,19 @@ function NewReturnModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
     };
 
     const createMutation = useMutation({
-        mutationFn: (data: Parameters<typeof returnsApi.create>[0]) => returnsApi.create(data),
+        mutationFn: (data: {
+            requestType: 'return' | 'exchange';
+            resolution: string;
+            originalOrderId: string;
+            reasonCategory: string;
+            reasonDetails?: string;
+            lines: { skuId: string; qty: number; unitPrice?: number }[];
+            returnValue?: number;
+            courier?: string;
+            awbNumber?: string;
+        }) => createReturnRequestFn({ data }),
         onSuccess: () => onSuccess(),
-        onError: (err: any) => setError(err.response?.data?.error || 'Failed to create return request'),
+        onError: (err: any) => setError(err?.message || 'Failed to create return request'),
     });
 
     const handleSubmit = () => {
@@ -1827,29 +1910,40 @@ function ReturnDetailModal({
     const [error, setError] = useState('');
     const [localLines] = useState(request.lines || []);
 
+    const updateReturnRequestFn = useServerFn(updateReturnRequest);
+    const markReverseReceivedFn = useServerFn(markReverseReceived);
+    const unmarkReverseReceivedFn = useServerFn(unmarkReverseReceived);
+    const markForwardDeliveredFn = useServerFn(markForwardDelivered);
+    const unmarkForwardDeliveredFn = useServerFn(unmarkForwardDelivered);
+
     const updateMutation = useMutation({
-        mutationFn: (data: Parameters<typeof returnsApi.update>[1]) => returnsApi.update(request.id, data),
+        mutationFn: (data: {
+            reasonCategory?: string;
+            reasonDetails?: string;
+            courier?: string;
+            awbNumber?: string;
+        }) => updateReturnRequestFn({ data: { id: request.id, ...data } }),
         onSuccess: () => onSuccess(),
-        onError: (err: any) => setError(err.response?.data?.error || 'Failed to update'),
+        onError: (err: any) => setError(err?.message || 'Failed to update'),
     });
 
     const markReverseReceivedMutation = useMutation({
-        mutationFn: () => returnsApi.markReverseReceived(request.id),
+        mutationFn: () => markReverseReceivedFn({ data: { id: request.id } }),
         onSuccess: () => onSuccess(),
     });
 
     const unmarkReverseReceivedMutation = useMutation({
-        mutationFn: () => returnsApi.unmarkReverseReceived(request.id),
+        mutationFn: () => unmarkReverseReceivedFn({ data: { id: request.id } }),
         onSuccess: () => onSuccess(),
     });
 
     const markForwardDeliveredMutation = useMutation({
-        mutationFn: () => returnsApi.markForwardDelivered(request.id),
+        mutationFn: () => markForwardDeliveredFn({ data: { id: request.id } }),
         onSuccess: () => onSuccess(),
     });
 
     const unmarkForwardDeliveredMutation = useMutation({
-        mutationFn: () => returnsApi.unmarkForwardDelivered(request.id),
+        mutationFn: () => unmarkForwardDeliveredFn({ data: { id: request.id } }),
         onSuccess: () => onSuccess(),
     });
 

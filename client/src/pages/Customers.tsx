@@ -1,7 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
-import { customersApi, ordersApi } from '../services/api';
 import { getCustomersList, getCustomer } from '../server/functions/customers';
+import { getOrders } from '../server/functions/orders';
+import {
+    getCustomerOverviewStats,
+    getHighValueCustomers,
+    getAtRiskCustomers,
+    getFrequentReturners,
+} from '../server/functions/reports';
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Crown, Medal, AlertTriangle, TrendingDown, ShoppingBag, Clock, TrendingUp, Repeat } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
@@ -141,19 +147,38 @@ export default function Customers() {
     });
 
     // Fetch full order when customer data is available
+    const getOrdersFn = useServerFn(getOrders);
     useEffect(() => {
         if (customerOrderData?.recentOrders?.length && !modalOrder) {
             const fetchOrder = async () => {
                 try {
-                    const response = await ordersApi.getById(customerOrderData.recentOrders[0].id);
-                    setModalOrder(response.data as Order);
+                    const response = await getOrdersFn({
+                        data: {
+                            view: 'open',
+                            orderId: customerOrderData.recentOrders[0].id,
+                        },
+                    });
+                    // Extract first order from response
+                    if (response.rows.length > 0) {
+                        // Group lines into order
+                        const orderLines = response.rows.filter(
+                            (line) => line.order.id === customerOrderData.recentOrders[0].id
+                        );
+                        if (orderLines.length > 0) {
+                            const order = orderLines[0].order;
+                            setModalOrder({
+                                ...order,
+                                lines: orderLines,
+                            } as any);
+                        }
+                    }
                 } catch (error) {
                     console.error('Failed to fetch order:', error);
                 }
             };
             fetchOrder();
         }
-    }, [customerOrderData, modalOrder]);
+    }, [customerOrderData, modalOrder, getOrdersFn]);
 
     // Handle customer row click - now URL-driven for bookmarking/sharing
     const handleCustomerClick = useCallback((customerId: string) => {
@@ -184,20 +209,44 @@ export default function Customers() {
     const customers = hasLoaderData && loaderData?.customers
         ? loaderData.customers.customers
         : customersData?.customers;
+    // Server Functions for analytics queries
+    const getOverviewStatsFn = useServerFn(getCustomerOverviewStats);
+    const getHighValueFn = useServerFn(getHighValueCustomers);
+    const getAtRiskFn = useServerFn(getAtRiskCustomers);
+    const getReturnersFn = useServerFn(getFrequentReturners);
+
     const { data: overviewStats } = useQuery({
         queryKey: ['customerOverviewStats', timePeriod],
-        queryFn: () => customersApi.getOverviewStats(timePeriod).then(r => r.data),
+        queryFn: () =>
+            getOverviewStatsFn({
+                data: { months: timePeriod === 'all' ? 'all' : timePeriod },
+            }),
     });
     const { data: highValueData } = useQuery({
         queryKey: ['highValueCustomers', topN],
-        queryFn: () => customersApi.getHighValue(topN).then(r => r.data),
+        queryFn: () => getHighValueFn({ data: { limit: topN } }),
     });
-    const { data: atRisk } = useQuery({ queryKey: ['atRiskCustomers'], queryFn: () => customersApi.getAtRisk().then(r => r.data) });
-    const { data: returners } = useQuery({ queryKey: ['frequentReturners'], queryFn: () => customersApi.getFrequentReturners().then(r => r.data) });
+    const { data: atRisk } = useQuery({
+        queryKey: ['atRiskCustomers'],
+        queryFn: () => getAtRiskFn(),
+    });
+    const { data: returners } = useQuery({
+        queryKey: ['frequentReturners'],
+        queryFn: () => getReturnersFn(),
+    });
 
-    // Extract customers and stats from high value response
-    const highValue = highValueData?.customers || [];
-    const highValueStats = highValueData?.stats;
+    // Extract customers from high value response
+    // Server Function returns array of customers, calculate stats on client side
+    const highValue = highValueData || [];
+    const highValueStats = highValue.length > 0 ? {
+        totalCustomers: highValue.length,
+        totalRevenue: highValue.reduce((sum, c) => sum + c.totalSpent, 0),
+        totalOrders: highValue.reduce((sum, c) => sum + c.totalOrders, 0),
+        avgLTV: highValue.reduce((sum, c) => sum + c.totalSpent, 0) / highValue.length,
+        avgAOV: highValue.reduce((sum, c) => sum + c.avgOrderValue, 0) / highValue.length,
+        avgOrdersPerCustomer: highValue.reduce((sum, c) => sum + c.totalOrders, 0) / highValue.length,
+        avgOrderFrequency: highValue.reduce((sum, c) => sum + c.totalOrders, 0) / highValue.length / 12, // Rough monthly estimate
+    } : undefined;
 
     const hasMore = customers?.length === PAGE_SIZE;
 

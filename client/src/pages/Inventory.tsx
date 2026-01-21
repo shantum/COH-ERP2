@@ -23,7 +23,7 @@ import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Package, Search, TrendingUp, Warehouse, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { getInventoryList } from '../server/functions/inventory';
-import { reportsApi } from '../services/api';
+import { getTopProducts } from '../server/functions/reports';
 import { compactThemeSmall } from '../utils/agGridHelpers';
 import { Route } from '../routes/_authenticated/inventory';
 
@@ -96,12 +96,13 @@ export default function Inventory() {
     const effectiveInventoryData = inventoryData;
 
     // Fetch demand data (top products by units sold)
+    const getTopProductsFn = useServerFn(getTopProducts);
     const { data: demandData, isLoading: demandLoading } = useQuery({
         queryKey: ['topProducts', demandDays],
-        queryFn: async () => {
-            const res = await reportsApi.getTopProducts({ days: demandDays, level: 'product', limit: 5 });
-            return res.data;
-        },
+        queryFn: () =>
+            getTopProductsFn({
+                data: { days: demandDays, level: 'product', limit: 5 },
+            }),
         staleTime: 60000,
     });
 
@@ -446,11 +447,11 @@ export default function Inventory() {
                                         <div key={i} className="h-12 bg-gray-200 rounded animate-pulse" />
                                     ))}
                                 </div>
-                            ) : !demandData?.data?.length ? (
+                            ) : !demandData?.length ? (
                                 <p className="text-gray-500 text-center py-6 text-sm">No sales data for this period</p>
                             ) : (
                                 <div className="space-y-2">
-                                    {demandData.data.map((product: any, index: number) => (
+                                    {demandData.map((product, index) => (
                                         <div key={product.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-gray-100 bg-white">
                                             {/* Rank Badge */}
                                             <div className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${index === 0 ? 'bg-green-100 text-green-700' :
@@ -474,13 +475,13 @@ export default function Inventory() {
                                             <div className="flex-1 min-w-0">
                                                 <div className="font-medium text-gray-900 text-sm truncate">{product.name}</div>
                                                 <div className="text-xs text-gray-500 mt-0.5">
-                                                    {product.orderCount} orders · {product.category || 'uncategorized'}
+                                                    {product.category || 'uncategorized'}
                                                 </div>
                                             </div>
 
                                             {/* Units Sold */}
                                             <div className="text-right flex-shrink-0">
-                                                <div className="text-sm font-semibold text-green-600">{product.units.toLocaleString()}</div>
+                                                <div className="text-sm font-semibold text-green-600">{product.unitsSold.toLocaleString()}</div>
                                                 <div className="text-xs text-gray-500">sold</div>
                                             </div>
                                         </div>
