@@ -427,7 +427,46 @@ Centralized config system in `/server/src/config/`:
 - **Env vars**:
   - `DATABASE_URL`, `JWT_SECRET` (required)
   - `ENABLE_ADMIN_SHIP` (default: true) - Enable admin force ship feature
-- **Deploy**: Railway (`railway` CLI)
+
+### Railway CLI (REQUIRED for Deployment)
+
+> **⚠️ ALWAYS use Railway CLI for deployment tasks.** This is our primary deployment platform.
+
+**Installation**: `npm install -g @railway/cli`
+
+**Essential Commands**:
+```bash
+railway login                    # Authenticate (one-time)
+railway link                     # Link to project (one-time per repo)
+railway status                   # Check current project/service status
+railway logs                     # View runtime logs (deployed app)
+railway variables                # List environment variables
+railway variables --set "KEY=value"  # Set environment variable
+railway up                       # Deploy current code (manual trigger)
+railway up --detach              # Deploy and return immediately (shows build URL)
+railway redeploy --yes           # Redeploy latest successful build
+railway open                     # Open Railway dashboard in browser
+```
+
+**Debugging Builds**:
+```bash
+# Force fresh build (clears Docker layer cache)
+railway variables --set "NO_CACHE=1"
+railway redeploy --yes
+
+# After successful build, remove to re-enable caching
+railway variables --unset "NO_CACHE"
+```
+
+**Key Files**:
+- `railway.json` - Railway-specific config (builder, deploy settings)
+- `nixpacks.toml` - Build phases (setup, install, build, start)
+- `.dockerignore` - Exclude files from build context (node_modules, dist)
+
+**Common Issues**:
+- Build cache stale? Set `NO_CACHE=1` for one build
+- Module not found? Check `.dockerignore` excludes `node_modules`
+- TypeScript errors? Ensure `shared` builds before `client`
 
 ## When to Use Agents
 
@@ -455,4 +494,4 @@ Centralized config system in `/server/src/config/`:
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `132bb72` (2026-01-20)
+**Updated till commit:** `5e1ee92` (2026-01-21)
