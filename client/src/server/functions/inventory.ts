@@ -619,3 +619,127 @@ export const getInventoryList = createServerFn({ method: 'GET' })
             throw error;
         }
     });
+
+// ============================================
+// RECENT INWARDS SERVER FUNCTION
+// ============================================
+
+const recentInwardsSchema = z.object({
+    limit: z.number().int().positive().max(100).optional().default(50),
+    source: z.enum(['production', 'returns', 'rto', 'repacking', 'adjustments']).optional(),
+});
+
+export type RecentInwardsInput = z.infer<typeof recentInwardsSchema>;
+
+/** Recent inward item for activity feed */
+export interface RecentInwardItem {
+    id: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    qty: number;
+    reason: string;
+    source: string;
+    notes: string | null;
+    createdAt: string;
+    createdBy: string;
+    isAllocated: boolean;
+}
+
+/**
+ * Get recent inward transactions for activity feed
+ *
+ * Returns inward transactions from the last 24 hours, optionally filtered by source.
+ * Used by InwardHub for the recent activity display.
+ */
+export const getRecentInwards = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator(
+        (input: unknown): z.infer<typeof recentInwardsSchema> =>
+            recentInwardsSchema.parse(input)
+    )
+    .handler(async ({ data }): Promise<RecentInwardItem[]> => {
+        const { limit, source } = data;
+
+        const prisma = await getPrisma();
+
+        // Map source param to reason values for filtering
+        const reasonMap: Record<string, string[]> = {
+            production: ['production'],
+            returns: ['return_receipt'],
+            rto: ['rto_received'],
+            repacking: ['repack_complete'],
+            adjustments: ['adjustment', 'found_stock', 'correction', 'received'],
+        };
+
+        // Build where clause
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const where: Record<string, any> = {
+            txnType: 'inward',
+            createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        };
+
+        // Add reason filter if source specified
+        if (source && reasonMap[source]) {
+            where.reason = { in: reasonMap[source] };
+        }
+
+        const transactions = await prisma.inventoryTransaction.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            take: limit,
+            select: {
+                id: true,
+                skuId: true,
+                qty: true,
+                reason: true,
+                referenceId: true,
+                notes: true,
+                createdAt: true,
+                sku: {
+                    select: {
+                        skuCode: true,
+                        size: true,
+                        variation: {
+                            select: {
+                                colorName: true,
+                                product: { select: { name: true } },
+                            },
+                        },
+                    },
+                },
+                createdBy: { select: { name: true } },
+            },
+        });
+
+        // Helper to map reason to source
+        const mapReasonToSource = (reason: string | null): string => {
+            const mapping: Record<string, string> = {
+                production: 'production',
+                return_receipt: 'return',
+                rto_received: 'rto',
+                repack_complete: 'repacking',
+                adjustment: 'adjustment',
+                received: 'received',
+            };
+            return mapping[reason || ''] || 'adjustment';
+        };
+
+        return transactions.map((t) => ({
+            id: t.id,
+            skuId: t.skuId,
+            skuCode: t.sku?.skuCode || '',
+            productName: t.sku?.variation?.product?.name || '',
+            colorName: t.sku?.variation?.colorName || '',
+            size: t.sku?.size || '',
+            qty: t.qty,
+            reason: t.reason || '',
+            source: mapReasonToSource(t.reason),
+            notes: t.notes,
+            createdAt: t.createdAt.toISOString(),
+            createdBy: t.createdBy?.name || 'System',
+            isAllocated: t.reason !== 'received',
+        }));
+    });

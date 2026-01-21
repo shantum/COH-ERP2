@@ -17,7 +17,7 @@ export interface EditModalProps {
     onClose: () => void;
     onSubmit: (formData: any) => void;
     fabricTypes: Array<{ id: string; name: string }>;
-    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string; displayName: string }>;
+    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
     isLoading: boolean;
 }
 

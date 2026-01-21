@@ -39,10 +39,12 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import { AgGridReact } from 'ag-grid-react';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
 import { Layers, Package, AlertTriangle, XCircle, ArrowLeft, X, ChevronDown, ChevronRight } from 'lucide-react';
-import { catalogApi, productsApi } from '../services/api';
+import { getCatalogProducts, getCatalogCategories } from '@/server/functions/catalog';
+import { updateProduct, updateVariation, updateSku } from '@/server/functions/productsMutations';
 import BomEditorPanel from '../components/bom/BomEditorPanel';
 import { ConfirmModal } from '../components/Modal';
 import { compactThemeSmall } from '../utils/agGridHelpers';
@@ -75,6 +77,13 @@ export default function Catalog() {
     // Grid ref for API access
     const gridRef = useRef<AgGridReact>(null);
     const queryClient = useQueryClient();
+
+    // Server Function wrappers
+    const getCatalogProductsFn = useServerFn(getCatalogProducts);
+    const getCatalogCategoriesFn = useServerFn(getCatalogCategories);
+    const updateProductFn = useServerFn(updateProduct);
+    const updateVariationFn = useServerFn(updateVariation);
+    const updateSkuFn = useServerFn(updateSku);
 
     // Use shared grid state hook for column visibility, order, widths, and page size
     const {
@@ -151,49 +160,66 @@ export default function Catalog() {
     // Fetch catalog data (without search - that's done client-side via quick filter)
     const { data: catalogData, isLoading, refetch, isFetching } = useQuery({
         queryKey: ['catalog', filter.gender, filter.category, filter.productId, filter.status],
-        queryFn: () => catalogApi.getSkuInventory({
-            gender: filter.gender || undefined,
-            category: filter.category || undefined,
-            productId: filter.productId || undefined,
-            status: filter.status || undefined,
-        }).then(r => r.data),
+        queryFn: () => getCatalogProductsFn({
+            data: {
+                gender: filter.gender || undefined,
+                category: filter.category || undefined,
+                productId: filter.productId || undefined,
+                status: (filter.status as 'below_target' | 'ok') || undefined,
+            }
+        }),
     });
 
     // Fetch filter options
     const { data: filterOptions } = useQuery({
         queryKey: ['catalogFilters'],
-        queryFn: () => catalogApi.getFilters().then(r => r.data),
+        queryFn: () => getCatalogCategoriesFn(),
         staleTime: 5 * 60 * 1000,
     });
 
     // Mutations for updating fabric type and fabric
     const updateProductMutation = useMutation({
-        mutationFn: ({ productId, fabricTypeId }: { productId: string; fabricTypeId: string | null }) =>
-            productsApi.update(productId, { fabricTypeId }),
+        mutationFn: async ({ productId, fabricTypeId }: { productId: string; fabricTypeId: string | null }) => {
+            const result = await updateProductFn({ data: { id: productId, fabricTypeId } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update fabric type');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             // Force refetch all catalog queries to ensure data consistency across views
             queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update fabric type');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update fabric type');
         },
     });
 
     const updateVariationMutation = useMutation({
-        mutationFn: ({ variationId, fabricId }: { variationId: string; fabricId: string }) =>
-            productsApi.updateVariation(variationId, { fabricId }),
+        mutationFn: async ({ variationId, fabricId }: { variationId: string; fabricId: string }) => {
+            const result = await updateVariationFn({ data: { id: variationId, fabricId } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update fabric');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             // Force refetch all catalog queries to ensure data consistency across views
             queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update fabric');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update fabric');
         },
     });
 
     const updateLiningMutation = useMutation({
-        mutationFn: ({ variationId, hasLining }: { variationId: string; hasLining: boolean }) =>
-            productsApi.updateVariation(variationId, { hasLining }),
+        mutationFn: async ({ variationId, hasLining }: { variationId: string; hasLining: boolean }) => {
+            const result = await updateVariationFn({ data: { id: variationId, hasLining } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update lining');
+            }
+            return result.data;
+        },
         onMutate: async ({ variationId, hasLining }) => {
             // Cancel any outgoing refetches
             await queryClient.cancelQueries({ queryKey: ['catalog'] });
@@ -219,7 +245,7 @@ export default function Catalog() {
 
             return { previousData };
         },
-        onError: (err: any, _variables, context) => {
+        onError: (err: Error, _variables, context) => {
             // Rollback on error
             if (context?.previousData) {
                 queryClient.setQueryData(
@@ -227,7 +253,7 @@ export default function Catalog() {
                     context.previousData
                 );
             }
-            alert(err.response?.data?.error || 'Failed to update lining');
+            alert(err.message || 'Failed to update lining');
         },
         onSettled: () => {
             // Refetch to ensure we're in sync
@@ -276,60 +302,80 @@ export default function Catalog() {
 
     // SKU update mutation
     const updateSkuMutation = useMutation({
-        mutationFn: ({ skuId, data }: { skuId: string; data: any }) =>
-            productsApi.updateSku(skuId, data),
+        mutationFn: async ({ skuId, data }: { skuId: string; data: { fabricConsumption?: number; mrp?: number; targetStockQty?: number } }) => {
+            const result = await updateSkuFn({ data: { id: skuId, ...data } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update SKU');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
             setEditModal({ isOpen: false, level: 'sku', data: null });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update SKU');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update SKU');
         },
     });
 
     // Full variation update mutation (for edit modal)
     const updateVariationFullMutation = useMutation({
-        mutationFn: ({ variationId, data }: { variationId: string; data: any }) =>
-            productsApi.updateVariation(variationId, data),
+        mutationFn: async ({ variationId, data }: { variationId: string; data: { colorName?: string; hasLining?: boolean; fabricId?: string } }) => {
+            const result = await updateVariationFn({ data: { id: variationId, ...data } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update variation');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
             setEditModal({ isOpen: false, level: 'variation', data: null });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update variation');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update variation');
         },
     });
 
     // Full product update mutation (for edit modal)
     const updateProductFullMutation = useMutation({
-        mutationFn: ({ productId, data }: { productId: string; data: any }) =>
-            productsApi.update(productId, data),
+        mutationFn: async ({ productId, data }: { productId: string; data: { name?: string; styleCode?: string | null; category?: string; gender?: string; productType?: string; fabricTypeId?: string | null } }) => {
+            const result = await updateProductFn({ data: { id: productId, ...data } });
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update product');
+            }
+            return result.data;
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
             setEditModal({ isOpen: false, level: 'product', data: null });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update product');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update product');
         },
     });
 
     // Inline cost update mutation (trimsCost, liningCost, packagingCost, or laborMinutes)
     const updateCostMutation = useMutation({
-        mutationFn: ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes'; value: number | null }) => {
-            const data = { [field]: value };
+        mutationFn: async ({ level, id, field, value }: { level: 'product' | 'variation' | 'sku'; id: string; field: 'trimsCost' | 'liningCost' | 'packagingCost' | 'laborMinutes'; value: number | null }) => {
+            const fieldData = { [field]: value };
+            let result;
             if (level === 'product') {
-                return productsApi.update(id, data);
+                result = await updateProductFn({ data: { id, ...fieldData } });
             } else if (level === 'variation') {
-                return productsApi.updateVariation(id, data);
+                result = await updateVariationFn({ data: { id, ...fieldData } });
             } else {
-                return productsApi.updateSku(id, data);
+                result = await updateSkuFn({ data: { id, ...fieldData } });
             }
+            if (!result.success) {
+                throw new Error(result.error?.message || 'Failed to update cost');
+            }
+            return result.data;
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['catalog'], refetchType: 'all' });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update cost');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update cost');
         },
     });
 
@@ -480,9 +526,13 @@ export default function Catalog() {
             for (let i = 0; i < skuIds.length; i += batchSize) {
                 const batch = skuIds.slice(i, i + batchSize);
                 const batchResults = await Promise.all(
-                    batch.map(skuId =>
-                        productsApi.updateSku(skuId, { fabricConsumption })
-                    )
+                    batch.map(async (skuId) => {
+                        const result = await updateSkuFn({ data: { id: skuId, fabricConsumption } });
+                        if (!result.success) {
+                            throw new Error(result.error?.message || 'Failed to update fabric consumption');
+                        }
+                        return result.data;
+                    })
                 );
                 results.push(...batchResults);
             }
@@ -490,10 +540,10 @@ export default function Catalog() {
             return results;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['catalogSkuInventory'] });
+            queryClient.invalidateQueries({ queryKey: ['catalog'] });
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to update fabric consumption');
+        onError: (err: Error) => {
+            alert(err.message || 'Failed to update fabric consumption');
         },
     });
 

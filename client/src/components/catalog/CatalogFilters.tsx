@@ -39,7 +39,7 @@ export interface CatalogFiltersProps {
     filterOptions?: {
         genders?: string[];
         categories?: string[];
-        products?: Array<{ id: string; name: string; gender: string; category: string }>;
+        products?: Array<{ id: string; name: string; gender: string | null; category: string | null }>;
     };
     filteredProducts: Array<{ id: string; name: string }>;
     pageSize: number;

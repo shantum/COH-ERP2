@@ -108,6 +108,29 @@ export interface DeleteReconciliationResult {
 }
 
 // ============================================
+// QUERY RESULT TYPES
+// ============================================
+
+export interface ReconciliationHistoryItem {
+    id: string;
+    date: string;
+    status: string;
+    itemsCount: number;
+    adjustments: number;
+}
+
+export interface GetReconciliationHistoryResult {
+    reconciliations: ReconciliationHistoryItem[];
+}
+
+export interface GetReconciliationResult {
+    id: string;
+    status: string;
+    createdAt: string;
+    items: ReconciliationItem[];
+}
+
+// ============================================
 // PRISMA HELPER
 // ============================================
 
@@ -569,6 +592,138 @@ export const deleteReconciliation = createServerFn({ method: 'POST' })
             data: {
                 reconciliationId,
                 deleted: true,
+            },
+        };
+    });
+
+// ============================================
+// QUERY SCHEMAS
+// ============================================
+
+const getReconciliationHistorySchema = z.object({
+    limit: z.number().int().positive().optional().default(50),
+});
+
+const getReconciliationByIdSchema = z.object({
+    reconciliationId: z.string().uuid('Invalid reconciliation ID'),
+});
+
+// ============================================
+// QUERY SERVER FUNCTIONS
+// ============================================
+
+/**
+ * Get reconciliation history
+ */
+export const getReconciliationHistory = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getReconciliationHistorySchema.parse(input || {}))
+    .handler(async ({ data }): Promise<MutationResult<GetReconciliationHistoryResult>> => {
+        const prisma = await getPrisma();
+        const { limit } = data;
+
+        const reconciliations = await prisma.inventoryReconciliation.findMany({
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+            include: {
+                items: {
+                    select: { variance: true },
+                },
+            },
+        });
+
+        const result: ReconciliationHistoryItem[] = reconciliations.map(
+            (r: {
+                id: string;
+                createdAt: Date;
+                status: string;
+                items: Array<{ variance: number | null }>;
+            }) => ({
+                id: r.id,
+                date: r.createdAt.toISOString(),
+                status: r.status,
+                itemsCount: r.items.length,
+                adjustments: r.items.filter((i) => i.variance !== null && i.variance !== 0).length,
+            })
+        );
+
+        return {
+            success: true,
+            data: { reconciliations: result },
+        };
+    });
+
+/**
+ * Get reconciliation by ID with all items
+ */
+export const getReconciliationById = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getReconciliationByIdSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<GetReconciliationResult>> => {
+        const prisma = await getPrisma();
+        const { reconciliationId } = data;
+
+        const reconciliation = await prisma.inventoryReconciliation.findUnique({
+            where: { id: reconciliationId },
+            include: {
+                items: {
+                    include: {
+                        sku: {
+                            include: {
+                                variation: { include: { product: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        if (!reconciliation) {
+            return {
+                success: false,
+                error: { code: 'NOT_FOUND', message: 'Reconciliation not found' },
+            };
+        }
+
+        const items: ReconciliationItem[] = reconciliation.items.map(
+            (item: {
+                id: string;
+                skuId: string;
+                systemQty: number;
+                physicalQty: number | null;
+                variance: number | null;
+                adjustmentReason: string | null;
+                notes: string | null;
+                sku: {
+                    skuCode: string;
+                    size: string;
+                    variation?: {
+                        colorName: string;
+                        product?: { name: string } | null;
+                    } | null;
+                };
+            }) => ({
+                id: item.id,
+                skuId: item.skuId,
+                skuCode: item.sku.skuCode,
+                productName: item.sku.variation?.product?.name || '',
+                colorName: item.sku.variation?.colorName || '',
+                size: item.sku.size,
+                systemQty: item.systemQty,
+                physicalQty: item.physicalQty,
+                variance: item.variance,
+                adjustmentReason: item.adjustmentReason,
+                notes: item.notes,
+            })
+        );
+
+        return {
+            success: true,
+            data: {
+                id: reconciliation.id,
+                status: reconciliation.status,
+                createdAt: reconciliation.createdAt.toISOString(),
+                items,
             },
         };
     });

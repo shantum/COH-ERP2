@@ -13,7 +13,8 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { inventoryApi } from '../services/api';
+import { useServerFn } from '@tanstack/react-start';
+import { getRecentInwards } from '../server/functions/inventory';
 import {
     ModeSelector,
     InwardModeHeader,
@@ -24,18 +25,23 @@ import {
     AdjustmentsInward,
 } from '../components/inward';
 import type { InwardMode } from '../components/inward';
-import type { RecentInward } from '../types';
 
 export default function InwardHub() {
     const [activeMode, setActiveMode] = useState<InwardMode | null>(null);
 
+    // Server function hook
+    const getRecentInwardsFn = useServerFn(getRecentInwards);
+
     // Fetch recent inwards for today's total (across all modes when on selector)
-    const { data: recentInwards = [] } = useQuery<RecentInward[]>({
+    const { data: recentInwards = [] } = useQuery({
         queryKey: ['recent-inwards', activeMode || 'all'],
-        queryFn: async () => {
-            const res = await inventoryApi.getRecentInwards(50, activeMode || undefined);
-            return res.data;
-        },
+        queryFn: () =>
+            getRecentInwardsFn({
+                data: {
+                    limit: 50,
+                    ...(activeMode ? { source: activeMode } : {}),
+                },
+            }),
         refetchInterval: 15000,
     });
 

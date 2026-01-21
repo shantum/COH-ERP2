@@ -23,7 +23,7 @@ export interface FabricEditPopoverProps {
     viewLevel: ViewLevel;
     columnType: 'fabricType' | 'fabric';
     fabricTypes: Array<{ id: string; name: string }>;
-    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string; displayName: string }>;
+    fabrics: Array<{ id: string; name: string; colorName: string; fabricTypeId: string | null; displayName: string }>;
     onUpdateFabricType: (productId: string, fabricTypeId: string | null, affectedCount: number) => void;
     onUpdateFabric: (variationId: string, fabricId: string, affectedCount: number) => void;
     rawItems: any[];

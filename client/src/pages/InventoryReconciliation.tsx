@@ -1,29 +1,28 @@
 /**
  * InventoryReconciliation - Physical inventory count reconciliation
  * Similar to FabricReconciliation but for SKU inventory
+ *
+ * Uses Server Functions for all operations EXCEPT CSV upload (which stays on Axios
+ * due to multipart/form-data requirements).
  */
 
 import { useState, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { inventoryApi } from '../services/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { useServerFn } from '@tanstack/react-start';
 import {
     ClipboardList, RefreshCw, AlertTriangle, CheckCircle, Search,
     Plus, History, Send, Trash2, Upload, Download, Eye, X
 } from 'lucide-react';
-
-interface ReconciliationItem {
-    id: string;
-    skuId: string;
-    skuCode: string;
-    productName: string;
-    colorName: string;
-    size: string;
-    systemQty: number;
-    physicalQty: number | null;
-    variance: number | null;
-    adjustmentReason: string | null;
-    notes: string | null;
-}
+import {
+    useReconciliationHistory,
+    useReconciliationById,
+    useInventoryReconciliationMutations,
+    type ReconciliationItem,
+} from '../hooks/useInventoryReconciliation';
+import {
+    getReconciliationById as getReconciliationByIdFn,
+    submitReconciliation as submitReconciliationFn,
+} from '../server/functions/reconciliationMutations';
 
 interface Reconciliation {
     id: string;
@@ -55,116 +54,101 @@ export default function InventoryReconciliation() {
     const [currentRecon, setCurrentRecon] = useState<Reconciliation | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const [uploadResult, setUploadResult] = useState<{ success: boolean; message: string; results?: any } | null>(null);
     const [viewingReconId, setViewingReconId] = useState<string | null>(null);
     const [historySearchTerm, setHistorySearchTerm] = useState('');
     const [submittingFromHistory, setSubmittingFromHistory] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Fetch history
-    const { data: history, isLoading: historyLoading } = useQuery({
-        queryKey: ['inventoryReconciliationHistory'],
-        queryFn: () => inventoryApi.getReconciliationHistory(50).then(r => r.data),
-    });
+    // Server Function wrappers for inline use (modal submit)
+    const getByIdServerFn = useServerFn(getReconciliationByIdFn);
+    const submitServerFn = useServerFn(submitReconciliationFn);
 
-    // Fetch details for viewing
-    const { data: viewingRecon, isLoading: viewingLoading } = useQuery({
-        queryKey: ['inventoryReconciliation', viewingReconId],
-        queryFn: () => inventoryApi.getReconciliation(viewingReconId!).then(r => r.data),
-        enabled: !!viewingReconId,
-    });
+    // Fetch history using Server Function
+    const { data: historyData, isLoading: historyLoading } = useReconciliationHistory(50);
+    const history = historyData?.reconciliations;
 
-    // Start new reconciliation
-    const startMutation = useMutation({
-        mutationFn: () => inventoryApi.startReconciliation(),
-        onSuccess: (res) => {
-            setCurrentRecon(res.data);
-            setLocalItems(res.data.items);
+    // Fetch details for viewing using Server Function
+    const { data: viewingRecon, isLoading: viewingLoading } = useReconciliationById(viewingReconId);
+
+    // Mutation hooks
+    const {
+        startMutation,
+        updateMutation,
+        submitMutation,
+        deleteMutation,
+        uploadMutation,
+    } = useInventoryReconciliationMutations({
+        onStartSuccess: (data) => {
+            // Transform to local Reconciliation type
+            const recon: Reconciliation = {
+                id: data.reconciliationId,
+                status: data.status,
+                createdAt: data.createdAt,
+                items: data.items,
+            };
+            setCurrentRecon(recon);
+            setLocalItems(data.items);
             setUploadResult(null);
-            queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
         },
-    });
-
-    // Update reconciliation
-    const updateMutation = useMutation({
-        mutationFn: (items: ReconciliationItem[]) =>
-            inventoryApi.updateReconciliation(currentRecon!.id, items.map(item => ({
-                id: item.id,
-                physicalQty: item.physicalQty,
-                systemQty: item.systemQty,
-                adjustmentReason: item.adjustmentReason || undefined,
-                notes: item.notes || undefined,
-            }))),
-        onSuccess: (res) => {
-            setCurrentRecon(res.data);
-            setLocalItems(res.data.items);
-        },
-    });
-
-    // Submit reconciliation
-    const submitMutation = useMutation({
-        mutationFn: () => inventoryApi.submitReconciliation(currentRecon!.id),
-        onSuccess: (res) => {
-            const adjustments = res.data.adjustmentsMade || 0;
+        onSubmitSuccess: (data) => {
+            const adjustments = data.adjustmentsMade || 0;
             setCurrentRecon(null);
             setLocalItems([]);
             setUploadResult(null);
-            queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
-            queryClient.invalidateQueries({ queryKey: ['inventoryBalance'] });
             alert(`Reconciliation submitted successfully!\n\n${adjustments} inventory adjustments created.`);
         },
-        onError: (err: any) => {
-            alert(err.response?.data?.error || 'Failed to submit reconciliation');
-        },
-    });
-
-    // Delete draft (from current working reconciliation)
-    const deleteMutation = useMutation({
-        mutationFn: () => inventoryApi.deleteReconciliation(currentRecon!.id),
-        onSuccess: () => {
+        onDeleteSuccess: () => {
             setCurrentRecon(null);
             setLocalItems([]);
             setUploadResult(null);
-            queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
         },
-    });
-
-    // Delete draft from history
-    const deleteFromHistoryMutation = useMutation({
-        mutationFn: (id: string) => inventoryApi.deleteReconciliation(id),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
-        },
-    });
-
-    // Upload CSV
-    const uploadMutation = useMutation({
-        mutationFn: (file: File) => inventoryApi.uploadReconciliationCsv(currentRecon!.id, file),
-        onSuccess: (res) => {
+        onUploadSuccess: async (result) => {
             setUploadResult({
                 success: true,
-                message: res.data.message,
-                results: res.data.results,
+                message: result.message,
+                results: result.results,
             });
-            // Refresh the reconciliation data
-            inventoryApi.getReconciliation(currentRecon!.id).then(r => {
-                setCurrentRecon(r.data);
-                setLocalItems(r.data.items);
-            });
+            // Refresh the reconciliation data using Server Function
+            if (currentRecon) {
+                try {
+                    const fetchResult = await getByIdServerFn({ data: { reconciliationId: currentRecon.id } });
+                    if (fetchResult.success && fetchResult.data) {
+                        const recon: Reconciliation = {
+                            id: fetchResult.data.id,
+                            status: fetchResult.data.status,
+                            createdAt: fetchResult.data.createdAt,
+                            items: fetchResult.data.items,
+                        };
+                        setCurrentRecon(recon);
+                        setLocalItems(fetchResult.data.items);
+                    }
+                } catch (error) {
+                    console.error('Failed to refresh reconciliation after upload:', error);
+                }
+            }
         },
-        onError: (err: any) => {
+        onUploadError: (error) => {
             setUploadResult({
                 success: false,
-                message: err.response?.data?.error || 'Failed to upload CSV',
+                message: error,
             });
         },
     });
+
+    // Delete from history mutation (using the same deleteMutation)
+    const handleDeleteFromHistory = (id: string) => {
+        if (confirm('Delete this draft reconciliation?')) {
+            deleteMutation.mutate(id);
+        }
+    };
 
     // Handle file selection
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            uploadMutation.mutate(file);
+        if (file && currentRecon) {
+            uploadMutation.mutate({ reconciliationId: currentRecon.id, file });
         }
         // Reset input so same file can be selected again
         if (fileInputRef.current) {
@@ -220,16 +204,41 @@ export default function InventoryReconciliation() {
 
     // Save progress
     const handleSave = () => {
-        updateMutation.mutate(localItems);
+        if (!currentRecon) return;
+        updateMutation.mutate({
+            reconciliationId: currentRecon.id,
+            items: localItems.map(item => ({
+                id: item.id,
+                physicalQty: item.physicalQty,
+                systemQty: item.systemQty,
+                adjustmentReason: item.adjustmentReason,
+                notes: item.notes,
+            })),
+        });
     };
 
     // Submit
     const handleSubmit = () => {
+        if (!currentRecon) return;
         if (!confirm('This will create adjustment transactions for all variances. Continue?')) return;
         // First save, then submit
-        updateMutation.mutate(localItems, {
-            onSuccess: () => submitMutation.mutate(),
-        });
+        updateMutation.mutate(
+            {
+                reconciliationId: currentRecon.id,
+                items: localItems.map(item => ({
+                    id: item.id,
+                    physicalQty: item.physicalQty,
+                    systemQty: item.systemQty,
+                    adjustmentReason: item.adjustmentReason,
+                    notes: item.notes,
+                })),
+            },
+            {
+                onSuccess: () => {
+                    submitMutation.mutate({ reconciliationId: currentRecon.id });
+                },
+            }
+        );
     };
 
     // Filter items
@@ -429,7 +438,7 @@ export default function InventoryReconciliation() {
                                     </button>
                                     <button
                                         className="btn btn-secondary flex items-center gap-2"
-                                        onClick={() => deleteMutation.mutate()}
+                                        onClick={() => currentRecon && deleteMutation.mutate(currentRecon.id)}
                                         disabled={deleteMutation.isPending}
                                     >
                                         <Trash2 size={16} /> Discard
@@ -593,7 +602,7 @@ export default function InventoryReconciliation() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {history.map((r: { id: string; date: string; status: string; itemsCount: number; adjustments: number }) => (
+                                {history.map((r) => (
                                     <tr key={r.id} className="hover:bg-gray-50">
                                         <td className="px-4 py-3">
                                             {new Date(r.date).toLocaleDateString('en-IN', {
@@ -634,14 +643,10 @@ export default function InventoryReconciliation() {
                                                 </button>
                                                 {r.status === 'draft' && (
                                                     <button
-                                                        onClick={() => {
-                                                            if (confirm('Delete this draft reconciliation?')) {
-                                                                deleteFromHistoryMutation.mutate(r.id);
-                                                            }
-                                                        }}
+                                                        onClick={() => handleDeleteFromHistory(r.id)}
                                                         className="p-1.5 rounded hover:bg-red-50 text-gray-500 hover:text-red-600"
                                                         title="Delete draft"
-                                                        disabled={deleteFromHistoryMutation.isPending}
+                                                        disabled={deleteMutation.isPending}
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>
@@ -830,13 +835,18 @@ export default function InventoryReconciliation() {
                                         if (!viewingReconId || submittingFromHistory) return;
                                         setSubmittingFromHistory(true);
                                         try {
-                                            const result = await inventoryApi.submitReconciliation(viewingReconId);
+                                            const result = await submitServerFn({
+                                                data: { reconciliationId: viewingReconId, applyAdjustments: true }
+                                            });
+                                            if (!result.success) {
+                                                throw new Error(result.error?.message || 'Failed to submit reconciliation');
+                                            }
                                             queryClient.invalidateQueries({ queryKey: ['inventoryReconciliationHistory'] });
                                             setViewingReconId(null);
                                             setHistorySearchTerm('');
-                                            alert(`Reconciliation submitted successfully!\n\n${result.data.adjustmentsMade} inventory adjustments created.`);
-                                        } catch (err: any) {
-                                            alert(err.response?.data?.error || 'Failed to submit reconciliation');
+                                            alert(`Reconciliation submitted successfully!\n\n${result.data?.adjustmentsMade || 0} inventory adjustments created.`);
+                                        } catch (err) {
+                                            alert(err instanceof Error ? err.message : 'Failed to submit reconciliation');
                                         } finally {
                                             setSubmittingFromHistory(false);
                                         }
