@@ -28,9 +28,9 @@
     }
   },
   "scripts": {
-    "build": "./node_modules/.bin/tsc",
-    "dev": "./node_modules/.bin/tsc --watch",
-    "typecheck": "./node_modules/.bin/tsc --noEmit",
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
