@@ -65,4 +65,26 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['pg', 'pg-pool'],
   },
+  // Build options for SSR
+  build: {
+    rollupOptions: {
+      // Externalize server-only packages for SSR build
+      external: [
+        'bcryptjs',
+        'pg',
+        'pg-pool',
+        'pg-native',
+        'kysely',
+        '@prisma/client',
+        'prisma',
+        'jsonwebtoken',
+        'express',
+        'cookie-parser',
+        'cors',
+        'multer',
+        'dotenv',
+        'node-cron',
+      ],
+    },
+  },
 })
