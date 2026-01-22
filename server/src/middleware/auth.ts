@@ -1,58 +1,53 @@
-import jwt from 'jsonwebtoken';
+/**
+ * Express Auth Middleware
+ *
+ * Uses the unified auth core for validation logic.
+ * This ensures Express API routes use the exact same auth logic
+ * as TanStack Server Functions.
+ */
+
 import type { Request, Response, NextFunction } from 'express';
-import type { JwtPayload } from '../types/express.js';
-import { validateTokenVersion, getUserPermissions } from './permissions.js';
+import {
+    validateAuth,
+    hasAdminAccess,
+    type AuthenticatedUser,
+} from '../utils/authCore.js';
+
+// Re-export types for convenience
+export type { AuthenticatedUser, AuthContext, AuthResult } from '../utils/authCore.js';
+
+/**
+ * Extract auth token from request
+ * Supports both Authorization header and HttpOnly cookie
+ */
+function extractToken(req: Request): string | undefined {
+    const authHeader = req.headers['authorization'];
+    return (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
+}
 
 /**
  * Middleware to authenticate JWT token
- * Supports both Authorization header and HttpOnly cookie
- * Attaches user and permissions to request
+ *
+ * Uses unified validateAuth() from authCore - same logic as Server Functions.
+ * Attaches user and permissions to request.
  */
 export const authenticateToken = async (
     req: Request,
     res: Response,
     next: NextFunction
 ): Promise<void> => {
-    const authHeader = req.headers['authorization'];
-    // Check both Authorization header AND auth_token cookie
-    const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
+    const token = extractToken(req);
+    const result = await validateAuth(token, req.prisma);
 
-    if (!token) {
-        res.status(401).json({ error: 'Access token required' });
+    if (!result.success) {
+        const status = result.code === 'NO_TOKEN' ? 401 : 403;
+        res.status(status).json({ error: result.error });
         return;
     }
 
-    try {
-        const decoded = jwt.verify(
-            token,
-            process.env.JWT_SECRET as string
-        ) as JwtPayload;
-
-        // Token version validation for immediate session invalidation
-        if (decoded.tokenVersion !== undefined) {
-            const isValid = await validateTokenVersion(
-                req.prisma,
-                decoded.id,
-                decoded.tokenVersion
-            );
-            if (!isValid) {
-                res.status(403).json({
-                    error: 'Session invalidated. Please login again.',
-                });
-                return;
-            }
-        }
-
-        req.user = decoded;
-
-        // Attach permissions for downstream middleware
-        req.userPermissions = await getUserPermissions(req.prisma, decoded.id);
-
-        next();
-    } catch (err) {
-        res.status(403).json({ error: 'Invalid or expired token' });
-        return;
-    }
+    req.user = result.user;
+    req.userPermissions = result.permissions;
+    next();
 };
 
 /**
@@ -64,98 +59,47 @@ export const requireAdmin = async (
     res: Response,
     next: NextFunction
 ): Promise<void> => {
-    const authHeader = req.headers['authorization'];
-    // Check both Authorization header AND auth_token cookie
-    const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
+    const token = extractToken(req);
+    const result = await validateAuth(token, req.prisma);
 
-    if (!token) {
-        res.status(401).json({ error: 'Access token required' });
+    if (!result.success) {
+        const status = result.code === 'NO_TOKEN' ? 401 : 403;
+        res.status(status).json({ error: result.error });
         return;
     }
 
-    try {
-        const decoded = jwt.verify(
-            token,
-            process.env.JWT_SECRET as string
-        ) as JwtPayload;
-
-        // Token version validation
-        if (decoded.tokenVersion !== undefined) {
-            const isValid = await validateTokenVersion(
-                req.prisma,
-                decoded.id,
-                decoded.tokenVersion
-            );
-            if (!isValid) {
-                res.status(403).json({
-                    error: 'Session invalidated. Please login again.',
-                });
-                return;
-            }
-        }
-
-        // Check legacy admin role OR new owner role permissions
-        const permissions = await getUserPermissions(req.prisma, decoded.id);
-        const isAdmin =
-            decoded.role === 'admin' || permissions.includes('users:create');
-
-        if (!isAdmin) {
-            res.status(403).json({ error: 'Admin access required' });
-            return;
-        }
-
-        req.user = decoded;
-        req.userPermissions = permissions;
-        next();
-    } catch (err) {
-        res.status(403).json({ error: 'Invalid or expired token' });
+    // Check admin access using unified logic
+    if (!hasAdminAccess(result.user, result.permissions)) {
+        res.status(403).json({ error: 'Admin access required' });
         return;
     }
+
+    req.user = result.user;
+    req.userPermissions = result.permissions;
+    next();
 };
 
 /**
  * Optional authentication middleware
- * Attaches user if token is valid, continues without auth otherwise
- * Supports both Authorization header and HttpOnly cookie
+ *
+ * Attaches user if token is valid, continues without auth otherwise.
+ * Uses unified validateAuth() from authCore.
  */
 export const optionalAuth = async (
     req: Request,
     res: Response,
     next: NextFunction
 ): Promise<void> => {
-    const authHeader = req.headers['authorization'];
-    // Check both Authorization header AND auth_token cookie
-    const token = (authHeader && authHeader.split(' ')[1]) || req.cookies?.auth_token;
+    const token = extractToken(req);
 
     if (token) {
-        try {
-            const decoded = jwt.verify(
-                token,
-                process.env.JWT_SECRET as string
-            ) as JwtPayload;
-
-            if (decoded.tokenVersion !== undefined) {
-                const isValid = await validateTokenVersion(
-                    req.prisma,
-                    decoded.id,
-                    decoded.tokenVersion
-                );
-                if (!isValid) {
-                    // Token invalidated - continue without auth
-                    next();
-                    return;
-                }
-            }
-
-            // Always set both user AND permissions
-            req.user = decoded;
-            req.userPermissions = await getUserPermissions(
-                req.prisma,
-                decoded.id
-            );
-        } catch (err) {
-            // Invalid token - continue without auth
+        const result = await validateAuth(token, req.prisma);
+        if (result.success) {
+            req.user = result.user;
+            req.userPermissions = result.permissions;
         }
+        // If invalid, continue without auth (don't error)
     }
+
     next();
 };
