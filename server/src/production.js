@@ -188,7 +188,8 @@ async function startProductionServer() {
 
   // Load TanStack Start server
   const tanstackServerPath = path.join(__dirname, '../../client/dist/server/server.js');
-  const clientDistPath = path.join(__dirname, '../../client/dist');
+  // TanStack Start puts client assets in client/dist/client/, not client/dist/
+  const clientDistPath = path.join(__dirname, '../../client/dist/client');
 
   // Debug: Log paths and directory contents
   console.log(`[Production] __dirname: ${__dirname}`);
