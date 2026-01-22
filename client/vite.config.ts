@@ -50,9 +50,17 @@ export default defineConfig({
       'cookie-parser',
       'cors',
       'multer',
+      // HTTP clients
+      'axios',
+      'node-fetch',
       // Utilities
       'dotenv',
       'node-cron',
+      'pino',
+      'pino-pretty',
+      'uuid',
+      // Shopify
+      '@shopify/shopify-api',
     ],
     // Don't externalize these - they need to be bundled for consistent module resolution
     noExternal: [
@@ -70,6 +78,7 @@ export default defineConfig({
     rollupOptions: {
       // Externalize server-only packages for SSR build
       external: [
+        // Database
         'bcryptjs',
         'pg',
         'pg-pool',
@@ -77,13 +86,29 @@ export default defineConfig({
         'kysely',
         '@prisma/client',
         'prisma',
+        // Auth
         'jsonwebtoken',
+        // Server frameworks
         'express',
         'cookie-parser',
         'cors',
         'multer',
+        // HTTP clients
+        'axios',
+        'node-fetch',
+        // Utilities
         'dotenv',
         'node-cron',
+        'pino',
+        'pino-pretty',
+        'uuid',
+        'crypto',
+        'fs',
+        'path',
+        'stream',
+        'zlib',
+        // Shopify
+        '@shopify/shopify-api',
       ],
     },
   },
