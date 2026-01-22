@@ -6,9 +6,12 @@
  */
 
 // Server function stub - returns a chainable builder that produces a no-op function
+// In SPA mode, Server Functions return null/empty data - components should handle this gracefully
 export function createServerFn(_options?: unknown) {
-  const noopFn = () => {
-    throw new Error('Server Functions are not available in SPA mode. Use tRPC instead.');
+  // Return async function that resolves to null - components handle missing data
+  const noopFn = async () => {
+    console.warn('[SPA Mode] Server Function called - returning null. Data will load via client-side fetch.');
+    return null;
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,8 +32,9 @@ export function createMiddleware() {
 }
 
 export function useServerFn(_serverFn: unknown) {
-  return () => {
-    throw new Error('Server Functions are not available in SPA mode. Use tRPC instead.');
+  return async () => {
+    console.warn('[SPA Mode] useServerFn called - returning null.');
+    return null;
   };
 }
 
