@@ -13,7 +13,7 @@
 'use server';
 
 import { createMiddleware } from '@tanstack/react-start';
-import { getCookie, getHeaders } from 'vinxi/http';
+import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
 import { z } from 'zod';
 
 // ============================================
@@ -256,32 +256,37 @@ export function hasAdminAccess(user: AuthenticatedUser, permissions: string[]): 
 
 /**
  * Helper to extract auth token from cookie
+ *
+ * Uses TanStack Start's getCookie utility which works for both
+ * SSR requests and client-side Server Function calls.
  */
 function getAuthToken(): string | undefined {
     try {
-        // Try direct cookie access first (works in production)
-        let token = getCookie('auth_token');
+        // Use TanStack Start's getCookie - works for SSR and client-initiated Server Functions
+        const token = getCookie('auth_token');
 
-        // Fallback: parse from request headers (for SSR)
-        if (!token) {
-            const headers = getHeaders();
-            const cookieHeader = headers?.cookie;
-
-            // Debug logging for production troubleshooting
-            if (process.env.NODE_ENV === 'production') {
-                console.log('[AuthMiddleware] getCookie returned:', token ? 'token-present' : 'undefined');
-                console.log('[AuthMiddleware] headers.cookie:', cookieHeader ? `present (${cookieHeader.length} chars)` : 'undefined');
-            }
-
-            if (cookieHeader) {
-                const match = cookieHeader.match(/auth_token=([^;]+)/);
-                token = match?.[1];
-            }
+        // Debug logging for production troubleshooting
+        if (process.env.NODE_ENV === 'production') {
+            console.log('[AuthMiddleware] getCookie returned:', token ? 'token-present' : 'undefined');
         }
 
         return token;
     } catch (error) {
-        // No request context available (e.g., client-side call)
+        // Fallback: try reading cookie header directly
+        try {
+            const cookieHeader = getRequestHeader('cookie');
+            if (cookieHeader) {
+                const match = cookieHeader.match(/auth_token=([^;]+)/);
+                const token = match?.[1];
+                if (process.env.NODE_ENV === 'production') {
+                    console.log('[AuthMiddleware] Fallback cookie header:', token ? 'token-present' : 'undefined');
+                }
+                return token;
+            }
+        } catch {
+            // Ignore fallback errors
+        }
+
         if (process.env.NODE_ENV === 'production') {
             console.log('[AuthMiddleware] Error getting auth token:', error);
         }
