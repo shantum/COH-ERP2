@@ -5,8 +5,8 @@
  * validator functions, and database queries shared between server and client.
  */
 
-// Re-export all types
-export * from './types/index.js';
+// Re-export all types (type-only export for pure interfaces)
+export type * from './types/index.js';
 
 // Re-export all schemas
 export * from './schemas/index.js';
