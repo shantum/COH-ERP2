@@ -37,6 +37,9 @@ export default defineConfig({
       { find: 'vinxi/runtime/http', replacement: path.resolve(__dirname, 'src/stubs/vinxi.ts') },
       { find: 'vinxi/http', replacement: path.resolve(__dirname, 'src/stubs/vinxi.ts') },
       { find: 'vinxi', replacement: path.resolve(__dirname, 'src/stubs/vinxi.ts') },
+      // Stub out server function imports - redirect to stub module
+      { find: /^\.\.\/server\/src\//, replacement: path.resolve(__dirname, 'src/stubs/server-functions.ts') },
+      { find: /^\.\.\/\.\.\/\.\.\/\.\.\/server\/src\//, replacement: path.resolve(__dirname, 'src/stubs/server-functions.ts') },
     ],
   },
   optimizeDeps: {
