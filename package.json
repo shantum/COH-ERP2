@@ -14,7 +14,7 @@
     "start": "pnpm --filter server start",
     "test": "pnpm --filter server test",
     "typecheck": "pnpm --filter @coh/shared typecheck && pnpm --filter server typecheck",
-    "db:generate": "pnpm --filter server db:generate",
+    "db:generate": "npx prisma generate --schema=server/prisma/schema.prisma",
     "db:push": "pnpm --filter server db:push",
     "db:migrate": "pnpm --filter server db:migrate",
     "db:studio": "pnpm --filter server db:studio",
@@ -22,5 +22,11 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
   }
 }
