@@ -11,7 +11,7 @@
 7. **Separate config from code.** Magic numbers, thresholds, mappings → `/config/`. Code should read config, not contain it.
 8. **Clean architecture.** Dependencies point inward. Business logic independent of frameworks/UI/DB.
 9. **Build for the long term.** Write code your future self will thank you for. Maintainability over cleverness.
-10. **Type-safe by default.** Strict TypeScript, proper tRPC typing, Zod validation. No `any`, no shortcuts.
+10. **Type-safe by default.** Strict TypeScript, proper Server Function typing, Zod validation. No `any`, no shortcuts.
 
 ## Architecture: TanStack Start + Server Functions
 
@@ -50,6 +50,76 @@ const { data } = useQuery({
 > - Infer types with `z.infer<>`
 > - Validate search params, Server Function inputs
 > - **NEVER write `interface` or `type` separately from the Zod schema**
+
+### Server Function Type Safety Standards
+
+**Error Handling** - Use `catch (error: unknown)` with type guards:
+```typescript
+// CORRECT - explicit unknown type with instanceof narrowing
+} catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: { code: 'EXTERNAL_ERROR', message } };
+}
+
+// WRONG - unsafe cast assumes all errors are Error instances
+} catch (error) {
+    const err = error as Error;  // DON'T - crashes on non-Error throws
+    return { success: false, error: err.message };
+}
+```
+
+**Prisma Client Typing** - Use `InstanceType<typeof PrismaClient>`:
+```typescript
+// Type alias for helper functions (at top of file)
+type PrismaInstance = InstanceType<typeof PrismaClient>;
+
+// For transaction clients (omit unavailable methods)
+type PrismaTransaction = Omit<
+    PrismaInstance,
+    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+async function getPrisma() {
+    const { PrismaClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
+    // ... singleton pattern
+}
+```
+
+**Handler Return Types** - Always explicit for complex queries:
+```typescript
+// Typed WHERE clause builders
+function buildWhereClause(view: string, ...): Prisma.OrderWhereInput {
+    const where: Prisma.OrderWhereInput = { isArchived: false };
+    // ...
+    return where;
+}
+
+// Export response types for consumers
+export interface OrdersResponse {
+    rows: FlattenedOrderRow[];
+    pagination: { total: number; page: number; /* ... */ };
+}
+```
+
+**Express Route Validation** - Zod schemas for request bodies:
+```typescript
+// Define schemas (replaces interface definitions)
+const LoginBodySchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required'),
+});
+
+// Validate in handler
+const parseResult = LoginBodySchema.safeParse(req.body);
+if (!parseResult.success) {
+    res.status(400).json({ error: parseResult.error.issues[0]?.message });
+    return;
+}
+const { email, password } = parseResult.data;
+```
 
 ### TanStack Router Migration Rules
 
@@ -137,6 +207,10 @@ Login: `admin@coh.com` / `XOFiya@34`
 27. **Server Function API calls**: In production, call Express API via `http://127.0.0.1:${process.env.PORT}` (same-server call), NOT `localhost:3001` which doesn't exist on Railway.
 28. **Server Function large payloads**: Use `method: 'POST'` for Server Functions that receive arrays or large data. GET requests encode data in headers, causing HTTP 431 "Request Header Fields Too Large".
 29. **JWT roleId can be null**: Auth middleware Zod schema must use `roleId: z.string().nullable().optional()` since users without roles have `roleId: null` in their token.
+30. **Error typing**: Always use `catch (error: unknown)` with `instanceof Error` guard. Never `catch (error)` with `error as Error` cast—non-Error objects can be thrown.
+31. **Prisma typing**: Use `InstanceType<typeof PrismaClient>` for client type. Don't use `any` for global prisma singleton. For transactions use `Omit<...>` to exclude unavailable methods.
+32. **WHERE clause typing**: Type Prisma WHERE builders as `Prisma.OrderWhereInput` (or relevant model). Avoids `any` in query construction.
+33. **Express body validation**: Use Zod schemas with `safeParse()` for request bodies. Don't use `req.body as SomeInterface`—validates at runtime, not just compile time.
 
 ## Orders Architecture
 
@@ -641,4 +715,4 @@ railway variables --unset "NO_CACHE"
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `77b3487` (2026-01-22) - Server Functions production fixes (cookies, large payloads, API URLs, SSR hydration)
+**Updated till commit:** `90b3f6b` (2026-01-22) - Type safety improvements: error handling with `catch (error: unknown)`, Prisma typing, handler return types, Express Zod validation
