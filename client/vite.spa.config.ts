@@ -57,6 +57,17 @@ export default defineConfig({
         'pg-native',
         '@prisma/client',
         'prisma',
+        'kysely',
+        'dotenv',
+        'jsonwebtoken',
+        'express',
+        'cookie-parser',
+        'cors',
+        'multer',
+        'node-cron',
+        // Externalize anything from server directory
+        /^\.\.\/server\//,
+        /server\/src\//,
       ],
       output: {
         manualChunks: {
