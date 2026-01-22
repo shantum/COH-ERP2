@@ -6,12 +6,12 @@
  * This ensures loaders don't run for unauthenticated users.
  *
  * Handles SSR/client hydration mismatch gracefully:
- * - SSR: Server Function may fail to get cookie
- * - Client: localStorage has the token
- * - Solution: pendingAuth state shows loading while client verifies
+ * - SSR: Server Function may fail to get cookie → returns pendingAuth
+ * - Client: Waits for AuthProvider to verify token
+ * - Redirect happens via useEffect to avoid hydration issues
  */
 import { createFileRoute, redirect, useNavigate, useLocation } from '@tanstack/react-router';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { getAuthUser } from '../server/functions/auth';
 import { useAuth } from '../hooks/useAuth';
 
@@ -29,13 +29,31 @@ function AuthenticatedLayout() {
     // Check for pendingAuth from beforeLoad
     const routeContext = Route.useRouteContext() as { pendingAuth?: boolean; user?: unknown } | undefined;
     const navigate = useNavigate();
-    const { isAuthenticated, isLoading } = useAuth();
+    const { isAuthenticated, isLoading, user } = useAuth();
     const location = useLocation();
+    const hasRedirected = useRef(false);
 
-    // Debug logging
+    // Debug logging (client-only)
     if (typeof window !== 'undefined') {
         console.log('[AuthLayout] pendingAuth:', routeContext?.pendingAuth, 'isLoading:', isLoading, 'isAuthenticated:', isAuthenticated);
     }
+
+    // Handle redirect via useEffect to avoid hydration issues
+    // Only runs after AuthProvider has finished loading
+    useEffect(() => {
+        // Only handle redirect for pendingAuth case
+        if (!routeContext?.pendingAuth) return;
+        // Wait for auth check to complete
+        if (isLoading) return;
+        // Prevent double redirect
+        if (hasRedirected.current) return;
+
+        if (!isAuthenticated) {
+            console.log('[AuthLayout] useEffect: Not authenticated, redirecting to /login');
+            hasRedirected.current = true;
+            navigate({ to: '/login', search: { redirect: location.pathname } });
+        }
+    }, [routeContext?.pendingAuth, isLoading, isAuthenticated, navigate, location.pathname]);
 
     // Handle pendingAuth: wait for client-side auth verification
     if (routeContext?.pendingAuth) {
@@ -46,18 +64,15 @@ function AuthenticatedLayout() {
 
         // Client: If AuthProvider is still loading, show spinner
         if (isLoading) {
-            console.log('[AuthLayout] Showing spinner - isLoading=true');
             return <LoadingSpinner />;
         }
 
-        // Client: Auth check complete - if not authenticated, redirect to login
+        // Client: Auth check complete but not authenticated - show spinner while redirecting
         if (!isAuthenticated) {
-            console.log('[AuthLayout] Not authenticated, navigating to /login');
-            navigate({ to: '/login', search: { redirect: location.pathname } });
             return <LoadingSpinner />;
         }
 
-        console.log('[AuthLayout] Authenticated, proceeding to render');
+        console.log('[AuthLayout] Authenticated via AuthProvider, user:', user?.email);
     }
 
     return (
