@@ -22,7 +22,8 @@ cmds = [
 dependsOn = ["setup"]
 
 [start]
-cmd = "npx prisma migrate deploy && cd server && npx tsx src/production.js"
+# Run from root directory where prisma/ folder lives
+cmd = "npx prisma migrate deploy --schema=prisma/schema.prisma && cd server && npx tsx src/production.js"
 
 [variables]
 NODE_ENV = "production"
