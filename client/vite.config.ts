@@ -35,9 +35,24 @@ export default defineConfig({
     // Packages that should remain as external imports in SSR bundle
     // (not bundled, loaded from node_modules at runtime)
     external: [
+      // Database
       'pg',
       'pg-pool',
       'pg-native',
+      'kysely',
+      '@prisma/client',
+      'prisma',
+      // Auth & crypto
+      'bcryptjs',
+      'jsonwebtoken',
+      // Server frameworks
+      'express',
+      'cookie-parser',
+      'cors',
+      'multer',
+      // Utilities
+      'dotenv',
+      'node-cron',
     ],
     // Don't externalize these - they need to be bundled for consistent module resolution
     noExternal: [
