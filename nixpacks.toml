@@ -14,7 +14,7 @@ cmds = [
 dependsOn = ["setup"]
 
 [start]
-cmd = "cd server && npx prisma migrate deploy && npm start"
+cmd = "cd server && npx prisma migrate deploy && npx tsx src/production.js"
 
 [variables]
 NODE_ENV = "production"
