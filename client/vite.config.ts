@@ -77,39 +77,27 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // Externalize server-only packages for SSR build
-      external: [
-        // Database
-        'bcryptjs',
-        'pg',
-        'pg-pool',
-        'pg-native',
-        'kysely',
-        '@prisma/client',
-        'prisma',
-        // Auth
-        'jsonwebtoken',
-        // Server frameworks
-        'express',
-        'cookie-parser',
-        'cors',
-        'multer',
-        // HTTP clients
-        'axios',
-        'node-fetch',
-        // Utilities
-        'dotenv',
-        'node-cron',
-        'pino',
-        'pino-pretty',
-        'uuid',
-        'crypto',
-        'fs',
-        'path',
-        'stream',
-        'zlib',
-        // Shopify
-        '@shopify/shopify-api',
-      ],
+      // Use function to handle @server imports and server paths
+      external: (id) => {
+        // Server-only Node.js packages
+        const serverPackages = [
+          'bcryptjs', 'pg', 'pg-pool', 'pg-native', 'kysely',
+          '@prisma/client', 'prisma', 'jsonwebtoken',
+          'express', 'cookie-parser', 'cors', 'multer',
+          'axios', 'node-fetch',
+          'dotenv', 'node-cron', 'pino', 'pino-pretty', 'uuid',
+          '@shopify/shopify-api',
+        ];
+        if (serverPackages.includes(id)) return true;
+        // Node.js built-ins
+        const builtins = ['crypto', 'fs', 'path', 'stream', 'zlib', 'http', 'https', 'net', 'tls', 'os', 'child_process'];
+        if (builtins.includes(id)) return true;
+        // Externalize @server/* imports (our server alias)
+        if (id.startsWith('@server')) return true;
+        // Externalize any server/src path imports
+        if (id.includes('server/src')) return true;
+        return false;
+      },
     },
   },
 })
