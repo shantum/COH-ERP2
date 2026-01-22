@@ -10,7 +10,7 @@
  * - Client: localStorage has the token
  * - Solution: pendingAuth state shows loading while client verifies
  */
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, redirect, useNavigate, useLocation } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 import { getAuthUser } from '../server/functions/auth';
 import { useAuth } from '../hooks/useAuth';
@@ -30,18 +30,23 @@ function AuthenticatedLayout() {
     const routeContext = Route.useRouteContext() as { pendingAuth?: boolean; user?: unknown } | undefined;
     const navigate = useNavigate();
     const { isAuthenticated, isLoading } = useAuth();
+    const location = useLocation();
 
     // Handle pendingAuth: wait for client-side auth verification
     if (routeContext?.pendingAuth) {
-        // If AuthProvider is still loading, show spinner
+        // SSR: Always show spinner, let client verify after hydration
+        if (typeof window === 'undefined') {
+            return <LoadingSpinner />;
+        }
+
+        // Client: If AuthProvider is still loading, show spinner
         if (isLoading) {
             return <LoadingSpinner />;
         }
 
-        // Auth check complete - if not authenticated, redirect to login
+        // Client: Auth check complete - if not authenticated, redirect to login
         if (!isAuthenticated) {
-            // Use effect to avoid render-time navigation
-            navigate({ to: '/login', search: { redirect: window.location.pathname } });
+            navigate({ to: '/login', search: { redirect: location.pathname } });
             return <LoadingSpinner />;
         }
     }
