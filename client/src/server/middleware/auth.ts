@@ -101,8 +101,12 @@ async function verifyToken(token: string, secret: string): Promise<JwtPayload | 
         const jwt = await getJwt();
         const decoded = jwt.verify(token, secret);
         const parsed = JwtPayloadSchema.safeParse(decoded);
+        if (!parsed.success) {
+            console.log('[AuthMiddleware] Zod parse failed:', parsed.error.message);
+        }
         return parsed.success ? parsed.data : null;
-    } catch {
+    } catch (error) {
+        console.log('[AuthMiddleware] JWT verify error:', error instanceof Error ? error.message : error);
         return null;
     }
 }
@@ -192,12 +196,20 @@ async function validateAuth(
     // 2. Get JWT secret
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
+        console.log('[AuthMiddleware] JWT_SECRET not found in env');
         throw new Error('JWT_SECRET not configured');
+    }
+
+    // Debug: log token and secret presence
+    if (process.env.NODE_ENV === 'production') {
+        console.log('[AuthMiddleware] JWT_SECRET present:', !!jwtSecret, 'length:', jwtSecret?.length);
+        console.log('[AuthMiddleware] Token length:', token?.length);
     }
 
     // 3. Verify and decode token
     const payload = await verifyToken(token, jwtSecret);
     if (!payload) {
+        console.log('[AuthMiddleware] Token verification failed');
         return { success: false, error: 'Invalid or expired token', code: 'INVALID_TOKEN' };
     }
 
