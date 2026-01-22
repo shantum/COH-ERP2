@@ -40,6 +40,8 @@ export default defineConfig({
       // Stub out server function imports - redirect to stub module
       { find: /^\.\.\/server\/src\//, replacement: path.resolve(__dirname, 'src/stubs/server-functions.ts') },
       { find: /^\.\.\/\.\.\/\.\.\/\.\.\/server\/src\//, replacement: path.resolve(__dirname, 'src/stubs/server-functions.ts') },
+      // Stub out @server alias imports
+      { find: /^@server\//, replacement: path.resolve(__dirname, 'src/stubs/server-functions.ts') },
     ],
   },
   optimizeDeps: {
@@ -61,8 +63,12 @@ export default defineConfig({
           '@prisma/client', 'prisma', 'kysely',
           'dotenv', 'jsonwebtoken', 'express',
           'cookie-parser', 'cors', 'multer', 'node-cron',
+          'axios', 'node-fetch', 'pino', 'pino-pretty', 'uuid',
+          '@shopify/shopify-api',
         ];
         if (serverPackages.includes(id)) return true;
+        // Externalize @server/* imports
+        if (id.startsWith('@server')) return true;
         // Externalize any import path containing 'server/src'
         if (id.includes('server/src')) return true;
         return false;

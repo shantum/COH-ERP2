@@ -8,7 +8,7 @@ dependsOn = ["setup"]
 [phases.build]
 cmds = [
   "cd shared && NODE_ENV=development npm ci && npx -y -p typescript tsc",
-  "cd client && NODE_ENV=development npm ci && npm run build",
+  "cd client && NODE_ENV=development npm ci && npm run build:spa",
   "cd server && NODE_ENV=development npm ci && npx prisma generate"
 ]
 dependsOn = ["setup"]
