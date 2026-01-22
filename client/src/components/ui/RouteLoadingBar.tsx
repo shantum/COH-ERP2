@@ -13,15 +13,15 @@ import { useEffect } from 'react';
 
 export function RouteLoadingBar() {
   const routerState = useRouterState({
-    select: (s) => ({ status: s.status, isLoading: s.isLoading, pendingMatches: s.pendingMatches?.length ?? 0 }),
+    select: (s) => ({ status: s.status, isLoading: s.isLoading }),
   });
 
   const isLoading = routerState.status === 'pending';
 
   // Debug logging
   useEffect(() => {
-    console.log('[RouteLoadingBar] Router state:', routerState);
-  }, [routerState]);
+    console.log('[RouteLoadingBar] Router state:', routerState, 'showing:', isLoading);
+  }, [routerState, isLoading]);
 
   if (!isLoading) {
     return null;
