@@ -12,3 +12,6 @@ export function withOrderLock<T>(
     source: string,
     fn: () => Promise<T>
 ): Promise<{ locked: boolean; skipped?: boolean; reason?: string; result?: T }>;
+
+export function getOrderLockStatus(): Array<{ orderId: string; source: string; age: number; expired: boolean }>;
+export function clearAllOrderLocks(): void;

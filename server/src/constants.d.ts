@@ -32,3 +32,15 @@ export const SYNC_WORKER_CONFIG: {
     };
     maxErrors: number;
 };
+
+export const FULL_DUMP_CONFIG: {
+    batchSize: number;
+    batchDelay: number;
+    maxConsecutiveSmallBatches: number;
+};
+
+export const CIRCUIT_BREAKER_CONFIG: {
+    failureThreshold: number;
+    resetTimeoutMs: number;
+    halfOpenMaxRequests: number;
+};

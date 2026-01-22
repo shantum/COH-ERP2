@@ -217,7 +217,7 @@ async function getAwbsNeedingUpdate(): Promise<Map<string, OrderInfo>> {
                 o.status,
                 o."paymentMethod",
                 o."customerId",
-                o."rtoInitiatedAt",
+                ol."rtoInitiatedAt",
                 o."orderDate"
             FROM "OrderLine" ol
             INNER JOIN "Order" o ON ol."orderId" = o.id
