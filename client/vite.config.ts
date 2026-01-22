@@ -4,12 +4,13 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import path from 'path'
 
-// Server packages that should never be bundled
+// Server-ONLY packages that should never be bundled (Node.js runtime only)
 const SERVER_PACKAGES = [
   'bcryptjs', 'pg', 'pg-pool', 'pg-native', 'kysely',
   '@prisma/client', 'prisma', 'jsonwebtoken',
   'express', 'cookie-parser', 'cors', 'multer',
-  'axios', 'node-fetch',
+  // Note: axios is NOT here - it's used in client-side api.ts
+  'node-fetch',
   'dotenv', 'node-cron', 'pino', 'pino-pretty', 'uuid',
   '@shopify/shopify-api',
 ];
