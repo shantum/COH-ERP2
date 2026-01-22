@@ -11,6 +11,117 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import type {
+    Material,
+    Fabric,
+    FabricColour,
+    TrimItem,
+    ServiceItem,
+    Supplier as PrismaSupplier,
+} from '@prisma/client';
+
+// ============================================
+// PRISMA ERROR HELPER
+// ============================================
+
+/**
+ * Type guard for Prisma errors with a code property
+ */
+function isPrismaError(error: unknown): error is { code: string; message: string } {
+    return (
+        error instanceof Error &&
+        'code' in error &&
+        typeof (error as { code: unknown }).code === 'string'
+    );
+}
+
+// ============================================
+// RETURN TYPES
+// ============================================
+
+// Material return types
+type FabricWithMaterial = Fabric & { material: Material };
+type ColourWithFabricAndSupplier = FabricColour & {
+    fabric: Fabric & { material: Material };
+    supplier: PrismaSupplier | null;
+};
+type TrimWithSupplier = TrimItem & { supplier: PrismaSupplier | null };
+type ServiceWithVendor = ServiceItem & { vendor: PrismaSupplier | null };
+
+interface CreateMaterialResult {
+    success: true;
+    material: Material;
+}
+
+interface UpdateMaterialResult {
+    success: true;
+    material: Material;
+}
+
+interface DeleteMaterialResult {
+    success: true;
+    message: string;
+}
+
+interface CreateFabricResult {
+    success: true;
+    fabric: FabricWithMaterial;
+}
+
+interface UpdateFabricResult {
+    success: true;
+    fabric: FabricWithMaterial;
+}
+
+interface DeleteFabricResult {
+    success: true;
+    message: string;
+}
+
+interface CreateColourResult {
+    success: true;
+    colour: ColourWithFabricAndSupplier;
+}
+
+interface UpdateColourResult {
+    success: true;
+    colour: ColourWithFabricAndSupplier;
+}
+
+interface DeleteColourResult {
+    success: true;
+    message: string;
+}
+
+interface CreateTrimResult {
+    success: true;
+    trim: TrimWithSupplier;
+}
+
+interface UpdateTrimResult {
+    success: true;
+    trim: TrimWithSupplier;
+}
+
+interface DeleteTrimResult {
+    success: true;
+    message: string;
+}
+
+interface CreateServiceResult {
+    success: true;
+    service: ServiceWithVendor;
+}
+
+interface UpdateServiceResult {
+    success: true;
+    service: ServiceWithVendor;
+}
+
+interface DeleteServiceResult {
+    success: true;
+    message: string;
+}
 
 // ============================================
 // INPUT SCHEMAS
@@ -107,7 +218,7 @@ const deleteColourSchema = z.object({
 export const createMaterial = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createMaterialSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CreateMaterialResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -123,9 +234,9 @@ export const createMaterial = createServerFn({ method: 'POST' })
                 success: true,
                 material,
             };
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Handle unique constraint violation
-            if (error.code === 'P2002') {
+            if (isPrismaError(error) && error.code === 'P2002') {
                 throw new Error(`Material "${data.name}" already exists`);
             }
             throw error;
@@ -140,7 +251,7 @@ export const createMaterial = createServerFn({ method: 'POST' })
 export const updateMaterial = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateMaterialSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<UpdateMaterialResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -158,12 +269,14 @@ export const updateMaterial = createServerFn({ method: 'POST' })
                 success: true,
                 material,
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Material not found');
-            }
-            if (error.code === 'P2002') {
-                throw new Error(`Material "${data.name}" already exists`);
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Material not found');
+                }
+                if (error.code === 'P2002') {
+                    throw new Error(`Material "${data.name}" already exists`);
+                }
             }
             throw error;
         } finally {
@@ -178,7 +291,7 @@ export const updateMaterial = createServerFn({ method: 'POST' })
 export const deleteMaterial = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteMaterialSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteMaterialResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -191,12 +304,14 @@ export const deleteMaterial = createServerFn({ method: 'POST' })
                 success: true,
                 message: 'Material deleted successfully',
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Material not found');
-            }
-            if (error.code === 'P2003') {
-                throw new Error('Cannot delete material with existing fabrics. Delete all fabrics first.');
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Material not found');
+                }
+                if (error.code === 'P2003') {
+                    throw new Error('Cannot delete material with existing fabrics. Delete all fabrics first.');
+                }
             }
             throw error;
         } finally {
@@ -214,7 +329,7 @@ export const deleteMaterial = createServerFn({ method: 'POST' })
 export const createFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CreateFabricResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -254,10 +369,10 @@ export const createFabric = createServerFn({ method: 'POST' })
 
             return {
                 success: true,
-                fabric,
+                fabric: fabric as FabricWithMaterial,
             };
-        } catch (error: any) {
-            if (error.code === 'P2002') {
+        } catch (error: unknown) {
+            if (isPrismaError(error) && error.code === 'P2002') {
                 throw new Error(`Fabric "${data.name}" already exists under this material`);
             }
             throw error;
@@ -272,7 +387,7 @@ export const createFabric = createServerFn({ method: 'POST' })
 export const updateFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<UpdateFabricResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -300,14 +415,16 @@ export const updateFabric = createServerFn({ method: 'POST' })
 
             return {
                 success: true,
-                fabric,
+                fabric: fabric as FabricWithMaterial,
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Fabric not found');
-            }
-            if (error.code === 'P2002') {
-                throw new Error(`Fabric "${data.name}" already exists`);
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Fabric not found');
+                }
+                if (error.code === 'P2002') {
+                    throw new Error(`Fabric "${data.name}" already exists`);
+                }
             }
             throw error;
         } finally {
@@ -322,7 +439,7 @@ export const updateFabric = createServerFn({ method: 'POST' })
 export const deleteFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteFabricResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -335,12 +452,14 @@ export const deleteFabric = createServerFn({ method: 'POST' })
                 success: true,
                 message: 'Fabric deleted successfully',
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Fabric not found');
-            }
-            if (error.code === 'P2003') {
-                throw new Error('Cannot delete fabric with existing colours or product variations. Delete all colours first.');
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Fabric not found');
+                }
+                if (error.code === 'P2003') {
+                    throw new Error('Cannot delete fabric with existing colours or product variations. Delete all colours first.');
+                }
             }
             throw error;
         } finally {
@@ -358,7 +477,7 @@ export const deleteFabric = createServerFn({ method: 'POST' })
 export const createColour = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createColourSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CreateColourResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -396,10 +515,10 @@ export const createColour = createServerFn({ method: 'POST' })
 
             return {
                 success: true,
-                colour,
+                colour: colour as ColourWithFabricAndSupplier,
             };
-        } catch (error: any) {
-            if (error.code === 'P2002') {
+        } catch (error: unknown) {
+            if (isPrismaError(error) && error.code === 'P2002') {
                 throw new Error(`Colour "${data.colourName}" already exists for this fabric`);
             }
             throw error;
@@ -414,7 +533,7 @@ export const createColour = createServerFn({ method: 'POST' })
 export const updateColour = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateColourSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<UpdateColourResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -443,14 +562,16 @@ export const updateColour = createServerFn({ method: 'POST' })
 
             return {
                 success: true,
-                colour,
+                colour: colour as ColourWithFabricAndSupplier,
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Colour not found');
-            }
-            if (error.code === 'P2002') {
-                throw new Error(`Colour "${data.colourName}" already exists`);
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Colour not found');
+                }
+                if (error.code === 'P2002') {
+                    throw new Error(`Colour "${data.colourName}" already exists`);
+                }
             }
             throw error;
         } finally {
@@ -465,7 +586,7 @@ export const updateColour = createServerFn({ method: 'POST' })
 export const deleteColour = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteColourSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteColourResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -478,12 +599,14 @@ export const deleteColour = createServerFn({ method: 'POST' })
                 success: true,
                 message: 'Colour deleted successfully',
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Colour not found');
-            }
-            if (error.code === 'P2003') {
-                throw new Error('Cannot delete colour that is used in product BOMs. Remove BOM references first.');
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Colour not found');
+                }
+                if (error.code === 'P2003') {
+                    throw new Error('Cannot delete colour that is used in product BOMs. Remove BOM references first.');
+                }
             }
             throw error;
         } finally {
@@ -531,7 +654,7 @@ const deleteTrimSchema = z.object({
 export const createTrim = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createTrimSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CreateTrimResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -557,8 +680,8 @@ export const createTrim = createServerFn({ method: 'POST' })
                 success: true,
                 trim,
             };
-        } catch (error: any) {
-            if (error.code === 'P2002') {
+        } catch (error: unknown) {
+            if (isPrismaError(error) && error.code === 'P2002') {
                 throw new Error(`Trim with code "${data.code}" already exists`);
             }
             throw error;
@@ -573,7 +696,7 @@ export const createTrim = createServerFn({ method: 'POST' })
 export const updateTrim = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateTrimSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<UpdateTrimResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -603,12 +726,14 @@ export const updateTrim = createServerFn({ method: 'POST' })
                 success: true,
                 trim,
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Trim not found');
-            }
-            if (error.code === 'P2002') {
-                throw new Error(`Trim with code "${data.code}" already exists`);
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Trim not found');
+                }
+                if (error.code === 'P2002') {
+                    throw new Error(`Trim with code "${data.code}" already exists`);
+                }
             }
             throw error;
         } finally {
@@ -622,7 +747,7 @@ export const updateTrim = createServerFn({ method: 'POST' })
 export const deleteTrim = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteTrimSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteTrimResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -635,12 +760,14 @@ export const deleteTrim = createServerFn({ method: 'POST' })
                 success: true,
                 message: 'Trim deleted successfully',
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Trim not found');
-            }
-            if (error.code === 'P2003') {
-                throw new Error('Cannot delete trim that is used in BOMs. Remove BOM references first.');
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Trim not found');
+                }
+                if (error.code === 'P2003') {
+                    throw new Error('Cannot delete trim that is used in BOMs. Remove BOM references first.');
+                }
             }
             throw error;
         } finally {
@@ -686,7 +813,7 @@ const deleteServiceSchema = z.object({
 export const createService = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createServiceSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CreateServiceResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -711,8 +838,8 @@ export const createService = createServerFn({ method: 'POST' })
                 success: true,
                 service,
             };
-        } catch (error: any) {
-            if (error.code === 'P2002') {
+        } catch (error: unknown) {
+            if (isPrismaError(error) && error.code === 'P2002') {
                 throw new Error(`Service with code "${data.code}" already exists`);
             }
             throw error;
@@ -727,7 +854,7 @@ export const createService = createServerFn({ method: 'POST' })
 export const updateService = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateServiceSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<UpdateServiceResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -756,12 +883,14 @@ export const updateService = createServerFn({ method: 'POST' })
                 success: true,
                 service,
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Service not found');
-            }
-            if (error.code === 'P2002') {
-                throw new Error(`Service with code "${data.code}" already exists`);
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Service not found');
+                }
+                if (error.code === 'P2002') {
+                    throw new Error(`Service with code "${data.code}" already exists`);
+                }
             }
             throw error;
         } finally {
@@ -775,7 +904,7 @@ export const updateService = createServerFn({ method: 'POST' })
 export const deleteService = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteServiceSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteServiceResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -788,12 +917,14 @@ export const deleteService = createServerFn({ method: 'POST' })
                 success: true,
                 message: 'Service deleted successfully',
             };
-        } catch (error: any) {
-            if (error.code === 'P2025') {
-                throw new Error('Service not found');
-            }
-            if (error.code === 'P2003') {
-                throw new Error('Cannot delete service that is used in BOMs. Remove BOM references first.');
+        } catch (error: unknown) {
+            if (isPrismaError(error)) {
+                if (error.code === 'P2025') {
+                    throw new Error('Service not found');
+                }
+                if (error.code === 'P2003') {
+                    throw new Error('Cannot delete service that is used in BOMs. Remove BOM references first.');
+                }
             }
             throw error;
         } finally {
@@ -824,7 +955,7 @@ const createColourTransactionSchema = z.object({
 export const createColourTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createColourTransactionSchema.parse(input))
-    .handler(async () => {
+    .handler(async (): Promise<never> => {
         // FabricColour transactions are not implemented yet
         // The schema only has FabricTransaction which links to the legacy Fabric model
         throw new Error('Colour inventory tracking is not yet implemented. Please use the Fabrics page for inventory transactions.');
@@ -842,13 +973,18 @@ export interface Supplier {
     isActive: boolean;
 }
 
+interface GetSuppliersResult {
+    success: true;
+    suppliers: Supplier[];
+}
+
 /**
  * Get all suppliers
  * Returns a list of all active suppliers for dropdowns
  */
 export const getSuppliers = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async (): Promise<{ success: true; suppliers: Supplier[] }> => {
+    .handler(async (): Promise<GetSuppliersResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 

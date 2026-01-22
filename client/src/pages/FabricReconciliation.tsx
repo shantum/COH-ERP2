@@ -478,14 +478,14 @@ export default function FabricReconciliation() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {history.map((r: { id: string; date: string; status: string; itemsCount: number; adjustments: number }) => (
+                                {history.map((r: { id: string; date: Date | null; status: string; itemsCount: number; adjustments: number }) => (
                                     <tr key={r.id} className="hover:bg-gray-50">
                                         <td className="px-4 py-3">
-                                            {new Date(r.date).toLocaleDateString('en-IN', {
+                                            {r.date ? new Date(r.date).toLocaleDateString('en-IN', {
                                                 day: 'numeric',
                                                 month: 'short',
                                                 year: 'numeric',
-                                            })}
+                                            }) : 'No date'}
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'submitted'

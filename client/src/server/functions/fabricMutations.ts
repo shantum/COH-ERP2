@@ -11,6 +11,92 @@
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
+import type {
+    FabricType,
+    Fabric,
+    FabricTransaction,
+    Supplier,
+    User,
+} from '@prisma/client';
+
+// ============================================
+// RETURN TYPES
+// ============================================
+
+type FabricTypeSuccessResult = {
+    success: true;
+    fabricType: FabricType;
+};
+
+type FabricTypeErrorResult = {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'FORBIDDEN';
+        message: string;
+    };
+};
+
+type FabricWithRelations = Fabric & {
+    fabricType: FabricType;
+    supplier: Supplier | null;
+};
+
+type FabricSuccessResult = {
+    success: true;
+    fabric: FabricWithRelations;
+};
+
+type FabricErrorResult = {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'FORBIDDEN';
+        message: string;
+    };
+};
+
+type DeleteFabricSuccessResult = {
+    success: true;
+    id: string;
+    hadTransactions: boolean;
+    variationsReassigned: number;
+    fabricTypeDeleted: boolean;
+};
+
+type DeleteFabricErrorResult = {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'FORBIDDEN' | 'INTERNAL_ERROR';
+        message: string;
+    };
+};
+
+type TransactionWithRelations = FabricTransaction & {
+    createdBy: Pick<User, 'id' | 'name'>;
+    supplier: Pick<Supplier, 'id' | 'name'> | null;
+};
+
+type TransactionSuccessResult = {
+    success: true;
+    transaction: TransactionWithRelations;
+};
+
+type DeleteTransactionSuccessResult = {
+    success: true;
+    id: string;
+};
+
+type TransactionErrorResult = {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'FORBIDDEN';
+        message: string;
+    };
+};
+
+type SupplierSuccessResult = {
+    success: true;
+    supplier: Supplier;
+};
 
 // ============================================
 // INPUT SCHEMAS
@@ -104,7 +190,7 @@ const createSupplierSchema = z.object({
 export const createFabricType = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricTypeSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<FabricTypeSuccessResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -136,7 +222,7 @@ export const createFabricType = createServerFn({ method: 'POST' })
 export const updateFabricType = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricTypeSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<FabricTypeSuccessResult | FabricTypeErrorResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -192,7 +278,7 @@ export const updateFabricType = createServerFn({ method: 'POST' })
 export const createFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createFabricSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<FabricSuccessResult | FabricErrorResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -255,7 +341,7 @@ export const createFabric = createServerFn({ method: 'POST' })
 export const updateFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<FabricSuccessResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -302,7 +388,7 @@ export const updateFabric = createServerFn({ method: 'POST' })
 export const deleteFabric = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteFabricSuccessResult | DeleteFabricErrorResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -423,7 +509,7 @@ export const deleteFabric = createServerFn({ method: 'POST' })
 export const createFabricTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createTransactionSchema.parse(input))
-    .handler(async ({ data, context }) => {
+    .handler(async ({ data, context }): Promise<TransactionSuccessResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -462,7 +548,7 @@ export const createFabricTransaction = createServerFn({ method: 'POST' })
 export const deleteFabricTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteTransactionSchema.parse(input))
-    .handler(async ({ data, context }) => {
+    .handler(async ({ data, context }): Promise<DeleteTransactionSuccessResult | TransactionErrorResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -515,7 +601,7 @@ export const deleteFabricTransaction = createServerFn({ method: 'POST' })
 export const createSupplier = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createSupplierSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<SupplierSuccessResult> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 

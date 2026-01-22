@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import { requireAdmin } from '../middleware/auth.js';
 import { validatePassword } from '@coh/shared';
 import { validateTokenVersion } from '../middleware/permissions.js';
@@ -10,25 +11,25 @@ import { asyncHandler } from '../middleware/asyncHandler.js';
 const router: Router = Router();
 
 // ============================================
-// REQUEST BODY INTERFACES
+// REQUEST BODY SCHEMAS (Zod runtime validation)
 // ============================================
 
-interface RegisterBody {
-    email: string;
-    password: string;
-    name: string;
-    role?: string;
-}
+const RegisterBodySchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required'),
+    name: z.string().min(1, 'Name is required'),
+    role: z.string().optional().default('staff'),
+});
 
-interface LoginBody {
-    email: string;
-    password: string;
-}
+const LoginBodySchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required'),
+});
 
-interface ChangePasswordBody {
-    currentPassword: string;
-    newPassword: string;
-}
+const ChangePasswordBodySchema = z.object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(1, 'New password is required'),
+});
 
 // ============================================
 // JWT PAYLOAD INTERFACE (for decoded tokens)
@@ -53,7 +54,12 @@ router.post(
     '/register',
     requireAdmin,
     asyncHandler(async (req: Request, res: Response) => {
-        const { email, password, name, role = 'staff' } = req.body as RegisterBody;
+        const parseResult = RegisterBodySchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ error: parseResult.error.issues[0]?.message || 'Invalid request body' });
+            return;
+        }
+        const { email, password, name, role } = parseResult.data;
 
         // Check if user exists
         const existing = await req.prisma.user.findUnique({ where: { email } });
@@ -97,7 +103,12 @@ router.post(
 router.post(
     '/login',
     asyncHandler(async (req: Request, res: Response) => {
-        const { email, password } = req.body as LoginBody;
+        const parseResult = LoginBodySchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ error: parseResult.error.issues[0]?.message || 'Invalid request body' });
+            return;
+        }
+        const { email, password } = parseResult.data;
 
         // Find user with role and permission overrides
         const user = await req.prisma.user.findUnique({
@@ -308,15 +319,12 @@ router.post(
             }
         }
 
-        const { currentPassword, newPassword } = req.body as ChangePasswordBody;
-
-        // Validate input
-        if (!currentPassword || !newPassword) {
-            res.status(400).json({
-                error: 'Current password and new password are required',
-            });
+        const parseResult = ChangePasswordBodySchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ error: parseResult.error.issues[0]?.message || 'Invalid request body' });
             return;
         }
+        const { currentPassword, newPassword } = parseResult.data;
 
         // Validate password strength
         const passwordValidation = validatePassword(newPassword) as {

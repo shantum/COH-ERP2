@@ -128,17 +128,11 @@ export interface TriggerSyncResult {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;

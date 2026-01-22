@@ -237,26 +237,21 @@ export interface LinkFabricResult {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    prisma: ReturnType<typeof createPrismaClient>;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-function createPrismaClient(): PrismaClientType {
-    return null;
-}
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;
     }
     return prisma;
 }
+
+/** Type alias for Prisma query results (unknown type for iteration safety) */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DbRecord = any;
 
 // ============================================
 // QUERY SERVER FUNCTIONS
@@ -299,7 +294,7 @@ export const getBomForVariation = createServerFn({ method: 'GET' })
             orderBy: { role: { sortOrder: 'asc' } },
         });
 
-        const result: BomLineResult[] = lines.map((line: PrismaClientType) => ({
+        const result: BomLineResult[] = lines.map((line: DbRecord) => ({
             id: line.id,
             roleId: line.roleId,
             roleCode: line.role.code,
@@ -364,7 +359,7 @@ export const getBomForProduct = createServerFn({ method: 'GET' })
             orderBy: { role: { sortOrder: 'asc' } },
         });
 
-        const result: BomLineResult[] = templates.map((t: PrismaClientType) => ({
+        const result: BomLineResult[] = templates.map((t: DbRecord) => ({
             id: t.id,
             roleId: t.roleId,
             roleCode: t.role.code,
@@ -423,7 +418,7 @@ export const getAvailableComponents = createServerFn({ method: 'GET' })
             }),
         ]);
 
-        const fabrics = fabricColours.map((c: PrismaClientType) => ({
+        const fabrics = fabricColours.map((c: DbRecord) => ({
             id: c.id,
             type: 'FABRIC',
             name: `${c.fabric.name} - ${c.colourName}`,
@@ -439,7 +434,7 @@ export const getAvailableComponents = createServerFn({ method: 'GET' })
             success: true,
             data: {
                 fabrics,
-                trims: trims.map((t: PrismaClientType) => ({
+                trims: trims.map((t: DbRecord) => ({
                     id: t.id,
                     type: 'TRIM',
                     code: t.code,
@@ -448,7 +443,7 @@ export const getAvailableComponents = createServerFn({ method: 'GET' })
                     costPerUnit: t.costPerUnit,
                     unit: t.unit,
                 })),
-                services: services.map((s: PrismaClientType) => ({
+                services: services.map((s: DbRecord) => ({
                     id: s.id,
                     type: 'SERVICE',
                     code: s.code,
@@ -475,7 +470,7 @@ export const getComponentRoles = createServerFn({ method: 'GET' })
             orderBy: [{ type: { sortOrder: 'asc' } }, { sortOrder: 'asc' }],
         });
 
-        const result: ComponentRoleResult[] = roles.map((r: PrismaClientType) => ({
+        const result: ComponentRoleResult[] = roles.map((r: DbRecord) => ({
             id: r.id,
             code: r.code,
             name: r.name,
@@ -548,8 +543,8 @@ export const getSizeConsumptions = createServerFn({ method: 'GET' })
         });
 
         // Collect all SKU IDs
-        const allSkus = product.variations.flatMap((v: PrismaClientType) => v.skus);
-        const skuIds = allSkus.map((s: PrismaClientType) => s.id);
+        const allSkus = product.variations.flatMap((v: DbRecord) => v.skus);
+        const skuIds = allSkus.map((s: DbRecord) => s.id);
 
         // Get SKU-level BOM lines for this role
         const skuBomLines = await prisma.skuBomLine.findMany({
@@ -948,16 +943,16 @@ export const importConsumption = createServerFn({ method: 'POST' })
             });
 
             // Create map of productId -> product
-            const productMap = new Map(products.map((p: PrismaClientType) => [p.id, p]));
+            const productMap = new Map(products.map((p: DbRecord) => [p.id, p]));
 
             // Build batch operations
             const skuUpdates: { skuId: string; quantity: number }[] = [];
 
             for (const imp of imports) {
-                const product = productMap.get(imp.productId) as PrismaClientType;
+                const product = productMap.get(imp.productId) as DbRecord;
                 if (!product || !imp.sizes) continue;
 
-                for (const variation of product.variations as PrismaClientType[]) {
+                for (const variation of product.variations as DbRecord[]) {
                     for (const sku of variation.skus) {
                         const quantity = imp.sizes[sku.size];
                         if (quantity === undefined || quantity === null) continue;
@@ -975,7 +970,7 @@ export const importConsumption = createServerFn({ method: 'POST' })
             }
 
             // Batch update in transaction
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 // Update Sku.fabricConsumption (legacy backward compat)
                 for (const update of skuUpdates) {
                     await tx.sku.update({
@@ -1079,7 +1074,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
 
         try {
             // Create/update BOM lines AND update variation.fabricId in a transaction
-            const results = await prisma.$transaction(async (tx: PrismaClientType) => {
+            const results = await prisma.$transaction(async (tx) => {
                 const updated: string[] = [];
 
                 for (const variation of variations) {
@@ -1176,8 +1171,8 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
         }
 
         // Collect all SKUs by size
-        const allSkus = product.variations.flatMap((v: PrismaClientType) => v.skus);
-        const skusToUpdate = allSkus.filter((sku: PrismaClientType) => sizeQuantityMap.has(sku.size));
+        const allSkus = product.variations.flatMap((v: DbRecord) => v.skus);
+        const skusToUpdate = allSkus.filter((sku: DbRecord) => sizeQuantityMap.has(sku.size));
 
         // Get role to check if it's main fabric (for backward compat)
         const role = await prisma.componentRole.findUnique({
@@ -1190,7 +1185,7 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
         try {
             // Batch update in transaction
             let updatedCount = 0;
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 for (const sku of skusToUpdate) {
                     const quantity = sizeQuantityMap.get(sku.size)!;
 
@@ -1325,8 +1320,8 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
             // Get all SKU IDs
             const allSkuIds: string[] = [];
             for (const product of products) {
-                for (const variation of product.variations as PrismaClientType[]) {
-                    for (const sku of variation.skus as PrismaClientType[]) {
+                for (const variation of product.variations as DbRecord[]) {
+                    for (const sku of variation.skus as DbRecord[]) {
                         allSkuIds.push(sku.id);
                     }
                 }
@@ -1344,7 +1339,7 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
             }
 
             // Get product templates for default quantities
-            const productIds = products.map((p: PrismaClientType) => p.id);
+            const productIds = products.map((p: DbRecord) => p.id);
             const templates = await prisma.productBomTemplate.findMany({
                 where: { productId: { in: productIds }, roleId: role.id },
             });
@@ -1359,8 +1354,8 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
             const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '2XL', '3XL', '4XL'];
 
             for (const product of products) {
-                for (const variation of product.variations as PrismaClientType[]) {
-                    for (const sku of variation.skus as PrismaClientType[]) {
+                for (const variation of product.variations as DbRecord[]) {
+                    for (const sku of variation.skus as DbRecord[]) {
                         sizeSet.add(sku.size);
                     }
                 }
@@ -1388,8 +1383,8 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
                 }
 
                 let totalSkus = 0;
-                for (const variation of product.variations as PrismaClientType[]) {
-                    for (const sku of variation.skus as PrismaClientType[]) {
+                for (const variation of product.variations as DbRecord[]) {
+                    for (const sku of variation.skus as DbRecord[]) {
                         totalSkus++;
                         const sizeData = sizesData[sku.size];
                         if (sizeData) {
@@ -1414,7 +1409,7 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
                     category: product.category,
                     gender: product.gender,
                     imageUrl: product.imageUrl,
-                    variationCount: (product.variations as PrismaClientType[]).length,
+                    variationCount: (product.variations as DbRecord[]).length,
                     skuCount: totalSkus,
                     defaultQuantity,
                     sizes: sizesData,
@@ -1482,8 +1477,8 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
             const productSizeSkuMap = new Map<string, Map<string, string[]>>();
             for (const product of products) {
                 const sizeMap = new Map<string, string[]>();
-                for (const variation of product.variations as PrismaClientType[]) {
-                    for (const sku of variation.skus as PrismaClientType[]) {
+                for (const variation of product.variations as DbRecord[]) {
+                    for (const sku of variation.skus as DbRecord[]) {
                         if (!sizeMap.has(sku.size)) {
                             sizeMap.set(sku.size, []);
                         }
@@ -1503,7 +1498,7 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
 
             let updatedCount = 0;
 
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 for (const update of updates) {
                     const sizeMap = productSizeSkuMap.get(update.productId);
                     if (!sizeMap) continue;
@@ -1590,10 +1585,10 @@ export const getProductsForMapping = createServerFn({ method: 'GET' })
                 orderBy: { name: 'asc' },
             });
 
-            const result: ProductForMappingResult[] = products.map((product: PrismaClientType) => {
-                const allSkus = product.variations.flatMap((v: PrismaClientType) => v.skus);
+            const result: ProductForMappingResult[] = products.map((product: DbRecord) => {
+                const allSkus = product.variations.flatMap((v: DbRecord) => v.skus);
                 const consumptions = allSkus
-                    .map((s: PrismaClientType) => s.fabricConsumption)
+                    .map((s: DbRecord) => s.fabricConsumption)
                     .filter((c: number | null): c is number => c !== null && c > 0);
 
                 return {
@@ -1640,7 +1635,7 @@ export const resetConsumption = createServerFn({ method: 'POST' })
             let deletedBomLines = 0;
             let resetSkus = 0;
 
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 // Delete SKU BOM lines for main fabric role
                 if (mainFabricRole) {
                     const deleteResult = await tx.skuBomLine.deleteMany({
@@ -1649,10 +1644,10 @@ export const resetConsumption = createServerFn({ method: 'POST' })
                     deletedBomLines = deleteResult.count;
                 }
 
-                // Reset legacy fabricConsumption field
+                // Reset legacy fabricConsumption field to default
                 const updateResult = await tx.sku.updateMany({
-                    where: { fabricConsumption: { not: null } },
-                    data: { fabricConsumption: null },
+                    where: { fabricConsumption: { not: 1.5 } },
+                    data: { fabricConsumption: 1.5 },
                 });
                 resetSkus = updateResult.count;
             }, { timeout: 60000 });
@@ -1779,7 +1774,7 @@ export const getProductBom = createServerFn({ method: 'GET' })
             });
 
             const result: ProductBomResult = {
-                templates: templates.map((t: PrismaClientType) => ({
+                templates: templates.map((t: DbRecord) => ({
                     id: t.id,
                     roleId: t.roleId,
                     roleCode: t.role.code,
@@ -1803,10 +1798,10 @@ export const getProductBom = createServerFn({ method: 'GET' })
                         costPerJob: t.serviceItem.costPerJob,
                     } : null,
                 })),
-                variations: variations.map((v: PrismaClientType) => ({
+                variations: variations.map((v: DbRecord) => ({
                     id: v.id,
                     colorName: v.colorName,
-                    bomLines: v.bomLines.map((line: PrismaClientType) => ({
+                    bomLines: v.bomLines.map((line: DbRecord) => ({
                         id: line.id,
                         roleId: line.roleId,
                         roleCode: line.role.code,
@@ -1886,17 +1881,17 @@ export const updateTemplate = createServerFn({ method: 'POST' })
             let updated = 0;
             let created = 0;
 
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 // Get existing templates
                 const existing = await tx.productBomTemplate.findMany({
                     where: { productId },
                 });
 
-                const existingRoleIds = new Set(existing.map((e: PrismaClientType) => e.roleId));
+                const existingRoleIds = new Set(existing.map((e: DbRecord) => e.roleId));
                 const newRoleIds = new Set(lines.map((l) => l.roleId));
 
                 // Delete templates not in the new list
-                const toDelete = existing.filter((e: PrismaClientType) => !newRoleIds.has(e.roleId));
+                const toDelete = existing.filter((e: DbRecord) => !newRoleIds.has(e.roleId));
                 for (const t of toDelete) {
                     await tx.productBomTemplate.delete({ where: { id: t.id } });
                 }
@@ -1907,7 +1902,7 @@ export const updateTemplate = createServerFn({ method: 'POST' })
                         await tx.productBomTemplate.updateMany({
                             where: { productId, roleId: line.roleId },
                             data: {
-                                defaultQuantity: line.defaultQuantity ?? null,
+                                defaultQuantity: line.defaultQuantity ?? 1,
                                 quantityUnit: line.quantityUnit || 'unit',
                                 wastagePercent: line.wastagePercent ?? 0,
                                 trimItemId: line.trimItemId || null,
@@ -1920,7 +1915,7 @@ export const updateTemplate = createServerFn({ method: 'POST' })
                             data: {
                                 productId,
                                 roleId: line.roleId,
-                                defaultQuantity: line.defaultQuantity ?? null,
+                                defaultQuantity: line.defaultQuantity ?? 1,
                                 quantityUnit: line.quantityUnit || 'unit',
                                 wastagePercent: line.wastagePercent ?? 0,
                                 trimItemId: line.trimItemId || null,
@@ -1981,7 +1976,7 @@ export const updateProductBom = createServerFn({ method: 'POST' })
             }
 
             if (template) {
-                await prisma.$transaction(async (tx: PrismaClientType) => {
+                await prisma.$transaction(async (tx) => {
                     // Clear existing templates
                     await tx.productBomTemplate.deleteMany({ where: { productId } });
 
@@ -1991,7 +1986,7 @@ export const updateProductBom = createServerFn({ method: 'POST' })
                             data: {
                                 productId,
                                 roleId: line.roleId,
-                                defaultQuantity: line.resolvedQuantity ?? null,
+                                defaultQuantity: line.resolvedQuantity ?? 1,
                                 trimItemId: line.componentType === 'TRIM' ? line.componentId : null,
                                 serviceItemId: line.componentType === 'SERVICE' ? line.componentId : null,
                             },
@@ -2031,26 +2026,18 @@ export const getCostConfig = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
 
         try {
-            // Get from SystemConfig table
-            const configs = await prisma.systemConfig.findMany({
-                where: {
-                    key: { in: ['LABOR_RATE_PER_MIN', 'DEFAULT_PACKAGING_COST'] },
-                },
-            });
-
-            const configMap = new Map<string, string>(
-                configs.map((c: PrismaClientType) => [c.key as string, c.value as string] as const)
-            );
+            // Get from CostConfig table
+            const config = await prisma.costConfig.findFirst();
 
             return {
                 success: true,
                 data: {
-                    laborRatePerMin: parseFloat(configMap.get('LABOR_RATE_PER_MIN') || '2.5'),
-                    defaultPackagingCost: parseFloat(configMap.get('DEFAULT_PACKAGING_COST') || '50'),
+                    laborRatePerMin: config?.laborRatePerMin ?? 2.5,
+                    defaultPackagingCost: config?.defaultPackagingCost ?? 50,
                 },
             };
         } catch {
-            // If SystemConfig doesn't exist, return defaults
+            // If CostConfig doesn't exist, return defaults
             return {
                 success: true,
                 data: {
@@ -2090,17 +2077,9 @@ export const getCogs = createServerFn({ method: 'GET' })
 
         try {
             // Get cost config
-            const configs = await prisma.systemConfig.findMany({
-                where: {
-                    key: { in: ['LABOR_RATE_PER_MIN', 'DEFAULT_PACKAGING_COST'] },
-                },
-            });
-
-            const configMap = new Map<string, string>(
-                configs.map((c: PrismaClientType) => [c.key as string, c.value as string] as const)
-            );
-            const laborRate = parseFloat(configMap.get('LABOR_RATE_PER_MIN') || '2.5');
-            const defaultPackaging = parseFloat(configMap.get('DEFAULT_PACKAGING_COST') || '50');
+            const costConfig = await prisma.costConfig.findFirst();
+            const laborRate = costConfig?.laborRatePerMin ?? 2.5;
+            const defaultPackaging = costConfig?.defaultPackagingCost ?? 50;
 
             // Get all active SKUs with related data
             const skus = await prisma.sku.findMany({
@@ -2114,7 +2093,7 @@ export const getCogs = createServerFn({ method: 'GET' })
                 },
             });
 
-            const results: CogsResult[] = skus.map((sku: PrismaClientType) => {
+            const results: CogsResult[] = skus.map((sku: DbRecord) => {
                 const variation = sku.variation;
                 const product = variation.product;
 

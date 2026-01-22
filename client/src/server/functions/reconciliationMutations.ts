@@ -134,17 +134,11 @@ export interface GetReconciliationResult {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;
@@ -152,12 +146,15 @@ async function getPrisma(): Promise<PrismaClientType> {
     return prisma;
 }
 
+/** Type alias for Prisma client instance */
+type PrismaClientInstance = Awaited<ReturnType<typeof getPrisma>>;
+
 // ============================================
 // BALANCE CALCULATION HELPER
 // ============================================
 
 async function calculateAllInventoryBalances(
-    prisma: PrismaClientType,
+    prisma: PrismaClientInstance,
     skuIds: string[]
 ): Promise<Map<string, { currentBalance: number }>> {
     const aggregations = await prisma.inventoryTransaction.groupBy({
@@ -497,7 +494,7 @@ export const submitReconciliation = createServerFn({ method: 'POST' })
                 const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
 
                 await prisma.$transaction(
-                    async (tx: PrismaClientType) => {
+                    async (tx) => {
                         for (const item of batch) {
                             const txn = await tx.inventoryTransaction.create({
                                 data: {

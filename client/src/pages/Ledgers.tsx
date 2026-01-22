@@ -42,7 +42,7 @@ export default function Ledgers() {
     // FabricTransaction interface for typing
     interface FabricTransaction {
         id: string;
-        fabric?: { colorName?: string; colorHex?: string; fabricType?: { name: string } } | null;
+        fabric?: { colorName?: string; colorHex?: string | null; fabricType?: { name: string } } | null;
         fabricType?: { name?: string } | null;
         txnType: string;
         reason: string;

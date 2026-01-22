@@ -179,20 +179,11 @@ export interface BackgroundJob {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    prisma: ReturnType<typeof createPrismaClient>;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-function createPrismaClient(): PrismaClientType {
-    return null;
-}
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;
@@ -208,6 +199,20 @@ function requireAdminRole(userRole: string): void {
     if (userRole !== 'admin') {
         throw new Error('Admin access required');
     }
+}
+
+// ============================================
+// JSON VALUE HELPERS
+// ============================================
+
+/**
+ * Safely converts a Prisma JsonValue to string[].
+ * Used for Role.permissions which is stored as Json in the database.
+ */
+function parsePermissionsArray(jsonValue: unknown): string[] {
+    if (!jsonValue) return [];
+    if (!Array.isArray(jsonValue)) return [];
+    return jsonValue.filter((item): item is string => typeof item === 'string');
 }
 
 // ============================================
@@ -1139,7 +1144,7 @@ export const getCostConfig = createServerFn({ method: 'GET' })
                 gstThreshold: config.gstThreshold ?? 2500,
                 gstRateAbove: config.gstRateAbove ?? 18,
                 gstRateBelow: config.gstRateBelow ?? 5,
-                lastUpdated: config.updatedAt.toISOString(),
+                lastUpdated: config.lastUpdated.toISOString(),
             },
         };
     });
@@ -1201,7 +1206,7 @@ export const updateCostConfig = createServerFn({ method: 'POST' })
                 gstThreshold: config.gstThreshold ?? 2500,
                 gstRateAbove: config.gstRateAbove ?? 18,
                 gstRateBelow: config.gstRateBelow ?? 5,
-                lastUpdated: config.updatedAt.toISOString(),
+                lastUpdated: config.lastUpdated.toISOString(),
             },
         };
     });
@@ -1390,7 +1395,7 @@ export const clearTables = createServerFn({ method: 'POST' })
 
         if (tables.includes('all') || tables.includes('products')) {
             // Delete in order: SKU BOM → SKU → Variation → Product
-            const skuBomResult = await prisma.skuBom.deleteMany();
+            const skuBomResult = await prisma.skuBomLine.deleteMany();
             deleted.skuBom = skuBomResult.count;
 
             const skusResult = await prisma.sku.deleteMany();
@@ -1776,7 +1781,7 @@ export const getUserPermissions = createServerFn({ method: 'GET' })
                 userId: user.id,
                 roleId: user.roleId,
                 roleName: user.userRole?.displayName || null,
-                rolePermissions: user.userRole?.permissions || [],
+                rolePermissions: parsePermissionsArray(user.userRole?.permissions),
                 overrides: user.permissionOverrides.map((o: { permission: string; granted: boolean }) => ({
                     permission: o.permission,
                     granted: o.granted,
@@ -1824,7 +1829,7 @@ export const updateUserPermissions = createServerFn({ method: 'POST' })
         }
 
         // Get the role's permissions as a Set for quick lookup
-        const rolePermissions = new Set(user.userRole?.permissions || []);
+        const rolePermissions = new Set(parsePermissionsArray(user.userRole?.permissions));
 
         // Filter overrides to only include those that differ from role defaults
         const effectiveOverrides = overrides.filter(o => {
@@ -1946,18 +1951,14 @@ export const getRoles = createServerFn({ method: 'GET' })
             orderBy: { displayName: 'asc' },
         });
 
-        // Convert dates to ISO strings
-        const rolesWithStringDates = roles.map((role: {
-            id: string;
-            name: string;
-            displayName: string;
-            description: string | null;
-            permissions: string[];
-            isBuiltIn: boolean;
-            createdAt: Date;
-            updatedAt: Date;
-        }) => ({
-            ...role,
+        // Convert dates to ISO strings and parse permissions from JsonValue
+        const rolesWithStringDates = roles.map((role) => ({
+            id: role.id,
+            name: role.name,
+            displayName: role.displayName,
+            description: role.description,
+            permissions: parsePermissionsArray(role.permissions),
+            isBuiltIn: role.isBuiltIn,
             createdAt: role.createdAt.toISOString(),
             updatedAt: role.updatedAt.toISOString(),
         }));

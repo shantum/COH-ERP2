@@ -137,6 +137,54 @@ export interface CatalogFiltersResponse {
 }
 
 // ============================================
+// MUTATION RESPONSE TYPES
+// ============================================
+
+/**
+ * Success response for catalog mutations
+ */
+export interface CatalogMutationSuccess {
+    success: true;
+    data: Record<string, unknown>;
+}
+
+/**
+ * Error response for catalog mutations
+ */
+export interface CatalogMutationError {
+    success: false;
+    error: { message: string };
+}
+
+/**
+ * Union type for catalog mutation responses
+ */
+export type CatalogMutationResponse = CatalogMutationSuccess | CatalogMutationError;
+
+/**
+ * Sync result data structure
+ */
+export interface SyncResultData {
+    message: string;
+    fetched: number;
+    syncAll: boolean;
+    results: unknown;
+}
+
+/**
+ * Success response for Shopify sync
+ */
+export interface SyncCatalogSuccess {
+    success: true;
+    data: SyncResultData;
+}
+
+/**
+ * Union type for sync catalog response
+ */
+export type SyncCatalogResponse = SyncCatalogSuccess | CatalogMutationError;
+
+// ============================================
 // HELPER TYPES FOR PRISMA QUERIES
 // ============================================
 
@@ -189,18 +237,15 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
             try {
                 const { gender, category, productId, status, search, limit, offset } = data;
 
-                // Build SKU filter
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const skuWhere: Record<string, any> = {
+                // Build SKU filter using Prisma-compatible where clause
+                const skuWhere: Record<string, unknown> = {
                     isActive: true,
                     isCustomSku: false,
                 };
 
                 // Add variation/product filters
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const variationWhere: Record<string, any> = {};
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const productWhere: Record<string, any> = {};
+                const variationWhere: Record<string, unknown> = {};
+                const productWhere: Record<string, unknown> = {};
 
                 if (gender) productWhere.gender = gender;
                 if (category) productWhere.category = category;

@@ -13,7 +13,504 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
+
+// ============================================
+// PRISMA TYPE ALIAS
+// ============================================
+
+/**
+ * Type alias for PrismaClient instance.
+ * Used for helper functions that need prisma parameter.
+ */
+type PrismaInstance = InstanceType<typeof PrismaClient>;
+
+/**
+ * Type alias for Prisma transaction client.
+ * Used in $transaction callbacks.
+ */
+type PrismaTransaction = Omit<
+    PrismaInstance,
+    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+// ============================================
+// INTERNAL TYPE DEFINITIONS FOR QUERY RESULTS
+// ============================================
+
+/**
+ * FabricType from Prisma with fabrics relation
+ */
+interface FabricTypeWithFabrics {
+    id: string;
+    name: string;
+    composition: string | null;
+    unit: string;
+    avgShrinkagePct: number | null;
+    defaultCostPerUnit: number | null;
+    defaultLeadTimeDays: number | null;
+    defaultMinOrderQty: number | null;
+    fabrics: FabricRecord[];
+}
+
+/**
+ * Base Fabric record from database
+ */
+interface FabricRecord {
+    id: string;
+    name: string;
+    colorName: string;
+    colorHex: string | null;
+    standardColor: string | null;
+    costPerUnit: number | null;
+    leadTimeDays: number | null;
+    minOrderQty: number | null;
+    isActive: boolean;
+    fabricTypeId: string;
+    supplierId: string | null;
+}
+
+/**
+ * Fabric with fabricType relation
+ */
+interface FabricWithType extends FabricRecord {
+    fabricType: {
+        id: string;
+        name: string;
+        composition: string | null;
+        unit: string;
+        avgShrinkagePct: number | null;
+        defaultCostPerUnit: number | null;
+        defaultLeadTimeDays: number | null;
+        defaultMinOrderQty: number | null;
+    };
+    supplier?: {
+        id: string;
+        name: string;
+    } | null;
+}
+
+/**
+ * OrderLine with SKU/Variation/Fabric relations for top fabrics queries
+ */
+interface OrderLineWithSkuRelations {
+    id: string;
+    orderId: string;
+    qty: number;
+    unitPrice: number | string;
+    trackingStatus: string | null;
+    sku: {
+        id: string;
+        variation: {
+            id: string;
+            product: {
+                id: string;
+                fabricTypeId: string | null;
+                fabricType: {
+                    id: string;
+                    name: string;
+                    composition: string | null;
+                } | null;
+            };
+            fabric: {
+                id: string;
+                colorName: string;
+                colorHex: string | null;
+                fabricType: {
+                    id: string;
+                    name: string;
+                    composition: string | null;
+                } | null;
+            } | null;
+        };
+    } | null;
+}
+
+/**
+ * Order line for sales calculation (minimal fields)
+ */
+interface SalesOrderLine {
+    qty: number;
+    unitPrice: number | string;
+}
+
+/**
+ * Reconciliation item with fabric relation
+ */
+interface ReconciliationItemWithFabric {
+    id: string;
+    fabricId: string;
+    systemQty: number;
+    physicalQty: number | null;
+    variance: number | null;
+    adjustmentReason: string | null;
+    notes: string | null;
+    fabric: FabricWithType;
+}
+
+/**
+ * Reconciliation with items relation
+ */
+interface ReconciliationWithItems {
+    id: string;
+    status: string;
+    notes: string | null;
+    createdAt: Date;
+    createdBy: string;
+    items: ReconciliationItemWithFabric[];
+}
+
+// TransactionAggregation interface removed - not needed with proper Prisma typing
+
+/**
+ * Reconciliation history record from database
+ */
+interface ReconciliationHistoryRecord {
+    id: string;
+    reconcileDate: Date | null;
+    status: string;
+    createdBy: string;
+    createdAt: Date;
+    items: {
+        id: string;
+        variance: number | null;
+    }[];
+}
+
+/**
+ * Simple fabric record for reconciliation
+ */
+interface SimpleFabricRecord {
+    id: string;
+    name: string;
+    colorName: string;
+    fabricType: {
+        id: string;
+        unit: string;
+    };
+}
+
+// ============================================
+// RESPONSE TYPES FOR HANDLERS
+// ============================================
+
+/** Standard error response structure */
+interface ErrorResponse {
+    success: false;
+    error: {
+        code: 'NOT_FOUND' | 'BAD_REQUEST';
+        message: string;
+    };
+}
+
+/** Response type for getFabrics */
+interface GetFabricsResponse {
+    success: true;
+    fabrics: Array<FabricWithType & {
+        currentBalance: number;
+        totalInward: number;
+        totalOutward: number;
+    }>;
+}
+
+/** Type view row for getFabricsFlat */
+interface FabricTypeFlatRow {
+    fabricTypeId: string;
+    fabricTypeName: string;
+    composition: string | null;
+    unit: string;
+    avgShrinkagePct: number | null;
+    defaultCostPerUnit: number | null;
+    defaultLeadTimeDays: number | null;
+    defaultMinOrderQty: number | null;
+    colorCount: number;
+    totalStock: number;
+    productCount: number;
+    consumption7d: number;
+    consumption30d: number;
+    sales7d: number;
+    sales30d: number;
+    isTypeRow: boolean;
+}
+
+/** Color view row for getFabricsFlat */
+interface FabricColorFlatRow {
+    fabricId: string;
+    colorName: string;
+    colorHex: string | null;
+    standardColor: string | null;
+    fabricTypeId: string;
+    fabricTypeName: string;
+    composition: string | null;
+    unit: string;
+    avgShrinkagePct: number | null;
+    supplierId: string | null;
+    supplierName: string | null;
+    costPerUnit: number | null;
+    leadTimeDays: number | null;
+    minOrderQty: number | null;
+    effectiveCostPerUnit: number;
+    effectiveLeadTimeDays: number;
+    effectiveMinOrderQty: number;
+    costInherited: boolean;
+    leadTimeInherited: boolean;
+    minOrderInherited: boolean;
+    typeCostPerUnit: number | null;
+    typeLeadTimeDays: number | null;
+    typeMinOrderQty: number | null;
+    currentBalance: number;
+    totalInward: number;
+    totalOutward: number;
+    avgDailyConsumption: number;
+    daysOfStock: number | null;
+    reorderPoint: number;
+    stockStatus: StockStatus;
+    suggestedOrderQty: number;
+    sales7d: number;
+    sales30d: number;
+    isTypeRow: boolean;
+}
+
+/** Response type for getFabricsFlat */
+interface GetFabricsFlatResponse {
+    success: true;
+    items: Array<FabricTypeFlatRow | FabricColorFlatRow>;
+    summary: {
+        total: number;
+        orderNow?: number;
+        orderSoon?: number;
+        ok?: number;
+    };
+}
+
+/** Response type for getFabricById */
+type GetFabricByIdResponse =
+    | { success: true; fabric: FabricWithType & { currentBalance: number; totalInward: number; totalOutward: number } }
+    | ErrorResponse;
+
+/** Response type for getFabricsFilters */
+interface GetFabricsFiltersResponse {
+    success: true;
+    filters: {
+        fabricTypes: Array<{ id: string; name: string }>;
+        suppliers: Array<{ id: string; name: string }>;
+    };
+}
+
+/** Response type for getFabricTypes */
+interface GetFabricTypesResponse {
+    success: true;
+    types: Array<{
+        id: string;
+        name: string;
+        composition: string | null;
+        unit: string;
+        avgShrinkagePct: number | null;
+        defaultCostPerUnit: number | null;
+        defaultLeadTimeDays: number | null;
+        defaultMinOrderQty: number | null;
+        colorCount: number;
+    }>;
+}
+
+/** Supplier record for getFabricSuppliers response */
+interface SupplierRecord {
+    id: string;
+    name: string;
+    isActive: boolean;
+    contactName: string | null;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    createdAt: Date;
+}
+
+/** Response type for getFabricSuppliers */
+interface GetFabricSuppliersResponse {
+    success: true;
+    suppliers: SupplierRecord[];
+}
+
+/** Transaction record for fabric transactions */
+interface FabricTransactionRecord {
+    id: string;
+    fabricId: string;
+    txnType: string;
+    qty: number;
+    unit: string;
+    reason: string;
+    costPerUnit: number | null;
+    referenceId: string | null;
+    notes: string | null;
+    supplierId: string | null;
+    createdById: string;
+    createdAt: Date;
+    createdBy: { id: string; name: string } | null;
+    supplier: { id: string; name: string } | null;
+}
+
+/** Response type for getFabricTransactions */
+interface GetFabricTransactionsResponse {
+    success: true;
+    transactions: FabricTransactionRecord[];
+}
+
+/** Transaction record with fabric details for getAllFabricTransactions */
+interface FabricTransactionWithFabricRecord extends FabricTransactionRecord {
+    fabric: {
+        id: string;
+        name: string;
+        colorName: string;
+        colorHex: string | null;
+        fabricType: { id: string; name: string };
+    };
+}
+
+/** Response type for getAllFabricTransactions */
+interface GetAllFabricTransactionsResponse {
+    success: true;
+    transactions: FabricTransactionWithFabricRecord[];
+}
+
+/** Top fabrics result item */
+interface TopFabricsResultItem {
+    id: string;
+    name: string;
+    colorHex?: string | null;
+    typeName?: string;
+    composition: string | null;
+    units: number;
+    revenue: number;
+    orderCount: number;
+    productCount: number;
+    topColors?: string[];
+}
+
+/** Response type for getTopFabrics */
+interface GetTopFabricsResponse {
+    success: true;
+    level: 'type' | 'color';
+    days: number;
+    data: TopFabricsResultItem[];
+}
+
+/** Stock analysis item */
+interface StockAnalysisItem {
+    fabricId: string;
+    fabricName: string;
+    colorName: string;
+    unit: string;
+    currentBalance: string;
+    avgDailyConsumption: string;
+    daysOfStock: number | null;
+    reorderPoint: string;
+    status: StockStatus;
+    suggestedOrderQty: number;
+    leadTimeDays: number | null;
+    costPerUnit: number | null;
+    supplier: string;
+}
+
+/** Response type for getFabricStockAnalysis */
+interface GetFabricStockAnalysisResponse {
+    success: true;
+    analysis: StockAnalysisItem[];
+}
+
+/** Reconciliation history item */
+interface ReconciliationHistoryItem {
+    id: string;
+    date: Date | null;
+    status: string;
+    itemsCount: number;
+    adjustments: number;
+    createdBy: string;
+    createdAt: Date;
+}
+
+/** Response type for getFabricReconciliationHistory */
+interface GetFabricReconciliationHistoryResponse {
+    success: true;
+    history: ReconciliationHistoryItem[];
+}
+
+/** Reconciliation item detail */
+interface ReconciliationItemDetail {
+    id: string;
+    fabricId: string;
+    fabricName: string;
+    colorName: string;
+    unit: string;
+    systemQty: number;
+    physicalQty: number | null;
+    variance: number | null;
+    adjustmentReason: string | null;
+    notes: string | null;
+}
+
+/** Response type for getFabricReconciliation */
+type GetFabricReconciliationResponse =
+    | {
+        success: true;
+        reconciliation: {
+            id: string;
+            status: string;
+            notes: string | null;
+            createdAt: Date;
+            items: ReconciliationItemDetail[];
+        };
+    }
+    | ErrorResponse;
+
+/** Response type for startFabricReconciliation */
+type StartFabricReconciliationResponse =
+    | {
+        success: true;
+        data: {
+            id: string;
+            status: string;
+            createdAt: Date;
+            items: ReconciliationItemDetail[];
+        };
+    }
+    | ErrorResponse;
+
+/** Response type for updateFabricReconciliationItems */
+type UpdateFabricReconciliationItemsResponse =
+    | {
+        success: true;
+        data: {
+            id: string;
+            status: string;
+            createdAt: Date;
+            items: ReconciliationItemDetail[];
+        };
+    }
+    | ErrorResponse;
+
+/** Response type for submitFabricReconciliation */
+type SubmitFabricReconciliationResponse =
+    | {
+        success: true;
+        data: {
+            reconciliationId: string;
+            status: string;
+            adjustmentsMade: number;
+        };
+    }
+    | ErrorResponse;
+
+/** Response type for deleteFabricReconciliation */
+type DeleteFabricReconciliationResponse =
+    | {
+        success: true;
+        data: {
+            reconciliationId: string;
+            deleted: boolean;
+        };
+    }
+    | ErrorResponse;
 
 // ============================================
 // INPUT SCHEMAS
@@ -144,7 +641,7 @@ const statusOrder: Record<StockStatus, number> = {
  * Calculate fabric balance from transactions
  */
 async function calculateFabricBalance(
-    prisma: any,
+    prisma: PrismaInstance,
     fabricId: string
 ): Promise<{ currentBalance: number; totalInward: number; totalOutward: number }> {
     const [inwardSum, outwardSum] = await Promise.all([
@@ -172,7 +669,7 @@ async function calculateFabricBalance(
  * Calculate average daily fabric consumption over 28 days
  */
 async function calculateAvgDailyConsumption(
-    prisma: any,
+    prisma: PrismaInstance,
     fabricId: string
 ): Promise<number> {
     const thirtyDaysAgo = new Date();
@@ -220,12 +717,12 @@ async function chunkProcess<T, R>(
 export const getFabrics = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricsInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricsResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
         try {
-            const where: any = {};
+            const where: Prisma.FabricWhereInput = {};
 
             if (data?.fabricTypeId) {
                 where.fabricTypeId = data.fabricTypeId;
@@ -255,7 +752,7 @@ export const getFabrics = createServerFn({ method: 'GET' })
             // Calculate balances in batches
             const fabricsWithBalance = await chunkProcess(
                 fabrics,
-                async (fabric: any) => {
+                async (fabric) => {
                     const balance = await calculateFabricBalance(prisma, fabric.id);
                     return { ...fabric, ...balance };
                 },
@@ -280,7 +777,7 @@ export const getFabrics = createServerFn({ method: 'GET' })
 export const getFabricsFlat = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricsFlatInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricsFlatResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -310,10 +807,10 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
                 });
 
                 const items = await Promise.all(
-                    types
-                        .filter((t: any) => t.name !== 'Default')
-                        .map(async (type: any) => {
-                            const fabricIds = type.fabrics.map((f: any) => f.id);
+                    (types as FabricTypeWithFabrics[])
+                        .filter((t) => t.name !== 'Default')
+                        .map(async (type) => {
+                            const fabricIds = type.fabrics.map((f) => f.id);
 
                             if (fabricIds.length === 0) {
                                 return {
@@ -415,12 +912,12 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
                             ]);
 
                             const sales7d = sales7dLines.reduce(
-                                (sum: number, line: any) =>
+                                (sum: number, line: SalesOrderLine) =>
                                     sum + line.qty * Number(line.unitPrice),
                                 0
                             );
                             const sales30d = sales30dLines.reduce(
-                                (sum: number, line: any) =>
+                                (sum: number, line: SalesOrderLine) =>
                                     sum + line.qty * Number(line.unitPrice),
                                 0
                             );
@@ -458,7 +955,7 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
             }
 
             // Color view - individual fabric data with stock analysis
-            const where: any = { isActive: true };
+            const where: Prisma.FabricWhereInput = { isActive: true };
             if (fabricTypeId) where.fabricTypeId = fabricTypeId;
             if (search) {
                 where.OR = [
@@ -478,8 +975,8 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
             });
 
             const items = await chunkProcess(
-                fabrics,
-                async (fabric: any) => {
+                fabrics as FabricWithType[],
+                async (fabric) => {
                     const balance = await calculateFabricBalance(prisma, fabric.id);
                     const avgDailyConsumption = await calculateAvgDailyConsumption(
                         prisma,
@@ -525,12 +1022,12 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
                     ]);
 
                     const sales7d = sales7dLines.reduce(
-                        (sum: number, line: any) =>
+                        (sum: number, line: SalesOrderLine) =>
                             sum + line.qty * Number(line.unitPrice),
                         0
                     );
                     const sales30d = sales30dLines.reduce(
-                        (sum: number, line: any) =>
+                        (sum: number, line: SalesOrderLine) =>
                             sum + line.qty * Number(line.unitPrice),
                         0
                     );
@@ -638,7 +1135,7 @@ export const getFabricsFlat = createServerFn({ method: 'GET' })
 export const getFabricById = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricByIdInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricByIdResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -677,7 +1174,7 @@ export const getFabricById = createServerFn({ method: 'GET' })
  */
 export const getFabricsFilters = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async () => {
+    .handler(async (): Promise<GetFabricsFiltersResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -711,7 +1208,7 @@ export const getFabricsFilters = createServerFn({ method: 'GET' })
  */
 export const getFabricTypes = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async () => {
+    .handler(async (): Promise<GetFabricTypesResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -750,7 +1247,7 @@ export const getFabricTypes = createServerFn({ method: 'GET' })
 export const getFabricSuppliers = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricSuppliersInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricSuppliersResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -775,7 +1272,7 @@ export const getFabricSuppliers = createServerFn({ method: 'GET' })
 export const getFabricTransactions = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricTransactionsInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricTransactionsResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -806,7 +1303,7 @@ export const getFabricTransactions = createServerFn({ method: 'GET' })
 export const getAllFabricTransactions = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getAllTransactionsInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetAllFabricTransactionsResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -824,6 +1321,7 @@ export const getAllFabricTransactions = createServerFn({ method: 'GET' })
                             id: true,
                             name: true,
                             colorName: true,
+                            colorHex: true,
                             fabricType: { select: { id: true, name: true } },
                         },
                     },
@@ -851,7 +1349,7 @@ export const getAllFabricTransactions = createServerFn({ method: 'GET' })
 export const getTopFabrics = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopFabricsInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetTopFabricsResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -897,6 +1395,9 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                 },
             });
 
+            // Cast to typed array for proper property access
+            const typedOrderLines = orderLines as unknown as OrderLineWithSkuRelations[];
+
             if (level === 'color') {
                 // Aggregate at specific fabric color level
                 const fabricStats: Record<
@@ -914,8 +1415,8 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const line of orderLines) {
-                    const fabric = (line as any).sku?.variation?.fabric;
+                for (const line of typedOrderLines) {
+                    const fabric = line.sku?.variation?.fabric;
                     if (!fabric) continue;
 
                     const key = fabric.id;
@@ -935,7 +1436,7 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                     fabricStats[key].units += line.qty;
                     fabricStats[key].revenue += line.qty * Number(line.unitPrice);
                     fabricStats[key].orderCount.add(line.orderId);
-                    const productId = (line as any).sku?.variation?.product?.id;
+                    const productId = line.sku?.variation?.product?.id;
                     if (productId) {
                         fabricStats[key].productCount.add(productId);
                     }
@@ -952,7 +1453,7 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
 
                 return {
                     success: true,
-                    level: 'color',
+                    level: 'color' as const,
                     days,
                     data: result,
                 };
@@ -972,10 +1473,10 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const line of orderLines) {
+                for (const line of typedOrderLines) {
                     const fabricType =
-                        (line as any).sku?.variation?.fabric?.fabricType ||
-                        (line as any).sku?.variation?.product?.fabricType;
+                        line.sku?.variation?.fabric?.fabricType ||
+                        line.sku?.variation?.product?.fabricType;
                     if (!fabricType) continue;
 
                     const key = fabricType.id;
@@ -994,13 +1495,13 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
                     typeStats[key].units += line.qty;
                     typeStats[key].revenue += line.qty * Number(line.unitPrice);
                     typeStats[key].orderCount.add(line.orderId);
-                    const productId = (line as any).sku?.variation?.product?.id;
+                    const productId = line.sku?.variation?.product?.id;
                     if (productId) {
                         typeStats[key].productCount.add(productId);
                     }
 
                     // Track top colors within this type
-                    const fabric = (line as any).sku?.variation?.fabric;
+                    const fabric = line.sku?.variation?.fabric;
                     if (fabric) {
                         if (!typeStats[key].colors[fabric.id]) {
                             typeStats[key].colors[fabric.id] = {
@@ -1035,7 +1536,7 @@ export const getTopFabrics = createServerFn({ method: 'GET' })
 
                 return {
                     success: true,
-                    level: 'type',
+                    level: 'type' as const,
                     days,
                     data: result,
                 };
@@ -1098,6 +1599,9 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
                 },
             });
 
+            // Cast to typed array for proper property access
+            const typedOrderLines = orderLines as unknown as OrderLineWithSkuRelations[];
+
             if (level === 'color') {
                 // Aggregate at specific fabric color level
                 const fabricStats: Record<
@@ -1115,8 +1619,8 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const line of orderLines) {
-                    const fabric = (line as any).sku?.variation?.fabric;
+                for (const line of typedOrderLines) {
+                    const fabric = line.sku?.variation?.fabric;
                     if (!fabric) continue;
 
                     const key = fabric.id;
@@ -1136,7 +1640,7 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
                     fabricStats[key].units += line.qty;
                     fabricStats[key].revenue += line.qty * Number(line.unitPrice);
                     fabricStats[key].orderCount.add(line.orderId);
-                    const productId = (line as any).sku?.variation?.product?.id;
+                    const productId = line.sku?.variation?.product?.id;
                     if (productId) {
                         fabricStats[key].productCount.add(productId);
                     }
@@ -1174,10 +1678,10 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const line of orderLines) {
+                for (const line of typedOrderLines) {
                     const fabricType =
-                        (line as any).sku?.variation?.fabric?.fabricType ||
-                        (line as any).sku?.variation?.product?.fabricType;
+                        line.sku?.variation?.fabric?.fabricType ||
+                        line.sku?.variation?.product?.fabricType;
                     if (!fabricType) continue;
 
                     const key = fabricType.id;
@@ -1196,13 +1700,13 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
                     typeStats[key].units += line.qty;
                     typeStats[key].revenue += line.qty * Number(line.unitPrice);
                     typeStats[key].orderCount.add(line.orderId);
-                    const productId = (line as any).sku?.variation?.product?.id;
+                    const productId = line.sku?.variation?.product?.id;
                     if (productId) {
                         typeStats[key].productCount.add(productId);
                     }
 
                     // Track top colors within this type
-                    const fabric = (line as any).sku?.variation?.fabric;
+                    const fabric = line.sku?.variation?.fabric;
                     if (fabric) {
                         if (!typeStats[key].colors[fabric.id]) {
                             typeStats[key].colors[fabric.id] = {
@@ -1248,7 +1752,7 @@ export const getTopFabricsForDashboard = createServerFn({ method: 'GET' })
 export const getFabricStockAnalysis = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getStockAnalysisInputSchema.parse(input))
-    .handler(async () => {
+    .handler(async (): Promise<GetFabricStockAnalysisResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -1259,8 +1763,8 @@ export const getFabricStockAnalysis = createServerFn({ method: 'GET' })
             });
 
             const analysis = await chunkProcess(
-                fabrics,
-                async (fabric: any) => {
+                fabrics as FabricWithType[],
+                async (fabric) => {
                     const balance = await calculateFabricBalance(prisma, fabric.id);
                     const avgDailyConsumption = await calculateAvgDailyConsumption(
                         prisma,
@@ -1333,7 +1837,7 @@ export const getFabricStockAnalysis = createServerFn({ method: 'GET' })
 export const getFabricReconciliationHistory = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getReconciliationHistoryInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricReconciliationHistoryResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -1346,13 +1850,13 @@ export const getFabricReconciliationHistory = createServerFn({ method: 'GET' })
                 take: data?.limit ?? 10,
             });
 
-            const history = reconciliations.map((r: any) => ({
+            const history = (reconciliations as ReconciliationHistoryRecord[]).map((r) => ({
                 id: r.id,
                 date: r.reconcileDate,
                 status: r.status,
                 itemsCount: r.items.length,
                 adjustments: r.items.filter(
-                    (i: any) => i.variance !== 0 && i.variance !== null
+                    (i) => i.variance !== 0 && i.variance !== null
                 ).length,
                 createdBy: r.createdBy,
                 createdAt: r.createdAt,
@@ -1373,7 +1877,7 @@ export const getFabricReconciliationHistory = createServerFn({ method: 'GET' })
 export const getFabricReconciliation = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getReconciliationByIdInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<GetFabricReconciliationResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -1399,14 +1903,17 @@ export const getFabricReconciliation = createServerFn({ method: 'GET' })
                 };
             }
 
+            // Cast to typed reconciliation for proper access
+            const typedReconciliation = reconciliation as unknown as ReconciliationWithItems;
+
             return {
                 success: true,
                 reconciliation: {
-                    id: reconciliation.id,
-                    status: reconciliation.status,
-                    notes: reconciliation.notes,
-                    createdAt: reconciliation.createdAt,
-                    items: reconciliation.items.map((item: any) => ({
+                    id: typedReconciliation.id,
+                    status: typedReconciliation.status,
+                    notes: typedReconciliation.notes,
+                    createdAt: typedReconciliation.createdAt,
+                    items: typedReconciliation.items.map((item) => ({
                         id: item.id,
                         fabricId: item.fabricId,
                         fabricName: item.fabric.name,
@@ -1438,7 +1945,7 @@ export const getFabricReconciliation = createServerFn({ method: 'GET' })
 export const startFabricReconciliation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => startFabricReconciliationInputSchema.parse(input))
-    .handler(async ({ data, context }) => {
+    .handler(async ({ data, context }): Promise<StartFabricReconciliationResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -1460,7 +1967,8 @@ export const startFabricReconciliation = createServerFn({ method: 'POST' })
             }
 
             // Calculate balances for all fabrics in batch
-            const fabricIds = fabrics.map((f: any) => f.id);
+            const typedFabrics = fabrics as SimpleFabricRecord[];
+            const fabricIds = typedFabrics.map((f) => f.id);
             const balanceMap = await calculateAllFabricBalances(prisma, fabricIds);
 
             // Create reconciliation with items
@@ -1470,7 +1978,7 @@ export const startFabricReconciliation = createServerFn({ method: 'POST' })
                     status: 'draft',
                     notes: data?.notes || null,
                     items: {
-                        create: fabrics.map((fabric: any) => ({
+                        create: typedFabrics.map((fabric) => ({
                             fabricId: fabric.id,
                             systemQty: balanceMap.get(fabric.id)?.currentBalance || 0,
                         })),
@@ -1485,13 +1993,16 @@ export const startFabricReconciliation = createServerFn({ method: 'POST' })
                 },
             });
 
+            // Cast to typed reconciliation for proper access
+            const typedReconciliation = reconciliation as unknown as ReconciliationWithItems;
+
             return {
                 success: true,
                 data: {
-                    id: reconciliation.id,
-                    status: reconciliation.status,
-                    createdAt: reconciliation.createdAt,
-                    items: reconciliation.items.map((item: any) => ({
+                    id: typedReconciliation.id,
+                    status: typedReconciliation.status,
+                    createdAt: typedReconciliation.createdAt,
+                    items: typedReconciliation.items.map((item) => ({
                         id: item.id,
                         fabricId: item.fabricId,
                         fabricName: item.fabric.name,
@@ -1514,7 +2025,7 @@ export const startFabricReconciliation = createServerFn({ method: 'POST' })
  * Helper: Calculate fabric balances in batch from FabricTransaction
  */
 async function calculateAllFabricBalances(
-    prisma: any,
+    prisma: PrismaInstance,
     fabricIds: string[]
 ): Promise<Map<string, { currentBalance: number }>> {
     const aggregations = await prisma.fabricTransaction.groupBy({
@@ -1557,7 +2068,7 @@ async function calculateAllFabricBalances(
 export const updateFabricReconciliationItems = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricReconciliationItemsInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<UpdateFabricReconciliationItemsResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -1618,13 +2129,16 @@ export const updateFabricReconciliationItems = createServerFn({ method: 'POST' }
                 },
             });
 
+            // Cast to typed reconciliation for proper access
+            const typedUpdated = updated as unknown as ReconciliationWithItems;
+
             return {
                 success: true,
                 data: {
-                    id: updated!.id,
-                    status: updated!.status,
-                    createdAt: updated!.createdAt,
-                    items: updated!.items.map((item: any) => ({
+                    id: typedUpdated.id,
+                    status: typedUpdated.status,
+                    createdAt: typedUpdated.createdAt,
+                    items: typedUpdated.items.map((item) => ({
                         id: item.id,
                         fabricId: item.fabricId,
                         fabricName: item.fabric.name,
@@ -1653,7 +2167,7 @@ export const updateFabricReconciliationItems = createServerFn({ method: 'POST' }
 export const submitFabricReconciliation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => submitFabricReconciliationInputSchema.parse(input))
-    .handler(async ({ data, context }) => {
+    .handler(async ({ data, context }): Promise<SubmitFabricReconciliationResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 
@@ -1691,14 +2205,17 @@ export const submitFabricReconciliation = createServerFn({ method: 'POST' })
                 };
             }
 
+            // Cast to typed reconciliation for proper access
+            const typedReconciliation = reconciliation as unknown as ReconciliationWithItems;
+
             // Process items with variances in a transaction
-            const itemsWithVariance = reconciliation.items.filter(
-                (item: any) => item.variance !== null && item.variance !== 0
+            const itemsWithVariance = typedReconciliation.items.filter(
+                (item) => item.variance !== null && item.variance !== 0
             );
 
             let transactionsCreated = 0;
 
-            await prisma.$transaction(async (tx: any) => {
+            await prisma.$transaction(async (tx: PrismaTransaction) => {
                 for (const item of itemsWithVariance) {
                     const variance = Number(item.variance);
                     const txnType = variance > 0 ? 'inward' : 'outward';
@@ -1709,6 +2226,7 @@ export const submitFabricReconciliation = createServerFn({ method: 'POST' })
                             fabricId: item.fabricId,
                             txnType,
                             qty,
+                            unit: item.fabric.fabricType.unit,
                             reason: `reconciliation_${item.adjustmentReason || 'adjustment'}`,
                             referenceId: reconciliationId,
                             notes: item.notes || `Reconciliation adjustment`,
@@ -1744,7 +2262,7 @@ export const submitFabricReconciliation = createServerFn({ method: 'POST' })
 export const deleteFabricReconciliation = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricReconciliationInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<DeleteFabricReconciliationResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 

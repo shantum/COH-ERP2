@@ -13,6 +13,43 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
 // ============================================
+// EXPORTED RESPONSE TYPES
+// ============================================
+
+/**
+ * Success response for product mutations
+ * Data contains the Prisma model with relations
+ */
+export interface ProductMutationSuccess {
+    success: true;
+    data: Record<string, unknown>;
+}
+
+/**
+ * Error response for product mutations
+ */
+export interface ProductMutationError {
+    success: false;
+    error: { message: string };
+}
+
+/**
+ * Union type for product mutation responses
+ * Handlers return this discriminated union
+ */
+export type ProductMutationResponse = ProductMutationSuccess | ProductMutationError;
+
+/**
+ * Delete product success response
+ */
+export interface DeleteProductSuccess {
+    success: true;
+    data: { message: string };
+}
+
+export type DeleteProductResponse = DeleteProductSuccess | ProductMutationError;
+
+// ============================================
 // INPUT SCHEMAS
 // ============================================
 

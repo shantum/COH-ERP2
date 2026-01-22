@@ -281,17 +281,11 @@ const TXN_REASON = {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;
@@ -299,12 +293,16 @@ async function getPrisma(): Promise<PrismaClientType> {
     return prisma;
 }
 
+/** Type alias for Prisma client instance or transaction */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PrismaTransactionClient = { inventoryTransaction: any; sku: any; [key: string]: any };
+
 // ============================================
 // BALANCE CALCULATION HELPER
 // ============================================
 
 async function calculateInventoryBalance(
-    prisma: PrismaClientType,
+    prisma: PrismaTransactionClient,
     skuId: string
 ): Promise<{ currentBalance: number; availableBalance: number; totalInward: number; totalOutward: number }> {
     const aggregations = await prisma.inventoryTransaction.groupBy({
@@ -568,7 +566,7 @@ export const quickInward = createServerFn({ method: 'POST' })
         // Create transactions in batch
         const transactions: Array<{ skuId: string; qty: number; transactionId: string }> = [];
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             for (const item of items) {
                 const txn = await tx.inventoryTransaction.create({
                     data: {
@@ -663,7 +661,7 @@ export const instantInward = createServerFn({ method: 'POST' })
             }
         }
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             const transaction = await tx.inventoryTransaction.create({
                 data: {
                     skuId,
@@ -1245,7 +1243,7 @@ export const rtoInwardLine = createServerFn({ method: 'POST' })
 
         const now = new Date();
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             // Update order line
             await tx.orderLine.update({
                 where: { id: lineId },
@@ -1345,7 +1343,7 @@ export const instantInwardBySkuCode = createServerFn({ method: 'POST' })
         }
 
         // Create transaction and calculate balance in single DB transaction
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             const transaction = await tx.inventoryTransaction.create({
                 data: {
                     skuId: sku.id,
@@ -1539,7 +1537,7 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
                 };
             }
 
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 // Revert previous production allocation
                 if (previousAllocation?.type === 'production' && previousAllocation.referenceId) {
                     const prevBatch = await tx.productionBatch.findUnique({
@@ -1612,7 +1610,7 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
 
             const condition = rtoCondition || 'good';
 
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 // Revert previous allocations
                 if (previousAllocation?.type === 'production' && previousAllocation.referenceId) {
                     const prevBatch = await tx.productionBatch.findUnique({
@@ -1713,7 +1711,7 @@ export const allocateTransactionFn = createServerFn({ method: 'POST' })
 
         } else {
             // adjustment - revert previous allocation if needed
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 // Revert previous production allocation
                 if (previousAllocation?.type === 'production' && previousAllocation.referenceId) {
                     const prevBatch = await tx.productionBatch.findUnique({
@@ -1902,7 +1900,7 @@ export const quickInwardBySkuCode = createServerFn({ method: 'POST' })
         }
 
         // Create transaction and calculate balance in single DB transaction
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             const transaction = await tx.inventoryTransaction.create({
                 data: {
                     skuId: sku.id,

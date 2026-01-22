@@ -13,6 +13,179 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
 // ============================================
+// EXPORTED RESPONSE TYPES
+// ============================================
+
+/** Tailor row from getProductionTailors */
+export interface TailorRow {
+    id: string;
+    name: string;
+    specializations: string | null;
+    dailyCapacityMins: number;
+    isActive: boolean;
+}
+
+/** Tailor info nested in batch */
+export interface TailorInfo {
+    id: string;
+    name: string | null;
+}
+
+/** Variation info nested in batch SKU */
+export interface BatchVariationInfo {
+    id: string | null;
+    colorName: string | null;
+    fabricId: string | null;
+    product: {
+        id: string | null;
+        name: string | null;
+    };
+    fabric: { id: string; name: string | null } | null;
+}
+
+/** SKU info nested in batch */
+export interface BatchSkuInfo {
+    id: string;
+    skuCode: string | null;
+    size: string | null;
+    isCustomSku: boolean | null;
+    customizationType: string | null;
+    customizationValue: string | null;
+    customizationNotes: string | null;
+    variation: BatchVariationInfo;
+}
+
+/** Order line info in batch */
+export interface BatchOrderLineInfo {
+    id: string;
+    order: {
+        id: string;
+        orderNumber: string;
+        customerName: string | null;
+    };
+}
+
+/** Sample batch info */
+export interface SampleInfo {
+    sampleCode: string | null;
+    sampleName: string | null;
+    sampleColour: string | null;
+    sampleSize: string | null;
+}
+
+/** Customization info for custom SKU batches */
+export interface CustomizationInfo {
+    type: string | null;
+    value: string | null;
+    notes: string | null;
+    sourceOrderLineId: string | null;
+    linkedOrder: {
+        id: string;
+        orderNumber: string;
+        customerName: string | null;
+    } | null;
+}
+
+/** Production batch from getProductionBatches */
+export interface ProductionBatchItem {
+    id: string;
+    batchCode: string;
+    batchDate: Date;
+    status: string;
+    qtyPlanned: number;
+    qtyCompleted: number;
+    priority: string;
+    notes: string | null;
+    sourceOrderLineId: string | null;
+    sampleCode: string | null;
+    sampleName: string | null;
+    sampleColour: string | null;
+    sampleSize: string | null;
+    tailorId: string | null;
+    tailorName: string | null;
+    skuId: string | null;
+    skuCode: string | null;
+    skuSize: string | null;
+    isCustomSku: boolean;
+    customizationType: string | null;
+    customizationValue: string | null;
+    customizationNotes: string | null;
+    variationId: string | null;
+    colorName: string | null;
+    productId: string | null;
+    productName: string | null;
+    fabricId: string | null;
+    fabricName: string | null;
+    tailor: TailorInfo | null;
+    sku: BatchSkuInfo | null;
+    orderLines: BatchOrderLineInfo[];
+    isSampleBatch: boolean | string | null;
+    sampleInfo?: SampleInfo;
+    customization?: CustomizationInfo;
+}
+
+/** Capacity item from getProductionCapacity */
+export interface CapacityItem {
+    tailorId: string;
+    tailorName: string;
+    dailyCapacityMins: number;
+    allocatedMins: number;
+    availableMins: number;
+    utilizationPct: string;
+}
+
+/** Requirement item from getProductionRequirements */
+export interface ProductionRequirementItem {
+    orderLineId: string;
+    orderId: string;
+    orderNumber: string;
+    orderDate: Date;
+    customerName: string;
+    skuId: string;
+    skuCode: string;
+    productName: string;
+    colorName: string;
+    size: string;
+    fabricType: string;
+    qty: number;
+    currentInventory: number;
+    scheduledForLine: number;
+    shortage: number;
+    lineStatus: string;
+}
+
+/** Requirements summary */
+export interface ProductionRequirementsSummary {
+    totalLinesNeedingProduction: number;
+    totalUnitsNeeded: number;
+    totalOrdersAffected: number;
+}
+
+/** Production requirements response */
+export interface ProductionRequirementsResponse {
+    requirements: ProductionRequirementItem[];
+    summary: ProductionRequirementsSummary;
+}
+
+/** Pending batch from getProductionPendingBySku */
+export interface PendingBatchItem {
+    id: string;
+    batchCode: string | null;
+    batchDate: Date | null;
+    qtyPlanned: number;
+    qtyCompleted: number;
+    qtyPending: number;
+    status: string;
+    tailor: TailorInfo | null;
+}
+
+/** Pending by SKU response */
+export interface PendingBySkuResponse {
+    batches: PendingBatchItem[];
+    totalPending: number;
+}
+
+// ============================================
 // INPUT SCHEMAS
 // ============================================
 

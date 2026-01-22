@@ -115,7 +115,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 5. **Line fields**: use pre-computed O(1) fields (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` O(n)
 6. **View filters**: shipped/cancelled orders stay in Open until Release clicked
 7. **Prisma dates**: returns Date objects—use `toDateString()` from `utils/dateHelpers.ts`
-8. **Dev URLs**: use `localhost` for API calls
+8. **Dev URLs**: use `localhost` for API calls in dev; see #27 for production
 9. **Zod params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
 10. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
 11. **Line-level tracking**: delivery/RTO mutations are line-level; orders can have mixed states (partial delivery, multi-AWB)
@@ -131,8 +131,12 @@ Login: `admin@coh.com` / `XOFiya@34`
 21. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
 22. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
 23. **Express routes**: Only for auth (cookies), webhooks, SSE, and file uploads. Everything else uses Server Functions.
-24. **SSR hydration**: Guard `window`/`document` access with `typeof window !== 'undefined'`. Use `isServer` from TanStack Start for server-only code paths.
+24. **SSR hydration**: Guard `window`/`document` access with `typeof window !== 'undefined'`. For UI depending on runtime state (router status, etc.), use TanStack's `ClientOnly` component—server-rendered HTML may persist otherwise.
 25. **Prisma location**: Schema is at `/prisma/schema.prisma` (root), not in server/. Run db commands from root.
+26. **Server Function cookies**: Use `getCookie` and `getRequestHeader` from `@tanstack/react-start/server`, NOT from `vinxi/http`. Vinxi utilities fail with "Cannot read properties of undefined (reading 'config')" when Server Functions are called from client.
+27. **Server Function API calls**: In production, call Express API via `http://127.0.0.1:${process.env.PORT}` (same-server call), NOT `localhost:3001` which doesn't exist on Railway.
+28. **Server Function large payloads**: Use `method: 'POST'` for Server Functions that receive arrays or large data. GET requests encode data in headers, causing HTTP 431 "Request Header Fields Too Large".
+29. **JWT roleId can be null**: Auth middleware Zod schema must use `roleId: z.string().nullable().optional()` since users without roles have `roleId: null` in their token.
 
 ## Orders Architecture
 
@@ -245,6 +249,59 @@ const mutation = useMutation({
   mutationFn: (input) => shipOrder({ data: input }),
   onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
 });
+```
+
+### Server Functions Production Gotchas
+
+**Cookie/Header Access** - Use TanStack Start utilities, NOT vinxi:
+```typescript
+// CORRECT - works for SSR and client-initiated Server Functions
+import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
+const token = getCookie('auth_token');
+
+// WRONG - fails with "Cannot read properties of undefined (reading 'config')"
+import { getCookie } from 'vinxi/http';  // DON'T USE
+```
+
+**Large Payloads** - Use POST method to avoid header size limits:
+```typescript
+// CORRECT - data goes in request body
+export const getInventoryBalances = createServerFn({ method: 'POST' })
+  .handler(async ({ data }) => { /* receives array of 100+ SKU IDs */ });
+
+// WRONG - causes HTTP 431 "Request Header Fields Too Large"
+export const getInventoryBalances = createServerFn({ method: 'GET' })
+  .handler(async ({ data }) => { /* array encoded in headers, too big */ });
+```
+
+**Internal API Calls** - Use correct URL for environment:
+```typescript
+// In Server Functions that call Express API
+const port = process.env.PORT || '3001';
+const apiUrl = process.env.NODE_ENV === 'production'
+  ? `http://127.0.0.1:${port}`   // Same server on Railway
+  : 'http://localhost:3001';     // Separate dev server
+```
+
+**SSR Hydration Mismatch** - Use ClientOnly for runtime-dependent UI:
+```typescript
+// CORRECT - server renders fallback, client renders actual state
+import { ClientOnly } from '@tanstack/react-router';
+
+function LoadingBar() {
+  return (
+    <ClientOnly fallback={null}>
+      <LoadingBarContent />  {/* Uses router state that differs SSR vs client */}
+    </ClientOnly>
+  );
+}
+
+// WRONG - server renders bar (pending), client hydrates with same HTML even though idle
+function LoadingBar() {
+  const isLoading = useRouterState({ select: (s) => s.status === 'pending' });
+  if (!isLoading) return null;
+  return <div>Loading...</div>;  // Server HTML persists after hydration!
+}
 ```
 
 ### Real-time: SSE → TanStack Query
@@ -584,4 +641,4 @@ railway variables --unset "NO_CACHE"
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `572617b` (2026-01-22) - Unified SSR production server, Prisma at root (shared brain pattern)
+**Updated till commit:** `77b3487` (2026-01-22) - Server Functions production fixes (cookies, large payloads, API URLs, SSR hydration)

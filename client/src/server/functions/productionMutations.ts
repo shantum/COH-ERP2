@@ -57,19 +57,15 @@ const uncompleteBatchSchema = z.object({
 
 const createTailorSchema = z.object({
     name: z.string().min(1, 'Name is required'),
-    phone: z.string().optional(),
     specializations: z.string().optional(),
     dailyCapacityMins: z.number().int().positive().optional(),
-    notes: z.string().optional(),
 });
 
 const updateTailorSchema = z.object({
     tailorId: z.string().uuid('Invalid tailor ID'),
     name: z.string().optional(),
-    phone: z.string().optional(),
     specializations: z.string().optional(),
     dailyCapacityMins: z.number().int().positive().optional(),
-    notes: z.string().optional(),
 });
 
 const lockDateSchema = z.object({
@@ -156,23 +152,20 @@ const TXN_REASON = {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma: any;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;
     }
     return prisma;
 }
+
+/** Type alias for Prisma client instance */
+type PrismaClientInstance = Awaited<ReturnType<typeof getPrisma>>;
 
 // ============================================
 // HELPER FUNCTIONS
@@ -182,7 +175,7 @@ async function getPrisma(): Promise<PrismaClientType> {
  * Generate batch code atomically
  * Format: YYYYMMDD-XXX (e.g., 20260107-001)
  */
-async function generateBatchCode(prisma: PrismaClientType, targetDate: Date): Promise<string> {
+async function generateBatchCode(prisma: PrismaClientInstance, targetDate: Date): Promise<string> {
     const dateStr = targetDate.toISOString().split('T')[0].replace(/-/g, '');
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -212,7 +205,7 @@ async function generateBatchCode(prisma: PrismaClientType, targetDate: Date): Pr
 /**
  * Generate sample code (SAMPLE-XX format)
  */
-async function generateSampleCode(prisma: PrismaClientType): Promise<string> {
+async function generateSampleCode(prisma: PrismaClientInstance): Promise<string> {
     const latest = await prisma.productionBatch.findFirst({
         where: { sampleCode: { not: null } },
         orderBy: { sampleCode: 'desc' },
@@ -232,7 +225,7 @@ async function generateSampleCode(prisma: PrismaClientType): Promise<string> {
 /**
  * Get locked dates from SystemSetting table
  */
-async function getLockedDates(prisma: PrismaClientType): Promise<string[]> {
+async function getLockedDates(prisma: PrismaClientInstance): Promise<string[]> {
     const setting = await prisma.systemSetting.findUnique({
         where: { key: 'locked_production_dates' },
     });
@@ -242,7 +235,7 @@ async function getLockedDates(prisma: PrismaClientType): Promise<string[]> {
 /**
  * Save locked dates to SystemSetting table
  */
-async function saveLockedDates(prisma: PrismaClientType, dates: string[]): Promise<void> {
+async function saveLockedDates(prisma: PrismaClientInstance, dates: string[]): Promise<void> {
     await prisma.systemSetting.upsert({
         where: { key: 'locked_production_dates' },
         update: { value: JSON.stringify(dates) },
@@ -264,7 +257,7 @@ function getEffectiveFabricConsumption(sku: {
  * Calculate fabric balance
  */
 async function calculateFabricBalance(
-    prisma: PrismaClientType,
+    prisma: PrismaClientInstance,
     fabricId: string
 ): Promise<{ currentBalance: number }> {
     const aggregations = await prisma.fabricTransaction.groupBy({
@@ -726,7 +719,7 @@ export const completeBatch = createServerFn({ method: 'POST' })
 
         let autoAllocated = false;
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Update batch
             await tx.productionBatch.update({
                 where: { id: batchId },
@@ -846,7 +839,7 @@ export const uncompleteBatch = createServerFn({ method: 'POST' })
         const isCustomSkuBatch = batch.sku?.isCustomSku && batch.sourceOrderLineId;
         let allocationReversed = false;
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Check order line status for custom SKU batches
             if (isCustomSkuBatch && batch.sourceOrderLineId) {
                 const currentLine = await tx.orderLine.findUnique({
@@ -886,7 +879,7 @@ export const uncompleteBatch = createServerFn({ method: 'POST' })
                         referenceId: batch.sourceOrderLineId,
                         txnType: TXN_TYPE.OUTWARD,
                         reason: TXN_REASON.ORDER_ALLOCATION,
-                        skuId: batch.skuId,
+                        ...(batch.skuId ? { skuId: batch.skuId } : {}),
                     },
                 });
 
@@ -925,15 +918,13 @@ export const createTailor = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => createTailorSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<CreateTailorResult>> => {
         const prisma = await getPrisma();
-        const { name, phone, specializations, dailyCapacityMins, notes } = data;
+        const { name, specializations, dailyCapacityMins } = data;
 
         const tailor = await prisma.tailor.create({
             data: {
                 name,
-                phone: phone || null,
                 specializations: specializations || null,
                 dailyCapacityMins: dailyCapacityMins || 480,
-                notes: notes || null,
             },
         });
 
@@ -954,7 +945,7 @@ export const updateTailor = createServerFn({ method: 'POST' })
     .inputValidator((input: unknown) => updateTailorSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<UpdateTailorResult>> => {
         const prisma = await getPrisma();
-        const { tailorId, name, phone, specializations, dailyCapacityMins, notes } = data;
+        const { tailorId, name, specializations, dailyCapacityMins } = data;
 
         const existing = await prisma.tailor.findUnique({
             where: { id: tailorId },
@@ -970,10 +961,8 @@ export const updateTailor = createServerFn({ method: 'POST' })
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updateData: Record<string, any> = {};
         if (name !== undefined) updateData.name = name;
-        if (phone !== undefined) updateData.phone = phone;
         if (specializations !== undefined) updateData.specializations = specializations;
         if (dailyCapacityMins !== undefined) updateData.dailyCapacityMins = dailyCapacityMins;
-        if (notes !== undefined) updateData.notes = notes;
 
         await prisma.tailor.update({
             where: { id: tailorId },

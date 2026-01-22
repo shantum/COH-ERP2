@@ -353,21 +353,11 @@ function hasAllocatedInventory(status: string): boolean {
 // PRISMA HELPER
 // ============================================
 
-interface PrismaGlobal {
-    prisma: ReturnType<typeof createPrismaClient>;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaClientType = any;
-
-function createPrismaClient(): PrismaClientType {
-    // This is a placeholder - actual implementation is dynamic
-    return null;
-}
-
-async function getPrisma(): Promise<PrismaClientType> {
+async function getPrisma() {
     const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as PrismaGlobal;
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
     const prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (process.env.NODE_ENV !== 'production') {
         globalForPrisma.prisma = prisma;
@@ -467,7 +457,7 @@ export const markLineDelivered = createServerFn({ method: 'POST' })
             };
         }
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             // Update line-level deliveredAt and trackingStatus
             await tx.orderLine.update({
                 where: { id: lineId },
@@ -582,7 +572,7 @@ export const markLineRto = createServerFn({ method: 'POST' })
             };
         }
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Update line-level rtoInitiatedAt and trackingStatus
             await tx.orderLine.update({
                 where: { id: lineId },
@@ -687,7 +677,7 @@ export const receiveLineRto = createServerFn({ method: 'POST' })
             };
         }
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             // Update line-level rtoReceivedAt, condition, and trackingStatus
             await tx.orderLine.update({
                 where: { id: lineId },
@@ -989,7 +979,7 @@ export const updateLine = createServerFn({ method: 'POST' })
             });
         } else {
             // qty/unitPrice changes need transaction to update order total
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 await tx.orderLine.update({
                     where: { id: lineId },
                     data: updateData,
@@ -1066,7 +1056,7 @@ export const addLine = createServerFn({ method: 'POST' })
 
         let newLineId: string = '';
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             const newLine = await tx.orderLine.create({
                 data: {
                     orderId,
@@ -1359,7 +1349,7 @@ export const deleteOrder = createServerFn({ method: 'POST' })
             };
         }
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Handle production batches and inventory
             for (const line of order.orderLines) {
                 if (line.productionBatchId) {
@@ -1470,10 +1460,10 @@ export const createOrder = createServerFn({ method: 'POST' })
             if (existingCustomer) {
                 customerId = existingCustomer.id;
             } else {
-                // Create new customer
+                // Create new customer - email is required, generate placeholder if not provided
                 const newCustomer = await prisma.customer.create({
                     data: {
-                        email: customerEmail ?? null,
+                        email: customerEmail ?? `offline-${Date.now()}@placeholder.local`,
                         phone: customerPhone ?? null,
                         firstName: customerName?.split(' ')[0] ?? '',
                         lastName: customerName?.split(' ').slice(1).join(' ') ?? '',
@@ -1485,7 +1475,7 @@ export const createOrder = createServerFn({ method: 'POST' })
         }
 
         // Create order with lines in transaction
-        const order = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const order = await prisma.$transaction(async (tx) => {
             const created = await tx.order.create({
                 data: {
                     orderNumber,
@@ -1618,7 +1608,7 @@ export const allocateOrder = createServerFn({ method: 'POST' })
 
         // Allocate inside transaction
         const failed: Array<{ lineId: string; reason: string }> = [];
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             const allocated: string[] = [];
             const timestamp = new Date();
 
@@ -1769,7 +1759,7 @@ export const shipOrder = createServerFn({ method: 'POST' })
         const now = new Date();
         const shippedLineIds: string[] = [];
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             // Update all lines to shipped
             await tx.orderLine.updateMany({
                 where: { id: { in: linesToShip.map((l: ShipOrderLine) => l.id) } },
@@ -1909,7 +1899,7 @@ export const adminShipOrder = createServerFn({ method: 'POST' })
         const now = new Date();
         const shippedLineIds = linesToShip.map((l: AdminShipOrderLine) => l.id);
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             // Force update all lines to shipped (skip status validation)
             await tx.orderLine.updateMany({
                 where: { id: { in: shippedLineIds } },
@@ -2003,7 +1993,7 @@ export const unshipOrder = createServerFn({ method: 'POST' })
 
         const unshippedLineIds = linesToUnship.map((l: UnshipOrderLine) => l.id);
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Revert line statuses and clear tracking fields
             await tx.orderLine.updateMany({
                 where: { id: { in: unshippedLineIds } },
@@ -2102,7 +2092,7 @@ export const cancelOrder = createServerFn({ method: 'POST' })
         const affectedSkuIds = linesWithInventory.map((l: CancelOrderLine) => l.skuId);
         let inventoryReleased = false;
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Release inventory for allocated lines
             for (const line of linesWithInventory) {
                 const txn = await tx.inventoryTransaction.findFirst({
@@ -2230,7 +2220,7 @@ export const uncancelOrder = createServerFn({ method: 'POST' })
         type UncancelOrderLine = { id: string; lineStatus: string };
         const cancelledLines = order.orderLines.filter((l: UncancelOrderLine) => l.lineStatus === 'cancelled');
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Restore order to open status
             await tx.order.update({
                 where: { id: orderId },
@@ -2330,7 +2320,7 @@ export const setLineStatus = createServerFn({ method: 'POST' })
         let inventoryUpdated = false;
         const timestamp = new Date();
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Build update data based on transition
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const updateData: any = { lineStatus: targetStatus };
@@ -2467,7 +2457,7 @@ export const customizeLine = createServerFn({ method: 'POST' })
         const baseSku = line.sku;
         const baseSkuId = baseSku.id;
 
-        const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+        const result = await prisma.$transaction(async (tx) => {
             // Atomically increment counter and generate custom SKU code
             const updatedBaseSku = await tx.sku.update({
                 where: { id: baseSkuId },
@@ -2617,7 +2607,7 @@ export const removeLineCustomization = createServerFn({ method: 'POST' })
             };
         }
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Delete inventory transactions if force
             if (force && txnCount > 0) {
                 await tx.inventoryTransaction.deleteMany({
@@ -2690,9 +2680,10 @@ const shipLinesSchema = z.object({
 
 export interface ShipLinesResult {
     shipped: Array<{ lineId: string; skuCode?: string; qty: number }>;
-    skipped: Array<{ lineId: string; reason: string }>;
-    errors: Array<{ lineId?: string; error: string; code: string }>;
+    skipped: Array<{ lineId: string; skuCode?: string; qty: number; reason?: string }>;
+    errors: Array<{ lineId?: string; skuCode?: string; error: string; code: string; currentStatus?: string }>;
     orderUpdated: boolean;
+    orderId?: string | null;
 }
 
 export const shipLines = createServerFn({ method: 'POST' })
@@ -2706,7 +2697,7 @@ export const shipLines = createServerFn({ method: 'POST' })
             // Import shipOrderLines dynamically
             const { shipOrderLines } = await import('@server/services/shipOrderService.js');
 
-            const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+            const result = await prisma.$transaction(async (tx) => {
                 return await shipOrderLines(tx, {
                     orderLineIds: lineIds,
                     awbNumber,
@@ -2778,7 +2769,7 @@ export const markShippedLine = createServerFn({ method: 'POST' })
             // Import shipOrderLines dynamically
             const { shipOrderLines } = await import('@server/services/shipOrderService.js');
 
-            const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+            const result = await prisma.$transaction(async (tx) => {
                 return await shipOrderLines(tx, {
                     orderLineIds: [lineId],
                     awbNumber,
@@ -2942,7 +2933,7 @@ export const unmarkShippedLine = createServerFn({ method: 'POST' })
         }
 
         // Revert to packed status
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             await tx.orderLine.update({
                 where: { id: lineId },
                 data: {
@@ -3199,7 +3190,7 @@ export const markDelivered = createServerFn({ method: 'POST' })
             });
         } else {
             // Update all shipped lines to delivered
-            await prisma.$transaction(async (tx: PrismaClientType) => {
+            await prisma.$transaction(async (tx) => {
                 await tx.orderLine.updateMany({
                     where: { id: { in: shippedLineIds } },
                     data: {
@@ -3280,7 +3271,7 @@ export const markRto = createServerFn({ method: 'POST' })
         const shippedLineIds = order.orderLines.map((l: { id: string }) => l.id);
         const linesInitiated = shippedLineIds.length;
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Update all shipped lines to RTO initiated
             if (shippedLineIds.length > 0) {
                 await tx.orderLine.updateMany({
@@ -3381,7 +3372,7 @@ export const receiveRto = createServerFn({ method: 'POST' })
             };
         }
 
-        await prisma.$transaction(async (tx: PrismaClientType) => {
+        await prisma.$transaction(async (tx) => {
             // Update all RTO-initiated lines
             const updateData: Record<string, unknown> = {
                 rtoReceivedAt: now,
@@ -3530,7 +3521,7 @@ export const migrateShopifyFulfilled = createServerFn({ method: 'POST' })
                 const awb = order.shopifyCache?.trackingNumber || 'MANUAL';
                 const courier = order.shopifyCache?.trackingCompany || 'Manual';
 
-                const result = await prisma.$transaction(async (tx: PrismaClientType) => {
+                const result = await prisma.$transaction(async (tx) => {
                     return await shipOrderLines(tx, {
                         orderLineIds: lineIds,
                         awbNumber: awb,
