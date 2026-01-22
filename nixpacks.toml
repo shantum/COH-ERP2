@@ -8,21 +8,21 @@ dependsOn = ["setup"]
 
 [phases.build]
 cmds = [
-  # Install root deps (hoisted Prisma) - use npm install (not ci) to avoid cache mount conflict
+  # Install root deps and generate Prisma client (shared brain pattern)
   "NODE_ENV=development npm install",
+  # Generate Prisma client at root level (both client and kysely generators)
+  "npx prisma generate",
   # Build shared types
   "cd shared && NODE_ENV=development npm ci && npx -y -p typescript tsc",
-  # Build server and generate Prisma client (both client and kysely generators)
-  "cd server && NODE_ENV=development npm ci && npx prisma generate",
-  # Copy generated .prisma/client from server to root node_modules for client resolution
-  "cp -r server/node_modules/.prisma node_modules/",
-  # Build client (resolves @prisma/client from root node_modules via Node module resolution)
+  # Build server (uses @prisma/client from root node_modules)
+  "cd server && NODE_ENV=development npm ci",
+  # Build client (uses @prisma/client from root node_modules via Node module resolution)
   "cd client && NODE_ENV=development npm ci && npm run build"
 ]
 dependsOn = ["setup"]
 
 [start]
-cmd = "cd server && npx prisma migrate deploy && npx tsx src/production.js"
+cmd = "npx prisma migrate deploy && cd server && npx tsx src/production.js"
 
 [variables]
 NODE_ENV = "production"

@@ -15,15 +15,15 @@ build/
 
 # Database
 *.sqlite
-server/prisma/dev.db
-server/prisma/dev.db-shm
-server/prisma/dev.db-wal
-server/prisma/dev.db-journal
+prisma/dev.db
+prisma/dev.db-shm
+prisma/dev.db-wal
+prisma/dev.db-journal
 
 # Migration data (temporary export files)
-server/prisma/migration_data/
-server/prisma/migrate-to-supabase.js
-server/prisma/generate-sql.js
+prisma/migration_data/
+prisma/migrate-to-supabase.js
+prisma/generate-sql.js
 
 # Logs
 logs
@@ -40,9 +40,6 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
-
-# Prisma
-prisma/migrations/
 
 # Debug
 *.trace

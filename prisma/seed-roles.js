@@ -3,11 +3,11 @@
  * Run this after migration to create built-in roles
  * 
  * Usage: npx prisma db seed
- * Or: node server/prisma/seed-roles.js
+ * Or: node prisma/seed-roles.js
  */
 
 import { PrismaClient } from '@prisma/client';
-import { DEFAULT_ROLES } from '../src/utils/permissions.js';
+import { DEFAULT_ROLES } from '../server/src/utils/permissions.js';
 
 const prisma = new PrismaClient();
 
