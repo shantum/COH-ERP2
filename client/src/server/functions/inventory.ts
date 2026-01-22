@@ -256,7 +256,7 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
  * Efficient batch lookup using inventoryBalanceCache.
  * Returns balance info for each requested SKU.
  */
-export const getInventoryBalances = createServerFn({ method: 'GET' })
+export const getInventoryBalances = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator(
         (input: unknown): z.infer<typeof getInventoryBalancesSchema> =>
