@@ -266,6 +266,13 @@ function getAuthToken(): string | undefined {
         if (!token) {
             const headers = getHeaders();
             const cookieHeader = headers?.cookie;
+
+            // Debug logging for production troubleshooting
+            if (process.env.NODE_ENV === 'production') {
+                console.log('[AuthMiddleware] getCookie returned:', token ? 'token-present' : 'undefined');
+                console.log('[AuthMiddleware] headers.cookie:', cookieHeader ? `present (${cookieHeader.length} chars)` : 'undefined');
+            }
+
             if (cookieHeader) {
                 const match = cookieHeader.match(/auth_token=([^;]+)/);
                 token = match?.[1];
@@ -273,8 +280,11 @@ function getAuthToken(): string | undefined {
         }
 
         return token;
-    } catch {
+    } catch (error) {
         // No request context available (e.g., client-side call)
+        if (process.env.NODE_ENV === 'production') {
+            console.log('[AuthMiddleware] Error getting auth token:', error);
+        }
         return undefined;
     }
 }
