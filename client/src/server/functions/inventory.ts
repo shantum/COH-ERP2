@@ -216,7 +216,7 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
         }
 
         // Calculate balance using query patterns
-        const { calculateInventoryBalance: calcBalance } = await import('@server/utils/queryPatterns.js');
+        const { calculateInventoryBalance: calcBalance } = await import('@coh/shared/services/db/queries');
 
         const balance = await calcBalance(prisma, skuId, {
             allowNegative: true,
@@ -253,7 +253,8 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
 /**
  * Get balances for multiple SKUs
  *
- * Efficient batch lookup using inventoryBalanceCache.
+ * Direct balance calculation using Prisma query.
+ * NOTE: Cannot import from @server/ in Server Functions (dev resolution issue).
  * Returns balance info for each requested SKU.
  */
 export const getInventoryBalances = createServerFn({ method: 'POST' })
@@ -267,24 +268,50 @@ export const getInventoryBalances = createServerFn({ method: 'POST' })
 
         const prisma = await getPrisma();
 
-        // Fetch SKUs to validate they exist
+        // Fetch SKUs (don't throw if some are missing - just return 0 balance)
         const skus = await prisma.sku.findMany({
             where: { id: { in: skuIds } },
             select: { id: true, skuCode: true, isActive: true },
         });
 
-        const foundSkuIds = new Set(skus.map((s) => s.id));
-        const missingSkuIds = skuIds.filter((id) => !foundSkuIds.has(id));
+        const skuCodeMap = new Map(skus.map((s: { id: string; skuCode: string }) => [s.id, s.skuCode]));
 
-        if (missingSkuIds.length > 0) {
-            throw new Error(`SKUs not found: ${missingSkuIds.join(', ')}`);
+        // Calculate balances directly with raw query (avoiding @server/ import)
+        // Only query for SKUs that exist in database
+        const validSkuIds = skus.map((s: { id: string }) => s.id);
+
+        let balanceMap = new Map<string, { totalInward: number; totalOutward: number; currentBalance: number }>();
+
+        if (validSkuIds.length > 0) {
+            const balances: Array<{
+                skuId: string;
+                totalInward: bigint;
+                totalOutward: bigint;
+                currentBalance: bigint;
+            }> = await prisma.$queryRaw`
+                SELECT
+                    "skuId",
+                    COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN qty ELSE 0 END), 0)::bigint AS "totalInward",
+                    COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN qty ELSE 0 END), 0)::bigint AS "totalOutward",
+                    COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN qty ELSE 0 END), 0) -
+                    COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN qty ELSE 0 END), 0) AS "currentBalance"
+                FROM "InventoryTransaction"
+                WHERE "skuId" = ANY(${validSkuIds})
+                GROUP BY "skuId"
+            `;
+
+            // Build balance lookup map
+            balanceMap = new Map(
+                balances.map((b) => [
+                    b.skuId,
+                    {
+                        totalInward: Number(b.totalInward),
+                        totalOutward: Number(b.totalOutward),
+                        currentBalance: Number(b.currentBalance),
+                    },
+                ])
+            );
         }
-
-        // Get balances from cache
-        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
-
-        const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
-        const skuCodeMap = new Map(skus.map((s) => [s.id, s.skuCode]));
 
         return skuIds.map((skuId) => {
             const balance = balanceMap.get(skuId);
@@ -296,8 +323,8 @@ export const getInventoryBalances = createServerFn({ method: 'POST' })
                 totalOutward: balance?.totalOutward ?? 0,
                 totalReserved: 0, // Reserved is no longer used, kept for backwards compatibility
                 currentBalance: balance?.currentBalance ?? 0,
-                availableBalance: balance?.availableBalance ?? 0,
-                hasDataIntegrityIssue: balance?.hasDataIntegrityIssue ?? false,
+                availableBalance: balance?.currentBalance ?? 0, // Available = current (no reservation)
+                hasDataIntegrityIssue: false,
             };
         });
     });
@@ -325,7 +352,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
 
         // Use Kysely for SKU metadata fetch (JOINs SKU/Variation/Product/Fabric)
-        const { listInventorySkusKysely } = await import('@server/db/queries/index.js');
+        const { listInventorySkusKysely } = await import('@coh/shared/services/db/queries');
 
         const skus = await listInventorySkusKysely({
             includeCustomSkus,
@@ -333,7 +360,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
         });
 
         // Get balances from cache (already optimized with groupBy)
-        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
 
         const skuIds = skus.map((sku) => sku.skuId);
         const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
