@@ -3,6 +3,11 @@ import tsConfigPaths from 'vite-tsconfig-paths'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+// ES Module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // Server-ONLY packages that should never be bundled (Node.js runtime only)
 const SERVER_PACKAGES = [
@@ -79,7 +84,12 @@ export default defineConfig({
   // Note: @server alias NOT defined here - we handle it in the plugin above
   // SSR configuration: externalize Node.js-only packages
   ssr: {
-    external: SERVER_PACKAGES,
+    external: [
+      ...SERVER_PACKAGES,
+      ...NODE_BUILTINS,
+      // Node built-ins with node: prefix
+      ...NODE_BUILTINS.map(m => `node:${m}`),
+    ],
     noExternal: [
       '@tanstack/react-start',
       '@tanstack/react-router',
