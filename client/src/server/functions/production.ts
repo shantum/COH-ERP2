@@ -211,11 +211,27 @@ const pendingBySkuInputSchema = z.object({
 
 /**
  * Lazy import of Kysely database instance.
- * Prevents Node.js pg module from being bundled into client.
+ * Creates instance directly to avoid @server import resolution issues in dev.
+ * Uses dynamic import with singleton pattern.
  */
 async function getKyselyDb() {
-    const { kysely } = await import('@server/db/index.js');
-    return kysely;
+    const { Kysely, PostgresDialect } = await import('kysely');
+    const { Pool } = await import('pg');
+
+    // Use globalThis for singleton - untyped to avoid import issues
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const globalForKysely = globalThis as unknown as { kyselyProductionInstance: any };
+    if (!globalForKysely.kyselyProductionInstance) {
+        globalForKysely.kyselyProductionInstance = new Kysely({
+            dialect: new PostgresDialect({
+                pool: new Pool({
+                    connectionString: process.env.DATABASE_URL,
+                    max: 10,
+                }),
+            }),
+        });
+    }
+    return globalForKysely.kyselyProductionInstance;
 }
 
 /**
@@ -334,7 +350,8 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         const rows = await query.orderBy('ProductionBatch.batchDate', 'desc').execute();
 
         // Transform to match tRPC router output format
-        const batches = rows.map((r) => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const batches = rows.map((r: any) => ({
             id: r.id,
             batchCode: r.batchCode,
             batchDate: r.batchDate as Date,
@@ -366,7 +383,8 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         }));
 
         // Fetch order lines for all batches
-        const batchIds = batches.map((b) => b.id);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const batchIds = batches.map((b: any) => b.id);
         const orderLines = batchIds.length > 0
             ? await db
                 .selectFrom('OrderLine')
@@ -391,7 +409,8 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
         }
 
         // Enrich batches with customization display info and sample info
-        return batches.map((batch) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return batches.map((batch: any) => {
             const isCustom = batch.isCustomSku || false;
             const isSample = !batch.skuId && batch.sampleCode;
             const batchOrderLines = orderLinesByBatch.get(batch.id) || [];
@@ -423,7 +442,8 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
                           },
                       }
                     : null,
-                orderLines: batchOrderLines.map((ol) => ({
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                orderLines: batchOrderLines.map((ol: any) => ({
                     id: ol.orderLineId,
                     order: {
                         id: ol.orderId,
@@ -521,9 +541,12 @@ export const getProductionCapacity = createServerFn({ method: 'GET' })
             .execute();
 
         // Calculate capacity for each tailor
-        return tailors.map((tailor) => {
-            const tailorBatches = batches.filter((b) => b.tailorId === tailor.id);
-            const allocatedMins = tailorBatches.reduce((sum, b) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return tailors.map((tailor: any) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const tailorBatches = batches.filter((b: any) => b.tailorId === tailor.id);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const allocatedMins = tailorBatches.reduce((sum: number, b: any) => {
                 const timePer = b.baseProductionTimeMins || 0;
                 return sum + timePer * b.qtyPlanned;
             }, 0);
@@ -725,7 +748,8 @@ export const getProductionPendingBySku = createServerFn({ method: 'GET' })
             .orderBy('ProductionBatch.batchDate', 'asc')
             .execute();
 
-        const batches = rows.map((r) => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const batches = rows.map((r: any) => ({
             id: r.id,
             batchCode: r.batchCode,
             batchDate: r.batchDate,
@@ -738,6 +762,6 @@ export const getProductionPendingBySku = createServerFn({ method: 'GET' })
 
         return {
             batches,
-            totalPending: batches.reduce((sum, b) => sum + b.qtyPending, 0),
+            totalPending: batches.reduce((sum: number, b: { qtyPending: number }) => sum + b.qtyPending, 0),
         };
     });

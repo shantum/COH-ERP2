@@ -11,6 +11,7 @@ import {
     HeadContent,
     Scripts,
     createRootRouteWithContext,
+    ClientOnly,
 } from '@tanstack/react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
@@ -93,11 +94,13 @@ function RootComponent() {
                         className: 'text-sm',
                     }}
                 />
-                {/* Client-only devtools - SSR doesn't have router context */}
-                {import.meta.env.DEV && typeof window !== 'undefined' && (
-                    <Suspense fallback={null}>
-                        <TanStackRouterDevtools position="bottom-right" />
-                    </Suspense>
+                {/* Client-only devtools - use ClientOnly to avoid hydration mismatch */}
+                {import.meta.env.DEV && (
+                    <ClientOnly fallback={null}>
+                        <Suspense fallback={null}>
+                            <TanStackRouterDevtools position="bottom-right" />
+                        </Suspense>
+                    </ClientOnly>
                 )}
             </ErrorBoundary>
         </RootDocument>

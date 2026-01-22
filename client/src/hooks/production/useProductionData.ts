@@ -63,11 +63,12 @@ export interface BatchListOptions {
     customOnly?: boolean;
 }
 
-export function useBatches(options?: BatchListOptions) {
+export function useBatches(options?: BatchListOptions, enabled = true) {
     const getBatchesFn = useServerFn(getProductionBatches);
     return useQuery({
         queryKey: ['production', 'batches', options],
         queryFn: () => getBatchesFn({ data: options ?? {} }),
+        enabled,
     });
 }
 

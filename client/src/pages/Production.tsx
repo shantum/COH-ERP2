@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Plus, CheckCircle, X, ChevronDown, ChevronRight, Lock, Unlock, Copy, Check, Undo2, Trash2, Scissors, FlaskConical } from 'lucide-react';
-import { useSearch, useNavigate } from '@tanstack/react-router';
+import { useSearch, useNavigate, ClientOnly } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { sortBySizeOrder } from '../constants/sizes';
 import { AddToPlanModal } from '../components/production/AddToPlanModal';
@@ -202,7 +202,8 @@ const getDefaultDateRange = () => {
     };
 };
 
-export default function Production() {
+// Inner component that uses date-dependent logic
+function ProductionContent() {
     const queryClient = useQueryClient();
 
     // URL state via TanStack Router
@@ -589,10 +590,14 @@ export default function Production() {
 
     const dateGroups = groupBatchesByDate(batches || []);
 
-    // Expand today and tomorrow by default
+    // Today's date for UI
     const today = new Date().toISOString().split('T')[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-    if (expandedDates.size === 0 && dateGroups.length > 0) {
+
+    // Expand today and tomorrow by default
+    useEffect(() => {
+        if (expandedDates.size > 0 || dateGroups.length === 0) return;
+
         const initial = new Set<string>();
         dateGroups.forEach(g => {
             if (g.date === today || g.date === tomorrow || g.isFuture) {
@@ -600,7 +605,7 @@ export default function Production() {
             }
         });
         if (initial.size > 0) setExpandedDates(initial);
-    }
+    }, [dateGroups, expandedDates.size, today, tomorrow]);
 
     if (isLoading) return <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div></div>;
 
@@ -1184,5 +1189,14 @@ export default function Production() {
                 lockedDates={lockedDates || []}
             />
         </div>
+    );
+}
+
+// Wrap in ClientOnly to avoid SSR hydration issues with date-dependent logic
+export default function Production() {
+    return (
+        <ClientOnly fallback={<div className="flex justify-center p-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-400"></div></div>}>
+            <ProductionContent />
+        </ClientOnly>
     );
 }
