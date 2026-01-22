@@ -384,10 +384,18 @@ The server-side tests appear well-structured and ready to use, though they shoul
 
 ## 9. Status Update (Jan 2026)
 
-**Note**: This analysis was conducted before the major tRPC migration. The performance characteristics may have changed since:
-- Orders, Inventory, and Production routes migrated from Express to tRPC
-- Request batching now automatic via tRPC (10ms window)
-- Type safety improvements may affect bundle size
-- SSE implementation refactored
+**Note (2026-01-21)**: This analysis was conducted before the major architecture change.
 
-**Recommendation**: Re-run all performance tests to establish new baselines post-migration.
+**Current State:**
+- tRPC has been **fully removed** - replaced with TanStack Start Server Functions
+- Express routes reduced to auth, webhooks, SSE, and file uploads only
+- 27 Server Function files now handle all data fetching and mutations
+- All queries use Prisma directly (Kysely removed)
+
+**Performance Implications:**
+- Server Functions execute directly on the server (no HTTP overhead)
+- Request batching via TanStack Query (not tRPC)
+- Route loaders prefetch data for instant page loads
+- SSE still handles real-time updates
+
+**Recommendation**: Re-run all performance tests to establish new baselines post-Server Functions migration.

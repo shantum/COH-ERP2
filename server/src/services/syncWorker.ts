@@ -9,10 +9,10 @@
  * Legacy modes (quick, update) are mapped to INCREMENTAL for backward compatibility.
  */
 
-import type { PrismaClient, SyncJob } from '@prisma/client';
+import type { SyncJob } from '@prisma/client';
 import prisma from '../lib/prisma.js';
+import type { ShopifyOrder } from './shopify.js';
 import shopifyClient from './shopify.js';
-import type { ShopifyOrder, ShopifyCustomer, ShopifyProduct } from './shopify.js';
 import { cacheAndProcessOrder } from './shopifyOrderProcessor.js';
 import { syncSingleProduct, ensureDefaultFabric } from './productSyncService.js';
 import { syncSingleCustomer } from './customerSyncService.js';

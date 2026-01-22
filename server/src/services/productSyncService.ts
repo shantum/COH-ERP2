@@ -4,8 +4,9 @@
  * Used by both background jobs (syncWorker.ts) and direct sync routes (shopify.js)
  */
 
-import type { PrismaClient, Fabric, Product, Variation, Sku } from '@prisma/client';
-import shopifyClient, { ShopifyProduct, ShopifyVariant } from './shopify.js';
+import type { PrismaClient, Fabric, Product } from '@prisma/client';
+import type { ShopifyProduct, ShopifyVariant } from './shopify.js';
+import shopifyClient from './shopify.js';
 import { resolveProductCategory } from '../config/mappings/index.js';
 
 // ============================================
@@ -208,7 +209,6 @@ export async function syncSingleProduct(
         .filter((sku): sku is string => Boolean(sku));
 
     let product: Product | null = null;
-    let matchType: 'sku' | 'title' | 'new' = 'new';
 
     // ============================================
     // TIER 1: SKU-FIRST MATCHING (Primary)
@@ -237,7 +237,6 @@ export async function syncSingleProduct(
 
             if (genderMatches) {
                 product = foundProduct;
-                matchType = 'sku';
 
                 // Add this Shopify ID to the product's linked IDs if not present
                 if (!product.shopifyProductIds.includes(shopifyProductId)) {
@@ -282,8 +281,6 @@ export async function syncSingleProduct(
         }
 
         if (product) {
-            matchType = 'title';
-
             // Link this Shopify product to existing
             if (!product.shopifyProductIds.includes(shopifyProductId)) {
                 const updateData: { shopifyProductIds?: { push: string }; shopifyProductId?: string } = {
@@ -327,7 +324,6 @@ export async function syncSingleProduct(
             },
         });
         result.created++;
-        matchType = 'new';
     } else {
         // Product exists - update fields if changed
         const updates: Partial<Product> = {};

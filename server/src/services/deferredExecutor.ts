@@ -29,6 +29,22 @@
 
 type DeferredTask = () => Promise<void>;
 
+/**
+ * Optional metadata for task identification in error logs
+ * Helps debugging by providing context about which entity caused a failure
+ */
+export interface TaskMetadata {
+    orderId?: string;
+    lineId?: string;
+    skuId?: string;
+    action?: string;
+}
+
+interface QueuedTask {
+    task: DeferredTask;
+    metadata?: TaskMetadata;
+}
+
 interface TaskStats {
     queued: number;
     completed: number;
@@ -36,16 +52,19 @@ interface TaskStats {
 }
 
 class DeferredExecutor {
-    private queue: DeferredTask[] = [];
+    private queue: QueuedTask[] = [];
     private processing = false;
     private stats: TaskStats = { queued: 0, completed: 0, failed: 0 };
 
     /**
      * Add a task to the deferred execution queue
      * Task will run after current synchronous code completes
+     *
+     * @param task - The async task to execute
+     * @param metadata - Optional metadata for error logging (orderId, lineId, skuId, action)
      */
-    enqueue(task: DeferredTask): void {
-        this.queue.push(task);
+    enqueue(task: DeferredTask, metadata?: TaskMetadata): void {
+        this.queue.push({ task, metadata });
         this.stats.queued++;
 
         // Start processing if not already running
@@ -56,10 +75,12 @@ class DeferredExecutor {
 
     /**
      * Add multiple tasks to execute in sequence
+     *
+     * @param tasks - Array of tasks with optional metadata
      */
-    enqueueAll(tasks: DeferredTask[]): void {
-        for (const task of tasks) {
-            this.enqueue(task);
+    enqueueAll(tasks: Array<{ task: DeferredTask; metadata?: TaskMetadata }>): void {
+        for (const { task, metadata } of tasks) {
+            this.enqueue(task, metadata);
         }
     }
 
@@ -72,15 +93,21 @@ class DeferredExecutor {
         this.processing = true;
 
         while (this.queue.length > 0) {
-            const task = this.queue.shift();
-            if (!task) continue;
+            const queuedTask = this.queue.shift();
+            if (!queuedTask) continue;
+
+            const { task, metadata } = queuedTask;
 
             try {
                 await task();
                 this.stats.completed++;
             } catch (err) {
                 this.stats.failed++;
-                console.error('[DeferredExecutor] Task failed:', err);
+                if (metadata && Object.keys(metadata).length > 0) {
+                    console.error('[DeferredExecutor] Task failed:', { ...metadata, error: err });
+                } else {
+                    console.error('[DeferredExecutor] Task failed:', err);
+                }
             }
         }
 

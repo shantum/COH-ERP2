@@ -1,4 +1,5 @@
-import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
+import type { AxiosInstance, AxiosResponse } from 'axios';
+import axios, { AxiosError } from 'axios';
 import prisma from '../lib/prisma.js';
 import { shopifyLogger } from '../utils/logger.js';
 

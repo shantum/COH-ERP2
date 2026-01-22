@@ -8,9 +8,7 @@
  * This catches any orders that webhooks might have missed.
  */
 
-import type { PrismaClient } from '@prisma/client';
 import shopifyClient from './shopify.js';
-import type { ShopifyOrder } from './shopify.js';
 import { cacheShopifyOrders, processCacheBatch } from './shopifyOrderProcessor.js';
 import prisma from '../lib/prisma.js';
 import { syncLogger } from '../utils/logger.js';

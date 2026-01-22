@@ -5,7 +5,8 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import shopifyClient, { ShopifyCustomer } from './shopify.js';
+import type { ShopifyCustomer } from './shopify.js';
+import shopifyClient from './shopify.js';
 
 // ============================================
 // TYPES & INTERFACES
@@ -144,7 +145,7 @@ export async function syncSingleCustomer(
     shopifyCustomer: ShopifyCustomer,
     options: SyncSingleCustomerOptions = {}
 ): Promise<SyncSingleCustomerResult> {
-    const { skipNoOrders = true, skipNoEmail = true } = options;
+    const { skipNoOrders = true } = options;
 
     // Skip customers without orders if option enabled
     if (skipNoOrders && (shopifyCustomer.orders_count || 0) === 0) {

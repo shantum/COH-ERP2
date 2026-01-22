@@ -1,12 +1,7 @@
-// Load environment variables FIRST before any other imports
-import dotenv from 'dotenv';
-dotenv.config();
-
-// Validate required environment variables
-if (!process.env.JWT_SECRET) {
-    console.error('FATAL: JWT_SECRET environment variable is required');
-    process.exit(1);
-}
+// Validate ALL environment variables using Zod schema
+// dotenv.config() is called inside env.ts before validation
+// This will fail fast with clear error messages if required vars are missing
+import './config/env.js';
 
 // Import logger EARLY to capture console.log/warn/error from all subsequent imports
 import logger from './utils/logger.js';
@@ -28,14 +23,10 @@ const __dirname = path.dirname(__filename);
 await initDb();
 
 // Import routes
-// Products routes migrated to TanStack Start Server Functions
-import fabricRoutes from './routes/fabrics/index.js';
-import inventoryRoutes from './routes/inventory/index.js';
+// Products, orders, materials, fabrics, BOM routes migrated to TanStack Start Server Functions
 import inventoryReconciliationRoutes from './routes/inventory-reconciliation.js';
-import orderRoutes from './routes/orders/index.js';
-import { autoArchiveOldOrders } from './routes/orders/mutations/index.js';
+import { autoArchiveOldOrders } from './services/autoArchive.js';
 import { backfillLtvsIfNeeded } from './utils/tierUtils.js';
-import returnRoutes from './routes/returns/index.js';
 // Feedback routes migrated to TanStack Start Server Functions
 import authRoutes from './routes/auth.js';
 import importExportRoutes from './routes/import-export.js';
@@ -48,9 +39,8 @@ import remittanceRoutes from './routes/remittance.js';
 import pincodeRoutes from './routes/pincodes.js';
 import sseRoutes from './routes/sse.js';
 import pulseRoutes from './routes/pulse.js';
+import internalRoutes from './routes/internal.js';
 import { pulseBroadcaster } from './services/pulseBroadcaster.js';
-import materialsRoutes from './routes/materials.js';
-import bomRoutes from './routes/bom.js';
 import scheduledSync from './services/scheduledSync.js';
 import trackingSync from './services/trackingSync.js';
 import cacheProcessor from './services/cacheProcessor.js';
@@ -129,12 +119,8 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-// Products routes migrated to TanStack Start Server Functions
-app.use('/api/fabrics', fabricRoutes);
-app.use('/api/inventory', inventoryRoutes);
+// Products, orders, materials, fabrics, BOM, inventory, returns routes migrated to TanStack Start Server Functions
 app.use('/api/inventory', inventoryReconciliationRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/returns', returnRoutes);
 // Feedback routes migrated to TanStack Start Server Functions
 app.use('/api', importExportRoutes);
 app.use('/api/shopify', shopifyRoutes);
@@ -146,8 +132,7 @@ app.use('/api/remittance', remittanceRoutes);
 app.use('/api/pincodes', pincodeRoutes);
 app.use('/api/events', sseRoutes);
 app.use('/api/pulse', pulseRoutes);
-app.use('/api/materials', materialsRoutes);
-app.use('/api/bom', bomRoutes);
+app.use('/api/internal', internalRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

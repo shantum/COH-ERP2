@@ -6,7 +6,7 @@
  * NOTE: Payment method detection rules are centralized in config/mappings/paymentGateway.ts
  */
 
-import type { ShopifyOrder, ShopifyFulfillment, ShopifyLineItem } from '../services/shopify.js';
+import type { ShopifyOrder, ShopifyFulfillment } from '../services/shopify.js';
 import { resolvePaymentMethod as resolvePaymentMethodFromConfig } from '../config/index.js';
 
 // ============================================

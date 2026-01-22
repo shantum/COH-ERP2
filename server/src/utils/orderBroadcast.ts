@@ -71,7 +71,7 @@ export function broadcastLineStatusChange(
                 changes: { lineStatus: newStatus },
             });
         }
-    });
+    }, { lineId, orderId, action: `line_status_change:${newStatus}` });
 }
 
 /**
@@ -130,7 +130,7 @@ export function broadcastBatchLineStatusChange(
                 });
             }
         }
-    });
+    }, { action: `batch_line_status_change:${newStatus}`, lineId: lineIds.join(',') });
 }
 
 // ============================================
@@ -153,7 +153,7 @@ export function broadcastOrderShipped(
             orderId,
             changes,
         });
-    });
+    }, { orderId, action: 'order_shipped' });
 }
 
 /**
@@ -172,7 +172,7 @@ export function broadcastOrderCancelled(
             orderId,
             lineIds,
         });
-    });
+    }, { orderId, action: 'order_cancelled' });
 }
 
 /**
@@ -191,7 +191,7 @@ export function broadcastOrderUncancelled(
             orderId,
             lineIds,
         });
-    });
+    }, { orderId, action: 'order_uncancelled' });
 }
 
 // ============================================
@@ -309,10 +309,12 @@ export interface DeferredBroadcastOptions {
  *
  * @param options - Cache invalidation options
  * @param broadcast - The broadcast function to call
+ * @param metadata - Optional metadata for error logging (orderId, lineId, skuId, action)
  */
 export function deferCacheInvalidationAndBroadcast(
     options: DeferredBroadcastOptions,
-    broadcast: () => void
+    broadcast: () => void,
+    metadata?: { orderId?: string; lineId?: string; skuId?: string; action?: string }
 ): void {
     deferredExecutor.enqueue(async () => {
         // Import dynamically to avoid circular dependencies
@@ -328,5 +330,5 @@ export function deferCacheInvalidationAndBroadcast(
 
         // Execute the broadcast
         broadcast();
-    });
+    }, metadata);
 }

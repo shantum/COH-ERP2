@@ -13,32 +13,34 @@
 9. **Build for the long term.** Write code your future self will thank you for. Maintainability over cleverness.
 10. **Type-safe by default.** Strict TypeScript, proper tRPC typing, Zod validation. No `any`, no shortcuts.
 
-## 🚧 MIGRATION IN PROGRESS: TanStack Start
+## Architecture: TanStack Start + Server Functions
 
-> **Active Migration**: Express + tRPC → TanStack Start
-> 
-> See [TANSTACK_START_MIGRATION_PLAN.md](./TANSTACK_START_MIGRATION_PLAN.md) for full details.
+> **Migration Complete**: tRPC fully removed. Server Functions are the primary data layer.
+>
+> See [TANSTACK_START_MIGRATION_PLAN.md](./TANSTACK_START_MIGRATION_PLAN.md) for migration history.
 
-### Migration Strategy: Hybrid Start
+### Current Architecture
 
-| Component | Current | Target | Status |
-|-----------|---------|--------|--------|
-| Frontend Router | react-router-dom | TanStack Router | 🔄 In Progress |
-| Layouts | React components | TanStack `__root.tsx` | 🔄 In Progress |
-| Data Fetching | tRPC hooks | Route Loaders → TanStack Query | ⏳ Pending |
-| Mutations | tRPC mutations | Server Functions | ⏳ Pending |
-| Backend | Express + tRPC | TanStack Start Server | ⏳ Pending |
-| Real-time | SSE | SSE → TanStack Query invalidation | ⏳ Pending |
+| Component | Technology | Status |
+|-----------|------------|--------|
+| Frontend Router | TanStack Router | ✅ Complete |
+| Layouts | TanStack `__root.tsx` | ✅ Complete |
+| Data Fetching | Server Functions + TanStack Query | ✅ Complete |
+| Mutations | Server Functions | ✅ Complete |
+| Backend | Express (minimal) + Server Functions | ✅ Complete |
+| Real-time | SSE → TanStack Query invalidation | ✅ Complete |
 
-**Key Insight**: tRPC stays running during migration. Call tRPC from TanStack Router pages:
-
+**Data Flow Pattern**:
 ```typescript
-// app/routes/orders.tsx - tRPC works inside TanStack Router!
-function OrdersPage() {
-  const search = Route.useSearch();
-  const { data } = trpc.orders.list.useQuery({ view: search.view });
-  return <OrdersGrid orders={data?.rows} />;
-}
+// Route loader prefetches data
+loader: async ({ search }) => getOrders({ data: search })
+
+// Component uses TanStack Query with loader data
+const { data } = useQuery({
+  queryKey: ['orders', search],
+  queryFn: () => getOrders({ data: search }),
+  initialData: Route.useLoaderData(),
+});
 ```
 
 ### Type Safety Philosophy
@@ -71,10 +73,6 @@ function OrdersPage() {
 - Use `beforeLoad` hook for auth checks—do NOT use `useEffect` inside components for redirects. The router must block unauthorized access BEFORE component render
 - Handle `auth.isLoading` gracefully in `beforeLoad`—do NOT redirect to `/login` while auth status is still loading
 
-#### tRPC Integration (Phase 1)
-- tRPC hooks stay inside components for Phase 1
-- Ensure `RouterContext` correctly passes `queryClient` and `trpc` instance—this foundation enables Phase 2 Route Loaders without refactoring context
-
 #### Backwards Compatibility
 - **Non-negotiable**: Every old URL (`/catalog`, `/shipments`, etc.) must have a redirect file in `_redirects/` folder using TanStack `redirect()`. No 404s for existing bookmarks
 - Use `activeProps` on all `Link` components for sidebar styling—do NOT manually calculate active state via pathname string matching
@@ -95,15 +93,11 @@ Login: `admin@coh.com` / `XOFiya@34`
 
 ## Stack
 
-### Current (During Migration)
-- **Backend**: Express + tRPC + Prisma + PostgreSQL
+- **Backend**: Express (auth, webhooks, file uploads) + TanStack Start Server Functions + Prisma + PostgreSQL
 - **Frontend**: React 19 + TanStack Router + TanStack Query v5 + AG-Grid + Tailwind + shadcn/ui
-- **Real-time**: SSE with TanStack Query invalidation
-
-### Target (Post-Migration)
-- **Full-stack**: TanStack Start + Prisma + PostgreSQL
-- **Data Flow**: Route Loaders → TanStack Query cache → SSE invalidation
+- **Data Flow**: Route Loaders → Server Functions → TanStack Query cache → SSE invalidation
 - **Validation**: Zod at all boundaries (search params, Server Function inputs)
+- **Real-time**: SSE with TanStack Query invalidation
 
 ### UI Components
 - **Use shadcn/ui components wherever possible** - buttons, dialogs, dropdowns, inputs, etc.
@@ -113,29 +107,29 @@ Login: `admin@coh.com` / `XOFiya@34`
 
 ## Gotchas (Read First!)
 
-1. **Router order**: specific routes before parameterized (`:id`)
-2. **Async routes**: wrap with `asyncHandler()`
-3. **Cache invalidation**: mutations MUST invalidate TanStack Query + tRPC + server caches
-4. **AG-Grid cellRenderer**: return JSX, not strings; use centralized formatting from `ordersGrid/formatting/`
-5. **Shopify data**: lives in `shopifyCache.*`, NEVER use `rawData`
-6. **Line fields**: use pre-computed O(1) fields (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` O(n)
-7. **View filters**: shipped/cancelled orders stay in Open until Release clicked
-8. **Prisma dates**: returns Date objects—use `toDateString()` from `utils/dateHelpers.ts`
-9. **Dev URLs**: use `localhost` for API calls
-10. **tRPC params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
-11. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
-12. **Line-level tracking**: delivery/RTO mutations are line-level; orders can have mixed states (partial delivery, multi-AWB)
-13. **Admin ship**: use `adminShip` mutation (not `ship` with force flag); requires admin role + `ENABLE_ADMIN_SHIP=true`
-14. **Tracking status mapping**: TEXT patterns override status codes; `cancel_status="Approved"` always means cancelled; "UD" code is unreliable
-15. **Shopify fulfillment**: syncs tracking data ONLY; ERP is source of truth for `shipped` status—never auto-ship from webhooks
-16. **Tracking sync**: excludes terminal statuses (`delivered`, `rto_delivered`) to avoid wasting API calls on unchangeable data
-17. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
-18. **TypeScript checks BEFORE committing**: ALWAYS run `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit` before every commit. This is NON-NEGOTIABLE. The client uses project references—`tsconfig.app.json` has stricter checks than the root config. Delete `.tsbuildinfo` if you suspect caching issues. Never push code with TypeScript errors.
-19. **TanStack Table trees**: use `getSubRows` for hierarchy, never mutate `children` directly; expansion state separate from data
-20. **Fabric hierarchy**: Database enforces Material→Fabric→Colour consistency; colours MUST have fabricId, fabrics MUST have materialId
-21. **Inheritance pattern**: Fabric colours inherit cost/lead/minOrder from parent fabric if not explicitly set (priority: colour → fabric → null)
-22. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
-23. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
+1. **Server Functions**: All data fetching and mutations use Server Functions in `client/src/server/functions/`. No tRPC.
+2. **Cache invalidation**: mutations MUST invalidate TanStack Query + server caches. Use `queryClient.invalidateQueries()`
+3. **AG-Grid cellRenderer**: return JSX, not strings; use centralized formatting from `ordersGrid/formatting/`
+4. **Shopify data**: lives in `shopifyCache.*`, NEVER use `rawData`
+5. **Line fields**: use pre-computed O(1) fields (`lineShippedAt`, `daysInTransit`), not `orderLines.find()` O(n)
+6. **View filters**: shipped/cancelled orders stay in Open until Release clicked
+7. **Prisma dates**: returns Date objects—use `toDateString()` from `utils/dateHelpers.ts`
+8. **Dev URLs**: use `localhost` for API calls
+9. **Zod params**: never `prop: undefined`, use spread `...(val ? {prop: val} : {})`
+10. **Deferred tasks**: mutations return immediately; side effects (cache, SSE) run async via `deferredExecutor`
+11. **Line-level tracking**: delivery/RTO mutations are line-level; orders can have mixed states (partial delivery, multi-AWB)
+12. **Admin ship**: use `adminShip` mutation; requires admin role + `ENABLE_ADMIN_SHIP=true`
+13. **Tracking status mapping**: TEXT patterns override status codes; `cancel_status="Approved"` always means cancelled; "UD" code is unreliable
+14. **Shopify fulfillment**: syncs tracking data ONLY; ERP is source of truth for `shipped` status—never auto-ship from webhooks
+15. **Tracking sync**: excludes terminal statuses (`delivered`, `rto_delivered`) to avoid wasting API calls on unchangeable data
+16. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
+17. **TypeScript checks BEFORE committing**: ALWAYS run `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit` before every commit. NON-NEGOTIABLE.
+18. **TanStack Table trees**: use `getSubRows` for hierarchy, never mutate `children` directly; expansion state separate from data
+19. **Fabric hierarchy**: Database enforces Material→Fabric→Colour consistency; colours MUST have fabricId, fabrics MUST have materialId
+20. **Inheritance pattern**: Fabric colours inherit cost/lead/minOrder from parent fabric if not explicitly set (priority: colour → fabric → null)
+21. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
+22. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
+23. **Express routes**: Only for auth (cookies), webhooks, SSE, and file uploads. Everything else uses Server Functions.
 
 ## Orders Architecture
 
@@ -228,25 +222,25 @@ inventoryBalanceCache.invalidateAll(); // bulk ops
 - Server: `routes/sse.ts` | Client: `hooks/useOrderSSE.ts`
 - Auto-reconnect with 100-event replay buffer; prefer `invalidate()` over `setData()`
 
-## Data Fetching & Mutations (During Migration)
+## Data Fetching & Mutations
 
-### Current Pattern (tRPC - Still Active)
+### Server Functions Pattern
 ```typescript
-import { trpc } from '@/services/trpc';
-const { data } = trpc.orders.list.useQuery({ view: 'open' });
-const mutation = trpc.orders.ship.useMutation();
-```
-
-### Target Pattern (TanStack Start)
-```typescript
-// Route loader (SSR)
+// Route loader prefetches via Server Function
 loader: async ({ search }) => getOrders({ data: search })
 
-// Component (hydrated from loader)
+// Component with TanStack Query
+const loaderData = Route.useLoaderData();
 const { data } = useQuery({
   queryKey: ['orders', search],
   queryFn: () => getOrders({ data: search }),
-  initialData: Route.useLoaderData(),
+  initialData: loaderData,
+});
+
+// Mutations
+const mutation = useMutation({
+  mutationFn: (input) => shipOrder({ data: input }),
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
 });
 ```
 
@@ -333,29 +327,53 @@ components/materials/
   types.ts                               # MaterialNode, MaterialNodeType, inheritance types
 ```
 
-### Server
+### Server Functions (Primary Data Layer)
 ```
+client/src/server/functions/
+  orders.ts, orderMutations.ts        # Orders queries and mutations
+  customers.ts, customerMutations.ts  # Customers queries and mutations
+  inventory.ts, inventoryMutations.ts # Inventory queries and mutations
+  products.ts, productsMutations.ts   # Products queries and mutations
+  materials.ts, materialsMutations.ts # Materials queries and mutations
+  fabrics.ts, fabricMutations.ts      # Fabrics queries and mutations
+  returns.ts, returnsMutations.ts     # Returns queries and mutations
+  tracking.ts                         # Tracking queries
+  admin.ts, shopify.ts, catalog.ts    # Admin, Shopify, Catalog functions
+  bomMutations.ts                     # BOM mutations
+  production.ts, productionMutations.ts # Production queries and mutations
+  reports.ts, repacking.ts            # Reports and repacking
+```
+
+### Server (Express - Minimal Routes)
+```
+routes/
+  auth.ts                             # Auth (JWT, HttpOnly cookies)
+  webhooks.ts                         # Shopify webhooks
+  shopify/                            # Shopify admin sync (6 files)
+  sse.ts                              # SSE streaming
+  pulse.ts                            # Health checks
+  admin.ts                            # Admin operations
+  remittance.ts                       # File uploads (remittance)
+  import-export.ts                    # File uploads/downloads
+  inventory-reconciliation.ts         # File uploads (reconciliation)
+  pincodes.js                         # File uploads (pincodes)
+
 config/                               # Centralized configuration system
 config/mappings/trackingStatus.ts     # iThink status mapping (text-first, cancel_status priority)
-routes/
-  orders/mutations/                   # crud, lifecycle, archive, lineOps, customization
-  orders/queries/                     # views, search, summaries, analytics
-  materials.ts                        # Materials hierarchy (Material→Fabric→Colour) + Trims/Services
-  products.ts                         # Products hierarchy (Product→Variation→SKU)
-  bom.ts                              # BOM management (product/variation level)
-  tracking.ts                         # Tracking endpoints (AWB, batch, sync, debug /raw/:awb)
-utils/orderStateMachine.ts            # Line status state machine
-utils/orderViews.ts                   # VIEW_CONFIGS (flattening, enrichment)
-utils/orderEnrichment/                # Enrichment pipeline (9 files)
-utils/patterns/                       # Query patterns (inventory, transactions, etc.)
-services/inventoryBalanceCache.ts     # Inventory cache
-services/customerStatsCache.ts        # Customer stats cache
-services/adminShipService.ts          # Admin force ship (isolated, feature-flagged)
-services/trackingSync.ts              # Background tracking sync (excludes terminal statuses)
-services/shopifyOrderProcessor.ts     # Shopify webhook processor (tracking sync only, no auto-ship)
-trpc/routers/
-  orders.ts                           # Orders tRPC procedures
-  products.ts                         # Products tree query
+
+services/
+  autoArchive.ts                      # Auto-archive service (extracted for server startup)
+  inventoryBalanceCache.ts            # Inventory cache
+  customerStatsCache.ts               # Customer stats cache
+  adminShipService.ts                 # Admin force ship (isolated, feature-flagged)
+  trackingSync.ts                     # Background tracking sync (excludes terminal statuses)
+  shopifyOrderProcessor.ts            # Shopify webhook processor (tracking sync only)
+
+utils/
+  orderStateMachine.ts                # Line status state machine
+  orderViews.ts                       # VIEW_CONFIGS (flattening, enrichment)
+  orderEnrichment/                    # Enrichment pipeline (9 files)
+  patterns/                           # Query patterns (inventory, transactions, etc.)
 ```
 
 ## Products & Materials Architecture
@@ -514,4 +532,4 @@ railway variables --unset "NO_CACHE"
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `5e1ee92` (2026-01-21)
+**Updated till commit:** `5c881e6` (2026-01-21) - Server Functions migration complete, Express routes minimal

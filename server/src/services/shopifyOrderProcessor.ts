@@ -27,7 +27,7 @@
 
 import type { PrismaClient, Prisma } from '@prisma/client';
 import shopifyClient from './shopify.js';
-import type { ShopifyOrder, ShopifyFulfillment, ShopifyLineItem, ShopifyAddress, ShopifyCustomer } from './shopify.js';
+import type { ShopifyOrder, ShopifyFulfillment, ShopifyAddress, ShopifyCustomer } from './shopify.js';
 import { findOrCreateCustomer, type ShopifyCustomerData } from '../utils/customerUtils.js';
 import { withOrderLock } from '../utils/orderLock.js';
 import { detectPaymentMethod, extractInternalNote, calculateEffectiveUnitPrice } from '../utils/shopifyHelpers.js';
