@@ -21,6 +21,26 @@
     "./domain": {
       "types": "./dist/domain/index.d.ts",
       "import": "./dist/domain/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "import": "./dist/services/index.js"
+    },
+    "./services/db": {
+      "types": "./dist/services/db/index.d.ts",
+      "import": "./dist/services/db/index.js"
+    },
+    "./services/db/queries": {
+      "types": "./dist/services/db/queries/index.d.ts",
+      "import": "./dist/services/db/queries/index.js"
+    },
+    "./services/inventory": {
+      "types": "./dist/services/inventory/index.d.ts",
+      "import": "./dist/services/inventory/index.js"
+    },
+    "./services/orders": {
+      "types": "./dist/services/orders/index.d.ts",
+      "import": "./dist/services/orders/index.js"
     }
   },
   "scripts": {
@@ -30,8 +50,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@prisma/client": "^6.1.0",
+    "kysely": "^0.28.10",
+    "pg": "^8.17.2",
     "typescript": "^5.7.3",
     "zod": "^4.3.5"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/pg": "^8.16.0"
+  }
 }

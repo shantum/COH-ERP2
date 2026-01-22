@@ -203,7 +203,7 @@ export interface CustomerDetailResult {
 export const getCustomer = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getCustomerInputSchema.parse(input))
     .handler(async ({ data }): Promise<CustomerDetailResult> => {
-        const { getCustomerKysely } = await import('@server/db/queries/index.js');
+        const { getCustomerKysely } = await import('@coh/shared/services/db/queries');
 
         const customer = await getCustomerKysely(data.id);
 

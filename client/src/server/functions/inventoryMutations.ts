@@ -363,7 +363,7 @@ async function broadcastUpdate(event: InventoryUpdateEvent): Promise<void> {
 async function invalidateCache(skuIds: string[]): Promise<void> {
     try {
         // Import dynamically to avoid bundling server code
-        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidate(skuIds);
     } catch {
         // Cache invalidation is best-effort in Server Functions

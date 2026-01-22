@@ -9,6 +9,7 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
@@ -209,6 +210,52 @@ const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', 'Free'];
 function getSizeIndex(size: string): number {
     const idx = SIZE_ORDER.indexOf(size);
     return idx === -1 ? 999 : idx;
+}
+
+// ============================================
+// EXPRESS API HELPER
+// ============================================
+
+/**
+ * Helper to call Express API endpoints from Server Functions.
+ * Handles auth token forwarding and environment-aware URL construction.
+ *
+ * See CLAUDE.md gotcha #27 for production URL handling.
+ */
+async function callExpressApi<T>(
+    path: string,
+    options: RequestInit = {}
+): Promise<T> {
+    const port = process.env.PORT || '3001';
+    const apiUrl =
+        process.env.NODE_ENV === 'production'
+            ? `http://127.0.0.1:${port}` // Same server on Railway
+            : 'http://localhost:3001'; // Separate dev server
+
+    const authToken = getCookie('auth_token');
+
+    const response = await fetch(`${apiUrl}${path}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
+            ...options.headers,
+        },
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        let errorMessage: string;
+        try {
+            const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
+            errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
+        } catch {
+            errorMessage = `API call failed: ${response.status} - ${errorBody}`;
+        }
+        throw new Error(errorMessage);
+    }
+
+    return response.json() as Promise<T>;
 }
 
 // ============================================
@@ -616,35 +663,29 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
  *
  * Triggers a product sync with Shopify to update product catalog data.
  * This imports/updates products from Shopify into the ERP.
+ *
+ * Calls: POST /api/shopify/sync/products
  */
 export const syncCatalogWithShopify = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => syncCatalogWithShopifySchema.parse(input ?? {}))
     .handler(async ({ data }): Promise<SyncCatalogResponse> => {
         try {
-            // Dynamic import to avoid bundling server-only code
-            const { syncAllProducts } = await import('@server/services/productSyncService.js');
-            const { PrismaClient } = await import('@prisma/client');
-            const prisma = new PrismaClient();
-
-            try {
-                const { shopifyProducts, results } = await syncAllProducts(prisma, {
-                    limit: data.limit,
-                    syncAll: data.syncAll,
-                });
-
-                return {
-                    success: true,
-                    data: {
-                        message: 'Product sync completed',
-                        fetched: shopifyProducts.length,
+            const response = await callExpressApi<SyncResultData>(
+                '/api/shopify/sync/products',
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        limit: data.limit,
                         syncAll: data.syncAll,
-                        results,
-                    },
-                };
-            } finally {
-                await prisma.$disconnect();
-            }
+                    }),
+                }
+            );
+
+            return {
+                success: true,
+                data: response,
+            };
         } catch (error: unknown) {
             console.error('syncCatalogWithShopify error:', error);
             const message = error instanceof Error ? error.message : 'Failed to sync catalog with Shopify';

@@ -10,7 +10,15 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import { sql } from 'kysely';
 import { authMiddleware } from '../middleware/auth';
+import {
+    productsListResultSchema,
+    type ProductsListResult,
+    type ProductWithVariations,
+    type VariationRow,
+    type SkuRow,
+} from '@coh/shared';
 
 // Input validation schema
 const productsTreeInputSchema = z.object({
@@ -18,6 +26,12 @@ const productsTreeInputSchema = z.object({
 });
 
 export type ProductsTreeInput = z.infer<typeof productsTreeInputSchema>;
+
+// ============================================
+// DATABASE IMPORTS
+// ============================================
+
+import { getKysely } from '@coh/shared/services/db';
 
 /**
  * Response type matching useProductsTree expectations
@@ -416,21 +430,213 @@ export type GetProductsListInput = z.infer<typeof getProductsListInputSchema>;
 /**
  * Server Function: Get products list
  *
- * Fetches products list using Kysely query.
+ * Fetches products list using Kysely query (inline implementation).
  * Used by CreateOrderModal, ProductSearch, and AddToPlanModal.
+ *
+ * NOTE: Cannot import from @server/ path alias in Server Functions (dev resolution issue).
+ * Query implemented inline using local Kysely singleton.
  */
 export const getProductsList = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getProductsListInputSchema.parse(input ?? {}))
-    .handler(async ({ data: input }) => {
-        const { listProductsKysely } = await import('@server/db/queries/index.js');
-        return listProductsKysely({
-            search: input.search,
-            category: input.category,
-            isActive: input.isActive,
-            page: input.page,
-            limit: input.limit,
-        });
+    .handler(async ({ data: input }): Promise<ProductsListResult> => {
+        const db = await getKysely();
+        const { search, category, isActive, page = 1, limit = 50 } = input;
+        const offset = (page - 1) * limit;
+
+        // Build base query for counting
+        let countQuery = db.selectFrom('Product').select(sql<number>`count(*)::int`.as('count'));
+
+        // Apply filters to count query
+        if (category) {
+            countQuery = countQuery.where('Product.category', '=', category);
+        }
+        if (isActive !== undefined) {
+            countQuery = countQuery.where('Product.isActive', '=', isActive);
+        }
+        if (search) {
+            const searchTerm = `%${search.toLowerCase()}%`;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            countQuery = countQuery.where((eb: any) =>
+                eb.or([sql`LOWER("Product"."name") LIKE ${searchTerm}`])
+            ) as typeof countQuery;
+        }
+
+        // Get total count
+        const countResult = await countQuery.executeTakeFirst();
+        const total = countResult?.count ?? 0;
+
+        // Build main query for products
+        const productsRaw = await db
+            .selectFrom('Product')
+            .leftJoin('FabricType', 'FabricType.id', 'Product.fabricTypeId')
+            .select([
+                'Product.id',
+                'Product.name',
+                'Product.styleCode',
+                'Product.category',
+                'Product.productType',
+                'Product.gender',
+                'Product.imageUrl',
+                'Product.isActive',
+                'Product.createdAt',
+                'Product.fabricTypeId',
+                'FabricType.name as fabricTypeName',
+            ])
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .$call((qb: any) => {
+                let q = qb;
+                if (category) {
+                    q = q.where('Product.category', '=', category) as typeof q;
+                }
+                if (isActive !== undefined) {
+                    q = q.where('Product.isActive', '=', isActive) as typeof q;
+                }
+                if (search) {
+                    const searchTerm = `%${search.toLowerCase()}%`;
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    q = q.where((eb: any) =>
+                        eb.or([sql`LOWER("Product"."name") LIKE ${searchTerm}`])
+                    ) as typeof q;
+                }
+                return q;
+            })
+            .orderBy('Product.createdAt', 'desc')
+            .limit(limit)
+            .offset(offset)
+            .execute();
+
+        // Get product IDs for fetching variations
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const productIds = productsRaw.map((p: any) => p.id);
+
+        if (productIds.length === 0) {
+            return {
+                products: [],
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit),
+                },
+            };
+        }
+
+        // Fetch variations with fabrics for these products
+        const variationsRaw = await db
+            .selectFrom('Variation')
+            .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
+            .select([
+                'Variation.id',
+                'Variation.productId',
+                'Variation.colorName',
+                'Variation.standardColor',
+                'Variation.colorHex',
+                'Variation.imageUrl',
+                'Variation.isActive',
+                'Variation.fabricId',
+                'Fabric.id as fabric_id',
+                'Fabric.name as fabric_name',
+                'Fabric.colorName as fabric_colorName',
+            ])
+            .where('Variation.productId', 'in', productIds)
+            .execute();
+
+        // Get variation IDs for fetching SKUs
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const variationIds = variationsRaw.map((v: any) => v.id);
+
+        // Fetch SKUs for these variations
+        const skusRaw =
+            variationIds.length > 0
+                ? await db
+                      .selectFrom('Sku')
+                      .select([
+                          'Sku.id',
+                          'Sku.variationId',
+                          'Sku.skuCode',
+                          'Sku.size',
+                          'Sku.mrp',
+                          'Sku.isActive',
+                          'Sku.fabricConsumption',
+                          'Sku.targetStockQty',
+                      ])
+                      .where('Sku.variationId', 'in', variationIds)
+                      .execute()
+                : [];
+
+        // Build lookup maps
+        const skusByVariation = new Map<string, SkuRow[]>();
+        for (const sku of skusRaw) {
+            const list = skusByVariation.get(sku.variationId) || [];
+            list.push({
+                id: sku.id,
+                skuCode: sku.skuCode,
+                size: sku.size,
+                mrp: sku.mrp,
+                isActive: sku.isActive,
+                fabricConsumption: sku.fabricConsumption ?? 0,
+                targetStockQty: sku.targetStockQty ?? 0,
+            });
+            skusByVariation.set(sku.variationId, list);
+        }
+
+        const variationsByProduct = new Map<string, VariationRow[]>();
+        for (const v of variationsRaw) {
+            const list = variationsByProduct.get(v.productId) || [];
+            list.push({
+                id: v.id,
+                colorName: v.colorName,
+                standardColor: v.standardColor,
+                colorHex: v.colorHex,
+                imageUrl: v.imageUrl,
+                isActive: v.isActive,
+                fabricId: v.fabricId ?? '',
+                fabric: v.fabric_id
+                    ? {
+                          id: v.fabric_id,
+                          name: v.fabric_name ?? '',
+                          colorName: v.fabric_colorName ?? '',
+                      }
+                    : null,
+                skus: skusByVariation.get(v.id) || [],
+            });
+            variationsByProduct.set(v.productId, list);
+        }
+
+        // Assemble final products
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const products: ProductWithVariations[] = productsRaw.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            styleCode: p.styleCode,
+            category: p.category,
+            productType: p.productType,
+            gender: p.gender,
+            imageUrl: p.imageUrl,
+            isActive: p.isActive,
+            createdAt: p.createdAt,
+            fabricType: p.fabricTypeId
+                ? {
+                      id: p.fabricTypeId,
+                      name: p.fabricTypeName ?? '',
+                  }
+                : null,
+            variations: variationsByProduct.get(p.id) || [],
+        }));
+
+        const result = {
+            products,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit),
+            },
+        };
+
+        // Validate output against Zod schema
+        return productsListResultSchema.parse(result);
     });
 
 // ============================================

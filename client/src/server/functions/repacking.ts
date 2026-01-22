@@ -318,7 +318,7 @@ export const processRepackingItem = createServerFn({ method: 'POST' })
         });
 
         // Invalidate caches
-        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidate([item.skuId]);
 
         return {
@@ -393,7 +393,7 @@ export const undoRepackingProcess = createServerFn({ method: 'POST' })
         });
 
         // Invalidate caches
-        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         inventoryBalanceCache.invalidate([item.skuId]);
 
         return {

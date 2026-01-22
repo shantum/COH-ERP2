@@ -4,11 +4,12 @@
  * TanStack Start Server Functions for Shopify integration management.
  * Provides configuration, sync jobs, and cache status endpoints.
  *
- * IMPORTANT: All database imports are dynamic to prevent Node.js code
- * (pg, Buffer) from being bundled into the client.
+ * IMPORTANT: Uses Express API calls for Shopify service interactions.
+ * This avoids bundling server-only code into the client.
  */
 
 import { createServerFn } from '@tanstack/react-start';
+import { getCookie } from '@tanstack/react-start/server';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
@@ -141,27 +142,49 @@ async function getPrisma() {
 }
 
 // ============================================
-// SHOPIFY CLIENT HELPER
+// EXPRESS API HELPER
 // ============================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ShopifyClientType = any;
+/**
+ * Helper to call Express API endpoints from Server Functions.
+ * Handles auth token forwarding and environment-aware URL construction.
+ *
+ * See CLAUDE.md gotcha #27 for production URL handling.
+ */
+async function callExpressApi<T>(
+    path: string,
+    options: RequestInit = {}
+): Promise<T> {
+    const port = process.env.PORT || '3001';
+    const apiUrl =
+        process.env.NODE_ENV === 'production'
+            ? `http://127.0.0.1:${port}` // Same server on Railway
+            : 'http://localhost:3001'; // Separate dev server
 
-async function getShopifyClient(): Promise<ShopifyClientType> {
-    const { default: shopifyClient } = await import('@server/services/shopify.js');
-    return shopifyClient;
-}
+    const authToken = getCookie('auth_token');
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getSyncWorker(): Promise<any> {
-    const { default: syncWorker } = await import('@server/services/syncWorker.js');
-    return syncWorker;
-}
+    const response = await fetch(`${apiUrl}${path}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
+            ...options.headers,
+        },
+    });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getScheduledSync(): Promise<any> {
-    const { default: scheduledSync } = await import('@server/services/scheduledSync.js');
-    return scheduledSync;
+    if (!response.ok) {
+        const errorBody = await response.text();
+        let errorMessage: string;
+        try {
+            const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
+            errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
+        } catch {
+            errorMessage = `API call failed: ${response.status} - ${errorBody}`;
+        }
+        throw new Error(errorMessage);
+    }
+
+    return response.json() as Promise<T>;
 }
 
 // ============================================
@@ -170,29 +193,16 @@ async function getScheduledSync(): Promise<any> {
 
 /**
  * Get Shopify configuration
+ * Calls: GET /api/shopify/config
  */
 export const getShopifyConfig = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<MutationResult<ShopifyConfigResult>> => {
         try {
-            const shopifyClient = await getShopifyClient();
-            await shopifyClient.loadFromDatabase();
-
-            const config = shopifyClient.getConfig();
-            const hasAccessToken = !!(shopifyClient as unknown as { accessToken: string | undefined }).accessToken;
-            const fromEnvVars = !!(process.env.SHOPIFY_ACCESS_TOKEN && process.env.SHOPIFY_SHOP_DOMAIN);
-
+            const config = await callExpressApi<ShopifyConfigResult>('/api/shopify/config');
             return {
                 success: true,
-                data: {
-                    shopDomain: config.shopDomain || '',
-                    apiVersion: config.apiVersion,
-                    hasAccessToken,
-                    fromEnvVars,
-                    ...(fromEnvVars && {
-                        info: 'Credentials loaded from environment variables. Changes made here will not persist after server restart.',
-                    }),
-                },
+                data: config,
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
@@ -205,6 +215,7 @@ export const getShopifyConfig = createServerFn({ method: 'GET' })
 
 /**
  * Update Shopify configuration
+ * Calls: PUT /api/shopify/config
  */
 export const updateShopifyConfig = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -213,14 +224,18 @@ export const updateShopifyConfig = createServerFn({ method: 'POST' })
         const { shopDomain, accessToken } = data;
 
         try {
-            const shopifyClient = await getShopifyClient();
-            const cleanDomain = shopDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-            await shopifyClient.updateConfig(cleanDomain, accessToken);
+            const response = await callExpressApi<{ message: string; shopDomain: string }>(
+                '/api/shopify/config',
+                {
+                    method: 'PUT',
+                    body: JSON.stringify({ shopDomain, accessToken }),
+                }
+            );
 
             return {
                 success: true,
                 data: {
-                    shopDomain: cleanDomain,
+                    shopDomain: response.shopDomain,
                     updated: true,
                 },
             };
@@ -235,67 +250,20 @@ export const updateShopifyConfig = createServerFn({ method: 'POST' })
 
 /**
  * Test Shopify connection
+ * Calls: POST /api/shopify/test-connection
  */
 export const testShopifyConnection = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .handler(async (): Promise<MutationResult<TestConnectionResult>> => {
         try {
-            const shopifyClient = await getShopifyClient();
-            await shopifyClient.loadFromDatabase();
-
-            if (!shopifyClient.isConfigured()) {
-                return {
-                    success: true,
-                    data: {
-                        success: false,
-                        message: 'Shopify credentials not configured',
-                    },
-                };
-            }
-
-            try {
-                const orderCount = await shopifyClient.getOrderCount();
-                const customerCount = await shopifyClient.getCustomerCount();
-
-                return {
-                    success: true,
-                    data: {
-                        success: true,
-                        message: 'Connection successful',
-                        stats: { totalOrders: orderCount, totalCustomers: customerCount },
-                    },
-                };
-            } catch (error: unknown) {
-                // Type guard for axios-like errors
-                const axiosError = error as {
-                    message?: string;
-                    response?: { status?: number; data?: { errors?: string | unknown } };
-                };
-
-                let errorMessage = axiosError.message ?? 'Unknown error';
-                const status = axiosError.response?.status;
-
-                if (status === 401) {
-                    errorMessage = 'Invalid access token. Please check your Admin API access token.';
-                } else if (status === 403) {
-                    errorMessage = 'Access forbidden. Your access token may be missing required API scopes.';
-                } else if (status === 404) {
-                    errorMessage = 'Shop not found. Please check the shop domain format (e.g., yourstore.myshopify.com)';
-                } else if (axiosError.response?.data?.errors) {
-                    errorMessage = typeof axiosError.response.data.errors === 'string'
-                        ? axiosError.response.data.errors
-                        : JSON.stringify(axiosError.response.data.errors);
-                }
-
-                return {
-                    success: true,
-                    data: {
-                        success: false,
-                        message: errorMessage,
-                        statusCode: status,
-                    },
-                };
-            }
+            const result = await callExpressApi<TestConnectionResult>(
+                '/api/shopify/test-connection',
+                { method: 'POST' }
+            );
+            return {
+                success: true,
+                data: result,
+            };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             return {
@@ -346,6 +314,7 @@ export const getShopifySyncHistory = createServerFn({ method: 'GET' })
 
 /**
  * Get sync jobs list
+ * Calls: GET /api/shopify/sync/jobs
  */
 export const getSyncJobs = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
@@ -355,30 +324,12 @@ export const getSyncJobs = createServerFn({ method: 'GET' })
     })
     .handler(async ({ data }): Promise<MutationResult<SyncJobResult[]>> => {
         try {
-            const syncWorker = await getSyncWorker();
-            const jobs = await syncWorker.listJobs(data.limit);
-
+            const jobs = await callExpressApi<SyncJobResult[]>(
+                `/api/shopify/sync/jobs?limit=${data.limit}`
+            );
             return {
                 success: true,
-                data: jobs.map((job: {
-                    id: string;
-                    jobType: string;
-                    status: string;
-                    progress?: number;
-                    startedAt?: Date;
-                    completedAt?: Date;
-                    errorMessage?: string;
-                    stats?: Record<string, unknown>;
-                }) => ({
-                    id: job.id,
-                    jobType: job.jobType,
-                    status: job.status,
-                    progress: job.progress,
-                    startedAt: job.startedAt?.toISOString(),
-                    completedAt: job.completedAt?.toISOString(),
-                    errorMessage: job.errorMessage,
-                    stats: job.stats,
-                })),
+                data: jobs,
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
@@ -391,37 +342,29 @@ export const getSyncJobs = createServerFn({ method: 'GET' })
 
 /**
  * Get sync job status
+ * Calls: GET /api/shopify/sync/jobs/:id
  */
 export const getSyncJobStatus = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getSyncJobStatusSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<SyncJobResult>> => {
         try {
-            const syncWorker = await getSyncWorker();
-            const job = await syncWorker.getJobStatus(data.jobId);
-
-            if (!job) {
+            const job = await callExpressApi<SyncJobResult>(
+                `/api/shopify/sync/jobs/${data.jobId}`
+            );
+            return {
+                success: true,
+                data: job,
+            };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            // Check for NOT_FOUND in the error message
+            if (message.includes('not found') || message.includes('404')) {
                 return {
                     success: false,
                     error: { code: 'NOT_FOUND', message: 'Job not found' },
                 };
             }
-
-            return {
-                success: true,
-                data: {
-                    id: job.id,
-                    jobType: job.jobType,
-                    status: job.status,
-                    progress: job.progress,
-                    startedAt: job.startedAt?.toISOString(),
-                    completedAt: job.completedAt?.toISOString(),
-                    errorMessage: job.errorMessage,
-                    stats: job.stats,
-                },
-            };
-        } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
                 error: { code: 'EXTERNAL_ERROR', message },
@@ -431,6 +374,7 @@ export const getSyncJobStatus = createServerFn({ method: 'GET' })
 
 /**
  * Start sync job
+ * Calls: POST /api/shopify/sync/jobs/start
  */
 export const startSyncJob = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -439,27 +383,22 @@ export const startSyncJob = createServerFn({ method: 'POST' })
         const { jobType, syncMode, days, staleAfterMins } = data;
 
         try {
-            const syncWorker = await getSyncWorker();
-            const job = await syncWorker.startJob(jobType, {
-                days: days || undefined,
-                syncMode: syncMode || undefined,
-                staleAfterMins,
-            });
-
-            const effectiveMode = syncMode === 'deep' ? 'deep' : 'incremental';
+            const response = await callExpressApi<{ message: string; job: SyncJobResult }>(
+                '/api/shopify/sync/jobs/start',
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        jobType,
+                        ...(syncMode ? { syncMode } : {}),
+                        ...(days ? { days } : {}),
+                        ...(staleAfterMins ? { staleAfterMins } : {}),
+                    }),
+                }
+            );
 
             return {
                 success: true,
-                data: {
-                    id: job.id,
-                    jobType: job.jobType,
-                    status: job.status,
-                    progress: job.progress,
-                    startedAt: job.startedAt?.toISOString(),
-                    completedAt: job.completedAt?.toISOString(),
-                    errorMessage: job.errorMessage,
-                    stats: { effectiveMode },
-                },
+                data: response.job,
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
@@ -472,27 +411,21 @@ export const startSyncJob = createServerFn({ method: 'POST' })
 
 /**
  * Cancel sync job
+ * Calls: POST /api/shopify/sync/jobs/:id/cancel
  */
 export const cancelSyncJob = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => cancelSyncJobSchema.parse(input))
     .handler(async ({ data }): Promise<MutationResult<SyncJobResult>> => {
         try {
-            const syncWorker = await getSyncWorker();
-            const job = await syncWorker.cancelJob(data.jobId);
+            const response = await callExpressApi<{ message: string; job: SyncJobResult }>(
+                `/api/shopify/sync/jobs/${data.jobId}/cancel`,
+                { method: 'POST' }
+            );
 
             return {
                 success: true,
-                data: {
-                    id: job.id,
-                    jobType: job.jobType,
-                    status: job.status,
-                    progress: job.progress,
-                    startedAt: job.startedAt?.toISOString(),
-                    completedAt: job.completedAt?.toISOString(),
-                    errorMessage: job.errorMessage,
-                    stats: job.stats,
-                },
+                data: response.job,
             };
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Unknown error';
@@ -545,6 +478,7 @@ export const getCacheStatus = createServerFn({ method: 'GET' })
 
 /**
  * Trigger manual sync (via scheduler)
+ * Calls: POST /api/shopify/sync/jobs/scheduler/trigger
  */
 export const triggerSync = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
@@ -554,14 +488,16 @@ export const triggerSync = createServerFn({ method: 'POST' })
     })
     .handler(async (): Promise<MutationResult<TriggerSyncResult>> => {
         try {
-            const scheduledSync = await getScheduledSync();
-            const result = await scheduledSync.triggerSync();
+            const response = await callExpressApi<{ message: string; result: Record<string, unknown> }>(
+                '/api/shopify/sync/jobs/scheduler/trigger',
+                { method: 'POST' }
+            );
 
             return {
                 success: true,
                 data: {
-                    message: 'Sync triggered',
-                    result,
+                    message: response.message,
+                    result: response.result,
                 },
             };
         } catch (error: unknown) {

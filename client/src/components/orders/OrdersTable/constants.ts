@@ -6,7 +6,7 @@
 export const ALL_COLUMN_IDS = [
     'orderInfo', 'customerInfo', 'paymentInfo', 'shipByDate',
     'tags', 'customerNotes', 'customerTags', 'productName', 'customize', 'qty', 'assignStock', 'fabricBalance',
-    'workflow', 'pickPack', 'production', 'notes', 'cancelLine',
+    'workflow', 'pickPack', 'production', 'notes', 'cancelLine', 'adminShip',
     'shopifyTracking', 'trackingInfo', 'trackingStatus',
 ] as const;
 
@@ -38,6 +38,7 @@ export const DEFAULT_HEADERS: Record<string, string> = {
     production: 'Production',
     notes: 'Notes',
     cancelLine: 'Cance',
+    adminShip: 'Admin',
     shopifyTracking: 'Shopify',
     trackingInfo: 'COH AWB',
     trackingStatus: 'Tracking',
@@ -74,6 +75,7 @@ export const DEFAULT_COLUMN_WIDTHS: Partial<Record<ColumnId | string, number>> =
     production: 90,
     notes: 120,
     cancelLine: 40,
+    adminShip: 55,
     shopifyTracking: 100,
     trackingInfo: 130,
     trackingStatus: 80,

@@ -1325,7 +1325,7 @@ export const scanLookup = createServerFn({ method: 'GET' })
         }
 
         // Get inventory balance
-        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
         const balanceMap = await inventoryBalanceCache.get(prisma, [sku.id]);
         const balance = balanceMap.get(sku.id) || { currentBalance: 0, availableBalance: 0 };
 

@@ -206,47 +206,10 @@ const pendingBySkuInputSchema = z.object({
 });
 
 // ============================================
-// LAZY DATABASE IMPORTS
+// DATABASE IMPORTS
 // ============================================
 
-/**
- * Lazy import of Kysely database instance.
- * Creates instance directly to avoid @server import resolution issues in dev.
- * Uses dynamic import with singleton pattern.
- */
-async function getKyselyDb() {
-    const { Kysely, PostgresDialect } = await import('kysely');
-    const { Pool } = await import('pg');
-
-    // Use globalThis for singleton - untyped to avoid import issues
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const globalForKysely = globalThis as unknown as { kyselyProductionInstance: any };
-    if (!globalForKysely.kyselyProductionInstance) {
-        globalForKysely.kyselyProductionInstance = new Kysely({
-            dialect: new PostgresDialect({
-                pool: new Pool({
-                    connectionString: process.env.DATABASE_URL,
-                    max: 10,
-                }),
-            }),
-        });
-    }
-    return globalForKysely.kyselyProductionInstance;
-}
-
-/**
- * Lazy import of Prisma client.
- * Uses singleton pattern to prevent multiple instances.
- */
-async function getPrisma() {
-    const { PrismaClient } = await import('@prisma/client');
-    const globalForPrisma = globalThis as unknown as { prisma: InstanceType<typeof PrismaClient> | undefined };
-    const prisma = globalForPrisma.prisma ?? new PrismaClient();
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.prisma = prisma;
-    }
-    return prisma;
-}
+import { getKysely, getPrisma } from '@coh/shared/services/db';
 
 // ============================================
 // SERVER FUNCTIONS - QUERIES
@@ -261,7 +224,7 @@ async function getPrisma() {
 export const getProductionTailors = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .handler(async (): Promise<TailorRow[]> => {
-        const db = await getKyselyDb();
+        const db = await getKysely();
 
         const rows = await db
             .selectFrom('Tailor')
@@ -289,7 +252,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => batchListInputSchema.parse(input))
     .handler(async ({ data: input }): Promise<ProductionBatchItem[]> => {
-        const db = await getKyselyDb();
+        const db = await getKysely();
 
         // Build the base query with joins
         let query = db
@@ -509,7 +472,7 @@ export const getProductionCapacity = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => capacityInputSchema.parse(input))
     .handler(async ({ data: input }): Promise<CapacityItem[]> => {
-        const db = await getKyselyDb();
+        const db = await getKysely();
 
         const targetDate = input.date ? new Date(input.date) : new Date();
         const startOfDay = new Date(targetDate);
@@ -599,14 +562,16 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
 
         // Collect unique SKU IDs from pending order lines
         const pendingSkuIds = new Set<string>();
-        openOrders.forEach(order => {
-            order.orderLines.forEach(line => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        openOrders.forEach((order: any) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            order.orderLines.forEach((line: any) => {
                 pendingSkuIds.add(line.skuId);
             });
         });
 
         // Import inventory balance calculator
-        const { calculateAllInventoryBalances } = await import('@server/utils/queryPatterns.js');
+        const { calculateAllInventoryBalances } = await import('@coh/shared/services/db/queries');
 
         // Get current inventory only for pending SKUs
         const balanceMap = pendingSkuIds.size > 0
@@ -632,7 +597,8 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
         // Calculate scheduled production per SKU
         const scheduledProduction: Record<string, number> = {};
         const scheduledByOrderLine: Record<string, number> = {};
-        plannedBatches.forEach(batch => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        plannedBatches.forEach((batch: any) => {
             if (batch.skuId) {
                 if (!scheduledProduction[batch.skuId]) scheduledProduction[batch.skuId] = 0;
                 scheduledProduction[batch.skuId] += (batch.qtyPlanned - batch.qtyCompleted);
@@ -664,8 +630,10 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
 
         const requirements: RequirementItem[] = [];
 
-        openOrders.forEach(order => {
-            order.orderLines.forEach(line => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        openOrders.forEach((order: any) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            order.orderLines.forEach((line: any) => {
                 const sku = line.sku;
                 const currentInventory = inventoryBalance[line.skuId] || 0;
                 const scheduledForThisLine = scheduledByOrderLine[line.id] || 0;
@@ -728,7 +696,7 @@ export const getProductionPendingBySku = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => pendingBySkuInputSchema.parse(input))
     .handler(async ({ data: input }): Promise<PendingBySkuResponse> => {
-        const db = await getKyselyDb();
+        const db = await getKysely();
 
         const rows = await db
             .selectFrom('ProductionBatch')

@@ -217,6 +217,18 @@ export function ProductSearch({
       });
     } catch (error) {
       console.error('Failed to fetch inventory balances:', error);
+      // On error, set balance to 0 for all requested SKUs to stop loading indicator
+      setLocalBalances(prev => {
+        const next = new Map(prev);
+        idsToFetch.forEach(id => {
+          next.set(id, {
+            skuId: id,
+            availableBalance: 0,
+            currentBalance: 0,
+          });
+        });
+        return next;
+      });
     } finally {
       // Clear fetching state
       setFetchingBalanceFor(prev => {
@@ -308,16 +320,34 @@ export function ProductSearch({
               const isOutOfStock = stockNum <= 0 && !isLoading;
               const isLowStock = stockNum > 0 && stockNum <= 3;
 
+              // Use variation image if available, fallback to product image
+              const imageUrl = sku.variation?.imageUrl || sku.variation?.product?.imageUrl;
+
               return (
                 <button
                   key={sku.id}
                   type="button"
                   onClick={() => onSelect(sku, stockNum)}
-                  className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-sky-50 transition-colors text-left"
+                  className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-sky-50 transition-colors text-left"
                 >
+                  {/* Thumbnail */}
+                  <div className={`shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-slate-100 ${isOutOfStock ? 'opacity-50' : ''}`}>
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt={sku.variation?.product?.name || 'Product'}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Package size={16} className="text-slate-300" />
+                      </div>
+                    )}
+                  </div>
+                  {/* Product Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className={`text-sm font-medium ${isOutOfStock ? 'text-slate-400' : 'text-slate-900'}`}>
+                      <span className={`text-sm font-medium truncate ${isOutOfStock ? 'text-slate-400' : 'text-slate-900'}`}>
                         {sku.variation?.product?.name}
                       </span>
                     </div>

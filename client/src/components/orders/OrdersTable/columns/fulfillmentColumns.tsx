@@ -8,6 +8,7 @@ import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { OrdersTableContext } from '../types';
 import { DEFAULT_COLUMN_WIDTHS } from '../constants';
 import {
+    AdminShipCell,
     CancelLineCell,
     PickPackCell,
     ProductionCell,
@@ -67,6 +68,15 @@ export function buildFulfillmentColumns(ctx: OrdersTableContext): ColumnDef<Flat
             header: getHeaderName('cancelLine'),
             size: DEFAULT_COLUMN_WIDTHS.cancelLine,
             cell: ({ row }) => <CancelLineCell row={row.original} handlersRef={handlersRef} />,
+            enableSorting: false,
+        },
+
+        // Admin Ship (force ship - admin only)
+        {
+            id: 'adminShip',
+            header: getHeaderName('adminShip'),
+            size: DEFAULT_COLUMN_WIDTHS.adminShip,
+            cell: ({ row }) => <AdminShipCell row={row.original} handlersRef={handlersRef} />,
             enableSorting: false,
         },
     ];
