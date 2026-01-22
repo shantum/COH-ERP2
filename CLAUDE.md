@@ -86,7 +86,7 @@ const { data } = useQuery({
 ```bash
 cd server && npm run dev    # Port 3001
 cd client && npm run dev    # Port 5173
-npm run db:generate && npm run db:push
+npm run db:generate && npm run db:push  # Run from root (Prisma is at /prisma/)
 ```
 
 Login: `admin@coh.com` / `XOFiya@34`
@@ -98,6 +98,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 - **Data Flow**: Route Loaders → Server Functions → TanStack Query cache → SSE invalidation
 - **Validation**: Zod at all boundaries (search params, Server Function inputs)
 - **Real-time**: SSE with TanStack Query invalidation
+- **Production**: Unified SSR server (TanStack Start + Express on single port)
 
 ### UI Components
 - **Use shadcn/ui components wherever possible** - buttons, dialogs, dropdowns, inputs, etc.
@@ -130,6 +131,8 @@ Login: `admin@coh.com` / `XOFiya@34`
 21. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
 22. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
 23. **Express routes**: Only for auth (cookies), webhooks, SSE, and file uploads. Everything else uses Server Functions.
+24. **SSR hydration**: Guard `window`/`document` access with `typeof window !== 'undefined'`. Use `isServer` from TanStack Start for server-only code paths.
+25. **Prisma location**: Schema is at `/prisma/schema.prisma` (root), not in server/. Run db commands from root.
 
 ## Orders Architecture
 
@@ -346,6 +349,11 @@ client/src/server/functions/
 
 ### Server (Express - Minimal Routes)
 ```
+server/src/
+  production.js                       # Unified SSR+API server (Railway entry point)
+  expressApp.js                       # Express app factory (used by dev & prod)
+  index.js                            # Dev server entry point
+
 routes/
   auth.ts                             # Auth (JWT, HttpOnly cookies)
   webhooks.ts                         # Shopify webhooks
@@ -374,6 +382,16 @@ utils/
   orderViews.ts                       # VIEW_CONFIGS (flattening, enrichment)
   orderEnrichment/                    # Enrichment pipeline (9 files)
   patterns/                           # Query patterns (inventory, transactions, etc.)
+```
+
+### Root (Monorepo)
+```
+prisma/
+  schema.prisma                       # Database schema (shared by client + server)
+  migrations/                         # Prisma migrations
+  seed.js                             # Database seeding
+package.json                          # Root package with Prisma deps
+nixpacks.toml                         # Railway build config
 ```
 
 ## Products & Materials Architecture
@@ -461,6 +479,32 @@ Centralized config system in `/server/src/config/`:
 
 ## Dev & Deploy
 
+### Monorepo Structure
+
+Prisma lives at root (`/prisma/`) - "Shared Brain" pattern:
+- Both `client` (Server Functions) and `server` (Express) share the same Prisma client
+- Run `npm run db:generate` from root to generate client for both packages
+- Migrations: `npm run db:migrate` from root
+
+### Production Architecture
+
+Production uses a unified server (`server/src/production.js`):
+- Single HTTP server on PORT (default 3000)
+- `/api/*` routes → Express (auth, webhooks, SSE, file uploads)
+- All other routes → TanStack Start SSR
+
+```
+Request → production.js
+           ├── /api/* → Express (expressApp.js)
+           └── /* → TanStack Start SSR (client/dist/server/server.js)
+```
+
+Key files:
+- `server/src/production.js` - Unified entry point
+- `server/src/expressApp.js` - Express app factory (shared between dev & prod)
+
+### Scripts & Environment
+
 - **Scripts**: `server/src/scripts/` — run with `npx ts-node src/scripts/scriptName.ts`
 - **Env vars**:
   - `DATABASE_URL`, `JWT_SECRET` (required)
@@ -498,13 +542,21 @@ railway variables --unset "NO_CACHE"
 
 **Key Files**:
 - `railway.json` - Railway-specific config (builder, deploy settings)
-- `nixpacks.toml` - Build phases (setup, install, build, start)
+- `nixpacks.toml` - Build phases (setup, install, build, start) - Node.js 22
 - `.dockerignore` - Exclude files from build context (node_modules, dist)
+- `prisma/schema.prisma` - Database schema (at root, not in server/)
+
+**Build Order** (nixpacks.toml):
+1. Install root deps + generate Prisma client
+2. Build shared types
+3. Build server
+4. Build client (SSR)
 
 **Common Issues**:
 - Build cache stale? Set `NO_CACHE=1` for one build
 - Module not found? Check `.dockerignore` excludes `node_modules`
 - TypeScript errors? Ensure `shared` builds before `client`
+- Prisma not found? Ensure running from root where `/prisma/` lives
 
 ## When to Use Agents
 
@@ -532,4 +584,4 @@ railway variables --unset "NO_CACHE"
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `5c881e6` (2026-01-21) - Server Functions migration complete, Express routes minimal
+**Updated till commit:** `572617b` (2026-01-22) - Unified SSR production server, Prisma at root (shared brain pattern)
