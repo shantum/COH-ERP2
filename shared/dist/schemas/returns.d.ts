@@ -1,0 +1,220 @@
+/**
+ * Returns Zod Schemas
+ *
+ * Defines strict output types for return queries.
+ * These schemas validate query results at runtime to catch schema drift.
+ */
+import { z } from 'zod';
+export declare const returnLineRowSchema: z.ZodObject<{
+    id: z.ZodString;
+    requestId: z.ZodString;
+    skuId: z.ZodString;
+    skuCode: z.ZodString;
+    skuSize: z.ZodString;
+    qty: z.ZodNumber;
+    reason: z.ZodNullable<z.ZodString>;
+    itemCondition: z.ZodNullable<z.ZodString>;
+    productId: z.ZodNullable<z.ZodString>;
+    productName: z.ZodNullable<z.ZodString>;
+    colorName: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>;
+export type ReturnLineRow = z.infer<typeof returnLineRowSchema>;
+export declare const returnListRowSchema: z.ZodObject<{
+    id: z.ZodString;
+    requestNumber: z.ZodString;
+    requestType: z.ZodString;
+    status: z.ZodString;
+    reason: z.ZodNullable<z.ZodString>;
+    customerNotes: z.ZodNullable<z.ZodString>;
+    createdAt: z.ZodCoercedDate<unknown>;
+    orderId: z.ZodNullable<z.ZodString>;
+    orderNumber: z.ZodNullable<z.ZodString>;
+    orderDate: z.ZodNullable<z.ZodCoercedDate<unknown>>;
+    customerId: z.ZodNullable<z.ZodString>;
+    customerFirstName: z.ZodNullable<z.ZodString>;
+    customerLastName: z.ZodNullable<z.ZodString>;
+    customerEmail: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>;
+export type ReturnListRow = z.infer<typeof returnListRowSchema>;
+export declare const returnWithLinesSchema: z.ZodObject<{
+    id: z.ZodString;
+    requestNumber: z.ZodString;
+    requestType: z.ZodString;
+    status: z.ZodString;
+    reason: z.ZodNullable<z.ZodString>;
+    customerNotes: z.ZodNullable<z.ZodString>;
+    createdAt: z.ZodCoercedDate<unknown>;
+    orderId: z.ZodNullable<z.ZodString>;
+    orderNumber: z.ZodNullable<z.ZodString>;
+    orderDate: z.ZodNullable<z.ZodCoercedDate<unknown>>;
+    customerId: z.ZodNullable<z.ZodString>;
+    customerFirstName: z.ZodNullable<z.ZodString>;
+    customerLastName: z.ZodNullable<z.ZodString>;
+    customerEmail: z.ZodNullable<z.ZodString>;
+    lines: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        requestId: z.ZodString;
+        skuId: z.ZodString;
+        skuCode: z.ZodString;
+        skuSize: z.ZodString;
+        qty: z.ZodNumber;
+        reason: z.ZodNullable<z.ZodString>;
+        itemCondition: z.ZodNullable<z.ZodString>;
+        productId: z.ZodNullable<z.ZodString>;
+        productName: z.ZodNullable<z.ZodString>;
+        colorName: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type ReturnWithLines = z.infer<typeof returnWithLinesSchema>;
+export declare const returnsListResultSchema: z.ZodObject<{
+    items: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        requestNumber: z.ZodString;
+        requestType: z.ZodString;
+        status: z.ZodString;
+        reason: z.ZodNullable<z.ZodString>;
+        customerNotes: z.ZodNullable<z.ZodString>;
+        createdAt: z.ZodCoercedDate<unknown>;
+        orderId: z.ZodNullable<z.ZodString>;
+        orderNumber: z.ZodNullable<z.ZodString>;
+        orderDate: z.ZodNullable<z.ZodCoercedDate<unknown>>;
+        customerId: z.ZodNullable<z.ZodString>;
+        customerFirstName: z.ZodNullable<z.ZodString>;
+        customerLastName: z.ZodNullable<z.ZodString>;
+        customerEmail: z.ZodNullable<z.ZodString>;
+        lines: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            requestId: z.ZodString;
+            skuId: z.ZodString;
+            skuCode: z.ZodString;
+            skuSize: z.ZodString;
+            qty: z.ZodNumber;
+            reason: z.ZodNullable<z.ZodString>;
+            itemCondition: z.ZodNullable<z.ZodString>;
+            productId: z.ZodNullable<z.ZodString>;
+            productName: z.ZodNullable<z.ZodString>;
+            colorName: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    pagination: z.ZodObject<{
+        page: z.ZodNumber;
+        limit: z.ZodNumber;
+        total: z.ZodNumber;
+        totalPages: z.ZodNumber;
+    }, z.core.$strip>;
+}, z.core.$strip>;
+export type ReturnsListResult = z.infer<typeof returnsListResultSchema>;
+export declare const returnDetailLineSchema: z.ZodObject<{
+    id: z.ZodString;
+    skuId: z.ZodString;
+    skuCode: z.ZodString;
+    size: z.ZodString;
+    qty: z.ZodNumber;
+    reason: z.ZodNullable<z.ZodString>;
+    itemCondition: z.ZodNullable<z.ZodString>;
+    processingAction: z.ZodNullable<z.ZodString>;
+    sku: z.ZodObject<{
+        id: z.ZodString;
+        skuCode: z.ZodString;
+        size: z.ZodString;
+        variation: z.ZodObject<{
+            colorName: z.ZodNullable<z.ZodString>;
+            product: z.ZodObject<{
+                id: z.ZodNullable<z.ZodString>;
+                name: z.ZodNullable<z.ZodString>;
+                imageUrl: z.ZodNullable<z.ZodString>;
+            }, z.core.$strip>;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
+    exchangeSku: z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        skuCode: z.ZodString;
+        size: z.ZodString;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const returnStatusHistorySchema: z.ZodObject<{
+    id: z.ZodString;
+    fromStatus: z.ZodNullable<z.ZodString>;
+    toStatus: z.ZodString;
+    notes: z.ZodNullable<z.ZodString>;
+    createdAt: z.ZodCoercedDate<unknown>;
+    changedBy: z.ZodNullable<z.ZodObject<{
+        name: z.ZodString;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const returnDetailResultSchema: z.ZodObject<{
+    id: z.ZodString;
+    requestNumber: z.ZodString;
+    requestType: z.ZodString;
+    status: z.ZodString;
+    reason: z.ZodNullable<z.ZodString>;
+    customerNotes: z.ZodNullable<z.ZodString>;
+    resolutionNotes: z.ZodNullable<z.ZodString>;
+    createdAt: z.ZodCoercedDate<unknown>;
+    updatedAt: z.ZodCoercedDate<unknown>;
+    originalOrder: z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        orderNumber: z.ZodString;
+        orderDate: z.ZodCoercedDate<unknown>;
+        totalAmount: z.ZodNullable<z.ZodNumber>;
+        shippingAddress: z.ZodNullable<z.ZodAny>;
+    }, z.core.$strip>>;
+    exchangeOrder: z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        orderNumber: z.ZodString;
+        orderDate: z.ZodCoercedDate<unknown>;
+    }, z.core.$strip>>;
+    customer: z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        firstName: z.ZodNullable<z.ZodString>;
+        lastName: z.ZodNullable<z.ZodString>;
+        email: z.ZodNullable<z.ZodString>;
+        phone: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>;
+    shipping: z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        awbNumber: z.ZodNullable<z.ZodString>;
+        courier: z.ZodNullable<z.ZodString>;
+        status: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>>;
+    lines: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        skuId: z.ZodString;
+        skuCode: z.ZodString;
+        size: z.ZodString;
+        qty: z.ZodNumber;
+        reason: z.ZodNullable<z.ZodString>;
+        itemCondition: z.ZodNullable<z.ZodString>;
+        processingAction: z.ZodNullable<z.ZodString>;
+        sku: z.ZodObject<{
+            id: z.ZodString;
+            skuCode: z.ZodString;
+            size: z.ZodString;
+            variation: z.ZodObject<{
+                colorName: z.ZodNullable<z.ZodString>;
+                product: z.ZodObject<{
+                    id: z.ZodNullable<z.ZodString>;
+                    name: z.ZodNullable<z.ZodString>;
+                    imageUrl: z.ZodNullable<z.ZodString>;
+                }, z.core.$strip>;
+            }, z.core.$strip>;
+        }, z.core.$strip>;
+        exchangeSku: z.ZodNullable<z.ZodObject<{
+            id: z.ZodString;
+            skuCode: z.ZodString;
+            size: z.ZodString;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    statusHistory: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        fromStatus: z.ZodNullable<z.ZodString>;
+        toStatus: z.ZodString;
+        notes: z.ZodNullable<z.ZodString>;
+        createdAt: z.ZodCoercedDate<unknown>;
+        changedBy: z.ZodNullable<z.ZodObject<{
+            name: z.ZodString;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type ReturnDetailResult = z.infer<typeof returnDetailResultSchema>;
+//# sourceMappingURL=returns.d.ts.map
