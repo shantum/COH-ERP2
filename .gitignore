@@ -8,8 +8,10 @@ node_modules/
 
 # Build output
 dist/
-!shared/dist/
 build/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
 
 # Database
 *.sqlite
