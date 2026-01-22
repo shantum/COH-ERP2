@@ -2,9 +2,10 @@
  * OrderNumberCell - Displays order number with click-to-view functionality
  */
 
+import { memo } from 'react';
 import type { CellProps } from '../types';
 
-export function OrderNumberCell({ row, handlersRef }: CellProps) {
+export const OrderNumberCell = memo(function OrderNumberCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
 
     const { onViewOrder } = handlersRef.current;
@@ -21,4 +22,4 @@ export function OrderNumberCell({ row, handlersRef }: CellProps) {
             {row.orderNumber}
         </button>
     );
-}
+});

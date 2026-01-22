@@ -1073,37 +1073,49 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
         }
 
         try {
-            // Create/update BOM lines AND update variation.fabricId in a transaction
+            // OPTIMIZED: Batch operations instead of sequential loop
             const results = await prisma.$transaction(async (tx) => {
-                const updated: string[] = [];
+                // 1. Batch update all variations' fabricId (single query)
+                await tx.variation.updateMany({
+                    where: { id: { in: variationIds } },
+                    data: { fabricId: colour.fabricId },
+                });
 
-                for (const variation of variations) {
-                    // 1. Update the variation's fabricId to match the colour's parent fabric
-                    await tx.variation.update({
-                        where: { id: variation.id },
-                        data: { fabricId: colour.fabricId },
-                    });
+                // 2. Find existing BOM lines for these variations
+                const existingBomLines = await tx.variationBomLine.findMany({
+                    where: {
+                        variationId: { in: variationIds },
+                        roleId: targetRoleId,
+                    },
+                    select: { variationId: true },
+                });
 
-                    // 2. Create/update the BOM line with the fabric colour
-                    await tx.variationBomLine.upsert({
+                const existingVariationIds = new Set(existingBomLines.map((b) => b.variationId));
+
+                // 3. Batch update existing BOM lines (single query)
+                if (existingVariationIds.size > 0) {
+                    await tx.variationBomLine.updateMany({
                         where: {
-                            variationId_roleId: {
-                                variationId: variation.id,
-                                roleId: targetRoleId,
-                            },
-                        },
-                        update: { fabricColourId: colourId },
-                        create: {
-                            variationId: variation.id,
+                            variationId: { in: Array.from(existingVariationIds) },
                             roleId: targetRoleId,
-                            fabricColourId: colourId,
                         },
+                        data: { fabricColourId: colourId },
                     });
-
-                    updated.push(variation.id);
                 }
 
-                return { updated };
+                // 4. Batch create new BOM lines (single query)
+                const newVariationIds = variationIds.filter((id) => !existingVariationIds.has(id));
+                if (newVariationIds.length > 0) {
+                    await tx.variationBomLine.createMany({
+                        data: newVariationIds.map((variationId) => ({
+                            variationId,
+                            roleId: targetRoleId,
+                            fabricColourId: colourId,
+                        })),
+                    });
+                }
+
+                return { updated: variationIds };
             }, { timeout: 30000 });
 
             return {

@@ -2,13 +2,14 @@
  * CityCell - Displays shipping city
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 
 interface CityCellProps {
     row: FlattenedOrderRow;
 }
 
-export function CityCell({ row }: CityCellProps) {
+export const CityCell = memo(function CityCell({ row }: CityCellProps) {
     if (!row.isFirstLine) return null;
 
     const city = row.city || '-';
@@ -18,4 +19,4 @@ export function CityCell({ row }: CityCellProps) {
             {city}
         </span>
     );
-}
+});

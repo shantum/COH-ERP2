@@ -76,7 +76,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
         },
         onMutate: async ({ lineIds }) => {
             // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            await queryClient.cancelQueries({ queryKey });
 
             // Snapshot the previous value
             const previousData = getCachedData();
@@ -137,7 +137,7 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             return result.data;
         },
         onMutate: async ({ lineId, status: newStatus }) => {
-            await queryClient.cancelQueries({ queryKey: ['orders'] });
+            await queryClient.cancelQueries({ queryKey });
             const previousData = getCachedData();
 
             // Get the row to calculate inventory delta

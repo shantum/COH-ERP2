@@ -9,14 +9,14 @@
  * - Expandable on click when text is truncated
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { Pencil, FileText, ChevronDown, Loader2 } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 import { useDebouncedAutoSave } from '../../../../hooks/useDebouncedAutoSave';
 import { UpdateLineNotesSchema } from '@coh/shared';
 
-export function NotesCell({ row, handlersRef }: CellProps) {
+export const NotesCell = memo(function NotesCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
     const { onUpdateLineNotes, onSettled } = handlersRef.current;
@@ -228,4 +228,4 @@ export function NotesCell({ row, handlersRef }: CellProps) {
             )}
         </div>
     );
-}
+});

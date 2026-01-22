@@ -2,9 +2,10 @@
  * CustomerNameCell - Displays customer name with click-to-view functionality
  */
 
+import { memo } from 'react';
 import type { CellProps } from '../types';
 
-export function CustomerNameCell({ row, handlersRef }: CellProps) {
+export const CustomerNameCell = memo(function CustomerNameCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
 
     const { onViewCustomer } = handlersRef.current;
@@ -21,4 +22,4 @@ export function CustomerNameCell({ row, handlersRef }: CellProps) {
             {row.customerName}
         </button>
     );
-}
+});

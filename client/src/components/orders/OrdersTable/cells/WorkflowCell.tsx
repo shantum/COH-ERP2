@@ -12,6 +12,7 @@
  * Each step reversible by clicking checked box
  */
 
+import { memo } from 'react';
 import { Check, Loader2 } from 'lucide-react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { DynamicColumnHandlers } from '../types';
@@ -41,7 +42,7 @@ function getStepIndex(status: string | null): number {
     }
 }
 
-export function WorkflowCell({ row, handlersRef }: WorkflowCellProps) {
+export const WorkflowCell = memo(function WorkflowCell({ row, handlersRef }: WorkflowCellProps) {
     const status = row.lineStatus || 'pending';
     const lineId = row.lineId;
     const stock = row.skuStock ?? 0;
@@ -230,4 +231,4 @@ export function WorkflowCell({ row, handlersRef }: WorkflowCellProps) {
             })}
         </div>
     );
-}
+});

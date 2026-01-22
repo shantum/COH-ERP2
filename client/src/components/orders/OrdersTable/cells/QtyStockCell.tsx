@@ -8,6 +8,7 @@
  * - Red: reserved for fabric out of stock (future)
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -15,7 +16,7 @@ interface QtyStockCellProps {
     row: FlattenedOrderRow;
 }
 
-export function QtyStockCell({ row }: QtyStockCellProps) {
+export const QtyStockCell = memo(function QtyStockCell({ row }: QtyStockCellProps) {
     const qty = row.qty || 0;
     const stock = row.skuStock ?? 0;
     const status = row.lineStatus || 'pending';
@@ -60,4 +61,4 @@ export function QtyStockCell({ row }: QtyStockCellProps) {
             </div>
         </div>
     );
-}
+});

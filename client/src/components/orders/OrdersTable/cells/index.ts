@@ -6,6 +6,7 @@
 export { CheckboxSpinner } from './CheckboxSpinner';
 
 // Fulfillment action cells
+export { AdminShipCell } from './AdminShipCell';
 export { AssignStockCell } from './AssignStockCell';
 export { CancelLineCell } from './CancelLineCell';
 export { PickPackCell } from './PickPackCell';

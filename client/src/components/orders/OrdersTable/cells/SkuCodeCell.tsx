@@ -2,13 +2,14 @@
  * SkuCodeCell - Displays SKU code
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 
 interface SkuCodeCellProps {
     row: FlattenedOrderRow;
 }
 
-export function SkuCodeCell({ row }: SkuCodeCellProps) {
+export const SkuCodeCell = memo(function SkuCodeCell({ row }: SkuCodeCellProps) {
     const skuCode = row.skuCode || '-';
 
     return (
@@ -16,4 +17,4 @@ export function SkuCodeCell({ row }: SkuCodeCellProps) {
             {skuCode}
         </span>
     );
-}
+});

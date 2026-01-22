@@ -2,6 +2,7 @@
  * StockCell - Displays available stock with color coding
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -9,7 +10,7 @@ interface StockCellProps {
     row: FlattenedOrderRow;
 }
 
-export function StockCell({ row }: StockCellProps) {
+export const StockCell = memo(function StockCell({ row }: StockCellProps) {
     const stock = row.skuStock ?? 0;
     const qty = row.qty || 0;
     const hasEnough = stock >= qty;
@@ -25,4 +26,4 @@ export function StockCell({ row }: StockCellProps) {
             {stock}
         </span>
     );
-}
+});

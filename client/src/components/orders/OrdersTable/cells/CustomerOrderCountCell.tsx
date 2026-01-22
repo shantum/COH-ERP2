@@ -2,6 +2,7 @@
  * CustomerOrderCountCell - Displays customer's total order count
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -9,7 +10,7 @@ interface CustomerOrderCountCellProps {
     row: FlattenedOrderRow;
 }
 
-export function CustomerOrderCountCell({ row }: CustomerOrderCountCellProps) {
+export const CustomerOrderCountCell = memo(function CustomerOrderCountCell({ row }: CustomerOrderCountCellProps) {
     if (!row.isFirstLine) return null;
 
     const count = row.customerOrderCount || 0;
@@ -28,4 +29,4 @@ export function CustomerOrderCountCell({ row }: CustomerOrderCountCellProps) {
             {count}
         </span>
     );
-}
+});

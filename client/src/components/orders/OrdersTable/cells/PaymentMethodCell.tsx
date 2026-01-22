@@ -2,6 +2,7 @@
  * PaymentMethodCell - Displays payment method with color coding
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -9,7 +10,7 @@ interface PaymentMethodCellProps {
     row: FlattenedOrderRow;
 }
 
-export function PaymentMethodCell({ row }: PaymentMethodCellProps) {
+export const PaymentMethodCell = memo(function PaymentMethodCell({ row }: PaymentMethodCellProps) {
     if (!row.isFirstLine || !row.paymentMethod) return null;
 
     const isCod = row.paymentMethod.toLowerCase().includes('cod') ||
@@ -27,4 +28,4 @@ export function PaymentMethodCell({ row }: PaymentMethodCellProps) {
             {isCod ? 'COD' : 'Prepaid'}
         </span>
     );
-}
+});

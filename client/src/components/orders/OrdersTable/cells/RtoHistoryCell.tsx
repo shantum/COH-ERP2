@@ -2,6 +2,7 @@
  * RtoHistoryCell - Displays customer's RTO history/risk
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -9,7 +10,7 @@ interface RtoHistoryCellProps {
     row: FlattenedOrderRow;
 }
 
-export function RtoHistoryCell({ row }: RtoHistoryCellProps) {
+export const RtoHistoryCell = memo(function RtoHistoryCell({ row }: RtoHistoryCellProps) {
     if (!row.isFirstLine) return null;
 
     const rtoCount = row.customerRtoCount || 0;
@@ -34,4 +35,4 @@ export function RtoHistoryCell({ row }: RtoHistoryCellProps) {
             {rtoCount} RTO
         </span>
     );
-}
+});

@@ -8,7 +8,7 @@
  * Backend remains agnostic to whether data came from button-save or auto-save.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, X, Trash2, AlertCircle } from 'lucide-react';
 import cohLogo from '../../../../assets/COH-Square-Monkey-Logo.png';
@@ -17,7 +17,7 @@ import { COURIER_OPTIONS } from '../constants';
 import { cn } from '../../../../lib/utils';
 import { UpdateLineTrackingSchema } from '@coh/shared';
 
-export function TrackingInfoCell({ row, handlersRef }: CellProps) {
+export const TrackingInfoCell = memo(function TrackingInfoCell({ row, handlersRef }: CellProps) {
     if (!row?.lineId) return null;
 
     const { onUpdateLineTracking, onSettled } = handlersRef.current;
@@ -238,4 +238,4 @@ export function TrackingInfoCell({ row, handlersRef }: CellProps) {
             )}
         </>
     );
-}
+});

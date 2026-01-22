@@ -2,13 +2,14 @@
  * OrderValueCell - Displays order total value
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 
 interface OrderValueCellProps {
     row: FlattenedOrderRow;
 }
 
-export function OrderValueCell({ row }: OrderValueCellProps) {
+export const OrderValueCell = memo(function OrderValueCell({ row }: OrderValueCellProps) {
     if (!row.isFirstLine) return null;
 
     const value = row.totalAmount;
@@ -25,4 +26,4 @@ export function OrderValueCell({ row }: OrderValueCellProps) {
             {formatted}
         </span>
     );
-}
+});

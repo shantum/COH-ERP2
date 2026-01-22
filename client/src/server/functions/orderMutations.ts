@@ -731,6 +731,17 @@ export const receiveLineRto = createServerFn({ method: 'POST' })
             context.user.id
         );
 
+        // Invalidate inventory cache (INWARD created)
+        if (line.skuId) {
+            try {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate([line.skuId]);
+                console.log('[receiveLineRto] Invalidated cache for SKU:', line.skuId);
+            } catch {
+                // Non-critical
+            }
+        }
+
         return {
             success: true,
             data: {
@@ -856,6 +867,17 @@ export const cancelLine = createServerFn({ method: 'POST' })
             },
             context.user.id
         );
+
+        // Invalidate inventory cache if inventory was released
+        if (inventoryReleased && line.skuId) {
+            try {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate([line.skuId]);
+                console.log('[cancelLine] Invalidated cache for SKU:', line.skuId);
+            } catch {
+                // Non-critical
+            }
+        }
 
         return {
             success: true,
@@ -1349,6 +1371,11 @@ export const deleteOrder = createServerFn({ method: 'POST' })
             };
         }
 
+        // Collect SKU IDs of lines with allocated inventory BEFORE transaction
+        const affectedSkuIds = order.orderLines
+            .filter((line) => hasAllocatedInventory(line.lineStatus))
+            .map((line) => line.skuId);
+
         await prisma.$transaction(async (tx) => {
             // Handle production batches and inventory
             for (const line of order.orderLines) {
@@ -1379,6 +1406,18 @@ export const deleteOrder = createServerFn({ method: 'POST' })
         });
 
         // No SSE broadcast needed for deleteOrder (per spec)
+
+        // Invalidate inventory cache for affected SKUs
+        const uniqueSkuIds = [...new Set(affectedSkuIds)];
+        if (uniqueSkuIds.length > 0) {
+            try {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate(uniqueSkuIds);
+                console.log('[deleteOrder] Invalidated cache for SKUs:', uniqueSkuIds);
+            } catch {
+                // Non-critical
+            }
+        }
 
         return {
             success: true,
@@ -1551,6 +1590,8 @@ export const allocateOrder = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => allocateOrderSchema.parse(input))
     .handler(async ({ data, context }): Promise<MutationResult<AllocateOrderResult>> => {
+        try {
+        console.log('[allocateOrder] Starting allocation:', { orderId: data.orderId, lineIds: data.lineIds });
         const prisma = await getPrisma();
         const { orderId, lineIds } = data;
 
@@ -1609,43 +1650,30 @@ export const allocateOrder = createServerFn({ method: 'POST' })
         // Allocate inside transaction
         const failed: Array<{ lineId: string; reason: string }> = [];
         const result = await prisma.$transaction(async (tx) => {
-            const allocated: string[] = [];
             const timestamp = new Date();
-
-            // Fetch inventory balances
             const skuIds = Array.from(skuRequirements.keys());
-            const balances = await tx.inventoryTransaction.groupBy({
-                by: ['skuId'],
+
+            // OPTIMIZED: Single query to get balances - group by both skuId AND txnType
+            const balanceTotals = await tx.inventoryTransaction.groupBy({
+                by: ['skuId', 'txnType'],
                 where: { skuId: { in: skuIds } },
                 _sum: { qty: true },
             });
 
-            // Build balance map (inward - outward)
+            // Build balance map in single pass: inward - outward
             const balanceMap = new Map<string, number>();
-            for (const b of balances) {
-                balanceMap.set(b.skuId, 0);
+            for (const t of balanceTotals) {
+                const current = balanceMap.get(t.skuId) || 0;
+                // CRITICAL: Use txnType to determine direction, NOT qty sign
+                // OUTWARD transactions store POSITIVE qty with txnType='outward'
+                const delta = t.txnType === TXN_TYPE.INWARD
+                    ? (t._sum.qty || 0)
+                    : -(t._sum.qty || 0);
+                balanceMap.set(t.skuId, current + delta);
             }
 
-            // Calculate actual balances
-            const inwardTotals = await tx.inventoryTransaction.groupBy({
-                by: ['skuId'],
-                where: { skuId: { in: skuIds }, txnType: TXN_TYPE.INWARD },
-                _sum: { qty: true },
-            });
-            const outwardTotals = await tx.inventoryTransaction.groupBy({
-                by: ['skuId'],
-                where: { skuId: { in: skuIds }, txnType: TXN_TYPE.OUTWARD },
-                _sum: { qty: true },
-            });
-
-            for (const t of inwardTotals) {
-                balanceMap.set(t.skuId, (balanceMap.get(t.skuId) || 0) + (t._sum.qty || 0));
-            }
-            for (const t of outwardTotals) {
-                balanceMap.set(t.skuId, (balanceMap.get(t.skuId) || 0) - (t._sum.qty || 0));
-            }
-
-            // Check balance for each SKU and allocate
+            // Check balance for each SKU and collect lines to allocate
+            const linesToProcess: OrderLineForAllocation[] = [];
             for (const [skuId, { lines: skuLines, totalQty }] of skuRequirements) {
                 const balance = balanceMap.get(skuId) || 0;
 
@@ -1659,30 +1687,52 @@ export const allocateOrder = createServerFn({ method: 'POST' })
                     continue;
                 }
 
-                // Create OUTWARD transactions and update lines
-                for (const line of skuLines) {
-                    await tx.inventoryTransaction.create({
-                        data: {
-                            skuId: line.skuId,
-                            txnType: TXN_TYPE.OUTWARD,
-                            qty: line.qty,
-                            reason: TXN_REASON.ORDER_ALLOCATION,
-                            referenceId: line.id,
-                            createdById: context.user.id,
-                        },
-                    });
-
-                    await tx.orderLine.update({
-                        where: { id: line.id },
-                        data: { lineStatus: 'allocated', allocatedAt: timestamp },
-                    });
-
-                    allocated.push(line.id);
-                }
+                console.log('[allocateOrder] SKU', skuId, 'balance:', balance, 'required:', totalQty);
+                linesToProcess.push(...skuLines);
             }
 
-            return { allocated };
+            if (linesToProcess.length === 0) {
+                return { allocated: [] };
+            }
+
+            // OPTIMIZED: Batch create all OUTWARD transactions at once
+            await tx.inventoryTransaction.createMany({
+                data: linesToProcess.map(line => ({
+                    skuId: line.skuId,
+                    txnType: TXN_TYPE.OUTWARD,
+                    qty: line.qty,
+                    reason: TXN_REASON.ORDER_ALLOCATION,
+                    referenceId: line.id,
+                    createdById: context.user.id,
+                })),
+            });
+
+            // OPTIMIZED: Batch update all line statuses at once
+            const lineIdsToUpdate = linesToProcess.map(l => l.id);
+            await tx.orderLine.updateMany({
+                where: { id: { in: lineIdsToUpdate } },
+                data: { lineStatus: 'allocated', allocatedAt: timestamp },
+            });
+
+            console.log('[allocateOrder] Transaction complete, allocated:', lineIdsToUpdate.length, 'lines');
+            return { allocated: lineIdsToUpdate };
         });
+
+        console.log('[allocateOrder] Transaction result:', { allocated: result.allocated.length, failed: failed.length });
+
+        // Invalidate inventory cache for affected SKUs
+        if (result.allocated.length > 0) {
+            const allocatedSkuIds = [...new Set(
+                linesToAllocate
+                    .filter((l: OrderLineForAllocation) => result.allocated.includes(l.id))
+                    .map((l: OrderLineForAllocation) => l.skuId)
+            )];
+            if (allocatedSkuIds.length > 0) {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate(allocatedSkuIds);
+                console.log('[allocateOrder] Invalidated cache for SKUs:', allocatedSkuIds);
+            }
+        }
 
         // Broadcast SSE update
         if (result.allocated.length > 0) {
@@ -1706,6 +1756,14 @@ export const allocateOrder = createServerFn({ method: 'POST' })
                 ...(failed.length > 0 ? { failed } : {}),
             },
         };
+        } catch (error: unknown) {
+            console.error('[allocateOrder] ERROR:', error);
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                success: false,
+                error: { code: 'BAD_REQUEST', message },
+            };
+        }
     });
 
 /**
@@ -2174,6 +2232,17 @@ export const cancelOrder = createServerFn({ method: 'POST' })
             context.user.id
         );
 
+        // Invalidate inventory cache if inventory was released
+        if (inventoryReleased && affectedSkuIds.length > 0) {
+            try {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate(affectedSkuIds);
+                console.log('[cancelOrder] Invalidated cache for SKUs:', affectedSkuIds);
+            } catch {
+                // Non-critical
+            }
+        }
+
         return {
             success: true,
             data: {
@@ -2393,6 +2462,17 @@ export const setLineStatus = createServerFn({ method: 'POST' })
             },
             context.user.id
         );
+
+        // Invalidate inventory cache if inventory was updated
+        if (inventoryUpdated && line.skuId) {
+            try {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate([line.skuId]);
+                console.log('[setLineStatus] Invalidated cache for SKU:', line.skuId);
+            } catch {
+                // Non-critical
+            }
+        }
 
         return {
             success: true,
@@ -2653,6 +2733,17 @@ export const removeLineCustomization = createServerFn({ method: 'POST' })
             context.user.id
         );
 
+        // Invalidate inventory cache if transactions were deleted (force cleanup)
+        if (force && txnCount > 0) {
+            try {
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
+                inventoryBalanceCache.invalidate([customSkuId]);
+                console.log('[removeLineCustomization] Invalidated cache for custom SKU:', customSkuId);
+            } catch {
+                // Non-critical
+            }
+        }
+
         return {
             success: true,
             data: {
@@ -2694,8 +2785,8 @@ export const shipLines = createServerFn({ method: 'POST' })
         const { lineIds, awbNumber, courier } = data;
 
         try {
-            // Import shipOrderLines dynamically
-            const { shipOrderLines } = await import('@server/services/shipOrderService.js');
+            // Import shipOrderLines from shared services
+            const { shipOrderLines } = await import('@coh/shared/services/orders');
 
             const result = await prisma.$transaction(async (tx) => {
                 return await shipOrderLines(tx, {
@@ -2766,8 +2857,8 @@ export const markShippedLine = createServerFn({ method: 'POST' })
         const { lineId, awbNumber, courier } = data;
 
         try {
-            // Import shipOrderLines dynamically
-            const { shipOrderLines } = await import('@server/services/shipOrderService.js');
+            // Import shipOrderLines from shared services
+            const { shipOrderLines } = await import('@coh/shared/services/orders');
 
             const result = await prisma.$transaction(async (tx) => {
                 return await shipOrderLines(tx, {
@@ -3406,7 +3497,7 @@ export const receiveRto = createServerFn({ method: 'POST' })
         // Invalidate inventory cache
         if (affectedSkuIds.length > 0) {
             try {
-                const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
+                const { inventoryBalanceCache } = await import('@coh/shared/services/inventory');
                 inventoryBalanceCache.invalidate(affectedSkuIds);
             } catch {
                 // Non-critical
@@ -3512,8 +3603,8 @@ export const migrateShopifyFulfilled = createServerFn({ method: 'POST' })
             errors: [] as Array<{ orderNumber: string; error: string }>,
         };
 
-        // Import shipping service
-        const { shipOrderLines } = await import('@server/services/shipOrderService.js');
+        // Import shipping service from shared services
+        const { shipOrderLines } = await import('@coh/shared/services/orders');
 
         for (const order of eligibleOrders) {
             try {

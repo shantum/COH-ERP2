@@ -2099,23 +2099,26 @@ export const updateFabricReconciliationItems = createServerFn({ method: 'POST' }
                 };
             }
 
-            // Update each item
-            for (const item of items) {
-                const variance =
-                    item.physicalQty !== null && item.physicalQty !== undefined
-                        ? item.physicalQty - item.systemQty
-                        : null;
+            // OPTIMIZED: Update all items in parallel using Promise.all
+            // Each item needs unique variance calculation, so we batch the promises
+            await Promise.all(
+                items.map((item) => {
+                    const variance =
+                        item.physicalQty !== null && item.physicalQty !== undefined
+                            ? item.physicalQty - item.systemQty
+                            : null;
 
-                await prisma.fabricReconciliationItem.update({
-                    where: { id: item.id },
-                    data: {
-                        physicalQty: item.physicalQty,
-                        variance,
-                        adjustmentReason: item.adjustmentReason || null,
-                        notes: item.notes || null,
-                    },
-                });
-            }
+                    return prisma.fabricReconciliationItem.update({
+                        where: { id: item.id },
+                        data: {
+                            physicalQty: item.physicalQty,
+                            variance,
+                            adjustmentReason: item.adjustmentReason || null,
+                            notes: item.notes || null,
+                        },
+                    });
+                })
+            );
 
             // Reload reconciliation with updated items
             const updated = await prisma.fabricReconciliation.findUnique({

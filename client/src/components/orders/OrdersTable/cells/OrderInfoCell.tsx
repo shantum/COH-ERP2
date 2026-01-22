@@ -3,11 +3,12 @@
  * Layout: Date & relative time (left) | Order number (right, bold)
  */
 
+import { memo } from 'react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 import { formatDateTime } from '../utils/dateFormatters';
 
-export function OrderInfoCell({ row, handlersRef }: CellProps) {
+export const OrderInfoCell = memo(function OrderInfoCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
 
     const { onViewOrder } = handlersRef.current;
@@ -42,4 +43,4 @@ export function OrderInfoCell({ row, handlersRef }: CellProps) {
             </button>
         </div>
     );
-}
+});

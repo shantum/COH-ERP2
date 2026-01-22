@@ -3,6 +3,7 @@
  * Shows active green button when stock available, inactive gray when not
  */
 
+import { memo } from 'react';
 import { Square, Check, Loader2 } from 'lucide-react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { DynamicColumnHandlers } from '../types';
@@ -13,7 +14,7 @@ interface AssignStockCellProps {
     handlersRef: React.MutableRefObject<DynamicColumnHandlers>;
 }
 
-export function AssignStockCell({ row, handlersRef }: AssignStockCellProps) {
+export const AssignStockCell = memo(function AssignStockCell({ row, handlersRef }: AssignStockCellProps) {
     const status = row.lineStatus || 'pending';
     const lineId = row.lineId;
     const qty = row.qty || 0;
@@ -121,4 +122,4 @@ export function AssignStockCell({ row, handlersRef }: AssignStockCellProps) {
     }
 
     return null;
-}
+});

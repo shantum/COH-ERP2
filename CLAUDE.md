@@ -201,7 +201,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 21. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
 22. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
 23. **Express routes**: Only for auth (cookies), webhooks, SSE, and file uploads. Everything else uses Server Functions.
-24. **SSR hydration**: Guard `window`/`document` access with `typeof window !== 'undefined'`. For UI depending on runtime state (router status, etc.), use TanStack's `ClientOnly` component—server-rendered HTML may persist otherwise.
+24. **SSR hydration**: Use TanStack's `ClientOnly` component for runtime-dependent UI (router state, dates, etc.). `typeof window !== 'undefined'` checks are NOT sufficient—server HTML persists after hydration even if the check passes on client. Components with `new Date()` or `Date.now()` must use `ClientOnly` to avoid hydration mismatches.
 25. **Prisma location**: Schema is at `/prisma/schema.prisma` (root), not in server/. Run db commands from root.
 26. **Server Function cookies**: Use `getCookie` and `getRequestHeader` from `@tanstack/react-start/server`, NOT from `vinxi/http`. Vinxi utilities fail with "Cannot read properties of undefined (reading 'config')" when Server Functions are called from client.
 27. **Server Function API calls**: In production, call Express API via `http://127.0.0.1:${process.env.PORT}` (same-server call), NOT `localhost:3001` which doesn't exist on Railway.
@@ -211,6 +211,15 @@ Login: `admin@coh.com` / `XOFiya@34`
 31. **Prisma typing**: Use `InstanceType<typeof PrismaClient>` for client type. Don't use `any` for global prisma singleton. For transactions use `Omit<...>` to exclude unavailable methods.
 32. **WHERE clause typing**: Type Prisma WHERE builders as `Prisma.OrderWhereInput` (or relevant model). Avoids `any` in query construction.
 33. **Express body validation**: Use Zod schemas with `safeParse()` for request bodies. Don't use `req.body as SomeInterface`—validates at runtime, not just compile time.
+34. **Server Function imports**: Server Functions in `client/src/server/functions/` CANNOT import from `@server/` path alias—it fails to resolve in dev mode. Use shared services layer instead (`@coh/shared/services/db`).
+35. **Shared DB layer**: Use `getKysely()` and `getPrisma()` from `@coh/shared/services/db` in both Server Functions and Express routes. These are singleton factories with dynamic imports to prevent Node.js code bundling. Ensure kysely/pg versions match across all packages.
+36. **Shared query functions**: High-performance Kysely queries live in `shared/src/services/db/queries/`. Import from `@coh/shared/services/db/queries` (e.g., `getCustomerKysely`, `listInventorySkusKysely`, `calculateInventoryBalance`). Output types are defined in `shared/src/schemas/` to avoid conflicts.
+37. **TanStack Query keys**: Server Functions use format `['domain', 'action', 'server-fn', params]`. Old tRPC format `[['domain', 'action'], { input }]` causes cache misses. Import `getOrdersListQueryKey()` from centralized hooks, don't define local versions.
+38. **Inventory balance calculation**: Always use `txnType` column to determine inward vs outward, NEVER use `qty > 0` / `qty < 0`. OUTWARD transactions store POSITIVE qty with `txnType = 'outward'`. Using qty sign causes OUTWARD to count as INWARD, making stock appear to increase on allocation.
+39. **Query key consistency**: Use `inventoryQueryKeys.balance` from `constants/queryKeys.ts` as base for inventory queries. Mutations invalidate `['inventoryBalance']`; queries must use `[...inventoryQueryKeys.balance, params]` to match partial invalidation.
+40. **Cell component memoization**: All AG-Grid and TanStack Table cell components MUST be wrapped with `React.memo()`. Prevents re-renders of 500+ rows when unrelated state changes.
+41. **Mutation query cancellation scope**: Use specific `queryKey` for `cancelQueries()`, not broad keys like `['orders']`. Cancelling unrelated queries causes data loss on concurrent operations.
+42. **Prisma batch operations**: Prefer `createMany()` and `updateMany()` over sequential `create()`/`update()` in loops. Use `groupBy: ['field1', 'field2']` for multi-field aggregation in single query. `Promise.all()` is acceptable when each item needs unique calculation.
 
 ## Orders Architecture
 
@@ -282,10 +291,13 @@ p.data?.order?.orderNumber, p.data?.shopifyCache?.discountCodes
 ### Server-Side Caches
 | Cache | TTL | Location |
 |-------|-----|----------|
-| `inventoryBalanceCache` | 5 min | `services/inventoryBalanceCache.ts` |
-| `customerStatsCache` | 2 min | `services/customerStatsCache.ts` |
+| `inventoryBalanceCache` | 5 min | `@coh/shared/services/inventory` |
+| `customerStatsCache` | 2 min | `server/services/customerStatsCache.ts` |
 
 ```typescript
+// Import from shared services layer
+import { inventoryBalanceCache } from '@coh/shared/services/inventory';
+
 // Get (batch fetch, auto-caches)
 const balances = await inventoryBalanceCache.get(prisma, skuIds);
 
@@ -295,7 +307,8 @@ inventoryBalanceCache.invalidateAll(); // bulk ops
 ```
 
 ### Inventory
-- **Balance**: `SUM(inward) - SUM(outward)`
+- **Balance**: `SUM(CASE WHEN txnType='inward' THEN qty ELSE 0 END) - SUM(CASE WHEN txnType='outward' THEN qty ELSE 0 END)`
+- **CRITICAL**: OUTWARD stores POSITIVE qty with `txnType='outward'`. Never use `qty > 0` to determine direction.
 - **Allocate**: Creates OUTWARD immediately (no RESERVED type)
 - Balance can be negative (data integrity) - use `allowNegative` option
 
@@ -362,20 +375,31 @@ const apiUrl = process.env.NODE_ENV === 'production'
 // CORRECT - server renders fallback, client renders actual state
 import { ClientOnly } from '@tanstack/react-router';
 
-function LoadingBar() {
+// For router state (devtools, loading bars)
+function DevTools() {
   return (
     <ClientOnly fallback={null}>
-      <LoadingBarContent />  {/* Uses router state that differs SSR vs client */}
+      <TanStackRouterDevtools />  {/* Router state differs SSR vs client */}
     </ClientOnly>
   );
 }
 
-// WRONG - server renders bar (pending), client hydrates with same HTML even though idle
-function LoadingBar() {
-  const isLoading = useRouterState({ select: (s) => s.status === 'pending' });
-  if (!isLoading) return null;
-  return <div>Loading...</div>;  // Server HTML persists after hydration!
+// For date-dependent logic (Production page, calendars)
+export default function Production() {
+  return (
+    <ClientOnly fallback={<Spinner />}>
+      <ProductionContent />  {/* Uses new Date() which differs SSR vs client */}
+    </ClientOnly>
+  );
 }
+
+// WRONG - typeof window check is NOT sufficient
+{import.meta.env.DEV && typeof window !== 'undefined' && (
+  <TanStackRouterDevtools />  // Still causes hydration mismatch!
+)}
+
+// WRONG - date logic causes mismatch
+const today = new Date().toISOString().split('T')[0];  // Different on server vs client
 ```
 
 ### Real-time: SSE → TanStack Query
@@ -502,17 +526,42 @@ config/mappings/trackingStatus.ts     # iThink status mapping (text-first, cance
 
 services/
   autoArchive.ts                      # Auto-archive service (extracted for server startup)
-  inventoryBalanceCache.ts            # Inventory cache
-  customerStatsCache.ts               # Customer stats cache
+  customerStatsCache.ts               # Customer stats cache (server-only, uses SSE)
   adminShipService.ts                 # Admin force ship (isolated, feature-flagged)
   trackingSync.ts                     # Background tracking sync (excludes terminal statuses)
   shopifyOrderProcessor.ts            # Shopify webhook processor (tracking sync only)
+  # NOTE: inventoryBalanceCache moved to @coh/shared/services/inventory
 
 utils/
   orderStateMachine.ts                # Line status state machine
   orderViews.ts                       # VIEW_CONFIGS (flattening, enrichment)
   orderEnrichment/                    # Enrichment pipeline (9 files)
   patterns/                           # Query patterns (inventory, transactions, etc.)
+```
+
+### Shared Package (@coh/shared)
+```
+shared/src/
+  schemas/                            # Zod schemas + inferred output types
+    customers.ts                      # CustomerDetailResult, etc.
+    inventory.ts                      # InventorySkuRow, InventoryBalanceRow
+    orders.ts, searchParams.ts, etc.
+  services/
+    db/
+      kysely.ts                       # getKysely() - Kysely singleton factory
+      prisma.ts                       # getPrisma(), PrismaInstance, PrismaTransaction types
+      queries/
+        customers.ts                  # getCustomerKysely
+        inventory.ts                  # listInventorySkusKysely, calculateInventoryBalance, calculateAllInventoryBalances
+        index.ts                      # Barrel export
+      index.ts                        # Re-exports singletons + queries
+    inventory/
+      balanceCache.ts                 # inventoryBalanceCache singleton (5min TTL)
+      index.ts                        # Exports cache + types
+    index.ts                          # Top-level barrel: db + inventory
+  domain/                             # Pure business logic functions
+  validators/                         # Validation helper functions
+  types/                              # Shared TypeScript types
 ```
 
 ### Root (Monorepo)
@@ -715,4 +764,4 @@ railway variables --unset "NO_CACHE"
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `90b3f6b` (2026-01-22) - Type safety improvements: error handling with `catch (error: unknown)`, Prisma typing, handler return types, Express Zod validation
+**Updated till commit:** `d8ce612` (2026-01-22) - Performance patterns: batch Prisma ops, query key consistency, cell memoization

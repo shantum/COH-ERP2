@@ -3,7 +3,7 @@
  * Reuses ProductionDatePopover for calendar functionality
  */
 
-import type { MutableRefObject } from 'react';
+import { memo, type MutableRefObject } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import type { DynamicColumnHandlers } from '../types';
 import { ProductionDatePopover } from './ProductionDatePopover';
@@ -16,7 +16,7 @@ interface ProductionCellProps {
     isDateLocked: (date: string) => boolean;
 }
 
-export function ProductionCell({ row, handlersRef, isDateLocked }: ProductionCellProps) {
+export const ProductionCell = memo(function ProductionCell({ row, handlersRef, isDateLocked }: ProductionCellProps) {
     if (!row) return null;
 
     const { onCreateBatch, onUpdateBatch, onDeleteBatch } = handlersRef.current;
@@ -75,4 +75,4 @@ export function ProductionCell({ row, handlersRef, isDateLocked }: ProductionCel
 
     // Don't show anything for other states
     return null;
-}
+});

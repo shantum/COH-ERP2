@@ -2,6 +2,7 @@
  * OrderAgeCell - Displays how old an order is in days
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -9,7 +10,7 @@ interface OrderAgeCellProps {
     row: FlattenedOrderRow;
 }
 
-export function OrderAgeCell({ row }: OrderAgeCellProps) {
+export const OrderAgeCell = memo(function OrderAgeCell({ row }: OrderAgeCellProps) {
     if (!row.isFirstLine || !row.orderDate) return null;
 
     const orderDate = new Date(row.orderDate);
@@ -27,4 +28,4 @@ export function OrderAgeCell({ row }: OrderAgeCellProps) {
             {daysOld}d
         </span>
     );
-}
+});

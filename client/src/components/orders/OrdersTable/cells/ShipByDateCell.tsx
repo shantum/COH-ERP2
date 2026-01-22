@@ -5,14 +5,14 @@
  * Backend remains agnostic to whether data came from button-save or auto-save.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, X, AlertCircle } from 'lucide-react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 import { UpdateShipByDateSchema } from '@coh/shared';
 
-export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
+export const ShipByDateCell = memo(function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
     if (!row.isFirstLine) return null;
 
     const { onUpdateShipByDate, onSettled } = handlersRef.current;
@@ -291,6 +291,6 @@ export function ShipByDateCell({ row, handlersRef }: ShipByDateCellProps) {
             )}
         </div>
     );
-}
+});
 
 interface ShipByDateCellProps extends CellProps {}

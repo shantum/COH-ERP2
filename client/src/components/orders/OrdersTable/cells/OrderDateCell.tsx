@@ -2,13 +2,14 @@
  * OrderDateCell - Displays order date in a formatted way
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 
 interface OrderDateCellProps {
     row: FlattenedOrderRow;
 }
 
-export function OrderDateCell({ row }: OrderDateCellProps) {
+export const OrderDateCell = memo(function OrderDateCell({ row }: OrderDateCellProps) {
     if (!row.isFirstLine) return null;
 
     const date = new Date(row.orderDate);
@@ -22,4 +23,4 @@ export function OrderDateCell({ row }: OrderDateCellProps) {
             {formattedDate}
         </span>
     );
-}
+});

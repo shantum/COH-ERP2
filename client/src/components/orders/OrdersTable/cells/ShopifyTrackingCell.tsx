@@ -3,6 +3,7 @@
  * Shows Shopify icon to indicate data source
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { cn } from '../../../../lib/utils';
 
@@ -64,7 +65,7 @@ const stateConfig: Record<FulfillmentState, { label: string; labelClass: string 
     partial: { label: 'Partial', labelClass: 'text-orange-600' },
 };
 
-export function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
+export const ShopifyTrackingCell = memo(function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
     if (!row.isFirstLine) return null;
 
     const awb = row.shopifyAwb;
@@ -106,4 +107,4 @@ export function ShopifyTrackingCell({ row }: ShopifyTrackingCellProps) {
             </div>
         </div>
     );
-}
+});

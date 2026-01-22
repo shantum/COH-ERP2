@@ -237,9 +237,10 @@ export function useUnifiedOrdersData({
 
     // Inventory balance for SKUs in current orders
     // Skip this query if server already included inventory (saves round-trip)
+    // IMPORTANT: Use inventoryQueryKeys.balance as base so mutations can invalidate via partial match
     const getInventoryBalancesFn = useServerFn(getInventoryBalances);
     const inventoryBalanceQuery = useQuery({
-        queryKey: ['inventory', 'balances', orderSkuIds],
+        queryKey: [...inventoryQueryKeys.balance, orderSkuIds],
         queryFn: () => getInventoryBalancesFn({ data: { skuIds: orderSkuIds } }),
         staleTime: 60000,
         refetchOnWindowFocus: false,

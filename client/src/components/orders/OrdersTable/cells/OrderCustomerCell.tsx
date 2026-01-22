@@ -4,6 +4,7 @@
  * Line 2: Time ago · City · LTV (count) for repeat customers
  */
 
+import { memo } from 'react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
@@ -31,7 +32,7 @@ function formatSmartDate(date: Date): { text: string; isOld: boolean } {
     }
 }
 
-export function OrderCustomerCell({ row, handlersRef }: CellProps) {
+export const OrderCustomerCell = memo(function OrderCustomerCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
 
     const { onViewOrder, onViewCustomer } = handlersRef.current;
@@ -109,4 +110,4 @@ export function OrderCustomerCell({ row, handlersRef }: CellProps) {
             </div>
         </div>
     );
-}
+});

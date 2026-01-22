@@ -3,7 +3,7 @@
  * Calendar picker for batch production scheduling with quick date selection
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, X } from 'lucide-react';
 
@@ -16,7 +16,7 @@ interface ProductionDatePopoverProps {
     variant?: 'pending' | 'allocated';
 }
 
-export function ProductionDatePopover({
+export const ProductionDatePopover = memo(function ProductionDatePopover({
     currentDate,
     isLocked,
     onSelectDate,
@@ -203,4 +203,4 @@ export function ProductionDatePopover({
             )}
         </div>
     );
-}
+});

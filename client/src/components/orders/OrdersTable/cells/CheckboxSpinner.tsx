@@ -3,6 +3,7 @@
  * Shows a spinning indicator with appropriate color
  */
 
+import { memo } from 'react';
 import { cn } from '../../../../lib/utils';
 
 interface CheckboxSpinnerProps {
@@ -19,7 +20,7 @@ const colorClasses = {
     gray: 'border-gray-500 border-t-transparent',
 };
 
-export function CheckboxSpinner({ color = 'gray', size = 'sm' }: CheckboxSpinnerProps) {
+export const CheckboxSpinner = memo(function CheckboxSpinner({ color = 'gray', size = 'sm' }: CheckboxSpinnerProps) {
     return (
         <div
             className={cn(
@@ -29,4 +30,4 @@ export function CheckboxSpinner({ color = 'gray', size = 'sm' }: CheckboxSpinner
             )}
         />
     );
-}
+});

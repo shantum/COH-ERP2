@@ -2,13 +2,14 @@
  * CustomerLtvCell - Displays customer lifetime value
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 
 interface CustomerLtvCellProps {
     row: FlattenedOrderRow;
 }
 
-export function CustomerLtvCell({ row }: CustomerLtvCellProps) {
+export const CustomerLtvCell = memo(function CustomerLtvCell({ row }: CustomerLtvCellProps) {
     if (!row.isFirstLine) return null;
 
     const ltv = row.customerLtv || 0;
@@ -25,4 +26,4 @@ export function CustomerLtvCell({ row }: CustomerLtvCellProps) {
             {formatted}
         </span>
     );
-}
+});

@@ -6,6 +6,7 @@
  *                         | Line 2: ₹Value Badge · City
  */
 
+import { memo } from 'react';
 import type { CellProps } from '../types';
 import { cn } from '../../../../lib/utils';
 
@@ -44,7 +45,7 @@ function formatLtv(value: number): string {
     return `₹${value}`;
 }
 
-export function OrderCell({ row, handlersRef }: CellProps) {
+export const OrderCell = memo(function OrderCell({ row, handlersRef }: CellProps) {
     if (!row.isFirstLine) return null;
 
     const { onViewOrder, onViewCustomer } = handlersRef.current;
@@ -183,4 +184,4 @@ export function OrderCell({ row, handlersRef }: CellProps) {
             </div>
         </div>
     );
-}
+});

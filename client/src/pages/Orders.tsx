@@ -447,13 +447,11 @@ export default function Orders() {
 
     const handleUpdateLineTracking = useCallback(
         (lineId: string, data: { awbNumber?: string; courier?: string }) => {
-            startProcessing(lineId);
-            mutations.updateLineTracking.mutate(
-                { lineId, data },
-                { onSettled: () => stopProcessing(lineId) }
-            );
+            // Note: Don't use startProcessing here - TrackingInfoCell manages its own state
+            // and we don't want to trigger loading indicators on unrelated cells (e.g., CancelLineCell)
+            mutations.updateLineTracking.mutate({ lineId, data });
         },
-        [mutations.updateLineTracking, startProcessing, stopProcessing]
+        [mutations.updateLineTracking]
     );
 
     const handleAllocate = useCallback(
@@ -644,15 +642,19 @@ export default function Orders() {
         onEditCustomization: handleEditCustomization,
         onRemoveCustomization: handleRemoveCustomization,
         onUpdateShipByDate: (orderId: string, date: string | null) => mutations.updateShipByDate.mutate({ orderId, date }),
-        onForceShipLine: (lineId: string, data: { awbNumber?: string; courier?: string }) => mutations.adminShip.mutate({ lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier }),
+        onForceShipLine: (lineId: string, data: { awbNumber?: string; courier?: string }) => {
+            startProcessing(lineId);
+            mutations.adminShip.mutate(
+                { lineIds: [lineId], awbNumber: data.awbNumber, courier: data.courier },
+                { onSettled: () => stopProcessing(lineId) }
+            );
+        },
         allocatingLines: processingLines,
         isCancellingOrder: mutations.cancelOrder.isPending,
         isCancellingLine: mutations.cancelLine.isPending,
         isUncancellingLine: mutations.uncancelLine.isPending,
         isDeletingOrder: mutations.deleteOrder.isPending,
         isAdmin: user?.role === 'admin',
-        // CRITICAL: onSettled for UI/DB sync after inline edits
-        onSettled: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
     };
 
     // Grid component using TanStack Table

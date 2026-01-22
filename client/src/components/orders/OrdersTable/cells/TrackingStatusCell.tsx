@@ -3,6 +3,7 @@
  * Two-line layout: status on line 1, last update time on line 2
  */
 
+import { memo } from 'react';
 import type { FlattenedOrderRow } from '../../../../utils/orderHelpers';
 import { TRACKING_STATUS_STYLES } from '../rowStyling';
 import { cn } from '../../../../lib/utils';
@@ -13,7 +14,7 @@ interface TrackingStatusCellProps {
     row: FlattenedOrderRow;
 }
 
-export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
+export const TrackingStatusCell = memo(function TrackingStatusCell({ row }: TrackingStatusCellProps) {
     const status = row.lineTrackingStatus;
     if (!status) return <span className="text-gray-300">—</span>;
 
@@ -52,4 +53,4 @@ export function TrackingStatusCell({ row }: TrackingStatusCellProps) {
             </div>
         </div>
     );
-}
+});
