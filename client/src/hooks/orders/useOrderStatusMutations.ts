@@ -12,7 +12,7 @@ import { useMemo } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation } from './orderMutationUtils';
+import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     cancelLine as cancelLineFn,
@@ -34,13 +34,6 @@ export interface UseOrderStatusMutationsOptions {
     currentView?: string;
     page?: number;
     shippedFilter?: 'rto' | 'cod_pending';
-}
-
-/**
- * Helper to build tRPC-compatible query key for orders.list
- */
-function getOrdersListQueryKey(input: { view: string; page: number; limit: number; shippedFilter?: string }) {
-    return [['orders', 'list'], { input, type: 'query' }];
 }
 
 export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions = {}) {

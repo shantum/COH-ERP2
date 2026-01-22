@@ -21,7 +21,7 @@
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation } from './orderMutationUtils';
+import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     // Line-level mutations
@@ -74,13 +74,6 @@ interface ReceiveRtoInput {
     orderId: string;
     condition?: 'good' | 'damaged' | 'missing';
     notes?: string;
-}
-
-/**
- * Helper to build tRPC-compatible query key for orders.list
- */
-function getOrdersListQueryKey(input: { view: string; page: number; limit: number; shippedFilter?: string }) {
-    return [['orders', 'list'], { input, type: 'query' }];
 }
 
 export function useOrderDeliveryMutations(options: UseOrderDeliveryMutationsOptions = {}) {

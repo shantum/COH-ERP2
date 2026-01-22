@@ -14,7 +14,7 @@ import { useMemo } from 'react';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
-import { useOrderInvalidation } from './orderMutationUtils';
+import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
 import { showError } from '../../utils/toast';
 import {
     shipOrder as shipOrderFn,
@@ -41,14 +41,6 @@ export interface UseOrderShipMutationsOptions {
     currentView?: string;
     page?: number;
     shippedFilter?: 'rto' | 'cod_pending';
-}
-
-/**
- * Helper to build tRPC-compatible query keys for orders.list
- * tRPC stores queries with this structure: [['router', 'procedure'], { input, type: 'query' }]
- */
-function getOrdersListQueryKey(input: { view: string; page?: number; limit?: number; shippedFilter?: string }) {
-    return [['orders', 'list'], { input, type: 'query' }];
 }
 
 export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}) {
@@ -93,7 +85,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ orderId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Optimistically update all lines to shipped
@@ -156,7 +148,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Ship the specified lines
@@ -226,7 +218,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineIds, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Ship the specified lines (provide defaults for optional fields)
@@ -273,7 +265,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
         onMutate: async ({ orderId }) => {
             // For unship, we may be in shipped view
             const shippedQueryInput = getOrdersQueryInput('shipped', page, undefined);
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = queryClient.getQueryData<OrdersListData>(getOrdersListQueryKey(shippedQueryInput));
 
             setCachedData(
@@ -318,7 +310,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             // Update line status to shipped
@@ -398,7 +390,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineId }) => {
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             setCachedData(
@@ -443,7 +435,7 @@ export function useOrderShipMutations(options: UseOrderShipMutationsOptions = {}
             return result.data;
         },
         onMutate: async ({ lineId, awbNumber, courier }) => {
-            await queryClient.cancelQueries({ queryKey: [['orders', 'list']] });
+            await queryClient.cancelQueries({ queryKey: ['orders'] });
             const previousData = getCachedData();
 
             setCachedData(
