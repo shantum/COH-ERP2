@@ -6,7 +6,7 @@
  */
 
 import { createServerFn } from '@tanstack/react-start';
-import { getCookie, getHeaders } from 'vinxi/http';
+import { getCookie, getRequestHeader } from '@tanstack/react-start/server';
 
 /**
  * User data returned from auth check
@@ -32,22 +32,20 @@ export interface AuthUser {
  */
 function getAuthToken(): string | undefined {
     try {
-        // Try direct cookie access first (works in production)
-        let token = getCookie('auth_token');
-
-        // Fallback: parse from request headers (for SSR)
-        if (!token) {
-            const headers = getHeaders();
-            const cookieHeader = headers?.cookie;
-            if (cookieHeader) {
-                const match = cookieHeader.match(/auth_token=([^;]+)/);
-                token = match?.[1];
-            }
-        }
-
+        // Use TanStack Start's getCookie - works for SSR and client-initiated Server Functions
+        const token = getCookie('auth_token');
         return token;
     } catch {
-        // No request context available (e.g., client-side call)
+        // Fallback: try reading cookie header directly
+        try {
+            const cookieHeader = getRequestHeader('cookie');
+            if (cookieHeader) {
+                const match = cookieHeader.match(/auth_token=([^;]+)/);
+                return match?.[1];
+            }
+        } catch {
+            // Ignore fallback errors
+        }
         return undefined;
     }
 }
@@ -69,7 +67,12 @@ export const getAuthUser = createServerFn({ method: 'GET' }).handler(
             }
 
             // Verify token with Express backend
-            const apiUrl = process.env.VITE_API_URL || 'http://localhost:3001';
+            // In production (Railway), Express runs on same server at PORT
+            // In development, Express runs separately on port 3001
+            const port = process.env.PORT || '3001';
+            const apiUrl = process.env.NODE_ENV === 'production'
+                ? `http://127.0.0.1:${port}`
+                : 'http://localhost:3001';
             const response = await fetch(`${apiUrl}/api/auth/me`, {
                 headers: {
                     Authorization: `Bearer ${token}`,
