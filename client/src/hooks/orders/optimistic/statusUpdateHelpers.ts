@@ -37,14 +37,16 @@ export function optimisticLineStatusUpdate(
             return updatedRow;
         }),
         // Also update the nested order.orderLines for consistency
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                line.id === lineId
-                    ? { ...line, lineStatus: newStatus }
-                    : line
-            ),
-        })),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.id === lineId
+                        ? { ...line, lineStatus: newStatus }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -78,14 +80,16 @@ export function optimisticBatchLineStatusUpdate(
 
             return updatedRow;
         }),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                lineIdSet.has(line.id)
-                    ? { ...line, lineStatus: newStatus }
-                    : line
-            ),
-        })),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    lineIdSet.has(line.id)
+                        ? { ...line, lineStatus: newStatus }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -118,14 +122,16 @@ export function optimisticCancelLine(
 
             return updatedRow;
         }),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                line.id === lineId
-                    ? { ...line, lineStatus: 'cancelled' }
-                    : line
-            ),
-        })),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.id === lineId
+                        ? { ...line, lineStatus: 'cancelled' }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -146,14 +152,16 @@ export function optimisticUncancelLine(
                 ? { ...row, lineStatus: 'pending' }
                 : row
         ),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                line.id === lineId
-                    ? { ...line, lineStatus: 'pending' }
-                    : line
-            ),
-        })),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.id === lineId
+                        ? { ...line, lineStatus: 'pending' }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -187,27 +195,29 @@ export function optimisticShipOrder(
                 lineShippedAt: shipData.shippedAt,
             };
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                status: 'shipped',
-                awbNumber: shipData.awbNumber,
-                courier: shipData.courier,
-                shippedAt: shipData.shippedAt,
-                orderLines: order.orderLines?.map((line: any) =>
-                    line.lineStatus === 'cancelled'
-                        ? line
-                        : {
-                            ...line,
-                            lineStatus: shipData.lineStatus,
-                            awbNumber: shipData.awbNumber,
-                            courier: shipData.courier,
-                            shippedAt: shipData.shippedAt,
-                        }
-                ),
-            };
-        }),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    status: 'shipped',
+                    awbNumber: shipData.awbNumber,
+                    courier: shipData.courier,
+                    shippedAt: shipData.shippedAt,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.lineStatus === 'cancelled'
+                            ? line
+                            : {
+                                ...line,
+                                lineStatus: shipData.lineStatus,
+                                awbNumber: shipData.awbNumber,
+                                courier: shipData.courier,
+                                shippedAt: shipData.shippedAt,
+                            }
+                    ),
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -237,20 +247,22 @@ export function optimisticShipLines(
                 lineShippedAt: shipData.shippedAt,
             };
         }),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                lineIdSet.has(line.id)
-                    ? {
-                        ...line,
-                        lineStatus: shipData.lineStatus,
-                        awbNumber: shipData.awbNumber,
-                        courier: shipData.courier,
-                        shippedAt: shipData.shippedAt,
-                    }
-                    : line
-            ),
-        })),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    lineIdSet.has(line.id)
+                        ? {
+                            ...line,
+                            lineStatus: shipData.lineStatus,
+                            awbNumber: shipData.awbNumber,
+                            courier: shipData.courier,
+                            shippedAt: shipData.shippedAt,
+                        }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -278,27 +290,29 @@ export function optimisticUnshipOrder(
                 lineShippedAt: null,
             };
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                status: 'open',
-                awbNumber: null,
-                courier: null,
-                shippedAt: null,
-                orderLines: order.orderLines?.map((line: any) =>
-                    line.lineStatus === 'shipped'
-                        ? {
-                            ...line,
-                            lineStatus: 'packed',
-                            awbNumber: null,
-                            courier: null,
-                            shippedAt: null,
-                        }
-                        : line
-                ),
-            };
-        }),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    status: 'open',
+                    awbNumber: null,
+                    courier: null,
+                    shippedAt: null,
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.lineStatus === 'shipped'
+                            ? {
+                                ...line,
+                                lineStatus: 'packed',
+                                awbNumber: null,
+                                courier: null,
+                                shippedAt: null,
+                            }
+                            : line
+                    ),
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -322,18 +336,20 @@ export function optimisticUpdateLineTracking(
                 ...(trackingData.courier !== undefined && { courier: trackingData.courier }),
             };
         }),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                line.id === lineId
-                    ? {
-                        ...line,
-                        ...(trackingData.awbNumber !== undefined && { awbNumber: trackingData.awbNumber }),
-                        ...(trackingData.courier !== undefined && { courier: trackingData.courier }),
-                    }
-                    : line
-            ),
-        })),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.id === lineId
+                        ? {
+                            ...line,
+                            ...(trackingData.awbNumber !== undefined && { awbNumber: trackingData.awbNumber }),
+                            ...(trackingData.courier !== undefined && { courier: trackingData.courier }),
+                        }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -361,20 +377,22 @@ export function optimisticMarkDelivered(
                 lineDeliveredAt: deliveredAt,
             };
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                status: 'delivered',
-                trackingStatus: 'delivered',
-                deliveredAt,
-                orderLines: order.orderLines?.map((line: any) => ({
-                    ...line,
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    status: 'delivered',
                     trackingStatus: 'delivered',
                     deliveredAt,
-                })),
-            };
-        }),
+                    orderLines: order.orderLines?.map((line: any) => ({
+                        ...line,
+                        trackingStatus: 'delivered',
+                        deliveredAt,
+                    })),
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -398,15 +416,17 @@ export function optimisticMarkRto(
                 lineTrackingStatus: 'rto_in_transit',
             };
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                trackingStatus: 'rto_in_transit',
-                rtoStatus: 'initiated',
-                rtoInitiatedAt,
-            };
-        }),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    trackingStatus: 'rto_in_transit',
+                    rtoStatus: 'initiated',
+                    rtoInitiatedAt,
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -438,15 +458,17 @@ export function optimisticReceiveRto(
 
             return updatedRow;
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                trackingStatus: 'rto_delivered',
-                rtoStatus: 'received',
-                rtoReceivedAt: new Date().toISOString(),
-            };
-        }),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    trackingStatus: 'rto_delivered',
+                    rtoStatus: 'received',
+                    rtoReceivedAt: new Date().toISOString(),
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -481,17 +503,19 @@ export function optimisticCancelOrder(
 
             return updatedRow;
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                status: 'cancelled',
-                orderLines: order.orderLines?.map((line: any) => ({
-                    ...line,
-                    lineStatus: 'cancelled',
-                })),
-            };
-        }),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    status: 'cancelled',
+                    orderLines: order.orderLines?.map((line: any) => ({
+                        ...line,
+                        lineStatus: 'cancelled',
+                    })),
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -518,18 +542,20 @@ export function optimisticUncancelOrder(
                 lineStatus: 'pending',
             };
         }),
-        orders: data.orders.map((order) => {
-            if (order.id !== orderId) return order;
-            return {
-                ...order,
-                status: 'open',
-                orderLines: order.orderLines?.map((line: any) =>
-                    line.lineStatus === 'cancelled'
-                        ? { ...line, lineStatus: 'pending' }
-                        : line
-                ),
-            };
-        }),
+        ...(data.orders ? {
+            orders: data.orders.map((order) => {
+                if (order.id !== orderId) return order;
+                return {
+                    ...order,
+                    status: 'open',
+                    orderLines: order.orderLines?.map((line: any) =>
+                        line.lineStatus === 'cancelled'
+                            ? { ...line, lineStatus: 'pending' }
+                            : line
+                    ),
+                };
+            }),
+        } : {}),
     };
 }
 
@@ -559,14 +585,17 @@ export function optimisticCreateBatch(
                 productionDate: batchDate,
             };
         }),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                line.id === sourceOrderLineId
-                    ? { ...line, productionBatchId: batchId }
-                    : line
-            ),
-        })),
+        // Only update orders array if it exists (Server Function may not return it)
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.id === sourceOrderLineId
+                        ? { ...line, productionBatchId: batchId }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }
 
@@ -614,13 +643,16 @@ export function optimisticDeleteBatch(
                 productionDate: null,
             };
         }),
-        orders: data.orders.map((order) => ({
-            ...order,
-            orderLines: order.orderLines?.map((line: any) =>
-                line.productionBatchId === batchId
-                    ? { ...line, productionBatchId: null }
-                    : line
-            ),
-        })),
+        // Only update orders array if it exists (Server Function may not return it)
+        ...(data.orders ? {
+            orders: data.orders.map((order) => ({
+                ...order,
+                orderLines: order.orderLines?.map((line: any) =>
+                    line.productionBatchId === batchId
+                        ? { ...line, productionBatchId: null }
+                        : line
+                ),
+            })),
+        } : {}),
     };
 }

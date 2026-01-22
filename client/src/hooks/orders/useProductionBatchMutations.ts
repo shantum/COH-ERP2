@@ -140,14 +140,17 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
                             }
                             return row;
                         }),
-                        orders: old.orders.map((order) => ({
-                            ...order,
-                            orderLines: order.orderLines?.map((line: { productionBatchId?: string | null }) =>
-                                line.productionBatchId === context.tempBatchId
-                                    ? { ...line, productionBatchId: response.id }
-                                    : line
-                            ),
-                        })),
+                        // Also update nested order.orderLines if present on each row
+                        ...(old.orders ? {
+                            orders: old.orders.map((order: { orderLines?: Array<{ productionBatchId?: string | null }> }) => ({
+                                ...order,
+                                orderLines: order.orderLines?.map((line) =>
+                                    line.productionBatchId === context.tempBatchId
+                                        ? { ...line, productionBatchId: response.id }
+                                        : line
+                                ),
+                            })),
+                        } : {}),
                     };
                 });
             }
