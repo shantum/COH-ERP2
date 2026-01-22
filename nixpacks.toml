@@ -8,8 +8,8 @@ dependsOn = ["setup"]
 
 [phases.build]
 cmds = [
-  # Install root deps (hoisted Prisma) - needed for client to resolve @prisma/client
-  "NODE_ENV=development npm ci",
+  # Install root deps (hoisted Prisma) - use npm install (not ci) to avoid cache mount conflict
+  "NODE_ENV=development npm install",
   # Build shared types
   "cd shared && NODE_ENV=development npm ci && npx -y -p typescript tsc",
   # Build server and generate Prisma client (both client and kysely generators)
