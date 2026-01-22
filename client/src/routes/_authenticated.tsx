@@ -32,6 +32,11 @@ function AuthenticatedLayout() {
     const { isAuthenticated, isLoading } = useAuth();
     const location = useLocation();
 
+    // Debug logging
+    if (typeof window !== 'undefined') {
+        console.log('[AuthLayout] pendingAuth:', routeContext?.pendingAuth, 'isLoading:', isLoading, 'isAuthenticated:', isAuthenticated);
+    }
+
     // Handle pendingAuth: wait for client-side auth verification
     if (routeContext?.pendingAuth) {
         // SSR: Always show spinner, let client verify after hydration
@@ -41,14 +46,18 @@ function AuthenticatedLayout() {
 
         // Client: If AuthProvider is still loading, show spinner
         if (isLoading) {
+            console.log('[AuthLayout] Showing spinner - isLoading=true');
             return <LoadingSpinner />;
         }
 
         // Client: Auth check complete - if not authenticated, redirect to login
         if (!isAuthenticated) {
+            console.log('[AuthLayout] Not authenticated, navigating to /login');
             navigate({ to: '/login', search: { redirect: location.pathname } });
             return <LoadingSpinner />;
         }
+
+        console.log('[AuthLayout] Authenticated, proceeding to render');
     }
 
     return (

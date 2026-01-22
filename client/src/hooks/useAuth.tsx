@@ -21,6 +21,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Main auth check effect - only runs on client
     useEffect(() => {
+        console.log('[AuthProvider] useEffect running, authCheckRef:', authCheckRef.current);
         // Prevent double-execution in strict mode
         if (authCheckRef.current) return;
         authCheckRef.current = true;
@@ -29,15 +30,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             try {
                 // Safe localStorage access (only runs in useEffect = client only)
                 const token = localStorage.getItem('token');
+                console.log('[AuthProvider] Token in localStorage:', !!token);
 
                 if (!token) {
                     // No token - user is not logged in, but auth check is complete
+                    console.log('[AuthProvider] No token, setting isLoading=false');
                     setIsLoading(false);
                     return;
                 }
 
                 // Verify token with server
+                console.log('[AuthProvider] Verifying token with /api/auth/me...');
                 const res = await authApi.me();
+                console.log('[AuthProvider] Auth verified, user:', res.data?.email);
                 setUser(res.data);
             } catch (err) {
                 // Token invalid or expired
@@ -48,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     // Ignore localStorage errors
                 }
             } finally {
+                console.log('[AuthProvider] Setting isLoading=false');
                 setIsLoading(false);
             }
         };
