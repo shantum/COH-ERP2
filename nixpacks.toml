@@ -9,10 +9,10 @@ dependsOn = ["setup"]
 [phases.build]
 cmds = [
   "cd shared && NODE_ENV=development npm ci && npx -y -p typescript tsc",
-  # Build server first and generate Prisma client
+  # Build server first - generates real Prisma client in server/node_modules/.prisma/client
   "cd server && NODE_ENV=development npm ci && npx prisma generate",
-  # Build client, then copy Prisma client from server
-  "cd client && NODE_ENV=development npm ci && mkdir -p node_modules/.prisma && cp -r ../server/node_modules/.prisma/client node_modules/.prisma/ && npm run build"
+  # Build client: install deps (creates stub .prisma/client), then REPLACE stub with server's generated client
+  "cd client && NODE_ENV=development npm ci && rm -rf node_modules/.prisma/client && cp -r ../server/node_modules/.prisma/client node_modules/.prisma/ && npm run build"
 ]
 dependsOn = ["setup"]
 
