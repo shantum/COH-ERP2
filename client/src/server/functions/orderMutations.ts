@@ -2728,7 +2728,7 @@ export const shipLines = createServerFn({ method: 'POST' })
                 success: true,
                 data: result,
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             return {
                 success: false,
@@ -2850,7 +2850,7 @@ export const markShippedLine = createServerFn({ method: 'POST' })
                     orderUpdated: result.orderUpdated,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             return {
                 success: false,
@@ -3543,10 +3543,10 @@ export const migrateShopifyFulfilled = createServerFn({ method: 'POST' })
                         reason: result.skipped[0]?.reason || 'Already shipped',
                     });
                 }
-            } catch (error) {
+            } catch (error: unknown) {
                 results.errors.push({
                     orderNumber: order.orderNumber,
-                    error: (error as Error).message,
+                    error: error instanceof Error ? error.message : String(error),
                 });
             }
         }

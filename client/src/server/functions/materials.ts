@@ -498,6 +498,17 @@ export const getServices = createServerFn({ method: 'GET' })
 // MATERIALS FILTERS
 // ============================================
 
+/** Materials filters response type */
+export interface MaterialsFiltersResponse {
+    success: true;
+    filters: {
+        materials: Array<{ id: string; name: string }>;
+        constructionTypes: string[];
+        patterns: string[];
+        suppliers: Array<{ id: string; name: string }>;
+    };
+}
+
 /**
  * Get filters metadata for materials hierarchy
  *
@@ -505,7 +516,7 @@ export const getServices = createServerFn({ method: 'GET' })
  */
 export const getMaterialsFilters = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async () => {
+    .handler(async (): Promise<MaterialsFiltersResponse> => {
         const { PrismaClient } = await import('@prisma/client');
         const prisma = new PrismaClient();
 

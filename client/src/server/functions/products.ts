@@ -396,7 +396,7 @@ export const getProductsTree = createServerFn({ method: 'GET' })
                     totalStock,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getProductsTree:', error);
             throw error;
         }
@@ -604,7 +604,7 @@ export const getProductById = createServerFn({ method: 'GET' })
                     })),
                 })),
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getProductById:', error);
             throw error;
         }
@@ -690,7 +690,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                 categories,
                 genders,
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getCatalogFilters:', error);
             throw error;
         }

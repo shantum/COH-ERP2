@@ -194,11 +194,11 @@ export const getShopifyConfig = createServerFn({ method: 'GET' })
                     }),
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -224,11 +224,11 @@ export const updateShopifyConfig = createServerFn({ method: 'POST' })
                     updated: true,
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -265,13 +265,14 @@ export const testShopifyConnection = createServerFn({ method: 'POST' })
                         stats: { totalOrders: orderCount, totalCustomers: customerCount },
                     },
                 };
-            } catch (error) {
+            } catch (error: unknown) {
+                // Type guard for axios-like errors
                 const axiosError = error as {
-                    message: string;
+                    message?: string;
                     response?: { status?: number; data?: { errors?: string | unknown } };
                 };
 
-                let errorMessage = axiosError.message;
+                let errorMessage = axiosError.message ?? 'Unknown error';
                 const status = axiosError.response?.status;
 
                 if (status === 401) {
@@ -295,11 +296,11 @@ export const testShopifyConnection = createServerFn({ method: 'POST' })
                     },
                 };
             }
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -334,11 +335,11 @@ export const getShopifySyncHistory = createServerFn({ method: 'GET' })
                     counts: { syncedOrders, syncedCustomers },
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -379,11 +380,11 @@ export const getSyncJobs = createServerFn({ method: 'GET' })
                     stats: job.stats,
                 })),
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -419,11 +420,11 @@ export const getSyncJobStatus = createServerFn({ method: 'GET' })
                     stats: job.stats,
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -460,11 +461,11 @@ export const startSyncJob = createServerFn({ method: 'POST' })
                     stats: { effectiveMode },
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'BAD_REQUEST', message: err.message },
+                error: { code: 'BAD_REQUEST', message },
             };
         }
     });
@@ -493,11 +494,11 @@ export const cancelSyncJob = createServerFn({ method: 'POST' })
                     stats: job.stats,
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'BAD_REQUEST', message: err.message },
+                error: { code: 'BAD_REQUEST', message },
             };
         }
     });
@@ -533,11 +534,11 @@ export const getCacheStatus = createServerFn({ method: 'GET' })
                     recentFailures,
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });
@@ -563,11 +564,11 @@ export const triggerSync = createServerFn({ method: 'POST' })
                     result,
                 },
             };
-        } catch (error) {
-            const err = error as Error;
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
             return {
                 success: false,
-                error: { code: 'EXTERNAL_ERROR', message: err.message },
+                error: { code: 'EXTERNAL_ERROR', message },
             };
         }
     });

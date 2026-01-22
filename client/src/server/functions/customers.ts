@@ -164,7 +164,7 @@ export const getCustomersList = createServerFn({ method: 'GET' })
                     hasMore: data.offset + data.limit < total,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getCustomersList:', error);
             throw error;
         }
@@ -179,9 +179,30 @@ const getCustomerInputSchema = z.object({
  *
  * Uses Kysely for high-performance query with order count and recent orders.
  */
+/** Customer detail result type from Kysely query */
+export interface CustomerDetailResult {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+    tier: string | null;
+    tags: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    ordersCount: number;
+    recentOrders: Array<{
+        id: string;
+        orderNumber: string;
+        totalAmount: number | null;
+        status: string;
+        orderDate: Date;
+    }>;
+}
+
 export const getCustomer = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getCustomerInputSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CustomerDetailResult> => {
         const { getCustomerKysely } = await import('@server/db/queries/index.js');
 
         const customer = await getCustomerKysely(data.id);

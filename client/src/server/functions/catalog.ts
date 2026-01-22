@@ -145,7 +145,8 @@ export interface CatalogFiltersResponse {
  */
 export interface CatalogMutationSuccess {
     success: true;
-    data: Record<string, unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any;
 }
 
 /**
@@ -168,7 +169,8 @@ export interface SyncResultData {
     message: string;
     fetched: number;
     syncAll: boolean;
-    results: unknown;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    results: any;
 }
 
 /**
@@ -476,7 +478,7 @@ export const getCatalogProducts = createServerFn({ method: 'GET' })
             } finally {
                 await prisma.$disconnect();
             }
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('getCatalogProducts error:', error);
             throw error;
         }
@@ -558,7 +560,7 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
             } finally {
                 await prisma.$disconnect();
             }
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('getCatalogCategories error:', error);
             throw error;
         }
@@ -573,7 +575,7 @@ export const getCatalogCategories = createServerFn({ method: 'GET' })
 export const updateCatalogProduct = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateCatalogProductSchema.parse(input))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<CatalogMutationResponse> => {
         try {
             const { PrismaClient } = await import('@prisma/client');
             const prisma = new PrismaClient();
@@ -618,7 +620,7 @@ export const updateCatalogProduct = createServerFn({ method: 'POST' })
 export const syncCatalogWithShopify = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => syncCatalogWithShopifySchema.parse(input ?? {}))
-    .handler(async ({ data }) => {
+    .handler(async ({ data }): Promise<SyncCatalogResponse> => {
         try {
             // Dynamic import to avoid bundling server-only code
             const { syncAllProducts } = await import('@server/services/productSyncService.js');

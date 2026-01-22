@@ -751,7 +751,7 @@ export const createBomLine = createServerFn({ method: 'POST' })
                 success: true,
                 data: { id: result.id, level, roleId },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to create BOM line';
             return {
                 success: false,
@@ -830,7 +830,7 @@ export const updateBomLine = createServerFn({ method: 'POST' })
                 success: true,
                 data: { id: lineId, level, updated: true },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to update BOM line';
             if (message.includes('Record to update not found')) {
                 return {
@@ -879,7 +879,7 @@ export const deleteBomLine = createServerFn({ method: 'POST' })
                 success: true,
                 data: { id: lineId, level, deleted: true },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to delete BOM line';
             if (message.includes('Record to delete does not exist')) {
                 return {
@@ -1007,7 +1007,7 @@ export const importConsumption = createServerFn({ method: 'POST' })
                     skusUpdated: skuUpdates.length,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Import failed';
             return {
                 success: false,
@@ -1119,7 +1119,7 @@ export const linkFabricToVariation = createServerFn({ method: 'POST' })
                     },
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to link fabric';
             return {
                 success: false,
@@ -1221,7 +1221,7 @@ export const updateSizeConsumptions = createServerFn({ method: 'POST' })
                     sizesUpdated: consumptions.length,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to update consumptions';
             return {
                 success: false,
@@ -1426,7 +1426,7 @@ export const getConsumptionGrid = createServerFn({ method: 'GET' })
                     rows,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to load consumption grid';
             return {
                 success: false,
@@ -1537,7 +1537,7 @@ export const updateConsumptionGrid = createServerFn({ method: 'POST' })
                 success: true,
                 data: { updated: updatedCount },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to update consumption grid';
             return {
                 success: false,
@@ -1606,7 +1606,7 @@ export const getProductsForMapping = createServerFn({ method: 'GET' })
             });
 
             return { success: true, data: result };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to load products';
             return {
                 success: false,
@@ -1656,7 +1656,7 @@ export const resetConsumption = createServerFn({ method: 'POST' })
                 success: true,
                 data: { deletedBomLines, resetSkus },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to reset consumption';
             return {
                 success: false,
@@ -1832,7 +1832,7 @@ export const getProductBom = createServerFn({ method: 'GET' })
             };
 
             return { success: true, data: result };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to load product BOM';
             return {
                 success: false,
@@ -1931,7 +1931,7 @@ export const updateTemplate = createServerFn({ method: 'POST' })
                 success: true,
                 data: { updated, created },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to update template';
             return {
                 success: false,
@@ -1996,7 +1996,7 @@ export const updateProductBom = createServerFn({ method: 'POST' })
             }
 
             return { success: true, data: { success: true } };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to update product BOM';
             return {
                 success: false,
@@ -2129,7 +2129,7 @@ export const getCogs = createServerFn({ method: 'GET' })
             });
 
             return { success: true, data: results };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to calculate COGS';
             return {
                 success: false,
@@ -2352,7 +2352,7 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                     total: results.updated.length,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             const message = error instanceof Error ? error.message : 'Failed to link variations';
             return {
                 success: false,

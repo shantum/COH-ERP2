@@ -606,7 +606,7 @@ export const getInventoryList = createServerFn({ method: 'GET' })
                     hasMore: offset + items.length < totalCount,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getInventoryList:', error);
             throw error;
         }

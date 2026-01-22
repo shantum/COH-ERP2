@@ -89,7 +89,7 @@ export interface CustomizationInfo {
 /** Production batch from getProductionBatches */
 export interface ProductionBatchItem {
     id: string;
-    batchCode: string;
+    batchCode: string | null;
     batchDate: Date;
     status: string;
     qtyPlanned: number;
@@ -244,7 +244,7 @@ async function getPrisma() {
  */
 export const getProductionTailors = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async () => {
+    .handler(async (): Promise<TailorRow[]> => {
         const db = await getKyselyDb();
 
         const rows = await db
@@ -272,7 +272,7 @@ export const getProductionTailors = createServerFn({ method: 'GET' })
 export const getProductionBatches = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => batchListInputSchema.parse(input))
-    .handler(async ({ data: input }) => {
+    .handler(async ({ data: input }): Promise<ProductionBatchItem[]> => {
         const db = await getKyselyDb();
 
         // Build the base query with joins
@@ -468,7 +468,7 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
  */
 export const getProductionLockedDates = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async () => {
+    .handler(async (): Promise<string[]> => {
         const prisma = await getPrisma();
 
         // Locked dates are stored in SystemSetting table
@@ -488,7 +488,7 @@ export const getProductionLockedDates = createServerFn({ method: 'GET' })
 export const getProductionCapacity = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => capacityInputSchema.parse(input))
-    .handler(async ({ data: input }) => {
+    .handler(async ({ data: input }): Promise<CapacityItem[]> => {
         const db = await getKyselyDb();
 
         const targetDate = input.date ? new Date(input.date) : new Date();
@@ -547,7 +547,7 @@ export const getProductionCapacity = createServerFn({ method: 'GET' })
  */
 export const getProductionRequirements = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
-    .handler(async () => {
+    .handler(async (): Promise<ProductionRequirementsResponse> => {
         const prisma = await getPrisma();
 
         // Get all open orders with their lines (only pending)
@@ -704,7 +704,7 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
 export const getProductionPendingBySku = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => pendingBySkuInputSchema.parse(input))
-    .handler(async ({ data: input }) => {
+    .handler(async ({ data: input }): Promise<PendingBySkuResponse> => {
         const db = await getKyselyDb();
 
         const rows = await db

@@ -85,7 +85,7 @@ export const getAuthUser = createServerFn({ method: 'GET' }).handler(
 
             const user = await response.json();
             return user as AuthUser;
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[getAuthUser] Error:', error);
             return null;
         }

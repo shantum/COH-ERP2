@@ -10,6 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 
 // ============================================
 // INPUT VALIDATION SCHEMAS
@@ -340,10 +341,8 @@ function buildWhereClause(
     search: string | undefined,
     shippedFilter: 'all' | 'rto' | 'cod_pending' | undefined,
     sinceDate: Date | null
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): any {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = {
+): Prisma.OrderWhereInput {
+    const where: Prisma.OrderWhereInput = {
         isArchived: false,
     };
 
@@ -735,7 +734,7 @@ export const getOrders = createServerFn({ method: 'GET' })
                     hasMore: data.page < totalPages,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getOrders:', error);
             throw error;
         }
@@ -964,7 +963,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                 totalResults: results.reduce((sum, r) => sum + r.count, 0),
                 results,
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in searchAllOrders:', error);
             throw error;
         }
@@ -1222,7 +1221,7 @@ export const searchUnifiedOrders = createServerFn({ method: 'GET' })
                 },
                 searchQuery: searchTerm,
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in searchUnifiedOrders:', error);
             throw error;
         }
@@ -1380,7 +1379,7 @@ export const getOrderById = createServerFn({ method: 'GET' })
                     } : null,
                 })),
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getOrderById:', error);
             throw error;
         }
@@ -1688,7 +1687,7 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                     thisMonth,
                 },
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getOrdersAnalytics:', error);
             throw error;
         }

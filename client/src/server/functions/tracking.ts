@@ -133,7 +133,7 @@ export const getShippingRates = createServerFn({ method: 'POST' })
                 fromPincode: data.fromPincode,
                 toPincode: data.toPincode,
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getShippingRates:', error);
             throw error;
         }
@@ -170,7 +170,7 @@ export const createShipment = createServerFn({ method: 'POST' })
                 orderId: data.orderId,
                 labelUrl: result.labelUrl,
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in createShipment:', error);
             throw error;
         }
@@ -205,7 +205,7 @@ export const cancelShipment = createServerFn({ method: 'POST' })
                 awbNumber: result.awbNumber || data.awbNumber || '',
                 message: result.message || 'Shipment cancelled successfully',
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in cancelShipment:', error);
             throw error;
         }
@@ -238,7 +238,7 @@ export const getShippingLabel = createServerFn({ method: 'POST' })
                 labelUrl: result.labelUrl,
                 awbNumber: result.awbNumber || data.awbNumber || '',
             };
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getShippingLabel:', error);
             throw error;
         }
@@ -339,7 +339,7 @@ export const getAwbTracking = createServerFn({ method: 'GET' })
 
             // Return the response as-is, the API already returns the correct shape
             return await response.json();
-        } catch (error) {
+        } catch (error: unknown) {
             console.error('[Server Function] Error in getAwbTracking:', error);
             throw error;
         }
