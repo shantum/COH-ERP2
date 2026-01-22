@@ -4,12 +4,16 @@
  *
  * Optimistic update strategy:
  * 1. onMutate: Cancel inflight queries, save previous data, update cache optimistically
+ *    - Updates BOTH orders cache AND inventory balance cache for consistency
  * 2. onError: Rollback to previous data + invalidate for consistency
  * 3. onSettled: Invalidate caches to confirm server state
+ *
+ * IMPORTANT: Inventory balance cache must be updated alongside orders cache to prevent
+ * enrichRowsWithInventory from overwriting optimistic skuStock values with stale data.
  */
 
 import { useMemo } from 'react';
-import { useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQueryClient, useMutation, type QueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
@@ -26,9 +30,79 @@ import {
     optimisticUncancelLine,
     optimisticCancelOrder,
     optimisticUncancelOrder,
+    calculateInventoryDelta,
+    getRowByLineId,
+    getRowsByOrderId,
+    hasAllocatedInventory,
     type OrdersListData,
     type OptimisticUpdateContext,
 } from './optimisticUpdateHelpers';
+import type { InventoryBalanceItem } from '../../server/functions/inventory';
+
+/**
+ * Optimistically update all inventory balance caches for affected SKUs
+ * Returns a map of query keys to previous data for rollback
+ */
+function optimisticInventoryUpdate(
+    queryClient: QueryClient,
+    skuDeltas: Map<string, number> // skuId -> delta (negative = allocated, positive = freed)
+): Map<string, InventoryBalanceItem[] | undefined> {
+    const previousInventoryData = new Map<string, InventoryBalanceItem[] | undefined>();
+
+    // Get all inventory balance queries from the cache
+    const queries = queryClient.getQueriesData<InventoryBalanceItem[]>({
+        queryKey: inventoryQueryKeys.balance,
+    });
+
+    // Update each matching query
+    for (const [queryKey, oldData] of queries) {
+        if (!oldData) continue;
+
+        // Check if any SKUs in this cache need updating
+        let hasChanges = false;
+        const newData = oldData.map((item: InventoryBalanceItem) => {
+            const delta = skuDeltas.get(item.skuId);
+            if (delta !== undefined && delta !== 0) {
+                hasChanges = true;
+                return {
+                    ...item,
+                    currentBalance: item.currentBalance + delta,
+                    availableBalance: item.availableBalance + delta,
+                };
+            }
+            return item;
+        });
+
+        if (hasChanges) {
+            // Save previous data for rollback (use stringified key for Map)
+            const keyStr = JSON.stringify(queryKey);
+            previousInventoryData.set(keyStr, oldData);
+
+            // Update the cache
+            queryClient.setQueryData<InventoryBalanceItem[]>(queryKey, newData);
+        }
+    }
+
+    return previousInventoryData;
+}
+
+/**
+ * Rollback inventory balance caches to previous state
+ */
+function rollbackInventoryUpdate(
+    queryClient: QueryClient,
+    previousData: Map<string, InventoryBalanceItem[] | undefined>
+): void {
+    for (const [keyStr, data] of previousData) {
+        const queryKey = JSON.parse(keyStr);
+        queryClient.setQueryData(queryKey, data);
+    }
+}
+
+/** Extended context that includes inventory rollback data */
+interface StatusOptimisticContext extends OptimisticUpdateContext {
+    previousInventoryData?: Map<string, InventoryBalanceItem[] | undefined>;
+}
 
 export interface UseOrderStatusMutationsOptions {
     currentView?: string;
@@ -69,7 +143,24 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         },
         onMutate: async ({ orderId }) => {
             await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Also cancel inventory balance queries to prevent stale data from overwriting
+            await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
+
             const previousData = getCachedData();
+
+            // Calculate inventory deltas for all lines in the order
+            // (cancel restores inventory for allocated lines)
+            const rows = getRowsByOrderId(previousData, orderId);
+            const skuDeltas = new Map<string, number>();
+
+            for (const row of rows) {
+                if (row.skuId && hasAllocatedInventory(row.lineStatus)) {
+                    // Cancelling an allocated line restores inventory
+                    const delta = row.qty || 0;
+                    const existing = skuDeltas.get(row.skuId) || 0;
+                    skuDeltas.set(row.skuId, existing + delta);
+                }
+            }
 
             // Optimistically cancel all lines in the order
             queryClient.setQueryData<OrdersListData>(
@@ -77,13 +168,23 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
                 (old) => optimisticCancelOrder(old, orderId) as OrdersListData | undefined
             );
 
-            return { previousData, queryInput } as OptimisticUpdateContext;
+            // Also optimistically update the inventory balance cache
+            let previousInventoryData: Map<string, InventoryBalanceItem[] | undefined> | undefined;
+            if (skuDeltas.size > 0) {
+                previousInventoryData = optimisticInventoryUpdate(queryClient, skuDeltas);
+            }
+
+            return { previousData, queryInput, previousInventoryData } as StatusOptimisticContext;
         },
         onError: (err, _vars, context) => {
             // Rollback on error
             if (context?.previousData) {
                 const rollbackKey = getOrdersListQueryKey(context.queryInput);
                 queryClient.setQueryData(rollbackKey, context.previousData);
+            }
+            // Rollback inventory cache
+            if (context?.previousInventoryData) {
+                rollbackInventoryUpdate(queryClient, context.previousInventoryData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
@@ -172,23 +273,42 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
         onMutate: async ({ lineId }) => {
             // Cancel inflight refetches
             await queryClient.cancelQueries({ queryKey: ['orders'] });
+            // Also cancel inventory balance queries to prevent stale data from overwriting
+            await queryClient.cancelQueries({ queryKey: inventoryQueryKeys.balance });
 
             // Snapshot previous value
             const previousData = getCachedData();
 
-            // Optimistically update
+            // Calculate inventory delta before updating (cancel restores inventory if allocated)
+            const row = getRowByLineId(previousData, lineId);
+            const inventoryDelta = row
+                ? calculateInventoryDelta(row.lineStatus || 'pending', 'cancelled', row.qty || 0)
+                : 0;
+
+            // Optimistically update orders cache
             queryClient.setQueryData<OrdersListData>(
                 queryKey,
                 (old) => optimisticCancelLine(old, lineId) as OrdersListData | undefined
             );
 
-            return { previousData, queryInput } as OptimisticUpdateContext;
+            // Also optimistically update the inventory balance cache
+            let previousInventoryData: Map<string, InventoryBalanceItem[] | undefined> | undefined;
+            if (row?.skuId && inventoryDelta !== 0) {
+                const skuDeltas = new Map<string, number>([[row.skuId, inventoryDelta]]);
+                previousInventoryData = optimisticInventoryUpdate(queryClient, skuDeltas);
+            }
+
+            return { previousData, queryInput, previousInventoryData } as StatusOptimisticContext;
         },
         onError: (err, _vars, context) => {
             // Rollback on error
             if (context?.previousData) {
                 const rollbackKey = getOrdersListQueryKey(context.queryInput);
                 queryClient.setQueryData(rollbackKey, context.previousData);
+            }
+            // Rollback inventory cache
+            if (context?.previousInventoryData) {
+                rollbackInventoryUpdate(queryClient, context.previousInventoryData);
             }
             // Invalidate after rollback to ensure consistency
             invalidateOpenOrders();
