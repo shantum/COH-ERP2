@@ -279,7 +279,8 @@ export async function adjustCustomerOrderCount(
  * Run as maintenance job after backfill or corrections
  */
 export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<{ total: number; updated: number }> {
-    const CHUNK_SIZE = 1000;
+    // Smaller chunk size to avoid connection pool exhaustion
+    const CHUNK_SIZE = 100;
     const thresholds = await getTierThresholds(prisma);
 
     const totalCount = await prisma.customer.count();
@@ -346,20 +347,22 @@ export async function recalculateAllCustomerLtvs(prisma: PrismaClient): Promise<
             }
         }
 
-        // Update all customers in chunk
-        const updates = customerIds.map(id => {
-            const ltv = ltvMap.get(id) || 0;
-            const orderCount = countMap.get(id) || 0;
-            return prisma.customer.update({
-                where: { id },
-                data: { ltv, orderCount, tier: calculateTier(ltv, thresholds) }
-            });
+        // Update all customers in chunk using interactive transaction
+        // This executes updates sequentially inside a single transaction
+        // to avoid connection pool exhaustion
+        await prisma.$transaction(async (tx) => {
+            for (const id of customerIds) {
+                const ltv = ltvMap.get(id) || 0;
+                const orderCount = countMap.get(id) || 0;
+                await tx.customer.update({
+                    where: { id },
+                    data: { ltv, orderCount, tier: calculateTier(ltv, thresholds) }
+                });
+            }
         });
 
-        await prisma.$transaction(updates);
-
         processed += customers.length;
-        updated += updates.length;
+        updated += customerIds.length;
         console.log(`[Tier] Processed ${processed}/${totalCount}`);
     }
 
