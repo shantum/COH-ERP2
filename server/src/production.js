@@ -125,14 +125,27 @@ async function serveStaticFile(req, res, clientDistPath) {
   const safePath = path.normalize(url.pathname).replace(/^(\.\.[\/\\])+/, '');
   const filePath = path.join(clientDistPath, safePath);
 
+  // Debug logging for static file requests
+  if (safePath.startsWith('/assets/')) {
+    console.log(`[Static] Request: ${safePath}`);
+    console.log(`[Static] clientDistPath: ${clientDistPath}`);
+    console.log(`[Static] filePath: ${filePath}`);
+  }
+
   // Ensure file is within client dist directory
   if (!filePath.startsWith(clientDistPath)) {
+    console.log(`[Static] REJECTED - path traversal attempt: ${filePath}`);
     return false;
   }
 
   try {
     const stat = await fs.promises.stat(filePath);
-    if (!stat.isFile()) return false;
+    if (!stat.isFile()) {
+      if (safePath.startsWith('/assets/')) {
+        console.log(`[Static] NOT A FILE: ${filePath}`);
+      }
+      return false;
+    }
 
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
@@ -147,10 +160,16 @@ async function serveStaticFile(req, res, clientDistPath) {
     res.setHeader('Content-Length', stat.size);
     res.setHeader('Cache-Control', cacheControl);
 
+    if (safePath.startsWith('/assets/')) {
+      console.log(`[Static] SERVING: ${filePath}`);
+    }
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
     return true;
-  } catch {
+  } catch (error) {
+    if (safePath.startsWith('/assets/')) {
+      console.log(`[Static] ERROR: ${filePath} - ${error.code || error.message}`);
+    }
     return false;
   }
 }
@@ -170,6 +189,22 @@ async function startProductionServer() {
   // Load TanStack Start server
   const tanstackServerPath = path.join(__dirname, '../../client/dist/server/server.js');
   const clientDistPath = path.join(__dirname, '../../client/dist');
+
+  // Debug: Log paths and directory contents
+  console.log(`[Production] __dirname: ${__dirname}`);
+  console.log(`[Production] clientDistPath: ${clientDistPath}`);
+  try {
+    const distContents = await fs.promises.readdir(clientDistPath);
+    console.log(`[Production] client/dist contents: ${distContents.join(', ')}`);
+    if (distContents.includes('assets')) {
+      const assetsContents = await fs.promises.readdir(path.join(clientDistPath, 'assets'));
+      console.log(`[Production] assets/ contains ${assetsContents.length} files`);
+      console.log(`[Production] First 5 assets: ${assetsContents.slice(0, 5).join(', ')}`);
+    }
+  } catch (error) {
+    console.error(`[Production] ERROR reading client/dist: ${error.message}`);
+  }
+
   let tanstackServer;
   try {
     tanstackServer = await import(tanstackServerPath);
