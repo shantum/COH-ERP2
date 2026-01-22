@@ -4,24 +4,20 @@
  * Displays a top loading bar when routes are loading (during navigation).
  * Uses TanStack Router's status to detect pending navigation with loaders.
  *
+ * IMPORTANT: Uses ClientOnly to prevent SSR hydration mismatch.
+ * During SSR, router is 'pending' but on client it may be 'idle'.
+ * Without ClientOnly, the server-rendered loading bar would persist.
+ *
  * Usage: Place in __root.tsx or Layout component
  *   <RouteLoadingBar />
  */
 
-import { useRouterState } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useRouterState, ClientOnly } from '@tanstack/react-router';
 
-export function RouteLoadingBar() {
-  const routerState = useRouterState({
-    select: (s) => ({ status: s.status, isLoading: s.isLoading }),
+function LoadingBarContent() {
+  const isLoading = useRouterState({
+    select: (s) => s.status === 'pending',
   });
-
-  const isLoading = routerState.status === 'pending';
-
-  // Debug logging
-  useEffect(() => {
-    console.log('[RouteLoadingBar] Router state:', routerState, 'showing:', isLoading);
-  }, [routerState, isLoading]);
 
   if (!isLoading) {
     return null;
@@ -50,5 +46,15 @@ export function RouteLoadingBar() {
         }
       `}</style>
     </div>
+  );
+}
+
+export function RouteLoadingBar() {
+  // Wrap in ClientOnly to avoid SSR hydration mismatch
+  // Server renders null, client renders based on actual router state
+  return (
+    <ClientOnly fallback={null}>
+      <LoadingBarContent />
+    </ClientOnly>
   );
 }
