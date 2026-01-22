@@ -10,8 +10,8 @@ dependsOn = ["setup"]
 cmds = [
   "cd shared && NODE_ENV=development npm ci && npx -y -p typescript tsc",
   # Generate Prisma client in client dir (Server Functions run from client/dist)
-  # Use --generator client to skip prisma-kysely which isn't installed in client
-  "cd client && NODE_ENV=development npm ci && npx prisma generate --schema=../server/prisma/schema.prisma --generator client && npm run build",
+  # Install prisma CLI first, then generate with --generator client to skip prisma-kysely
+  "cd client && NODE_ENV=development npm ci && npm install prisma@5.22.0 --save-dev && npx prisma generate --schema=../server/prisma/schema.prisma --generator client && npm run build",
   "cd server && NODE_ENV=development npm ci && npx prisma generate"
 ]
 dependsOn = ["setup"]
