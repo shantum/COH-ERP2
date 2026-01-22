@@ -12,6 +12,7 @@
  */
 
 import http from 'node:http';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -90,6 +91,70 @@ async function sendWebResponse(webResponse, res) {
   res.end();
 }
 
+/**
+ * MIME types for static file serving
+ */
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.eot': 'application/vnd.ms-fontobject',
+};
+
+/**
+ * Serve static files from client/dist
+ * Returns true if file was served, false otherwise
+ */
+async function serveStaticFile(req, res, clientDistPath) {
+  // Only handle GET requests for static files
+  if (req.method !== 'GET') return false;
+
+  const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+  // Security: prevent directory traversal
+  const safePath = path.normalize(url.pathname).replace(/^(\.\.[\/\\])+/, '');
+  const filePath = path.join(clientDistPath, safePath);
+
+  // Ensure file is within client dist directory
+  if (!filePath.startsWith(clientDistPath)) {
+    return false;
+  }
+
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) return false;
+
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+    // Set caching headers for assets (hashed filenames = immutable)
+    const cacheControl = safePath.startsWith('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=0, must-revalidate';
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Cache-Control', cacheControl);
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function startProductionServer() {
   const PORT = process.env.PORT || 3000;
 
@@ -104,6 +169,7 @@ async function startProductionServer() {
 
   // Load TanStack Start server
   const tanstackServerPath = path.join(__dirname, '../../client/dist/server/server.js');
+  const clientDistPath = path.join(__dirname, '../../client/dist');
   let tanstackServer;
   try {
     tanstackServer = await import(tanstackServerPath);
@@ -123,6 +189,11 @@ async function startProductionServer() {
     // Route /api/* to Express
     if (url.pathname.startsWith('/api/')) {
       expressApp(req, res);
+      return;
+    }
+
+    // Serve static files from client/dist (assets, favicon, etc.)
+    if (await serveStaticFile(req, res, clientDistPath)) {
       return;
     }
 
