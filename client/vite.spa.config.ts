@@ -53,25 +53,20 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       // Externalize server-only Node.js packages that can't be bundled for browser
-      external: [
-        'bcryptjs',
-        'pg',
-        'pg-pool',
-        'pg-native',
-        '@prisma/client',
-        'prisma',
-        'kysely',
-        'dotenv',
-        'jsonwebtoken',
-        'express',
-        'cookie-parser',
-        'cors',
-        'multer',
-        'node-cron',
-        // Externalize anything from server directory
-        /^\.\.\/server\//,
-        /server\/src\//,
-      ],
+      // Use function to handle complex matching for server paths
+      external: (id) => {
+        // Server-only Node.js packages
+        const serverPackages = [
+          'bcryptjs', 'pg', 'pg-pool', 'pg-native',
+          '@prisma/client', 'prisma', 'kysely',
+          'dotenv', 'jsonwebtoken', 'express',
+          'cookie-parser', 'cors', 'multer', 'node-cron',
+        ];
+        if (serverPackages.includes(id)) return true;
+        // Externalize any import path containing 'server/src'
+        if (id.includes('server/src')) return true;
+        return false;
+      },
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
