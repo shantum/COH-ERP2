@@ -49,7 +49,15 @@ export default defineConfig({
     // Ensure proper source maps and chunk splitting
     sourcemap: true,
     rollupOptions: {
-      // Don't mark SSR modules as external - let aliases stub them
+      // Externalize server-only Node.js packages that can't be bundled for browser
+      external: [
+        'bcryptjs',
+        'pg',
+        'pg-pool',
+        'pg-native',
+        '@prisma/client',
+        'prisma',
+      ],
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
