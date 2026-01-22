@@ -154,19 +154,19 @@ async function getPrisma(): Promise<PrismaClientType> {
 type ShopifyClientType = any;
 
 async function getShopifyClient(): Promise<ShopifyClientType> {
-    const { default: shopifyClient } = await import('../../../../server/src/services/shopify.js');
+    const { default: shopifyClient } = await import('@server/services/shopify.js');
     return shopifyClient;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getSyncWorker(): Promise<any> {
-    const { default: syncWorker } = await import('../../../../server/src/services/syncWorker.js');
+    const { default: syncWorker } = await import('@server/services/syncWorker.js');
     return syncWorker;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getScheduledSync(): Promise<any> {
-    const { default: scheduledSync } = await import('../../../../server/src/services/scheduledSync.js');
+    const { default: scheduledSync } = await import('@server/services/scheduledSync.js');
     return scheduledSync;
 }
 

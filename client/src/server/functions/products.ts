@@ -423,7 +423,7 @@ export const getProductsList = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getProductsListInputSchema.parse(input ?? {}))
     .handler(async ({ data: input }) => {
-        const { listProductsKysely } = await import('../../../../server/src/db/queries/index.js');
+        const { listProductsKysely } = await import('@server/db/queries/index.js');
         return listProductsKysely({
             search: input.search,
             category: input.category,

@@ -216,9 +216,7 @@ export const getInventoryBalance = createServerFn({ method: 'GET' })
         }
 
         // Calculate balance using query patterns
-        const { calculateInventoryBalance: calcBalance } = await import(
-            '../../../../server/src/utils/queryPatterns.js'
-        );
+        const { calculateInventoryBalance: calcBalance } = await import('@server/utils/queryPatterns.js');
 
         const balance = await calcBalance(prisma, skuId, {
             allowNegative: true,
@@ -283,9 +281,7 @@ export const getInventoryBalances = createServerFn({ method: 'GET' })
         }
 
         // Get balances from cache
-        const { inventoryBalanceCache } = await import(
-            '../../../../server/src/services/inventoryBalanceCache.js'
-        );
+        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
 
         const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
         const skuCodeMap = new Map(skus.map((s) => [s.id, s.skuCode]));
@@ -329,9 +325,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
 
         // Use Kysely for SKU metadata fetch (JOINs SKU/Variation/Product/Fabric)
-        const { listInventorySkusKysely } = await import(
-            '../../../../server/src/db/queries/index.js'
-        );
+        const { listInventorySkusKysely } = await import('@server/db/queries/index.js');
 
         const skus = await listInventorySkusKysely({
             includeCustomSkus,
@@ -339,9 +333,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
         });
 
         // Get balances from cache (already optimized with groupBy)
-        const { inventoryBalanceCache } = await import(
-            '../../../../server/src/services/inventoryBalanceCache.js'
-        );
+        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
 
         const skuIds = skus.map((sku) => sku.skuId);
         const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);

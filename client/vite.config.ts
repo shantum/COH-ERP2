@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import tsConfigPaths from 'vite-tsconfig-paths'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import viteReact from '@vitejs/plugin-react'
+import path from 'path'
 
 export default defineConfig({
   server: {
@@ -22,6 +23,12 @@ export default defineConfig({
     tanstackStart(),
     viteReact(),
   ],
+  resolve: {
+    alias: {
+      // Map server imports for SSR build
+      '@server': path.resolve(__dirname, '../server/src'),
+    },
+  },
   // SSR configuration: externalize Node.js-only packages
   // These packages should only run on the server, not be bundled for client
   ssr: {

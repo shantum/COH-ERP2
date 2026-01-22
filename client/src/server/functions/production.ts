@@ -41,7 +41,7 @@ const pendingBySkuInputSchema = z.object({
  * Prevents Node.js pg module from being bundled into client.
  */
 async function getKyselyDb() {
-    const { kysely } = await import('../../../../server/src/db/index.js');
+    const { kysely } = await import('@server/db/index.js');
     return kysely;
 }
 
@@ -410,7 +410,7 @@ export const getProductionRequirements = createServerFn({ method: 'GET' })
         });
 
         // Import inventory balance calculator
-        const { calculateAllInventoryBalances } = await import('../../../../server/src/utils/queryPatterns.js');
+        const { calculateAllInventoryBalances } = await import('@server/utils/queryPatterns.js');
 
         // Get current inventory only for pending SKUs
         const balanceMap = pendingSkuIds.size > 0

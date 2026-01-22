@@ -2704,8 +2704,7 @@ export const shipLines = createServerFn({ method: 'POST' })
 
         try {
             // Import shipOrderLines dynamically
-            // @ts-expect-error - Dynamic import from server directory, types not available in client build
-            const { shipOrderLines } = await import('../../../server/src/services/shipOrderService.js');
+            const { shipOrderLines } = await import('@server/services/shipOrderService.js');
 
             const result = await prisma.$transaction(async (tx: PrismaClientType) => {
                 return await shipOrderLines(tx, {
@@ -2777,8 +2776,7 @@ export const markShippedLine = createServerFn({ method: 'POST' })
 
         try {
             // Import shipOrderLines dynamically
-            // @ts-expect-error - Dynamic import from server directory, types not available in client build
-            const { shipOrderLines } = await import('../../../server/src/services/shipOrderService.js');
+            const { shipOrderLines } = await import('@server/services/shipOrderService.js');
 
             const result = await prisma.$transaction(async (tx: PrismaClientType) => {
                 return await shipOrderLines(tx, {
@@ -3417,8 +3415,7 @@ export const receiveRto = createServerFn({ method: 'POST' })
         // Invalidate inventory cache
         if (affectedSkuIds.length > 0) {
             try {
-                // @ts-expect-error - Dynamic import from server directory, types not available in client build
-                const { inventoryBalanceCache } = await import('../../../server/src/services/inventoryBalanceCache.js');
+                const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
                 inventoryBalanceCache.invalidate(affectedSkuIds);
             } catch {
                 // Non-critical
@@ -3525,8 +3522,7 @@ export const migrateShopifyFulfilled = createServerFn({ method: 'POST' })
         };
 
         // Import shipping service
-        // @ts-expect-error - Dynamic import from server directory, types not available in client build
-        const { shipOrderLines } = await import('../../../server/src/services/shipOrderService.js');
+        const { shipOrderLines } = await import('@server/services/shipOrderService.js');
 
         for (const order of eligibleOrders) {
             try {

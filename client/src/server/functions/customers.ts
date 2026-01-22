@@ -182,7 +182,7 @@ const getCustomerInputSchema = z.object({
 export const getCustomer = createServerFn({ method: 'GET' })
     .inputValidator((input: unknown) => getCustomerInputSchema.parse(input))
     .handler(async ({ data }) => {
-        const { getCustomerKysely } = await import('../../../../server/src/db/queries/index.js');
+        const { getCustomerKysely } = await import('@server/db/queries/index.js');
 
         const customer = await getCustomerKysely(data.id);
 

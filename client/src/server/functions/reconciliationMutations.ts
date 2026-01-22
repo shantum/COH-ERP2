@@ -200,7 +200,7 @@ async function calculateAllInventoryBalances(
 
 async function invalidateAllCache(): Promise<void> {
     try {
-        const { inventoryBalanceCache } = await import('../../../../server/src/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
         inventoryBalanceCache.invalidateAll();
     } catch {
         console.log('[Server Function] Cache invalidation skipped (server module not available)');

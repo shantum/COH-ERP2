@@ -293,7 +293,7 @@ async function calculateFabricBalance(
 
 async function invalidateInventoryCache(skuIds: string[]): Promise<void> {
     try {
-        const { inventoryBalanceCache } = await import('../../../../server/src/services/inventoryBalanceCache.js');
+        const { inventoryBalanceCache } = await import('@server/services/inventoryBalanceCache.js');
         inventoryBalanceCache.invalidate(skuIds);
     } catch {
         console.log('[Server Function] Cache invalidation skipped (server module not available)');

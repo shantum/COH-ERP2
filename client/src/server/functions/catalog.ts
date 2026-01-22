@@ -576,7 +576,7 @@ export const syncCatalogWithShopify = createServerFn({ method: 'POST' })
     .handler(async ({ data }) => {
         try {
             // Dynamic import to avoid bundling server-only code
-            const { syncAllProducts } = await import('../../../../server/src/services/productSyncService.js');
+            const { syncAllProducts } = await import('@server/services/productSyncService.js');
             const { PrismaClient } = await import('@prisma/client');
             const prisma = new PrismaClient();
 
