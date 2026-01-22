@@ -9,11 +9,19 @@
  */
 
 import { useRouterState } from '@tanstack/react-router';
+import { useEffect } from 'react';
 
 export function RouteLoadingBar() {
-  const isLoading = useRouterState({
-    select: (s) => s.status === 'pending',
+  const routerState = useRouterState({
+    select: (s) => ({ status: s.status, isLoading: s.isLoading, pendingMatches: s.pendingMatches?.length ?? 0 }),
   });
+
+  const isLoading = routerState.status === 'pending';
+
+  // Debug logging
+  useEffect(() => {
+    console.log('[RouteLoadingBar] Router state:', routerState);
+  }, [routerState]);
 
   if (!isLoading) {
     return null;
