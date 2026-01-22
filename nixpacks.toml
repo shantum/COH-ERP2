@@ -1,3 +1,4 @@
+# Railway build configuration
 [phases.setup]
 nixPkgs = ["nodejs_22"]
 
