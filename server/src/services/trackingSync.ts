@@ -82,16 +82,10 @@ interface LineUpdateData {
     rtoReceivedAt?: Date;
 }
 
-/** Order update data for Prisma */
+/** Order update data for Prisma - ONLY status field exists on Order now */
+/** All tracking fields (trackingStatus, lastScanAt, deliveredAt, etc.) moved to OrderLine */
 interface OrderUpdateData {
-    trackingStatus?: TrackingStatus;
-    deliveredAt?: Date;
-    rtoInitiatedAt?: Date;
-    rtoReceivedAt?: Date;
-    terminalStatus?: string;
-    terminalAt?: Date;
     status?: OrderStatus;
-    lastScanAt?: Date;
 }
 
 /** Result of line tracking update */
@@ -290,16 +284,14 @@ async function updateLineTracking(
         data: lineUpdateData,
     });
 
-    // Update Order.status for terminal states (delivered, RTO, cancelled)
-    // This is the ONLY Order update - no tracking fields
+    // Update Order.status ONLY for terminal states (RTO delivered, cancelled)
+    // NOTE: All tracking fields (trackingStatus, lastScanAt, deliveredAt, rtoInitiatedAt, etc.)
+    // have been moved to OrderLine. Order only has `status` field now.
     const orderUpdateData: OrderUpdateData = {};
     let statusChanged = false;
 
     if (trackingData.internalStatus === 'delivered') {
-        // Set terminal status for delivered orders
-        orderUpdateData.terminalStatus = 'delivered';
-        orderUpdateData.terminalAt = lineUpdateData.deliveredAt || new Date();
-        trackingLogger.info({ orderNumber: orderInfo.orderNumber, terminalStatus: 'delivered' }, 'Order reached terminal status');
+        trackingLogger.info({ orderNumber: orderInfo.orderNumber }, 'Order delivered (line-level tracking)');
     }
 
     if (trackingData.internalStatus === 'rto_delivered') {
@@ -318,39 +310,22 @@ async function updateLineTracking(
         }
     }
 
-    // Also update Order.trackingStatus as denormalized cache (for query compatibility)
-    // This maintains backward compatibility with existing queries while lines are source of truth
-    orderUpdateData.trackingStatus = trackingData.internalStatus;
-
-    // Store the courier's last scan timestamp (from iThink API)
-    if (trackingData.lastScan?.datetime) {
-        orderUpdateData.lastScanAt = new Date(trackingData.lastScan.datetime);
+    // Increment customer RTO count on first RTO initiation
+    if (lineUpdateData.rtoInitiatedAt && !orderInfo.rtoInitiatedAt && orderInfo.customerId) {
+        await prisma.customer.update({
+            where: { id: orderInfo.customerId },
+            data: { rtoCount: { increment: 1 } },
+        });
+        trackingLogger.info({ customerId: orderInfo.customerId }, 'Incremented customer rtoCount');
     }
 
-    if (trackingData.internalStatus === 'delivered') {
-        orderUpdateData.deliveredAt = lineUpdateData.deliveredAt;
+    // Only update Order if status changed
+    if (Object.keys(orderUpdateData).length > 0) {
+        await prisma.order.update({
+            where: { id: orderInfo.orderId },
+            data: orderUpdateData,
+        });
     }
-    if (lineUpdateData.rtoInitiatedAt) {
-        orderUpdateData.rtoInitiatedAt = lineUpdateData.rtoInitiatedAt;
-
-        // Increment customer RTO count on first RTO initiation
-        if (!orderInfo.rtoInitiatedAt && orderInfo.customerId) {
-            await prisma.customer.update({
-                where: { id: orderInfo.customerId },
-                data: { rtoCount: { increment: 1 } },
-            });
-            trackingLogger.info({ customerId: orderInfo.customerId }, 'Incremented customer rtoCount');
-        }
-    }
-    if (lineUpdateData.rtoReceivedAt) {
-        orderUpdateData.rtoReceivedAt = lineUpdateData.rtoReceivedAt;
-    }
-
-    // Apply Order updates
-    await prisma.order.update({
-        where: { id: orderInfo.orderId },
-        data: orderUpdateData,
-    });
 
     // Also recompute order status from lines
     if (!statusChanged) {
