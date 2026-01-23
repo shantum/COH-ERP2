@@ -207,9 +207,10 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
         },
         onSettled: () => {
-            // Only invalidate non-SSE-synced data (inventory balance)
-            // Order list updates are handled by optimistic updates + SSE
-            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
+            // Don't invalidate inventory here - the optimistic update already handles it
+            // Invalidating causes a refetch that can race with server cache and return stale data
+            // The server mutation invalidates its cache, so future queries will get fresh data
+            // SSE handles syncing for other users
         },
     });
 
@@ -270,8 +271,8 @@ export function useOrderWorkflowMutations(options: UseOrderWorkflowMutationsOpti
             }
         },
         onSettled: () => {
-            // Only invalidate non-SSE-synced data (inventory balance)
-            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
+            // Don't invalidate inventory here - the optimistic update already handles it
+            // Invalidating causes a refetch that can race with server cache and return stale data
         },
     });
 
