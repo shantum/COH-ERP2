@@ -55,7 +55,11 @@ export async function listInventorySkusKysely(
         .innerJoin('Product', 'Product.id', 'Variation.productId')
         .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
         .leftJoin('ShopifyInventoryCache', 'ShopifyInventoryCache.skuId', 'Sku.id')
-        .leftJoin('ShopifyProductCache', 'ShopifyProductCache.id', 'Product.shopifyProductId')
+        // Use Variation.shopifySourceProductId for status lookup (more accurate for multi-color products)
+        // Falls back to Product.shopifyProductId if variation source is not set
+        .leftJoin('ShopifyProductCache', (join) =>
+            join.onRef('ShopifyProductCache.id', '=', sql`COALESCE("Variation"."shopifySourceProductId", "Product"."shopifyProductId")`)
+        )
         .select([
             'Sku.id as skuId',
             'Sku.skuCode',
