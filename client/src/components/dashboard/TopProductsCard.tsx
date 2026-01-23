@@ -11,6 +11,8 @@ import { getTopProductsForDashboard } from '../../server/functions/reports';
 import { TrendingUp, Package, Palette } from 'lucide-react';
 
 const TIME_PERIODS = [
+    { value: 0, label: 'Today' },
+    { value: -1, label: 'Yesterday' },
     { value: 7, label: '7d' },
     { value: 14, label: '14d' },
     { value: 30, label: '30d' },
@@ -23,7 +25,7 @@ const LEVELS = [
 ] as const;
 
 export function TopProductsCard() {
-    const [days, setDays] = useState(30);
+    const [days, setDays] = useState(0);
     const [level, setLevel] = useState<'product' | 'variation'>('product');
 
     const { data, isLoading } = useQuery({

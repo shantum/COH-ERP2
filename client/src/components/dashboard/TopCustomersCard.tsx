@@ -11,6 +11,8 @@ import { getTopCustomersForDashboard } from '../../server/functions/reports';
 import { Users, Crown, Star, Award } from 'lucide-react';
 
 const TIME_PERIODS = [
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
     { value: 'thisMonth', label: 'This Month' },
     { value: 'lastMonth', label: 'Last Month' },
     { value: '3months', label: '3 Months' },
@@ -25,7 +27,7 @@ const TIER_STYLES: Record<string, { bg: string; text: string; icon: any }> = {
 };
 
 export function TopCustomersCard() {
-    const [period, setPeriod] = useState('3months');
+    const [period, setPeriod] = useState('today');
 
     const { data, isLoading } = useQuery({
         queryKey: ['topCustomers', period],
