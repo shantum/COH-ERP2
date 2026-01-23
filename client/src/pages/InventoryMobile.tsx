@@ -205,8 +205,11 @@ interface ZeroOutButtonProps {
     onSuccess: () => void;
 }
 
+/** Delay in ms to wait for Shopify webhook before refreshing data */
+const SHOPIFY_SYNC_DELAY = 3000;
+
 /**
- * ZeroOutButton - Icon button to zero out Shopify stock for archived SKUs
+ * ZeroOutButton - Button to zero out Shopify stock for archived SKUs
  * Only visible when: status is 'archived' AND shopifyQty > 0
  */
 const ZeroOutButton = memo(function ZeroOutButton({
@@ -229,12 +232,16 @@ const ZeroOutButton = memo(function ZeroOutButton({
         setIsPending(true);
         try {
             await zeroOutShopifyStock(skuCode, locationId);
-            showSuccess('Stock zeroed on Shopify', { description: skuCode });
-            onSuccess();
+            showSuccess('Stock zeroed on Shopify', { description: `Refreshing in ${SHOPIFY_SYNC_DELAY / 1000}s...` });
+
+            // Wait for Shopify webhook to update our database, then refresh
+            setTimeout(() => {
+                onSuccess();
+                setIsPending(false);
+            }, SHOPIFY_SYNC_DELAY);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             showError('Failed to zero stock', { description: message });
-        } finally {
             setIsPending(false);
         }
     };
