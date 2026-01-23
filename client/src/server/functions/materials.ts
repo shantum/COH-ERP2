@@ -672,6 +672,45 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                 orderBy: { name: 'asc' },
             });
 
+            // Collect all colour IDs to batch-fetch balances
+            const allColourIds: string[] = [];
+            for (const material of materials) {
+                for (const fabric of material.fabrics) {
+                    for (const colour of fabric.colours) {
+                        allColourIds.push(colour.id);
+                    }
+                }
+            }
+
+            // Batch calculate balances from FabricColourTransaction
+            const balanceMap = new Map<string, number>();
+            if (allColourIds.length > 0) {
+                const aggregations = await prisma.fabricColourTransaction.groupBy({
+                    by: ['fabricColourId', 'txnType'],
+                    where: { fabricColourId: { in: allColourIds } },
+                    _sum: { qty: true },
+                });
+
+                // Build totals per colour
+                const colourTotals = new Map<string, { inward: number; outward: number }>();
+                for (const agg of aggregations) {
+                    if (!colourTotals.has(agg.fabricColourId)) {
+                        colourTotals.set(agg.fabricColourId, { inward: 0, outward: 0 });
+                    }
+                    const totals = colourTotals.get(agg.fabricColourId)!;
+                    if (agg.txnType === 'inward') {
+                        totals.inward = Number(agg._sum.qty) || 0;
+                    } else if (agg.txnType === 'outward') {
+                        totals.outward = Number(agg._sum.qty) || 0;
+                    }
+                }
+
+                // Calculate balance: inward - outward
+                for (const [colourId, totals] of colourTotals) {
+                    balanceMap.set(colourId, totals.inward - totals.outward);
+                }
+            }
+
             // Build tree - using inline type assertions for the response
             const items = materials.map((material) => ({
                 id: material.id,
@@ -727,6 +766,8 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         supplierId: colour.supplierId,
                         supplierName: colour.supplier?.name,
                         isActive: colour.isActive,
+                        // Inventory balance from FabricColourTransaction
+                        currentBalance: balanceMap.get(colour.id) ?? 0,
                         // Extract unique products from variation BOM lines
                         connectedProducts: (() => {
                             const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
@@ -849,6 +890,34 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                     orderBy: { colourName: 'asc' },
                 });
 
+                // Batch calculate balances for these colours
+                const colourIds = colours.map((c) => c.id);
+                const balanceMap = new Map<string, number>();
+                if (colourIds.length > 0) {
+                    const aggregations = await prisma.fabricColourTransaction.groupBy({
+                        by: ['fabricColourId', 'txnType'],
+                        where: { fabricColourId: { in: colourIds } },
+                        _sum: { qty: true },
+                    });
+
+                    const colourTotals = new Map<string, { inward: number; outward: number }>();
+                    for (const agg of aggregations) {
+                        if (!colourTotals.has(agg.fabricColourId)) {
+                            colourTotals.set(agg.fabricColourId, { inward: 0, outward: 0 });
+                        }
+                        const totals = colourTotals.get(agg.fabricColourId)!;
+                        if (agg.txnType === 'inward') {
+                            totals.inward = Number(agg._sum.qty) || 0;
+                        } else if (agg.txnType === 'outward') {
+                            totals.outward = Number(agg._sum.qty) || 0;
+                        }
+                    }
+
+                    for (const [colourId, totals] of colourTotals) {
+                        balanceMap.set(colourId, totals.inward - totals.outward);
+                    }
+                }
+
                 const items = colours.map((colour) => {
                     // Extract unique products from variation BOM lines
                     const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
@@ -887,6 +956,8 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                         supplierId: colour.supplierId,
                         supplierName: colour.supplier?.name,
                         isActive: colour.isActive,
+                        // Inventory balance from FabricColourTransaction
+                        currentBalance: balanceMap.get(colour.id) ?? 0,
                         connectedProducts,
                         productCount: connectedProducts.length,
                     };
