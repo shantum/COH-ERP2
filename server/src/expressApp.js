@@ -156,8 +156,9 @@ export async function createExpressApp() {
       metrics.checks.database = { status: 'ok', latencyMs: Date.now() - dbStart };
 
       const ordersStart = Date.now();
+      // Count non-archived orders (isCancelled removed - use line-level status)
       const orderCount = await prisma.order.count({
-        where: { isCancelled: false, isArchived: false },
+        where: { isArchived: false },
       });
       metrics.checks.ordersQuery = {
         status: 'ok',
@@ -167,15 +168,15 @@ export async function createExpressApp() {
 
       const freshnessStart = Date.now();
       const latestOrder = await prisma.order.findFirst({
-        orderBy: { updatedAt: 'desc' },
-        select: { updatedAt: true },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
       });
-      const dataAgeMs = latestOrder ? Date.now() - latestOrder.updatedAt.getTime() : null;
+      const dataAgeMs = latestOrder ? Date.now() - latestOrder.createdAt.getTime() : null;
       metrics.checks.dataFreshness = {
         status: dataAgeMs !== null && dataAgeMs < 3600000 ? 'ok' : 'stale',
         latencyMs: Date.now() - freshnessStart,
         lastUpdateAgeMs: dataAgeMs,
-        lastUpdateAt: latestOrder?.updatedAt?.toISOString() || null,
+        lastUpdateAt: latestOrder?.createdAt?.toISOString() || null,
       };
 
       metrics.performance.totalLatencyMs = Date.now() - startTime;

@@ -156,9 +156,10 @@ app.get('/api/health/production', async (req, res) => {
     metrics.checks.database = { status: 'ok', latencyMs: Date.now() - dbStart };
 
     // Orders query performance (count only for speed)
+    // Note: isCancelled removed from schema - use line-level status instead
     const ordersStart = Date.now();
     const orderCount = await prisma.order.count({
-      where: { isCancelled: false, isArchived: false },
+      where: { isArchived: false },
     });
     metrics.checks.ordersQuery = {
       status: 'ok',
@@ -166,18 +167,18 @@ app.get('/api/health/production', async (req, res) => {
       openOrderCount: orderCount,
     };
 
-    // Check most recent order update (data freshness)
+    // Check most recent order creation (data freshness)
     const freshnessStart = Date.now();
     const latestOrder = await prisma.order.findFirst({
-      orderBy: { updatedAt: 'desc' },
-      select: { updatedAt: true },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
     });
-    const dataAgeMs = latestOrder ? Date.now() - latestOrder.updatedAt.getTime() : null;
+    const dataAgeMs = latestOrder ? Date.now() - latestOrder.createdAt.getTime() : null;
     metrics.checks.dataFreshness = {
       status: dataAgeMs !== null && dataAgeMs < 3600000 ? 'ok' : 'stale',
       latencyMs: Date.now() - freshnessStart,
       lastUpdateAgeMs: dataAgeMs,
-      lastUpdateAt: latestOrder?.updatedAt?.toISOString() || null,
+      lastUpdateAt: latestOrder?.createdAt?.toISOString() || null,
     };
 
     // Total response time
