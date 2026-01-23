@@ -113,9 +113,9 @@ export function ModalHeader({
 
         <div className="flex items-start justify-between gap-4">
           {/* Left: Order info */}
-          <div className="flex items-start gap-4">
+          <div className="flex items-start gap-4 min-w-0 flex-1">
             {/* Icon */}
-            <div className={`p-3 rounded-2xl shadow-sm ${
+            <div className={`p-3 rounded-2xl shadow-sm flex-shrink-0 ${
               order.isExchange
                 ? 'bg-gradient-to-br from-amber-100 to-amber-50 text-amber-600'
                 : 'bg-gradient-to-br from-sky-100 to-sky-50 text-sky-600'
@@ -124,7 +124,7 @@ export function ModalHeader({
             </div>
 
             {/* Order details */}
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-3">
                 <h2 className="text-xl font-semibold text-slate-800 tracking-tight">
                   Order #{order.orderNumber}
@@ -143,9 +143,9 @@ export function ModalHeader({
               </div>
 
               {/* Meta info row */}
-              <div className="flex items-center gap-3 mt-1.5 text-sm text-slate-500">
-                <span className="flex items-center gap-1.5">
-                  <Calendar size={13} className="text-slate-400" />
+              <div className="flex items-center gap-3 mt-1.5 text-sm text-slate-500 flex-wrap">
+                <span className="flex items-center gap-1.5 whitespace-nowrap">
+                  <Calendar size={13} className="text-slate-400 flex-shrink-0" />
                   {formatDate(order.orderDate)}
                 </span>
                 <span className="text-slate-300">|</span>
@@ -156,9 +156,9 @@ export function ModalHeader({
                 {discountCodes && (
                   <>
                     <span className="text-slate-300">|</span>
-                    <span className="flex items-center gap-1.5 text-emerald-600">
-                      <Tag size={13} />
-                      {discountCodes}
+                    <span className="flex items-center gap-1.5 text-emerald-600 max-w-[200px]" title={discountCodes}>
+                      <Tag size={13} className="flex-shrink-0" />
+                      <span className="truncate">{discountCodes}</span>
                     </span>
                   </>
                 )}
@@ -187,7 +187,7 @@ export function ModalHeader({
           </div>
 
           {/* Right: Mode tabs and close */}
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3 flex-shrink-0">
             {/* Mode tabs */}
             <div className="flex bg-slate-100/80 rounded-xl p-1 shadow-inner">
               <button

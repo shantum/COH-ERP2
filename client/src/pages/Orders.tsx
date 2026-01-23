@@ -5,7 +5,7 @@
  * Note: Archived view hidden from UI but auto-archive still runs. Search shows archived orders.
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { Route } from '../routes/_authenticated/orders';
@@ -266,6 +266,14 @@ export default function Orders() {
 
     // Use order from list if available, otherwise use fetched order
     const unifiedModalOrder = orderFromList || (fetchedOrder as unknown as Order) || null;
+
+    // When modal opens from search results, populate search input with order number
+    // This filters the grid to show only the selected order
+    useEffect(() => {
+        if (unifiedModalOrder?.orderNumber && modalType !== null && !searchInput) {
+            setSearchInput(unifiedModalOrder.orderNumber);
+        }
+    }, [unifiedModalOrder?.orderNumber, modalType]);
 
     // Modal handlers - now URL-driven for bookmarking/sharing
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' | 'customer' = 'view') => {
