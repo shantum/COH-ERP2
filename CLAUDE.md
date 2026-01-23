@@ -196,7 +196,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 16. **Page sizes**: Open=500 (active mgmt), Shipped/Cancelled=100 (historical views)
 17. **TypeScript checks BEFORE committing**: ALWAYS run `cd client && npx tsc -p tsconfig.app.json --noEmit && cd ../server && npx tsc --noEmit` before every commit. NON-NEGOTIABLE.
 18. **TanStack Table trees**: use `getSubRows` for hierarchy, never mutate `children` directly; expansion state separate from data
-19. **Fabric hierarchy**: Database enforces Material→Fabric→Colour consistency; colours MUST have fabricId, fabrics MUST have materialId
+19. **Fabric hierarchy**: Database enforces Material→Fabric→Colour consistency; colours MUST have fabricId, fabrics MUST have materialId. **Variations now link to FabricColour** (not just Fabric) via `fabricColourId`.
 20. **Inheritance pattern**: Fabric colours inherit cost/lead/minOrder from parent fabric if not explicitly set (priority: colour → fabric → null)
 21. **Cell components**: Modularize into `/cells/` directory with barrel export from `index.ts`; reusable across tables
 22. **URL state sync**: Master-detail views sync selection to URL params (`?tab=bom&id=123&type=product`); parse on mount, update on selection
@@ -560,18 +560,19 @@ components/materials/
 ### Server Functions (Primary Data Layer)
 ```
 client/src/server/functions/
-  orders.ts, orderMutations.ts        # Orders queries and mutations
-  customers.ts, customerMutations.ts  # Customers queries and mutations
-  inventory.ts, inventoryMutations.ts # Inventory queries and mutations
-  products.ts, productsMutations.ts   # Products queries and mutations
-  materials.ts, materialsMutations.ts # Materials queries and mutations
-  fabrics.ts, fabricMutations.ts      # Fabrics queries and mutations
-  returns.ts, returnsMutations.ts     # Returns queries and mutations
-  tracking.ts                         # Tracking queries
-  admin.ts, shopify.ts, catalog.ts    # Admin, Shopify, Catalog functions
-  bomMutations.ts                     # BOM mutations
-  production.ts, productionMutations.ts # Production queries and mutations
-  reports.ts, repacking.ts            # Reports and repacking
+  orders.ts, orderMutations.ts           # Orders queries and mutations
+  customers.ts, customerMutations.ts     # Customers queries and mutations
+  inventory.ts, inventoryMutations.ts    # Inventory queries and mutations
+  products.ts, productsMutations.ts      # Products queries and mutations
+  materials.ts, materialsMutations.ts    # Materials queries and mutations
+  fabrics.ts, fabricMutations.ts         # Fabrics queries and mutations
+  fabricColours.ts, fabricColourMutations.ts  # FabricColour transactions
+  returns.ts, returnsMutations.ts        # Returns queries and mutations
+  tracking.ts                            # Tracking queries
+  admin.ts, shopify.ts, catalog.ts       # Admin, Shopify, Catalog functions
+  bomMutations.ts                        # BOM mutations
+  production.ts, productionMutations.ts  # Production queries and mutations
+  reports.ts, repacking.ts               # Reports and repacking
 ```
 
 ### Server (Express - Minimal Routes)
@@ -726,7 +727,22 @@ effectiveCostPerUnit: colour.costPerUnit ?? fabric.costPerUnit,
 costInherited: colour.costPerUnit === null,
 ```
 
-UI shows inheritance indicator (↑) when using fabric value.
+UI shows inheritance indicator when using fabric value.
+
+### FabricColour Transaction System
+
+Fabric stock is tracked at the **colour level** (not fabric level):
+
+| Model | Purpose |
+|-------|---------|
+| `FabricColourTransaction` | Inward/outward movements per colour |
+| `FabricColourReconciliation` | Physical count sessions |
+| `FabricColourReconciliationItem` | Individual count items |
+
+**Key relationships:**
+- `Variation.fabricColourId` → Links product variations to specific fabric colours
+- Assigning a `fabricColourId` auto-sets `fabricId` for backwards compatibility
+- Ledgers page (`/ledgers`) shows Material→Fabric→Colour hierarchy with balances
 
 ### Master-Detail with URL Sync
 
@@ -896,14 +912,17 @@ PGPASSWORD=<staging_password> psql -h <staging_host> -p <staging_port> -U postgr
 |------|---------|-----------|
 | `/orders` | Order fulfillment pipeline | AG-Grid (Open/Shipped/Cancelled views) |
 | `/products` | Product catalog + BOM | TanStack Table trees + flat tables (5 tabs) |
-| `/materials` | Materials catalog (legacy standalone) | Tree view |
 | `/inventory` | Stock management | AG-Grid |
+| `/inventory-mobile` | Mobile stock view with Shopify sync | TanStack Table (sortable, filterable) |
 | `/customers` | Customer management | AG-Grid |
 | `/analytics` | Business metrics | Charts + tables |
 | `/returns` | Customer returns | AG-Grid |
 | `/returns-rto` | RTO processing | AG-Grid |
+| `/ledgers` | Fabric colour ledgers | Material→Fabric→Colour hierarchy |
+| `/fabric-reconciliation` | Fabric count reconciliation | FabricColour-based |
+| `/production` | Production planning | Calendar-based |
 
-**Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
+**Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/fabrics` page removed - use `/products?tab=materials`.
 
 ---
-**Updated till commit:** `89d6bd3` (2026-01-23) - Added Shopify inventory sync documentation
+**Updated till commit:** `64bce27` (2026-01-23) - FabricColour transactions, inventory-mobile page, removed /fabrics route
