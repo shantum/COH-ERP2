@@ -90,10 +90,6 @@ export type ProductsSearchParams = z.infer<typeof ProductsSearchParams>;
 export const InventorySearchParams = z.object({
     /** Search query for SKU/product name */
     search: z.string().optional().catch(undefined),
-    /** Page number */
-    page: z.coerce.number().int().positive().catch(1),
-    /** Items per page */
-    limit: z.coerce.number().int().positive().max(500).catch(100),
     /** Stock status filter */
     stockFilter: z.enum(['all', 'in_stock', 'low_stock', 'out_of_stock']).optional().catch(undefined),
 });

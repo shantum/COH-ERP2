@@ -16,24 +16,18 @@ const Inventory = lazy(() => import('../../pages/Inventory'));
 
 export const Route = createFileRoute('/_authenticated/inventory')({
     validateSearch: (search) => InventorySearchParams.parse(search),
-    // Extract search params for loader
+    // Extract search params for loader (only stockFilter used, client does filtering)
     loaderDeps: ({ search }) => ({
         stockFilter: search.stockFilter,
-        search: search.search,
-        page: search.page || 1,
-        limit: search.limit || 100,
     }),
-    // Pre-fetch inventory data on server
+    // Pre-fetch ALL inventory data on server (client-side filtering via AG-Grid)
     loader: async ({ deps }): Promise<InventoryLoaderData> => {
         try {
-            const offset = (deps.page - 1) * deps.limit;
             const inventory = await getInventoryList({
                 data: {
                     includeCustomSkus: false,
-                    search: deps.search,
                     stockFilter: deps.stockFilter as 'all' | 'in_stock' | 'low_stock' | 'out_of_stock' | undefined,
-                    limit: deps.limit,
-                    offset,
+                    limit: 10000, // Load all SKUs for client-side search/filter
                 },
             });
             return { inventory, error: null };
