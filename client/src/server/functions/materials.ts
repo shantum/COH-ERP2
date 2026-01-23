@@ -650,6 +650,17 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                             colours: {
                                 include: {
                                     supplier: { select: { id: true, name: true } },
+                                    variationBomLines: {
+                                        include: {
+                                            variation: {
+                                                include: {
+                                                    product: {
+                                                        select: { id: true, name: true, styleCode: true },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
                                 },
                                 orderBy: { colourName: 'asc' },
                             },
@@ -716,7 +727,29 @@ export const getMaterialsTree = createServerFn({ method: 'GET' })
                         supplierId: colour.supplierId,
                         supplierName: colour.supplier?.name,
                         isActive: colour.isActive,
-                        connectedProducts: 0, // Could count VariationBomLine references
+                        // Extract unique products from variation BOM lines
+                        connectedProducts: (() => {
+                            const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
+                            colour.variationBomLines.forEach((bomLine) => {
+                                const product = bomLine.variation?.product;
+                                if (product && !productMap.has(product.id)) {
+                                    productMap.set(product.id, {
+                                        id: product.id,
+                                        name: product.name,
+                                        styleCode: product.styleCode ?? undefined,
+                                    });
+                                }
+                            });
+                            return Array.from(productMap.values());
+                        })(),
+                        productCount: (() => {
+                            const productIds = new Set<string>();
+                            colour.variationBomLines.forEach((bomLine) => {
+                                const product = bomLine.variation?.product;
+                                if (product) productIds.add(product.id);
+                            });
+                            return productIds.size;
+                        })(),
                     })),
                 })),
             }));
@@ -801,34 +834,63 @@ export const getMaterialsTreeChildren = createServerFn({ method: 'GET' })
                             },
                         },
                         supplier: { select: { id: true, name: true } },
+                        variationBomLines: {
+                            include: {
+                                variation: {
+                                    include: {
+                                        product: {
+                                            select: { id: true, name: true, styleCode: true },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     },
                     orderBy: { colourName: 'asc' },
                 });
 
-                const items = colours.map((colour) => ({
-                    id: colour.id,
-                    type: 'colour' as const,
-                    name: colour.colourName,
-                    colourName: colour.colourName,
-                    fabricId: colour.fabricId,
-                    fabricName: colour.fabric.name,
-                    materialId: colour.fabric.materialId,
-                    materialName: colour.fabric.material?.name,
-                    standardColour: colour.standardColour,
-                    colourHex: colour.colourHex,
-                    costPerUnit: colour.costPerUnit,
-                    effectiveCostPerUnit: colour.costPerUnit ?? colour.fabric.costPerUnit,
-                    costInherited: colour.costPerUnit === null,
-                    leadTimeDays: colour.leadTimeDays,
-                    effectiveLeadTimeDays: colour.leadTimeDays ?? colour.fabric.defaultLeadTimeDays,
-                    leadTimeInherited: colour.leadTimeDays === null,
-                    minOrderQty: colour.minOrderQty,
-                    effectiveMinOrderQty: colour.minOrderQty ?? colour.fabric.defaultMinOrderQty,
-                    minOrderInherited: colour.minOrderQty === null,
-                    supplierId: colour.supplierId,
-                    supplierName: colour.supplier?.name,
-                    isActive: colour.isActive,
-                }));
+                const items = colours.map((colour) => {
+                    // Extract unique products from variation BOM lines
+                    const productMap = new Map<string, { id: string; name: string; styleCode?: string }>();
+                    colour.variationBomLines.forEach((bomLine) => {
+                        const product = bomLine.variation?.product;
+                        if (product && !productMap.has(product.id)) {
+                            productMap.set(product.id, {
+                                id: product.id,
+                                name: product.name,
+                                styleCode: product.styleCode ?? undefined,
+                            });
+                        }
+                    });
+                    const connectedProducts = Array.from(productMap.values());
+
+                    return {
+                        id: colour.id,
+                        type: 'colour' as const,
+                        name: colour.colourName,
+                        colourName: colour.colourName,
+                        fabricId: colour.fabricId,
+                        fabricName: colour.fabric.name,
+                        materialId: colour.fabric.materialId,
+                        materialName: colour.fabric.material?.name,
+                        standardColour: colour.standardColour,
+                        colourHex: colour.colourHex,
+                        costPerUnit: colour.costPerUnit,
+                        effectiveCostPerUnit: colour.costPerUnit ?? colour.fabric.costPerUnit,
+                        costInherited: colour.costPerUnit === null,
+                        leadTimeDays: colour.leadTimeDays,
+                        effectiveLeadTimeDays: colour.leadTimeDays ?? colour.fabric.defaultLeadTimeDays,
+                        leadTimeInherited: colour.leadTimeDays === null,
+                        minOrderQty: colour.minOrderQty,
+                        effectiveMinOrderQty: colour.minOrderQty ?? colour.fabric.defaultMinOrderQty,
+                        minOrderInherited: colour.minOrderQty === null,
+                        supplierId: colour.supplierId,
+                        supplierName: colour.supplier?.name,
+                        isActive: colour.isActive,
+                        connectedProducts,
+                        productCount: connectedProducts.length,
+                    };
+                });
 
                 return { success: true, items };
             }
