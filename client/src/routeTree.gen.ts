@@ -24,6 +24,7 @@ import { Route as AuthenticatedReturnsRtoRouteImport } from './routes/_authentic
 import { Route as AuthenticatedReturnsRouteImport } from './routes/_authenticated/returns'
 import { Route as AuthenticatedProductsRouteImport } from './routes/_authenticated/products'
 import { Route as AuthenticatedProductionRouteImport } from './routes/_authenticated/production'
+import { Route as AuthenticatedOrdersMobileRouteImport } from './routes/_authenticated/orders-mobile'
 import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
 import { Route as AuthenticatedOrderSearchRouteImport } from './routes/_authenticated/order-search'
 import { Route as AuthenticatedLedgersRouteImport } from './routes/_authenticated/ledgers'
@@ -110,6 +111,12 @@ const AuthenticatedProductionRoute = AuthenticatedProductionRouteImport.update({
   path: '/production',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedOrdersMobileRoute =
+  AuthenticatedOrdersMobileRouteImport.update({
+    id: '/orders-mobile',
+    path: '/orders-mobile',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedOrdersRoute = AuthenticatedOrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
@@ -192,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/ledgers': typeof AuthenticatedLedgersRoute
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
+  '/orders-mobile': typeof AuthenticatedOrdersMobileRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
   '/returns': typeof AuthenticatedReturnsRoute
@@ -218,6 +226,7 @@ export interface FileRoutesByTo {
   '/ledgers': typeof AuthenticatedLedgersRoute
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
+  '/orders-mobile': typeof AuthenticatedOrdersMobileRoute
   '/production': typeof AuthenticatedProductionRoute
   '/products': typeof AuthenticatedProductsRoute
   '/returns': typeof AuthenticatedReturnsRoute
@@ -247,6 +256,7 @@ export interface FileRoutesById {
   '/_authenticated/ledgers': typeof AuthenticatedLedgersRoute
   '/_authenticated/order-search': typeof AuthenticatedOrderSearchRoute
   '/_authenticated/orders': typeof AuthenticatedOrdersRoute
+  '/_authenticated/orders-mobile': typeof AuthenticatedOrdersMobileRoute
   '/_authenticated/production': typeof AuthenticatedProductionRoute
   '/_authenticated/products': typeof AuthenticatedProductsRoute
   '/_authenticated/returns': typeof AuthenticatedReturnsRoute
@@ -277,6 +287,7 @@ export interface FileRouteTypes {
     | '/ledgers'
     | '/order-search'
     | '/orders'
+    | '/orders-mobile'
     | '/production'
     | '/products'
     | '/returns'
@@ -303,6 +314,7 @@ export interface FileRouteTypes {
     | '/ledgers'
     | '/order-search'
     | '/orders'
+    | '/orders-mobile'
     | '/production'
     | '/products'
     | '/returns'
@@ -331,6 +343,7 @@ export interface FileRouteTypes {
     | '/_authenticated/ledgers'
     | '/_authenticated/order-search'
     | '/_authenticated/orders'
+    | '/_authenticated/orders-mobile'
     | '/_authenticated/production'
     | '/_authenticated/products'
     | '/_authenticated/returns'
@@ -458,6 +471,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProductionRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/orders-mobile': {
+      id: '/_authenticated/orders-mobile'
+      path: '/orders-mobile'
+      fullPath: '/orders-mobile'
+      preLoaderRoute: typeof AuthenticatedOrdersMobileRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/orders': {
       id: '/_authenticated/orders'
       path: '/orders'
@@ -550,6 +570,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedLedgersRoute: typeof AuthenticatedLedgersRoute
   AuthenticatedOrderSearchRoute: typeof AuthenticatedOrderSearchRoute
   AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
+  AuthenticatedOrdersMobileRoute: typeof AuthenticatedOrdersMobileRoute
   AuthenticatedProductionRoute: typeof AuthenticatedProductionRoute
   AuthenticatedProductsRoute: typeof AuthenticatedProductsRoute
   AuthenticatedReturnsRoute: typeof AuthenticatedReturnsRoute
@@ -572,6 +593,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedLedgersRoute: AuthenticatedLedgersRoute,
   AuthenticatedOrderSearchRoute: AuthenticatedOrderSearchRoute,
   AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,
+  AuthenticatedOrdersMobileRoute: AuthenticatedOrdersMobileRoute,
   AuthenticatedProductionRoute: AuthenticatedProductionRoute,
   AuthenticatedProductsRoute: AuthenticatedProductsRoute,
   AuthenticatedReturnsRoute: AuthenticatedReturnsRoute,
