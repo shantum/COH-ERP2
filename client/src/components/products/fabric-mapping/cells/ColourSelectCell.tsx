@@ -3,10 +3,13 @@
  *
  * Third level of cascading dropdown (Material → Fabric → Colour).
  * Filtered by selected fabric. Selecting a colour triggers a pending change.
+ * Includes "+ Add new colour" option in dropdown for better UX.
  */
 
 import { Plus } from 'lucide-react';
 import type { ColourOption, CascadingSelection } from '../types';
+
+const ADD_NEW_VALUE = '__add_new__';
 
 interface ColourSelectCellProps {
     selection: CascadingSelection;
@@ -45,6 +48,14 @@ export function ColourSelectCell({
     const selectedColour = filteredColours.find((c) => c.id === selectedId);
     const displayHex = selectedColour?.colourHex || currentColourHex;
 
+    const handleChange = (value: string) => {
+        if (value === ADD_NEW_VALUE) {
+            onAddNew?.();
+            return;
+        }
+        onChange(value || null);
+    };
+
     return (
         <div className="flex items-center gap-1">
             {displayHex && (
@@ -56,7 +67,7 @@ export function ColourSelectCell({
 
             <select
                 value={selectedId || ''}
-                onChange={(e) => onChange(e.target.value || null)}
+                onChange={(e) => handleChange(e.target.value)}
                 disabled={isDisabled}
                 className="flex-1 text-sm py-1 px-2 border border-gray-200 rounded
                            focus:outline-none focus:ring-1 focus:ring-blue-500
@@ -66,6 +77,11 @@ export function ColourSelectCell({
                 <option value="">
                     {isDisabled ? 'Select fabric first...' : 'Select colour...'}
                 </option>
+                {onAddNew && (
+                    <option value={ADD_NEW_VALUE} className="text-blue-600 font-medium">
+                        + Add new colour...
+                    </option>
+                )}
                 {filteredColours.map((colour) => (
                     <option key={colour.id} value={colour.id}>
                         {colour.name}
