@@ -7,7 +7,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { Route } from '../routes/_authenticated/orders';
 import { Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, X, Search } from 'lucide-react';
 
@@ -24,6 +24,9 @@ import { useOrdersUrlModal, type OrderModalType } from '../hooks/useUrlModal';
 import {
     enrichRowsWithInventory,
 } from '../utils/orderHelpers';
+
+// Server functions
+import { getOrderById } from '../server/functions/orders';
 
 // Components
 import {
@@ -246,11 +249,23 @@ export default function Orders() {
     // Must be placed after `orders` is defined from useUnifiedOrdersData
     // Note: `orders` is DerivedOrder[] but modal expects full Order type
     // The modal only needs core fields which DerivedOrder provides
-    const unifiedModalOrder = useMemo(() => {
+    const orderFromList = useMemo(() => {
         if (!modalOrderId || !orders) return null;
         const found = (orders as DerivedOrder[]).find((o) => o.id === modalOrderId);
         return found ? (found as unknown as Order) : null;
     }, [modalOrderId, orders]);
+
+    // Fetch order directly when orderId is in URL but not in loaded list
+    // This handles the case when coming from search results
+    const { data: fetchedOrder, isLoading: isLoadingModalOrder } = useQuery({
+        queryKey: ['order', modalOrderId],
+        queryFn: () => getOrderById({ data: { id: modalOrderId! } }),
+        enabled: !!modalOrderId && !orderFromList && modalType !== null,
+        staleTime: 30 * 1000,
+    });
+
+    // Use order from list if available, otherwise use fetched order
+    const unifiedModalOrder = orderFromList || (fetchedOrder as unknown as Order) || null;
 
     // Modal handlers - now URL-driven for bookmarking/sharing
     const openUnifiedModal = useCallback((order: Order, mode: 'view' | 'edit' | 'ship' | 'customer' = 'view') => {
@@ -937,6 +952,16 @@ export default function Orders() {
                     isEditMode={isEditingCustomization}
                     initialData={customizationInitialData}
                 />
+            )}
+
+            {/* Loading state when fetching order from URL */}
+            {isLoadingModalOrder && modalOrderId && !unifiedModalOrder && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 flex items-center gap-3">
+                        <RefreshCw className="h-5 w-5 animate-spin text-primary-600" />
+                        <span>Loading order...</span>
+                    </div>
+                </div>
             )}
 
             {unifiedModalOrder && (

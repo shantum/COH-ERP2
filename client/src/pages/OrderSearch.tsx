@@ -77,9 +77,10 @@ export default function OrderSearch() {
         const mappedTab = tabMapping[tab] || 'open';
         // Map tab to view for Orders page - open/cancelled stay, shipped tabs become shipped view
         const view = (ordersPageTabs as string[]).includes(mappedTab as string) ? mappedTab : 'shipped';
+        // Navigate with modal=view to directly open the order modal
         navigate({
             to: '/orders',
-            search: { view: view as 'open' | 'shipped' | 'cancelled', orderId } as any,
+            search: { view: view as 'open' | 'shipped' | 'cancelled', orderId, modal: 'view' } as any,
         });
     };
 
