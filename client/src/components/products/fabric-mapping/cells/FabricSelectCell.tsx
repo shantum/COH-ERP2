@@ -5,6 +5,7 @@
  * Filtered by selected material. Changes reset Colour selection.
  */
 
+import { memo, useMemo } from 'react';
 import { Plus } from 'lucide-react';
 import type { FabricOption, CascadingSelection } from '../types';
 
@@ -18,7 +19,7 @@ interface FabricSelectCellProps {
     disabled?: boolean;
 }
 
-export function FabricSelectCell({
+export const FabricSelectCell = memo(function FabricSelectCell({
     selection,
     fabrics,
     currentFabricId,
@@ -31,10 +32,13 @@ export function FabricSelectCell({
     const selectedId = selection.fabricId ?? currentFabricId;
     const selectedMaterialId = selection.materialId;
 
-    // Filter fabrics by selected material
-    const filteredFabrics = selectedMaterialId
-        ? fabrics.filter((f) => f.materialId === selectedMaterialId)
-        : fabrics;
+    // Filter fabrics by selected material (memoized for performance)
+    const filteredFabrics = useMemo(
+        () => selectedMaterialId
+            ? fabrics.filter((f) => f.materialId === selectedMaterialId)
+            : fabrics,
+        [fabrics, selectedMaterialId]
+    );
 
     // Disabled if no material selected
     const isDisabled = disabled || !selectedMaterialId;
@@ -71,4 +75,4 @@ export function FabricSelectCell({
             )}
         </div>
     );
-}
+});

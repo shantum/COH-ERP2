@@ -5,6 +5,7 @@
  * For variation rows: Shows checkmark if mapped, empty if not
  */
 
+import { memo } from 'react';
 import { Check } from 'lucide-react';
 import type { FabricMappingRow } from '../types';
 
@@ -13,7 +14,7 @@ interface StatusCellProps {
     isPending?: boolean;
 }
 
-export function StatusCell({ row, isPending }: StatusCellProps) {
+export const StatusCell = memo(function StatusCell({ row, isPending }: StatusCellProps) {
     if (row.rowType === 'product') {
         const mappedCount = row.mappedCount || 0;
         const totalCount = row.variationCount || 0;
@@ -55,4 +56,4 @@ export function StatusCell({ row, isPending }: StatusCellProps) {
             )}
         </div>
     );
-}
+});

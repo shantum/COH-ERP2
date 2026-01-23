@@ -5,6 +5,7 @@
  * Changes here reset Fabric and Colour selections.
  */
 
+import { memo } from 'react';
 import { Plus } from 'lucide-react';
 import type { MaterialOption, CascadingSelection } from '../types';
 
@@ -18,7 +19,7 @@ interface MaterialSelectCellProps {
     disabled?: boolean;
 }
 
-export function MaterialSelectCell({
+export const MaterialSelectCell = memo(function MaterialSelectCell({
     selection,
     materials,
     currentMaterialId,
@@ -60,4 +61,4 @@ export function MaterialSelectCell({
             )}
         </div>
     );
-}
+});

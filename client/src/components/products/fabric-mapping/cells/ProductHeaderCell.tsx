@@ -5,6 +5,7 @@
  * Used for visual grouping in the flat table.
  */
 
+import { memo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { FabricMappingRow } from '../types';
 
@@ -14,7 +15,7 @@ interface ProductHeaderCellProps {
     onToggle: () => void;
 }
 
-export function ProductHeaderCell({ row, isExpanded, onToggle }: ProductHeaderCellProps) {
+export const ProductHeaderCell = memo(function ProductHeaderCell({ row, isExpanded, onToggle }: ProductHeaderCellProps) {
     return (
         <div className="flex items-center gap-2">
             <button
@@ -53,4 +54,4 @@ export function ProductHeaderCell({ row, isExpanded, onToggle }: ProductHeaderCe
             </div>
         </div>
     );
-}
+});
