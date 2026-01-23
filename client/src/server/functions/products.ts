@@ -10,7 +10,7 @@
 
 import { createServerFn } from '@tanstack/react-start';
 import { z } from 'zod';
-import { sql } from 'kysely';
+// NOTE: kysely's `sql` is imported dynamically inside functions to prevent client bundling
 import { authMiddleware } from '../middleware/auth';
 import {
     productsListResultSchema,
@@ -440,6 +440,8 @@ export const getProductsList = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getProductsListInputSchema.parse(input ?? {}))
     .handler(async ({ data: input }): Promise<ProductsListResult> => {
+        // Dynamic import to prevent kysely from being bundled into client
+        const { sql } = await import('kysely');
         const db = await getKysely();
         const { search, category, isActive, page = 1, limit = 50 } = input;
         const offset = (page - 1) * limit;
