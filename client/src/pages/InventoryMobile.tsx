@@ -7,7 +7,7 @@
 
 import { useMemo, useState, useCallback, memo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     useReactTable,
     getCoreRowModel,
@@ -26,9 +26,58 @@ import {
 } from '../components/ui/table';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
-import { Package, Search, ChevronLeft, ChevronRight, AlertCircle, X, ArrowUp, ArrowDown } from 'lucide-react';
+import { Package, Search, ChevronLeft, ChevronRight, AlertCircle, X, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
-// Filter types are defined locally since the route just needs the schema
+import { showSuccess, showError } from '../utils/toast';
+
+// ============================================
+// SHOPIFY INVENTORY SYNC
+// ============================================
+
+/**
+ * Fetch Shopify inventory locations
+ * Returns the first (primary) location ID
+ */
+async function fetchShopifyLocationId(): Promise<string | null> {
+    try {
+        const res = await fetch('/api/shopify/inventory/locations');
+        if (!res.ok) return null;
+        const data = await res.json() as { locations: Array<{ id: string; name: string }> };
+        return data.locations?.[0]?.id ?? null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Zero out Shopify stock for a SKU
+ */
+async function zeroOutShopifyStock(sku: string, locationId: string): Promise<{ success: boolean; error?: string }> {
+    const res = await fetch('/api/shopify/inventory/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku, locationId, quantity: 0 }),
+    });
+
+    if (!res.ok) {
+        const data = await res.json() as { error?: string };
+        throw new Error(data.error || 'Failed to update Shopify');
+    }
+
+    return res.json() as Promise<{ success: boolean; error?: string }>;
+}
+
+/**
+ * Hook to manage Shopify location ID (fetched once and cached)
+ */
+function useShopifyLocation() {
+    return useQuery({
+        queryKey: ['shopify-location'],
+        queryFn: fetchShopifyLocationId,
+        staleTime: Infinity, // Location rarely changes
+        retry: 1,
+    });
+}
 
 // ============================================
 // CELL COMPONENTS (Memoized for performance)
@@ -148,6 +197,71 @@ const ShopifyStatusCell = memo(function ShopifyStatusCell({ status }: ShopifySta
     );
 });
 
+interface ZeroOutButtonProps {
+    skuCode: string;
+    shopifyQty: number | null;
+    shopifyProductStatus: 'active' | 'archived' | 'draft' | null;
+    locationId: string | null | undefined;
+    onSuccess: () => void;
+}
+
+/**
+ * ZeroOutButton - Icon button to zero out Shopify stock for archived SKUs
+ * Only visible when: status is 'archived' AND shopifyQty > 0
+ */
+const ZeroOutButton = memo(function ZeroOutButton({
+    skuCode,
+    shopifyQty,
+    shopifyProductStatus,
+    locationId,
+    onSuccess,
+}: ZeroOutButtonProps) {
+    const [isPending, setIsPending] = useState(false);
+
+    // Only show for archived SKUs with stock > 0 on Shopify
+    const shouldShow = shopifyProductStatus === 'archived' && shopifyQty !== null && shopifyQty > 0;
+
+    if (!shouldShow) return null;
+
+    const handleClick = async () => {
+        if (!locationId || isPending) return;
+
+        setIsPending(true);
+        try {
+            await zeroOutShopifyStock(skuCode, locationId);
+            showSuccess('Stock zeroed on Shopify', { description: skuCode });
+            onSuccess();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            showError('Failed to zero stock', { description: message });
+        } finally {
+            setIsPending(false);
+        }
+    };
+
+    // Don't show button if location not loaded yet
+    if (!locationId) return null;
+
+    return (
+        <button
+            type="button"
+            onClick={handleClick}
+            disabled={isPending}
+            className={cn(
+                'px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap transition-colors',
+                'bg-red-50 text-red-600 hover:bg-red-100',
+                isPending && 'cursor-not-allowed opacity-50'
+            )}
+        >
+            {isPending ? (
+                <Loader2 className="w-3 h-3 animate-spin inline" />
+            ) : (
+                'Set Shopify to 0'
+            )}
+        </button>
+    );
+});
+
 // ============================================
 // FILTER CHIP COMPONENT
 // ============================================
@@ -261,8 +375,12 @@ const filterConfig = {
 
 export default function InventoryMobile() {
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const search = InventoryMobileRoute.useSearch();
     const loaderData = InventoryMobileRoute.useLoaderData();
+
+    // Shopify location (fetched once)
+    const { data: locationId } = useShopifyLocation();
 
     // Local search input state (debounced)
     const [searchInput, setSearchInput] = useState(search.search || '');
@@ -486,13 +604,22 @@ export default function InventoryMobile() {
                 id: 'shopifyStatus',
                 header: () => <div className="text-center">Status</div>,
                 cell: ({ row }) => (
-                    <div className="text-center">
+                    <div className="flex items-center justify-center gap-1">
                         <ShopifyStatusCell status={row.original.shopifyProductStatus} />
+                        <ZeroOutButton
+                            skuCode={row.original.skuCode}
+                            shopifyQty={row.original.shopifyQty}
+                            shopifyProductStatus={row.original.shopifyProductStatus}
+                            locationId={locationId}
+                            onSuccess={() => {
+                                queryClient.invalidateQueries({ queryKey: ['inventory-mobile'] });
+                            }}
+                        />
                     </div>
                 ),
             },
         ],
-        [search.sortBy, search.sortOrder, handleSortChange]
+        [search.sortBy, search.sortOrder, handleSortChange, locationId, queryClient]
     );
 
     // Table instance
