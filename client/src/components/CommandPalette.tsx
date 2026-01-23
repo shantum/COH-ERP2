@@ -46,7 +46,6 @@ const navigationItems: NavigationItem[] = [
     { label: 'Products', icon: Package, to: '/products', keywords: ['catalog', 'sku', 'items'] },
     { label: 'Inventory', icon: Package, to: '/inventory', keywords: ['stock', 'warehouse'] },
     { label: 'Materials', icon: Scissors, to: '/products', search: { tab: 'materials' }, keywords: ['fabrics', 'textiles'] },
-    { label: 'Fabrics', icon: Scissors, to: '/fabrics', keywords: ['materials', 'textiles'] },
     { label: 'Production', icon: Factory, to: '/production', keywords: ['manufacturing', 'batches'] },
     { label: 'Inventory Inward', icon: PackagePlus, to: '/inventory-inward', keywords: ['receiving', 'inbound'] },
     { label: 'Returns', icon: RotateCcw, to: '/returns', keywords: ['refunds', 'rma'] },

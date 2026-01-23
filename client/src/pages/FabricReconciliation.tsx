@@ -13,18 +13,21 @@ import {
     Plus, History, Send, Trash2
 } from 'lucide-react';
 import {
-    getFabricReconciliationHistory,
-    startFabricReconciliation,
-    updateFabricReconciliationItems,
-    submitFabricReconciliation,
-    deleteFabricReconciliation,
-} from '../server/functions/fabrics';
+    getFabricColourReconciliations,
+    startFabricColourReconciliation,
+} from '../server/functions/fabricColours';
+import {
+    updateFabricColourReconciliationItems,
+    submitFabricColourReconciliation,
+    deleteFabricColourReconciliation,
+} from '../server/functions/fabricColourMutations';
 
 interface ReconciliationItem {
     id: string;
-    fabricId: string;
+    fabricColourId: string;
+    colourName: string;
     fabricName: string;
-    colorName: string;
+    materialName: string;
     unit: string;
     systemQty: number;
     physicalQty: number | null;
@@ -63,15 +66,15 @@ export default function FabricReconciliation() {
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
 
     // Server Function wrappers
-    const getHistoryFn = useServerFn(getFabricReconciliationHistory);
-    const startReconFn = useServerFn(startFabricReconciliation);
-    const updateReconFn = useServerFn(updateFabricReconciliationItems);
-    const submitReconFn = useServerFn(submitFabricReconciliation);
-    const deleteReconFn = useServerFn(deleteFabricReconciliation);
+    const getHistoryFn = useServerFn(getFabricColourReconciliations);
+    const startReconFn = useServerFn(startFabricColourReconciliation);
+    const updateReconFn = useServerFn(updateFabricColourReconciliationItems);
+    const submitReconFn = useServerFn(submitFabricColourReconciliation);
+    const deleteReconFn = useServerFn(deleteFabricColourReconciliation);
 
     // Fetch history using Server Functions
     const { data: history, isLoading: historyLoading } = useQuery({
-        queryKey: ['fabricReconciliationHistory'],
+        queryKey: ['fabricColourReconciliationHistory'],
         queryFn: async () => {
             const result = await getHistoryFn({ data: { limit: 20 } });
             if (!result.success) {
@@ -101,7 +104,11 @@ export default function FabricReconciliation() {
                 setCurrentRecon(recon);
                 setLocalItems(data.items);
             }
-            queryClient.invalidateQueries({ queryKey: ['fabricReconciliationHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
+        },
+        onError: (error) => {
+            console.error('Start reconciliation error:', error);
+            alert(`Failed to start reconciliation: ${error instanceof Error ? error.message : 'Unknown error'}`);
         },
     });
 
@@ -137,6 +144,10 @@ export default function FabricReconciliation() {
                 setLocalItems(data.items);
             }
         },
+        onError: (error) => {
+            console.error('Update reconciliation error:', error);
+            alert(`Failed to save: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        },
     });
 
     // Submit reconciliation
@@ -153,8 +164,13 @@ export default function FabricReconciliation() {
         onSuccess: () => {
             setCurrentRecon(null);
             setLocalItems([]);
-            queryClient.invalidateQueries({ queryKey: ['fabricReconciliationHistory'] });
-            queryClient.invalidateQueries({ queryKey: ['fabrics'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColours'] });
+            alert('Reconciliation submitted successfully!');
+        },
+        onError: (error) => {
+            console.error('Submit reconciliation error:', error);
+            alert(`Failed to submit: ${error instanceof Error ? error.message : 'Unknown error'}`);
         },
     });
 
@@ -172,7 +188,11 @@ export default function FabricReconciliation() {
         onSuccess: () => {
             setCurrentRecon(null);
             setLocalItems([]);
-            queryClient.invalidateQueries({ queryKey: ['fabricReconciliationHistory'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
+        },
+        onError: (error) => {
+            console.error('Delete reconciliation error:', error);
+            alert(`Failed to delete: ${error instanceof Error ? error.message : 'Unknown error'}`);
         },
     });
 
@@ -222,8 +242,9 @@ export default function FabricReconciliation() {
 
     // Filter items
     const filteredItems = localItems.filter(item =>
+        item.materialName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.fabricName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.colorName.toLowerCase().includes(searchTerm.toLowerCase())
+        item.colourName.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     // Stats
@@ -240,10 +261,10 @@ export default function FabricReconciliation() {
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                         <ClipboardCheck className="text-primary-600" />
-                        Fabric Reconciliation
+                        Materials Reconciliation
                     </h1>
                     <p className="text-gray-500 mt-1">
-                        Compare physical stock with system records and adjust variances
+                        Compare physical fabric colour stock with system records and adjust variances
                     </p>
                 </div>
             </div>
@@ -280,7 +301,7 @@ export default function FabricReconciliation() {
                                 Start a New Reconciliation
                             </h2>
                             <p className="text-gray-500 mb-6">
-                                This will load all active fabrics with their current system balances.
+                                This will load all active fabric colours with their current system balances.
                             </p>
                             <button
                                 className="btn btn-primary"
@@ -301,7 +322,7 @@ export default function FabricReconciliation() {
                             <div className="grid grid-cols-4 gap-4 mb-4">
                                 <div className="card py-3 text-center">
                                     <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-                                    <p className="text-sm text-gray-500">Total Fabrics</p>
+                                    <p className="text-sm text-gray-500">Total Colours</p>
                                 </div>
                                 <div className="card py-3 text-center">
                                     <p className="text-2xl font-bold text-primary-600">{stats.entered}</p>
@@ -326,7 +347,7 @@ export default function FabricReconciliation() {
                                     <input
                                         type="text"
                                         className="input pl-10 w-64"
-                                        placeholder="Search fabrics..."
+                                        placeholder="Search materials, fabrics, colours..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
                                     />
@@ -371,7 +392,7 @@ export default function FabricReconciliation() {
                                 <table className="w-full">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Fabric</th>
+                                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Material / Fabric / Colour</th>
                                             <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 w-28">System Qty</th>
                                             <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 w-32">Physical Qty</th>
                                             <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 w-28">Variance</th>
@@ -389,8 +410,8 @@ export default function FabricReconciliation() {
                                                     : ''
                                             }>
                                                 <td className="px-4 py-3">
-                                                    <div className="font-medium text-gray-900">{item.fabricName}</div>
-                                                    <div className="text-sm text-gray-500">{item.colorName}</div>
+                                                    <div className="text-xs text-gray-500">{item.materialName} → {item.fabricName}</div>
+                                                    <div className="font-medium text-gray-900">{item.colourName}</div>
                                                 </td>
                                                 <td className="px-4 py-3 text-right font-mono">
                                                     {item.systemQty.toFixed(2)} {item.unit}
@@ -473,7 +494,7 @@ export default function FabricReconciliation() {
                                 <tr>
                                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date</th>
                                     <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Status</th>
-                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Fabrics</th>
+                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Colours</th>
                                     <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Adjustments</th>
                                 </tr>
                             </thead>

@@ -7,6 +7,7 @@ import syncRouter from './sync.js';
 import jobsRouter from './jobs.js';
 import cacheRouter from './cache.js';
 import debugRouter from './debug.js';
+import inventoryRouter from './inventory.js';
 
 const router = Router();
 
@@ -26,6 +27,9 @@ router.use('/sync/jobs', jobsRouter);
 router.use('/sync', cacheRouter);
 router.use('/cache', cacheRouter);
 router.use('/webhooks', cacheRouter);
+
+// Inventory management: /inventory/locations, /inventory/set, /inventory/zero-out
+router.use('/inventory', inventoryRouter);
 
 // Debug endpoints: /debug/locks, /debug/sync-progress, /debug/circuit-breaker
 router.use('/debug', debugRouter);

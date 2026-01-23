@@ -5,11 +5,11 @@ import { useAuth } from '../hooks/useAuth';
 
 // Server Functions
 import { getInventoryTransactions, type InventoryTransactionItem } from '../server/functions/inventory';
-import { getAllFabricTransactions, getFabricTypes } from '../server/functions/fabrics';
+import { getAllFabricColourTransactions } from '../server/functions/fabricColours';
 import { deleteTransaction as deleteInventoryTransaction } from '../server/functions/inventoryMutations';
-import { deleteFabricTransaction } from '../server/functions/fabricMutations';
+import { deleteFabricColourTransaction } from '../server/functions/fabricColourMutations';
 
-type Tab = 'inventory' | 'fabric';
+type Tab = 'inventory' | 'materials';
 
 export default function Ledgers() {
     const queryClient = useQueryClient();
@@ -17,7 +17,7 @@ export default function Ledgers() {
     const isAdmin = user?.role === 'admin';
     const [activeTab, setActiveTab] = useState<Tab>('inventory');
     const [inventoryFilter, setInventoryFilter] = useState({ search: '', txnType: '', reason: '', customOnly: false });
-    const [fabricFilter, setFabricFilter] = useState({ search: '', txnType: '' });
+    const [materialsFilter, setMaterialsFilter] = useState({ search: '', txnType: '', materialId: '', fabricId: '' });
 
     // Fetch all inventory transactions using Server Function
     const { data: inventoryTxns, isLoading: invLoading } = useQuery({
@@ -29,21 +29,17 @@ export default function Ledgers() {
         enabled: activeTab === 'inventory'
     });
 
-    // Fetch fabric types (kept for potential future use) using Server Function
-    const { data: _fabricTypesData } = useQuery({
-        queryKey: ['fabricTypes'],
-        queryFn: async () => {
-            const result = await getFabricTypes();
-            return result.types;
-        },
-        enabled: activeTab === 'fabric'
-    });
-
-    // FabricTransaction interface for typing
-    interface FabricTransaction {
+    // FabricColourTransaction interface for typing
+    interface FabricColourTransaction {
         id: string;
-        fabric?: { colorName?: string; colorHex?: string | null; fabricType?: { name: string } } | null;
-        fabricType?: { name?: string } | null;
+        fabricColour?: {
+            colourName: string;
+            colourHex?: string | null;
+            fabric?: {
+                name: string;
+                material?: { name: string } | null;
+            } | null;
+        } | null;
         txnType: string;
         reason: string;
         createdAt: string;
@@ -55,13 +51,13 @@ export default function Ledgers() {
         createdBy?: { name: string } | null;
     }
 
-    // Fetch all fabric transactions using Server Function
-    const { data: fabricTxns, isLoading: fabLoading } = useQuery<FabricTransaction[]>({
-        queryKey: ['allFabricTransactions'],
+    // Fetch all fabric colour transactions using Server Function
+    const { data: materialTxns, isLoading: materialsLoading } = useQuery<FabricColourTransaction[]>({
+        queryKey: ['allFabricColourTransactions'],
         queryFn: async () => {
-            const result = await getAllFabricTransactions({ data: { limit: 1000, days: 365 } });
+            const result = await getAllFabricColourTransactions({ data: { limit: 1000, days: 365 } });
             // Transform to expected format
-            return result.transactions.map((t): FabricTransaction => ({
+            return result.transactions.map((t): FabricColourTransaction => ({
                 id: t.id,
                 txnType: t.txnType,
                 reason: t.reason,
@@ -70,13 +66,12 @@ export default function Ledgers() {
                 unit: t.unit,
                 notes: t.notes,
                 costPerUnit: t.costPerUnit ? Number(t.costPerUnit) : null,
-                fabric: t.fabric,
-                fabricType: t.fabric?.fabricType,
+                fabricColour: t.fabricColour,
                 supplier: t.supplier,
                 createdBy: t.createdBy
             }));
         },
-        enabled: activeTab === 'fabric'
+        enabled: activeTab === 'materials'
     });
 
     // Filter inventory transactions
@@ -102,15 +97,16 @@ export default function Ledgers() {
         return txn.sku?.isCustomSku || txn.sku?.skuCode?.startsWith('C-');
     })?.length || 0;
 
-    // Filter fabric transactions
-    const filteredFabric = fabricTxns?.filter((txn: FabricTransaction) => {
-        if (fabricFilter.search) {
-            const search = fabricFilter.search.toLowerCase();
-            const fabricMatch = txn.fabric?.colorName?.toLowerCase().includes(search);
-            const typeMatch = txn.fabricType?.name?.toLowerCase().includes(search);
-            if (!fabricMatch && !typeMatch) return false;
+    // Filter fabric colour transactions
+    const filteredMaterials = materialTxns?.filter((txn: FabricColourTransaction) => {
+        if (materialsFilter.search) {
+            const search = materialsFilter.search.toLowerCase();
+            const colourMatch = txn.fabricColour?.colourName?.toLowerCase().includes(search);
+            const fabricMatch = txn.fabricColour?.fabric?.name?.toLowerCase().includes(search);
+            const materialMatch = txn.fabricColour?.fabric?.material?.name?.toLowerCase().includes(search);
+            if (!colourMatch && !fabricMatch && !materialMatch) return false;
         }
-        if (fabricFilter.txnType && txn.txnType !== fabricFilter.txnType) return false;
+        if (materialsFilter.txnType && txn.txnType !== materialsFilter.txnType) return false;
         return true;
     });
 
@@ -126,19 +122,19 @@ export default function Ledgers() {
     };
 
     const inventoryGroups = groupByDate(filteredInventory || []);
-    const fabricGroups = groupByDate(filteredFabric || []);
+    const materialsGroups = groupByDate(filteredMaterials || []);
 
-    const deleteFabricTxnMutation = useMutation({
+    const deleteMaterialsTxnMutation = useMutation({
         mutationFn: async (txnId: string) => {
-            const result = await deleteFabricTransaction({ data: { txnId } });
+            const result = await deleteFabricColourTransaction({ data: { txnId } });
             if (!result.success) {
                 throw new Error(result.error?.message || 'Failed to delete transaction');
             }
             return result;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['allFabricTransactions'] });
-            queryClient.invalidateQueries({ queryKey: ['fabricStock'] });
+            queryClient.invalidateQueries({ queryKey: ['allFabricColourTransactions'] });
+            queryClient.invalidateQueries({ queryKey: ['fabricColourStock'] });
         },
         onError: (err: Error) => alert(err.message || 'Failed to delete transaction')
     });
@@ -188,13 +184,13 @@ export default function Ledgers() {
                         Inventory (SKU) Ledger
                     </button>
                     <button
-                        onClick={() => setActiveTab('fabric')}
-                        className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'fabric'
+                        onClick={() => setActiveTab('materials')}
+                        className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'materials'
                                 ? 'border-primary-600 text-primary-600'
                                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                             }`}
                     >
-                        Fabric Ledger
+                        Materials Ledger
                     </button>
                 </nav>
             </div>
@@ -342,8 +338,8 @@ export default function Ledgers() {
                 </div>
             )}
 
-            {/* Fabric Ledger */}
-            {activeTab === 'fabric' && (
+            {/* Materials Ledger */}
+            {activeTab === 'materials' && (
                 <div className="space-y-4">
                     {/* Filters */}
                     <div className="card flex flex-wrap gap-2 md:gap-4 items-center">
@@ -351,36 +347,36 @@ export default function Ledgers() {
                             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
                                 type="text"
-                                placeholder="Search fabric or type..."
+                                placeholder="Search material, fabric, or colour..."
                                 className="input pl-9 w-full"
-                                value={fabricFilter.search}
-                                onChange={(e) => setFabricFilter(f => ({ ...f, search: e.target.value }))}
+                                value={materialsFilter.search}
+                                onChange={(e) => setMaterialsFilter(f => ({ ...f, search: e.target.value }))}
                             />
                         </div>
                         <select
                             className="input w-full sm:w-auto sm:max-w-[150px]"
-                            value={fabricFilter.txnType}
-                            onChange={(e) => setFabricFilter(f => ({ ...f, txnType: e.target.value }))}
+                            value={materialsFilter.txnType}
+                            onChange={(e) => setMaterialsFilter(f => ({ ...f, txnType: e.target.value }))}
                         >
                             <option value="">All Types</option>
                             <option value="inward">Inward</option>
                             <option value="outward">Outward (Usage)</option>
                         </select>
                         <span className="text-sm text-gray-500">
-                            {filteredFabric?.length || 0} transactions
+                            {filteredMaterials?.length || 0} transactions
                         </span>
                     </div>
 
                     {/* Transactions List */}
-                    {fabLoading ? (
+                    {materialsLoading ? (
                         <div className="flex justify-center py-12">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
                         </div>
-                    ) : Object.keys(fabricGroups).length === 0 ? (
+                    ) : Object.keys(materialsGroups).length === 0 ? (
                         <div className="card text-center py-12 text-gray-500">No transactions found</div>
                     ) : (
                         <div className="space-y-6">
-                            {Object.entries(fabricGroups).map(([date, txns]) => (
+                            {Object.entries(materialsGroups).map(([date, txns]) => (
                                 <div key={date}>
                                     <div className="flex items-center gap-2 mb-3">
                                         <Calendar size={16} className="text-gray-400" />
@@ -388,7 +384,7 @@ export default function Ledgers() {
                                         <span className="text-xs text-gray-400">({txns.length} transactions)</span>
                                     </div>
                                     <div className="card divide-y">
-                                        {txns.map((txn: FabricTransaction) => (
+                                        {txns.map((txn: FabricColourTransaction) => (
                                             <div key={txn.id} className="py-3 flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
                                                     {txn.txnType === 'inward' ? (
@@ -403,14 +399,14 @@ export default function Ledgers() {
                                                     <div className="flex items-center gap-2">
                                                         <div
                                                             className="w-5 h-5 rounded-full border border-gray-300"
-                                                            style={{ backgroundColor: txn.fabric?.colorHex || '#ccc' }}
+                                                            style={{ backgroundColor: txn.fabricColour?.colourHex || '#ccc' }}
                                                         />
                                                         <div>
                                                             <p className="font-medium text-gray-900">
-                                                                {txn.fabric?.colorName}
-                                                                <span className="ml-2 text-sm font-normal text-gray-500">
-                                                                    {txn.fabricType?.name}
-                                                                </span>
+                                                                {txn.fabricColour?.colourName}
+                                                            </p>
+                                                            <p className="text-sm text-gray-500">
+                                                                {txn.fabricColour?.fabric?.material?.name} → {txn.fabricColour?.fabric?.name}
                                                             </p>
                                                             <div className="flex items-center gap-2 text-xs text-gray-500">
                                                                 <span className="capitalize">{txn.reason.replace(/_/g, ' ')}</span>
@@ -443,7 +439,7 @@ export default function Ledgers() {
                                                         <button
                                                             onClick={() => {
                                                                 if (confirm(`Delete this ${txn.txnType} transaction of ${txn.qty} ${txn.unit}?`)) {
-                                                                    deleteFabricTxnMutation.mutate(txn.id);
+                                                                    deleteMaterialsTxnMutation.mutate(txn.id);
                                                                 }
                                                             }}
                                                             className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"

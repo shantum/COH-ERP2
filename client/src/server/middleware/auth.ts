@@ -99,7 +99,9 @@ async function getJwt() {
 async function verifyToken(token: string, secret: string): Promise<JwtPayload | null> {
     try {
         const jwt = await getJwt();
+        console.log('[AuthMiddleware] Verifying token with secret length:', secret.length);
         const decoded = jwt.verify(token, secret);
+        console.log('[AuthMiddleware] Token decoded successfully:', JSON.stringify(decoded).substring(0, 100));
         const parsed = JwtPayloadSchema.safeParse(decoded);
         if (!parsed.success) {
             console.log('[AuthMiddleware] Zod parse failed:', parsed.error.message);
@@ -107,6 +109,7 @@ async function verifyToken(token: string, secret: string): Promise<JwtPayload | 
         return parsed.success ? parsed.data : null;
     } catch (error) {
         console.log('[AuthMiddleware] JWT verify error:', error instanceof Error ? error.message : error);
+        console.log('[AuthMiddleware] Secret first 10 chars:', secret.substring(0, 10));
         return null;
     }
 }
@@ -214,8 +217,10 @@ async function validateAuth(
     }
 
     // 4. Validate token version (if present)
+    console.log('[AuthMiddleware] Checking token version:', payload.tokenVersion);
     if (payload.tokenVersion !== undefined) {
         const isValid = await validateTokenVersion(prisma, payload.id, payload.tokenVersion);
+        console.log('[AuthMiddleware] Token version valid:', isValid);
         if (!isValid) {
             return {
                 success: false,
@@ -226,9 +231,12 @@ async function validateAuth(
     }
 
     // 5. Load permissions
+    console.log('[AuthMiddleware] Loading permissions for user:', payload.id);
     const permissions = await getUserPermissions(prisma, payload.id);
+    console.log('[AuthMiddleware] Permissions loaded:', permissions.length);
 
     // 6. Return authenticated context
+    console.log('[AuthMiddleware] Auth successful for:', payload.email);
     return {
         success: true,
         user: {
@@ -277,10 +285,9 @@ function getAuthToken(): string | undefined {
         // Use TanStack Start's getCookie - works for SSR and client-initiated Server Functions
         const token = getCookie('auth_token');
 
-        // Debug logging for production troubleshooting
-        if (process.env.NODE_ENV === 'production') {
-            console.log('[AuthMiddleware] getCookie returned:', token ? 'token-present' : 'undefined');
-        }
+        // Debug logging
+        console.log('[AuthMiddleware] getCookie returned:', token ? `token-present (${token.substring(0, 20)}...)` : 'undefined');
+        console.log('[AuthMiddleware] JWT_SECRET present:', !!process.env.JWT_SECRET);
 
         return token;
     } catch (error) {

@@ -762,6 +762,53 @@ railway variables --unset "NO_CACHE"
 - TypeScript errors? Ensure `shared` builds before `client`
 - Prisma not found? Ensure running from root where `/prisma/` lives
 
+### Staging Environment (REQUIRED before Production)
+
+> **⚠️ ALL changes MUST go through staging before production.** No direct deploys to production.
+
+**Branch Strategy**:
+- `develop` → Staging environment (https://coh-erp2-staging.up.railway.app)
+- `main` → Production environment (https://coh-erp2-production.up.railway.app)
+
+**Workflow**:
+1. Work on `develop` branch locally
+2. Push to `develop` → Auto-deploys to staging
+3. Test thoroughly on staging
+4. Create PR: `develop` → `main`
+5. Merge PR → Auto-deploys to production
+
+**Railway CLI for Staging**:
+```bash
+# Link to staging environment
+railway link -e staging -s COH-ERP2 -p COH-ERP2
+
+# Deploy to staging
+railway up --detach
+
+# Check staging logs
+railway logs -n 50
+
+# Switch back to production for monitoring
+railway link -e production -s COH-ERP2 -p COH-ERP2
+```
+
+**Database Sync** (copy production data to staging):
+```bash
+# Get connection strings from Railway
+railway variables -e production -s Postgres  # Get prod DATABASE_PUBLIC_URL
+railway variables -e staging -s Postgres     # Get staging DATABASE_PUBLIC_URL
+
+# Copy data (requires PostgreSQL 17+ client tools)
+PGPASSWORD=<prod_password> pg_dump -h <prod_host> -p <prod_port> -U postgres -d railway --clean --if-exists --no-owner --no-acl | \
+PGPASSWORD=<staging_password> psql -h <staging_host> -p <staging_port> -U postgres -d railway
+```
+
+**Key Points**:
+- Staging has its own PostgreSQL database (isolated from production)
+- DATABASE_URL uses `${{Postgres.DATABASE_URL}}` reference variable (auto-syncs)
+- Same login credentials work on both environments
+- Staging mirrors production data—sync periodically for realistic testing
+
 ## When to Use Agents
 
 - **Exploring codebase** → `Explore` agent
@@ -788,4 +835,4 @@ railway variables --unset "NO_CACHE"
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `d8ce612` (2026-01-22) - Performance patterns: batch Prisma ops, query key consistency, cell memoization
+**Updated till commit:** `f2274f8` (2026-01-23) - Added staging environment workflow (develop branch → staging → production)

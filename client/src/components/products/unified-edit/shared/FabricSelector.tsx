@@ -1,23 +1,23 @@
 /**
  * FabricSelector - Combobox with color swatches
  *
- * Searchable dropdown for fabric selection with:
- * - Color swatch preview
- * - Fabric name + color name display
- * - Filter by fabricTypeId
+ * Searchable dropdown for fabric colour selection with:
+ * - Colour swatch preview
+ * - Material → Fabric → Colour hierarchy display
+ * - Filter by materialId
  */
 
 import { useState, useMemo } from 'react';
 import { Controller, type Control } from 'react-hook-form';
 import { Check, ChevronsUpDown, Search, X } from 'lucide-react';
-import type { Fabric } from '../types';
+import type { FabricColour } from '../types';
 
 interface FabricSelectorProps {
   name: string;
   label: string;
   control: Control<any>;
-  fabrics: Fabric[];
-  fabricTypeId?: string | null;
+  fabricColours: FabricColour[];
+  materialId?: string | null;
   disabled?: boolean;
   placeholder?: string;
 }
@@ -26,41 +26,42 @@ export function FabricSelector({
   name,
   label,
   control,
-  fabrics,
-  fabricTypeId,
+  fabricColours,
+  materialId,
   disabled = false,
-  placeholder = 'Select fabric...',
+  placeholder = 'Select fabric colour...',
 }: FabricSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  // Filter fabrics by type and search
-  const filteredFabrics = useMemo(() => {
-    let filtered = fabrics;
+  // Filter fabric colours by material and search
+  const filteredFabricColours = useMemo(() => {
+    let filtered = fabricColours;
 
-    // Filter by fabric type if specified
-    if (fabricTypeId) {
-      filtered = filtered.filter(f => f.fabricTypeId === fabricTypeId);
+    // Filter by material if specified
+    if (materialId) {
+      filtered = filtered.filter(fc => fc.materialId === materialId);
     }
 
     // Filter by search
     if (search.trim()) {
       const query = search.toLowerCase();
-      filtered = filtered.filter(f =>
-        f.name.toLowerCase().includes(query) ||
-        f.colorName?.toLowerCase().includes(query)
+      filtered = filtered.filter(fc =>
+        fc.name.toLowerCase().includes(query) ||
+        fc.fabricName.toLowerCase().includes(query) ||
+        fc.materialName.toLowerCase().includes(query)
       );
     }
 
     return filtered;
-  }, [fabrics, fabricTypeId, search]);
+  }, [fabricColours, materialId, search]);
 
   return (
     <Controller
       name={name}
       control={control}
       render={({ field, fieldState: { error } }) => {
-        const selectedFabric = fabrics.find(f => f.id === field.value);
+        const selectedFabricColour = fabricColours.find(fc => fc.id === field.value);
 
         return (
           <div className="space-y-2">
@@ -83,19 +84,19 @@ export function FabricSelector({
                   ${isOpen ? 'ring-2 ring-blue-500' : ''}
                 `}
               >
-                {selectedFabric ? (
+                {selectedFabricColour ? (
                   <div className="flex items-center gap-2 min-w-0">
-                    {selectedFabric.colorHex && (
+                    {selectedFabricColour.hex && (
                       <div
                         className="w-4 h-4 rounded-full border border-gray-200 flex-shrink-0"
-                        style={{ backgroundColor: selectedFabric.colorHex }}
+                        style={{ backgroundColor: selectedFabricColour.hex }}
                       />
                     )}
                     <span className="truncate">
-                      {selectedFabric.name}
-                      {selectedFabric.colorName && (
-                        <span className="text-gray-500"> - {selectedFabric.colorName}</span>
-                      )}
+                      {selectedFabricColour.name}
+                      <span className="text-gray-500 text-xs ml-2">
+                        {selectedFabricColour.materialName} → {selectedFabricColour.fabricName}
+                      </span>
                     </span>
                   </div>
                 ) : (
@@ -115,7 +116,7 @@ export function FabricSelector({
                         type="text"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search fabrics..."
+                        placeholder="Search materials, fabrics, colours..."
                         className="w-full pl-7 pr-7 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                         autoFocus
                       />
@@ -133,46 +134,44 @@ export function FabricSelector({
 
                   {/* Options list */}
                   <div className="max-h-60 overflow-y-auto">
-                    {filteredFabrics.length === 0 ? (
+                    {filteredFabricColours.length === 0 ? (
                       <div className="px-3 py-4 text-sm text-gray-500 text-center">
-                        No fabrics found
+                        No fabric colours found
                       </div>
                     ) : (
-                      filteredFabrics.map((fabric) => (
+                      filteredFabricColours.map((fabricColour) => (
                         <button
-                          key={fabric.id}
+                          key={fabricColour.id}
                           type="button"
                           onClick={() => {
-                            field.onChange(fabric.id);
+                            field.onChange(fabricColour.id);
                             setIsOpen(false);
                             setSearch('');
                           }}
                           className={`
                             w-full flex items-center gap-2 px-3 py-2 text-sm text-left
                             hover:bg-gray-50 transition-colors
-                            ${field.value === fabric.id ? 'bg-blue-50' : ''}
+                            ${field.value === fabricColour.id ? 'bg-blue-50' : ''}
                           `}
                         >
-                          {fabric.colorHex && (
+                          {fabricColour.hex && (
                             <div
                               className="w-4 h-4 rounded-full border border-gray-200 flex-shrink-0"
-                              style={{ backgroundColor: fabric.colorHex }}
+                              style={{ backgroundColor: fabricColour.hex }}
                             />
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="truncate font-medium">
-                              {fabric.name}
+                              {fabricColour.name}
                             </div>
-                            {fabric.colorName && (
-                              <div className="text-xs text-gray-500 truncate">
-                                {fabric.colorName}
-                                {fabric.costPerUnit && (
-                                  <span> - {fabric.costPerUnit}/m</span>
-                                )}
-                              </div>
-                            )}
+                            <div className="text-xs text-gray-500 truncate">
+                              {fabricColour.materialName} → {fabricColour.fabricName}
+                              {fabricColour.costPerUnit && (
+                                <span> • ₹{fabricColour.costPerUnit}/m</span>
+                              )}
+                            </div>
                           </div>
-                          {field.value === fabric.id && (
+                          {field.value === fabricColour.id && (
                             <Check size={16} className="text-blue-600 flex-shrink-0" />
                           )}
                         </button>
@@ -212,9 +211,9 @@ export function FabricSelector({
             </div>
 
             {/* Cost display */}
-            {selectedFabric?.costPerUnit && (
+            {selectedFabricColour?.costPerUnit && (
               <div className="text-xs text-gray-500">
-                Cost: {selectedFabric.costPerUnit}/meter
+                Cost: ₹{selectedFabricColour.costPerUnit}/meter
               </div>
             )}
 

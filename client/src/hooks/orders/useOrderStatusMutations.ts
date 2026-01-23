@@ -192,8 +192,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             showError('Failed to cancel order', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
-            // Only invalidate non-SSE-synced data (inventory balance)
-            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
+            // Don't invalidate inventory here - the optimistic update already handles it
+            // Invalidating causes a refetch that can race with server cache and return stale data
         }
     });
 
@@ -315,8 +315,8 @@ export function useOrderStatusMutations(options: UseOrderStatusMutationsOptions 
             showError('Failed to cancel line', { description: err instanceof Error ? err.message : String(err) });
         },
         onSettled: () => {
-            // Only invalidate non-SSE-synced data (inventory balance)
-            queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.balance });
+            // Don't invalidate inventory here - the optimistic update already handles it
+            // Invalidating causes a refetch that can race with server cache and return stale data
         },
     });
 

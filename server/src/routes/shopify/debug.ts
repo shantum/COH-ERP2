@@ -112,4 +112,108 @@ router.post('/circuit-breaker/reset', authenticateToken, asyncHandler(async (req
   }
 }));
 
+// GET /product-cache/:skuCode - Debug product cache for a specific SKU
+router.get('/product-cache/:skuCode', authenticateToken, asyncHandler(async (req: Request, res: Response) => {
+  const { skuCode } = req.params as { skuCode: string };
+
+  // Find the SKU and its product
+  const sku = await req.prisma.sku.findFirst({
+    where: { skuCode },
+    include: {
+      variation: {
+        include: {
+          product: true
+        }
+      }
+    }
+  });
+
+  if (!sku) {
+    res.status(404).json({ error: 'SKU not found', skuCode });
+    return;
+  }
+
+  const product = sku.variation.product;
+
+  // Check the cache for the primary shopifyProductId
+  let primaryCache = null;
+  if (product.shopifyProductId) {
+    const cache = await req.prisma.shopifyProductCache.findUnique({
+      where: { id: product.shopifyProductId }
+    });
+    if (cache) {
+      const rawData = JSON.parse(cache.rawData);
+      primaryCache = {
+        cacheId: cache.id,
+        statusInCache: rawData.status,
+        titleInCache: rawData.title,
+        lastWebhookAt: cache.lastWebhookAt,
+        processedAt: cache.processedAt
+      };
+    }
+  }
+
+  // Check cache for all linked shopifyProductIds
+  const linkedCaches = [];
+  for (const shopifyId of product.shopifyProductIds || []) {
+    const cache = await req.prisma.shopifyProductCache.findUnique({
+      where: { id: shopifyId }
+    });
+    if (cache) {
+      const rawData = JSON.parse(cache.rawData);
+      linkedCaches.push({
+        cacheId: cache.id,
+        statusInCache: rawData.status,
+        titleInCache: rawData.title,
+        isPrimary: shopifyId === product.shopifyProductId
+      });
+    }
+  }
+
+  // Check variation's source product cache
+  let variationSourceCache = null;
+  const variation = sku.variation;
+  if (variation.shopifySourceProductId) {
+    const cache = await req.prisma.shopifyProductCache.findUnique({
+      where: { id: variation.shopifySourceProductId }
+    });
+    if (cache) {
+      const rawData = JSON.parse(cache.rawData);
+      variationSourceCache = {
+        cacheId: cache.id,
+        statusInCache: rawData.status,
+        titleInCache: rawData.title
+      };
+    }
+  }
+
+  res.json({
+    sku: {
+      skuCode: sku.skuCode,
+      size: sku.size
+    },
+    variation: {
+      id: variation.id,
+      colorName: variation.colorName,
+      shopifySourceProductId: variation.shopifySourceProductId,
+      shopifySourceHandle: variation.shopifySourceHandle
+    },
+    product: {
+      id: product.id,
+      name: product.name,
+      shopifyProductId: product.shopifyProductId,
+      shopifyProductIds: product.shopifyProductIds
+    },
+    variationSourceCache,
+    primaryCache,
+    linkedCaches,
+    issue: primaryCache && primaryCache.statusInCache !== 'active'
+      ? `Primary cache shows '${primaryCache.statusInCache}' but may have active variants in other linked products`
+      : null,
+    fix: variationSourceCache
+      ? `Query now uses variation.shopifySourceProductId (${variation.shopifySourceProductId}) which shows status: ${variationSourceCache.statusInCache}`
+      : 'Variation has no shopifySourceProductId set - will fall back to product.shopifyProductId'
+  });
+}));
+
 export default router;

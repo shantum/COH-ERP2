@@ -295,7 +295,7 @@ export function SkuFlatView({
                         gender: product.gender,
                         category: product.category,
                         fabricTypeName: product.fabricTypeName,
-                        imageUrl: product.imageUrl,
+                        imageUrl: variation.imageUrl || product.imageUrl,
                         mrp: sku.mrp,
                         currentBalance: sku.currentBalance,
                         availableBalance: sku.availableBalance,

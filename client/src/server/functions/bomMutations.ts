@@ -2323,10 +2323,13 @@ export const linkVariationsToColour = createServerFn({ method: 'POST' })
                 const updated: string[] = [];
 
                 for (const variation of variations) {
-                    // 1. FIRST update the variation's fabricId to match the colour's parent fabric
+                    // 1. Update the variation's fabricId AND fabricColourId to keep them in sync
                     await tx.variation.update({
                         where: { id: variation.id },
-                        data: { fabricId: colour.fabricId },
+                        data: {
+                            fabricId: colour.fabricId,
+                            fabricColourId: colourId,  // Keep fabricColourId in sync
+                        },
                     });
 
                     // 2. THEN create/update the BOM line with the fabric colour

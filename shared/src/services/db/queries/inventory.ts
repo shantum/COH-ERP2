@@ -47,6 +47,7 @@ export async function listInventorySkusKysely(
     const { includeCustomSkus = false, search } = params;
 
     const db = await getKysely();
+    const { sql } = await import('kysely');
 
     let query = db
         .selectFrom('Sku')
@@ -54,6 +55,11 @@ export async function listInventorySkusKysely(
         .innerJoin('Product', 'Product.id', 'Variation.productId')
         .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
         .leftJoin('ShopifyInventoryCache', 'ShopifyInventoryCache.skuId', 'Sku.id')
+        // Use Variation.shopifySourceProductId for status lookup (more accurate for multi-color products)
+        // Falls back to Product.shopifyProductId if variation source is not set
+        .leftJoin('ShopifyProductCache', (join) =>
+            join.onRef('ShopifyProductCache.id', '=', sql`COALESCE("Variation"."shopifySourceProductId", "Product"."shopifyProductId")`)
+        )
         .select([
             'Sku.id as skuId',
             'Sku.skuCode',
@@ -72,7 +78,10 @@ export async function listInventorySkusKysely(
             'Product.imageUrl as productImageUrl',
             'Variation.fabricId',
             'Fabric.name as fabricName',
+            'Variation.fabricColourId',
             'ShopifyInventoryCache.availableQty as shopifyAvailableQty',
+            // Extract status from ShopifyProductCache.rawData JSON
+            sql<string | null>`"ShopifyProductCache"."rawData"::json->>'status'`.as('shopifyProductStatus'),
         ])
         .where('Sku.isActive', '=', true);
 
@@ -83,8 +92,6 @@ export async function listInventorySkusKysely(
 
     // Apply search filter
     if (search) {
-        // Dynamic import to prevent kysely from being bundled into client
-        const { sql } = await import('kysely');
         const searchTerm = `%${search.toLowerCase()}%`;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         query = query.where((eb: any) =>
@@ -115,7 +122,9 @@ export async function listInventorySkusKysely(
         productImageUrl: r.productImageUrl,
         fabricId: r.fabricId,
         fabricName: r.fabricName,
+        fabricColourId: r.fabricColourId,
         shopifyAvailableQty: r.shopifyAvailableQty,
+        shopifyProductStatus: r.shopifyProductStatus as 'active' | 'archived' | 'draft' | null,
     }));
 }
 

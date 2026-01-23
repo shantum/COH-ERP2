@@ -29,6 +29,14 @@ const getInventoryAllSchema = z.object({
     search: z.string().optional(),
     limit: z.number().int().positive().optional().default(10000),
     offset: z.number().int().nonnegative().optional().default(0),
+    // Filters for mobile inventory
+    stockFilter: z.enum(['all', 'in_stock', 'out_of_stock', 'low_stock']).optional().default('all'),
+    shopifyStatus: z.enum(['all', 'active', 'archived', 'draft']).optional().default('all'),
+    discrepancy: z.enum(['all', 'has_discrepancy', 'no_discrepancy']).optional().default('all'),
+    fabricFilter: z.enum(['all', 'has_fabric', 'no_fabric', 'low_fabric']).optional().default('all'),
+    // Sorting
+    sortBy: z.enum(['stock', 'shopify', 'fabric']).optional().default('stock'),
+    sortOrder: z.enum(['desc', 'asc']).optional().default('desc'),
 });
 
 // Legacy schema kept for backwards compatibility
@@ -111,6 +119,9 @@ export interface InventoryAllItem {
     mrp: number | null;
     shopifyQty: number | null;
     isCustomSku: boolean;
+    fabricColourId: string | null;
+    fabricColourBalance: number | null;
+    shopifyProductStatus: 'active' | 'archived' | 'draft' | null;
 }
 
 export interface InventoryAllResult {
@@ -347,7 +358,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
             getInventoryAllSchema.parse(input)
     )
     .handler(async ({ data }): Promise<InventoryAllResult> => {
-        const { includeCustomSkus, belowTarget, search, limit, offset } = data;
+        const { includeCustomSkus, belowTarget, search, limit, offset, stockFilter, shopifyStatus, discrepancy, fabricFilter, sortBy, sortOrder } = data;
 
         const prisma = await getPrisma();
 
@@ -365,6 +376,34 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
         const skuIds = skus.map((sku) => sku.skuId);
         const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
 
+        // Get unique fabricColourIds and calculate their balances
+        const fabricColourIds = [...new Set(
+            skus.map((sku) => sku.fabricColourId).filter((id): id is string => id !== null)
+        )];
+
+        // Calculate fabric colour balances in batch
+        const fabricColourBalanceMap = new Map<string, number>();
+        if (fabricColourIds.length > 0) {
+            const fcBalances: Array<{
+                fabricColourId: string;
+                totalInward: bigint;
+                totalOutward: bigint;
+            }> = await prisma.$queryRaw`
+                SELECT
+                    "fabricColourId",
+                    COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN qty ELSE 0 END), 0)::bigint AS "totalInward",
+                    COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN qty ELSE 0 END), 0)::bigint AS "totalOutward"
+                FROM "FabricColourTransaction"
+                WHERE "fabricColourId" = ANY(${fabricColourIds})
+                GROUP BY "fabricColourId"
+            `;
+
+            for (const b of fcBalances) {
+                const balance = Number(b.totalInward) - Number(b.totalOutward);
+                fabricColourBalanceMap.set(b.fabricColourId, balance);
+            }
+        }
+
         // Map SKU metadata with balances
         const balances: InventoryAllItem[] = skus.map((sku) => {
             const balance = balanceMap.get(sku.skuId) || {
@@ -375,6 +414,11 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
             };
 
             const imageUrl = sku.variationImageUrl || sku.productImageUrl || null;
+
+            // Get fabric colour balance if linked
+            const fabricColourBalance = sku.fabricColourId
+                ? fabricColourBalanceMap.get(sku.fabricColourId) ?? null
+                : null;
 
             return {
                 skuId: sku.skuId,
@@ -401,20 +445,89 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
                 mrp: sku.mrp,
                 shopifyQty: sku.shopifyAvailableQty ?? null,
                 isCustomSku: sku.isCustomSku || false,
+                fabricColourId: sku.fabricColourId ?? null,
+                fabricColourBalance,
+                shopifyProductStatus: sku.shopifyProductStatus ?? null,
             };
         });
 
-        // Filter by below-target status if requested
+        // Apply filters
         let filteredBalances = balances;
+
+        // Legacy below-target filter
         if (belowTarget === true) {
-            filteredBalances = balances.filter((b) => b.status === 'below_target');
+            filteredBalances = filteredBalances.filter((b) => b.status === 'below_target');
         }
 
-        // Sort: below_target first, then by SKU code
+        // Stock filter
+        if (stockFilter && stockFilter !== 'all') {
+            filteredBalances = filteredBalances.filter((b) => {
+                switch (stockFilter) {
+                    case 'in_stock':
+                        return b.availableBalance > 0;
+                    case 'out_of_stock':
+                        return b.availableBalance <= 0;
+                    case 'low_stock':
+                        return b.availableBalance > 0 && b.availableBalance < (b.targetStockQty || 10);
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        // Shopify product status filter
+        if (shopifyStatus && shopifyStatus !== 'all') {
+            filteredBalances = filteredBalances.filter((b) => b.shopifyProductStatus === shopifyStatus);
+        }
+
+        // Shopify qty discrepancy filter
+        if (discrepancy && discrepancy !== 'all') {
+            filteredBalances = filteredBalances.filter((b) => {
+                const hasDiscrepancy = b.shopifyQty !== null && b.shopifyQty !== b.availableBalance;
+                return discrepancy === 'has_discrepancy' ? hasDiscrepancy : !hasDiscrepancy;
+            });
+        }
+
+        // Fabric filter
+        if (fabricFilter && fabricFilter !== 'all') {
+            filteredBalances = filteredBalances.filter((b) => {
+                switch (fabricFilter) {
+                    case 'has_fabric':
+                        return b.fabricColourBalance !== null && b.fabricColourBalance > 0;
+                    case 'no_fabric':
+                        return b.fabricColourBalance === null || b.fabricColourBalance <= 0;
+                    case 'low_fabric':
+                        return b.fabricColourBalance !== null && b.fabricColourBalance > 0 && b.fabricColourBalance < 10;
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        // Sort by selected column and order
         filteredBalances.sort((a, b) => {
-            if (a.status === 'below_target' && b.status !== 'below_target') return -1;
-            if (a.status !== 'below_target' && b.status === 'below_target') return 1;
-            return a.skuCode.localeCompare(b.skuCode);
+            let aVal: number;
+            let bVal: number;
+
+            switch (sortBy) {
+                case 'shopify':
+                    // Sort nulls to end
+                    aVal = a.shopifyQty ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    bVal = b.shopifyQty ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    break;
+                case 'fabric':
+                    // Sort nulls to end
+                    aVal = a.fabricColourBalance ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    bVal = b.fabricColourBalance ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    break;
+                case 'stock':
+                default:
+                    aVal = a.availableBalance;
+                    bVal = b.availableBalance;
+                    break;
+            }
+
+            return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
         });
 
         // Apply pagination

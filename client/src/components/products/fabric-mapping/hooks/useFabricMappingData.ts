@@ -257,11 +257,13 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
     });
 
     // Get main fabric role ID
-    // Note: getComponentRoles returns an array directly, not { roles: [...] }
+    // getComponentRoles returns { success: true, data: [...] }
     const mainFabricRoleId = useMemo(() => {
-        if (!rolesData || !Array.isArray(rolesData)) return null;
-        const mainFabricRole = rolesData.find(
-            (role: any) => role.code === 'main' && role.type?.code === 'FABRIC'
+        // Handle the MutationResult wrapper
+        const roles = rolesData?.success && rolesData?.data ? rolesData.data : null;
+        if (!roles || !Array.isArray(roles)) return null;
+        const mainFabricRole = roles.find(
+            (role: { code: string; type?: { code: string } }) => role.code === 'main' && role.type?.code === 'FABRIC'
         );
         return mainFabricRole?.id || null;
     }, [rolesData]);

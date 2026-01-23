@@ -611,14 +611,15 @@ export async function syncAllProducts(
         errors: [],
     };
 
-    // Fetch products from Shopify
+    // Fetch products from Shopify (all statuses to keep cache up-to-date)
     let shopifyProducts: ShopifyProduct[];
     if (syncAll) {
         console.log('Fetching ALL products from Shopify...');
         shopifyProducts = await shopifyClient.getAllProducts();
         console.log(`Fetched ${shopifyProducts.length} products total`);
     } else {
-        shopifyProducts = await shopifyClient.getProducts({ limit });
+        // Use status: 'any' to fetch active, archived, and draft products
+        shopifyProducts = await shopifyClient.getProducts({ limit, status: 'any' });
     }
 
     // Ensure default fabric exists

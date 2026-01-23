@@ -36,6 +36,9 @@ export type PrismaTransaction = Omit<
  * Uses dynamic import to prevent Node.js code from being bundled into client builds.
  * Creates singleton on globalThis with environment-specific caching.
  *
+ * NOTE: If models are missing after schema changes, the cached client will be
+ * invalidated and a fresh instance created.
+ *
  * @returns Promise<PrismaInstance> - Prisma client instance
  */
 export async function getPrisma(): Promise<PrismaInstance> {
@@ -44,6 +47,13 @@ export async function getPrisma(): Promise<PrismaInstance> {
     const globalForPrisma = globalThis as unknown as {
         prisma: InstanceType<typeof PrismaClient> | undefined;
     };
+
+    // Check if cached client has required models, if not, invalidate cache
+    // This handles cases where schema was updated but dev server wasn't restarted
+    if (globalForPrisma.prisma && !('fabricColourTransaction' in globalForPrisma.prisma)) {
+        console.log('[getPrisma] Cached client missing new models, creating fresh instance');
+        globalForPrisma.prisma = undefined;
+    }
 
     // Create new instance or reuse existing singleton
     const prisma = globalForPrisma.prisma ?? new PrismaClient({

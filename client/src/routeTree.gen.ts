@@ -27,10 +27,10 @@ import { Route as AuthenticatedProductionRouteImport } from './routes/_authentic
 import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
 import { Route as AuthenticatedOrderSearchRouteImport } from './routes/_authenticated/order-search'
 import { Route as AuthenticatedLedgersRouteImport } from './routes/_authenticated/ledgers'
+import { Route as AuthenticatedInventoryMobileRouteImport } from './routes/_authenticated/inventory-mobile'
 import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_authenticated/inventory-inward'
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
-import { Route as AuthenticatedFabricsRouteImport } from './routes/_authenticated/fabrics'
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
@@ -125,6 +125,12 @@ const AuthenticatedLedgersRoute = AuthenticatedLedgersRouteImport.update({
   path: '/ledgers',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedInventoryMobileRoute =
+  AuthenticatedInventoryMobileRouteImport.update({
+    id: '/inventory-mobile',
+    path: '/inventory-mobile',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedInventoryInwardRoute =
   AuthenticatedInventoryInwardRouteImport.update({
     id: '/inventory-inward',
@@ -140,11 +146,6 @@ const AuthenticatedInventoryCountRoute =
 const AuthenticatedInventoryRoute = AuthenticatedInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedFabricsRoute = AuthenticatedFabricsRouteImport.update({
-  id: '/fabrics',
-  path: '/fabrics',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedFabricReconciliationRoute =
@@ -176,10 +177,10 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
-  '/fabrics': typeof AuthenticatedFabricsRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
+  '/inventory-mobile': typeof AuthenticatedInventoryMobileRoute
   '/ledgers': typeof AuthenticatedLedgersRoute
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
@@ -201,10 +202,10 @@ export interface FileRoutesByTo {
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/customers': typeof AuthenticatedCustomersRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
-  '/fabrics': typeof AuthenticatedFabricsRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/inventory-inward': typeof AuthenticatedInventoryInwardRoute
+  '/inventory-mobile': typeof AuthenticatedInventoryMobileRoute
   '/ledgers': typeof AuthenticatedLedgersRoute
   '/order-search': typeof AuthenticatedOrderSearchRoute
   '/orders': typeof AuthenticatedOrdersRoute
@@ -229,10 +230,10 @@ export interface FileRoutesById {
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
-  '/_authenticated/fabrics': typeof AuthenticatedFabricsRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
   '/_authenticated/inventory-inward': typeof AuthenticatedInventoryInwardRoute
+  '/_authenticated/inventory-mobile': typeof AuthenticatedInventoryMobileRoute
   '/_authenticated/ledgers': typeof AuthenticatedLedgersRoute
   '/_authenticated/order-search': typeof AuthenticatedOrderSearchRoute
   '/_authenticated/orders': typeof AuthenticatedOrdersRoute
@@ -258,10 +259,10 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/customers'
     | '/fabric-reconciliation'
-    | '/fabrics'
     | '/inventory'
     | '/inventory-count'
     | '/inventory-inward'
+    | '/inventory-mobile'
     | '/ledgers'
     | '/order-search'
     | '/orders'
@@ -283,10 +284,10 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/customers'
     | '/fabric-reconciliation'
-    | '/fabrics'
     | '/inventory'
     | '/inventory-count'
     | '/inventory-inward'
+    | '/inventory-mobile'
     | '/ledgers'
     | '/order-search'
     | '/orders'
@@ -310,10 +311,10 @@ export interface FileRouteTypes {
     | '/_authenticated/analytics'
     | '/_authenticated/customers'
     | '/_authenticated/fabric-reconciliation'
-    | '/_authenticated/fabrics'
     | '/_authenticated/inventory'
     | '/_authenticated/inventory-count'
     | '/_authenticated/inventory-inward'
+    | '/_authenticated/inventory-mobile'
     | '/_authenticated/ledgers'
     | '/_authenticated/order-search'
     | '/_authenticated/orders'
@@ -465,6 +466,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLedgersRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/inventory-mobile': {
+      id: '/_authenticated/inventory-mobile'
+      path: '/inventory-mobile'
+      fullPath: '/inventory-mobile'
+      preLoaderRoute: typeof AuthenticatedInventoryMobileRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/inventory-inward': {
       id: '/_authenticated/inventory-inward'
       path: '/inventory-inward'
@@ -484,13 +492,6 @@ declare module '@tanstack/react-router' {
       path: '/inventory'
       fullPath: '/inventory'
       preLoaderRoute: typeof AuthenticatedInventoryRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/fabrics': {
-      id: '/_authenticated/fabrics'
-      path: '/fabrics'
-      fullPath: '/fabrics'
-      preLoaderRoute: typeof AuthenticatedFabricsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/fabric-reconciliation': {
@@ -521,10 +522,10 @@ interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
-  AuthenticatedFabricsRoute: typeof AuthenticatedFabricsRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
   AuthenticatedInventoryInwardRoute: typeof AuthenticatedInventoryInwardRoute
+  AuthenticatedInventoryMobileRoute: typeof AuthenticatedInventoryMobileRoute
   AuthenticatedLedgersRoute: typeof AuthenticatedLedgersRoute
   AuthenticatedOrderSearchRoute: typeof AuthenticatedOrderSearchRoute
   AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
@@ -542,10 +543,10 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
   AuthenticatedFabricReconciliationRoute:
     AuthenticatedFabricReconciliationRoute,
-  AuthenticatedFabricsRoute: AuthenticatedFabricsRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
   AuthenticatedInventoryCountRoute: AuthenticatedInventoryCountRoute,
   AuthenticatedInventoryInwardRoute: AuthenticatedInventoryInwardRoute,
+  AuthenticatedInventoryMobileRoute: AuthenticatedInventoryMobileRoute,
   AuthenticatedLedgersRoute: AuthenticatedLedgersRoute,
   AuthenticatedOrderSearchRoute: AuthenticatedOrderSearchRoute,
   AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,

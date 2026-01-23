@@ -25,7 +25,7 @@ export const JwtPayloadSchema = z.object({
     id: z.string(),
     email: z.string().email(),
     role: z.string(),
-    roleId: z.string(),
+    roleId: z.string().nullable().optional(), // Can be null if user has no role
     tokenVersion: z.number().optional(),
     iat: z.number().optional(),
     exp: z.number().optional(),
@@ -40,7 +40,7 @@ export interface AuthenticatedUser {
     id: string;
     email: string;
     role: string;
-    roleId: string;
+    roleId: string | null;
     tokenVersion?: number;
 }
 
@@ -226,7 +226,7 @@ export async function validateAuth(
             id: payload.id,
             email: payload.email,
             role: payload.role,
-            roleId: payload.roleId,
+            roleId: payload.roleId ?? null,
             tokenVersion: payload.tokenVersion,
         },
         permissions,

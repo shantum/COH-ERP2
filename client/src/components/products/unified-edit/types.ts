@@ -48,7 +48,7 @@ export interface ProductFormData {
 export interface VariationFormData {
   colorName: string;
   colorHex: string | null;
-  fabricId: string | null;
+  fabricColourId: string | null;
   hasLining: boolean;
   trimsCost: number | null;
   liningCost: number | null;
@@ -116,8 +116,10 @@ export interface VariationDetailData {
   productId: string;
   colorName: string;
   colorHex: string | null;
-  fabricId: string | null;
+  fabricColourId: string | null;
+  fabricColourName: string | null;
   fabricName: string | null;
+  materialName: string | null;
   hasLining: boolean;
   trimsCost: number | null;
   liningCost: number | null;
@@ -151,18 +153,20 @@ export interface FabricType {
   name: string;
 }
 
-export interface Fabric {
+export interface FabricColour {
   id: string;
   name: string;
-  fabricTypeId: string;
-  colorName: string | null;
-  colorHex: string | null;
+  hex: string | null;
+  fabricId: string;
+  fabricName: string;
+  materialId: string;
+  materialName: string;
   costPerUnit: number | null;
 }
 
 export interface CatalogFilters {
   fabricTypes: FabricType[];
-  fabrics: Fabric[];
+  fabricColours: FabricColour[];
   categories: string[];
   genders: string[];
 }

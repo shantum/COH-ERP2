@@ -198,7 +198,7 @@ export function UnifiedProductEditModal({
             <VariationEditDialog
               variation={currentVariation}
               product={product!}
-              fabrics={filters?.fabrics ?? []}
+              fabricColours={filters?.fabricColours ?? []}
               isActive={activeIndex === 1}
               onNavigate={handleNavigate}
               onBack={handleBack}

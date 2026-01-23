@@ -52,7 +52,7 @@ export function useVariationEditForm({
           id: variation.id,
           colorName: data.colorName,
           colorHex: data.colorHex ?? undefined,
-          fabricId: data.fabricId ?? undefined,
+          fabricColourId: data.fabricColourId ?? undefined,
           hasLining: data.hasLining,
           trimsCost: data.trimsCost ?? undefined,
           packagingCost: data.packagingCost ?? undefined,
@@ -154,7 +154,7 @@ function getDefaultValues(variation: VariationDetailData): VariationFormData {
   return {
     colorName: variation.colorName ?? '',
     colorHex: variation.colorHex ?? null,
-    fabricId: variation.fabricId ?? null,
+    fabricColourId: variation.fabricColourId ?? null,
     hasLining: variation.hasLining ?? false,
     trimsCost: variation.trimsCost ?? null,
     liningCost: variation.liningCost ?? null,
