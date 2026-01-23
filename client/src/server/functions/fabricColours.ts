@@ -16,7 +16,7 @@ import type { PrismaClient, Prisma } from '@prisma/client';
 import { authMiddleware } from '../middleware/auth';
 
 // ============================================
-// PRISMA TYPE ALIAS
+// PRISMA TYPE ALIAS & SINGLETON
 // ============================================
 
 /**
@@ -25,6 +25,31 @@ import { authMiddleware } from '../middleware/auth';
  */
 type PrismaInstance = InstanceType<typeof PrismaClient>;
 
+/**
+ * Get Prisma singleton instance
+ * Uses globalThis to cache in development, avoids multiple connections
+ *
+ * NOTE: If models are missing after schema changes, restart the dev server
+ * to clear the globalThis cache.
+ */
+async function getPrisma(): Promise<PrismaInstance> {
+    const { PrismaClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
+
+    // Check if cached client has the required models, if not, create a new one
+    if (globalForPrisma.prisma && !('fabricColourTransaction' in globalForPrisma.prisma)) {
+        console.log('[getPrisma] Cached client missing new models, creating fresh instance');
+        globalForPrisma.prisma = undefined;
+    }
+
+    const prisma = globalForPrisma.prisma ?? new PrismaClient();
+    if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+    }
+    return prisma;
+}
 
 // ============================================
 // INTERNAL TYPE DEFINITIONS FOR QUERY RESULTS
@@ -410,8 +435,7 @@ export const getFabricColourTransactions = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getFabricColourTransactionsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricColourTransactionsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const transactions = await prisma.fabricColourTransaction.findMany({
@@ -443,8 +467,7 @@ export const getAllFabricColourTransactions = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getAllTransactionsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetAllFabricColourTransactionsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const limit = data?.limit ?? 500;
@@ -535,8 +558,7 @@ export const getFabricColourStockAnalysis = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getStockAnalysisInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricColourStockAnalysisResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const where: Prisma.FabricColourWhereInput = { isActive: true };
@@ -656,8 +678,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getTopMaterialsInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetTopMaterialsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const days = data?.days ?? 30;
@@ -969,8 +990,7 @@ export const getFabricColourReconciliations = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getReconciliationHistoryInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricColourReconciliationsResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const reconciliations = await prisma.fabricColourReconciliation.findMany({
@@ -1009,8 +1029,7 @@ export const getFabricColourReconciliation = createServerFn({ method: 'GET' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => getReconciliationByIdInputSchema.parse(input))
     .handler(async ({ data }): Promise<GetFabricColourReconciliationResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const reconciliation = await prisma.fabricColourReconciliation.findUnique({
@@ -1079,8 +1098,7 @@ export const startFabricColourReconciliation = createServerFn({ method: 'POST' }
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => startFabricColourReconciliationInputSchema.parse(input))
     .handler(async ({ data, context }): Promise<StartFabricColourReconciliationResponse> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             // Get all active fabric colours
@@ -1159,8 +1177,9 @@ export const startFabricColourReconciliation = createServerFn({ method: 'POST' }
                     })),
                 },
             };
-        } finally {
-            await prisma.$disconnect();
+        } catch (error: unknown) {
+            console.error('[startFabricColourReconciliation] Error:', error);
+            throw error;
         }
     });
 

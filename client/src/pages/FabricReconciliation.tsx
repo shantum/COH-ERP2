@@ -106,6 +106,10 @@ export default function FabricReconciliation() {
             }
             queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
         },
+        onError: (error) => {
+            console.error('Start reconciliation error:', error);
+            alert(`Failed to start reconciliation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        },
     });
 
     // Update reconciliation
@@ -140,6 +144,10 @@ export default function FabricReconciliation() {
                 setLocalItems(data.items);
             }
         },
+        onError: (error) => {
+            console.error('Update reconciliation error:', error);
+            alert(`Failed to save: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        },
     });
 
     // Submit reconciliation
@@ -158,6 +166,11 @@ export default function FabricReconciliation() {
             setLocalItems([]);
             queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
             queryClient.invalidateQueries({ queryKey: ['fabricColours'] });
+            alert('Reconciliation submitted successfully!');
+        },
+        onError: (error) => {
+            console.error('Submit reconciliation error:', error);
+            alert(`Failed to submit: ${error instanceof Error ? error.message : 'Unknown error'}`);
         },
     });
 
@@ -176,6 +189,10 @@ export default function FabricReconciliation() {
             setCurrentRecon(null);
             setLocalItems([]);
             queryClient.invalidateQueries({ queryKey: ['fabricColourReconciliationHistory'] });
+        },
+        onError: (error) => {
+            console.error('Delete reconciliation error:', error);
+            alert(`Failed to delete: ${error instanceof Error ? error.message : 'Unknown error'}`);
         },
     });
 

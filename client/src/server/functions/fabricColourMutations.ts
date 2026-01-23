@@ -16,7 +16,7 @@ import { authMiddleware } from '../middleware/auth';
 import type { PrismaClient } from '@prisma/client';
 
 // ============================================
-// PRISMA TYPE ALIAS
+// PRISMA TYPE ALIAS & SINGLETON
 // ============================================
 
 /**
@@ -33,6 +33,32 @@ type PrismaTransaction = Omit<
     PrismaInstance,
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
+
+/**
+ * Get Prisma singleton instance
+ * Uses globalThis to cache in development, avoids multiple connections
+ *
+ * NOTE: If models are missing after schema changes, restart the dev server
+ * to clear the globalThis cache.
+ */
+async function getPrisma(): Promise<PrismaInstance> {
+    const { PrismaClient } = await import('@prisma/client');
+    const globalForPrisma = globalThis as unknown as {
+        prisma: InstanceType<typeof PrismaClient> | undefined;
+    };
+
+    // Check if cached client has the required models, if not, create a new one
+    if (globalForPrisma.prisma && !('fabricColourTransaction' in globalForPrisma.prisma)) {
+        console.log('[getPrisma] Cached client missing new models, creating fresh instance');
+        globalForPrisma.prisma = undefined;
+    }
+
+    const prisma = globalForPrisma.prisma ?? new PrismaClient();
+    if (process.env.NODE_ENV !== 'production') {
+        globalForPrisma.prisma = prisma;
+    }
+    return prisma;
+}
 
 // ============================================
 // INTERNAL TYPE DEFINITIONS
@@ -240,8 +266,7 @@ export const createFabricColourTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => createTransactionSchema.parse(input))
     .handler(async ({ data, context }): Promise<TransactionSuccessResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const transaction = await prisma.fabricColourTransaction.create({
@@ -282,8 +307,7 @@ export const deleteFabricColourTransaction = createServerFn({ method: 'POST' })
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteTransactionSchema.parse(input))
     .handler(async ({ data, context }): Promise<DeleteTransactionSuccessResult | TransactionErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             // Check if user is admin
@@ -339,8 +363,7 @@ export const updateFabricColourReconciliationItems = createServerFn({ method: 'P
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => updateFabricColourReconciliationItemsInputSchema.parse(input))
     .handler(async ({ data }): Promise<UpdateReconciliationItemsSuccessResult | UpdateReconciliationItemsErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const { reconciliationId, items } = data;
@@ -449,8 +472,7 @@ export const submitFabricColourReconciliation = createServerFn({ method: 'POST' 
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => submitFabricColourReconciliationInputSchema.parse(input))
     .handler(async ({ data, context }): Promise<SubmitReconciliationSuccessResult | SubmitReconciliationErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const { reconciliationId } = data;
@@ -552,8 +574,7 @@ export const deleteFabricColourReconciliation = createServerFn({ method: 'POST' 
     .middleware([authMiddleware])
     .inputValidator((input: unknown) => deleteFabricColourReconciliationInputSchema.parse(input))
     .handler(async ({ data }): Promise<DeleteReconciliationSuccessResult | DeleteReconciliationErrorResult> => {
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
+        const prisma = await getPrisma();
 
         try {
             const { reconciliationId } = data;
