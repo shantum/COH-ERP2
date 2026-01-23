@@ -163,28 +163,39 @@ async function callExpressApi<T>(
 
     const authToken = getCookie('auth_token');
 
-    const response = await fetch(`${apiUrl}${path}`, {
-        ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
-            ...options.headers,
-        },
-    });
+    console.log(`[callExpressApi] Calling ${apiUrl}${path}`);
+    console.log(`[callExpressApi] Auth token present: ${!!authToken}`);
 
-    if (!response.ok) {
-        const errorBody = await response.text();
-        let errorMessage: string;
-        try {
-            const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
-            errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
-        } catch {
-            errorMessage = `API call failed: ${response.status} - ${errorBody}`;
+    try {
+        const response = await fetch(`${apiUrl}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(authToken ? { Cookie: `auth_token=${authToken}` } : {}),
+                ...options.headers,
+            },
+        });
+
+        console.log(`[callExpressApi] Response status: ${response.status}`);
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.log(`[callExpressApi] Error body: ${errorBody}`);
+            let errorMessage: string;
+            try {
+                const errorJson = JSON.parse(errorBody) as { error?: string; message?: string };
+                errorMessage = errorJson.error || errorJson.message || `API call failed: ${response.status}`;
+            } catch {
+                errorMessage = `API call failed: ${response.status} - ${errorBody}`;
+            }
+            throw new Error(errorMessage);
         }
-        throw new Error(errorMessage);
-    }
 
-    return response.json() as Promise<T>;
+        return response.json() as Promise<T>;
+    } catch (error) {
+        console.log(`[callExpressApi] Fetch error: ${error instanceof Error ? error.message : error}`);
+        throw error;
+    }
 }
 
 // ============================================

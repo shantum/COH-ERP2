@@ -45,6 +45,7 @@ interface CustomerOptions {
 interface ProductOptions {
     since_id?: string;
     limit?: number;
+    status?: 'active' | 'archived' | 'draft' | 'any';
 }
 
 /**
@@ -786,16 +787,36 @@ class ShopifyClient {
 
     /**
      * Fetch products from Shopify (useful for SKU matching)
+     * NOTE: Pass status to filter by product status. Default fetches only active products.
+     * Use 'any' to fetch all statuses (makes 3 API calls internally).
      */
     async getProducts(options: ProductOptions = {}): Promise<ShopifyProduct[]> {
         if (!this.isConfigured()) {
             throw new Error('Shopify is not configured');
         }
 
-        const params: Record<string, string | number> = {
-            limit: Math.min(options.limit || 50, 250),
-        };
+        const limit = Math.min(options.limit || 50, 250);
 
+        // Handle 'any' status by fetching all three statuses
+        if (options.status === 'any') {
+            const statuses: Array<'active' | 'archived' | 'draft'> = ['active', 'archived', 'draft'];
+            const allProducts: ShopifyProduct[] = [];
+
+            for (const status of statuses) {
+                const params: Record<string, string | number> = { status, limit };
+                if (options.since_id) params.since_id = options.since_id;
+
+                const response = await this.executeWithRetry<{ products: ShopifyProduct[] }>(
+                    () => this.client!.get('/products.json', { params })
+                );
+                allProducts.push(...response.data.products);
+            }
+            return allProducts;
+        }
+
+        // Single status fetch
+        const params: Record<string, string | number> = { limit };
+        if (options.status) params.status = options.status;
         if (options.since_id) params.since_id = options.since_id;
 
         const response = await this.executeWithRetry<{ products: ShopifyProduct[] }>(
@@ -806,6 +827,7 @@ class ShopifyClient {
 
     /**
      * Fetch ALL products from Shopify with pagination
+     * Fetches all three statuses (active, archived, draft) to ensure complete sync.
      */
     async getAllProducts(
         onProgress: ((fetched: number) => void) | null = null
@@ -815,52 +837,56 @@ class ShopifyClient {
         }
 
         const allProducts: ShopifyProduct[] = [];
-        let hasMore = true;
-        let pageInfo: string | null = null;
+        const statuses: Array<'active' | 'archived' | 'draft'> = ['active', 'archived', 'draft'];
 
-        while (hasMore) {
-            const params: Record<string, string | number> = { limit: 250 };
+        // Fetch each status separately (Shopify API doesn't support 'any' for products)
+        for (const status of statuses) {
+            let hasMore = true;
+            let pageInfo: string | null = null;
+            let sinceId: string | null = null;
 
-            // Use cursor-based pagination
-            if (pageInfo) {
-                params.page_info = pageInfo;
-            }
+            while (hasMore) {
+                // IMPORTANT: When using page_info, only limit is allowed (no status/filters)
+                // The cursor "remembers" the original query params
+                const params: Record<string, string | number> = pageInfo
+                    ? { page_info: pageInfo, limit: 250 }
+                    : sinceId
+                        ? { status, since_id: sinceId, limit: 250 }
+                        : { status, limit: 250 };
 
-            const response = await this.executeWithRetry<{ products: ShopifyProduct[] }>(
-                () => this.client!.get('/products.json', { params })
-            );
-            const products = response.data.products;
+                const response = await this.executeWithRetry<{ products: ShopifyProduct[] }>(
+                    () => this.client!.get('/products.json', { params })
+                );
+                const products = response.data.products;
 
-            if (products.length === 0) {
-                hasMore = false;
-            } else {
-                allProducts.push(...products);
-
-                // Report progress if callback provided
-                if (onProgress) {
-                    onProgress(allProducts.length);
-                }
-
-                // Check for pagination link header
-                const linkHeader = response.headers.link as string | undefined;
-                if (linkHeader && linkHeader.includes('rel="next"')) {
-                    const nextMatch = linkHeader.match(/<[^>]*page_info=([^>&]*)[^>]*>;\s*rel="next"/);
-                    pageInfo = nextMatch ? nextMatch[1] : null;
-                    hasMore = !!pageInfo;
+                if (products.length === 0) {
+                    hasMore = false;
                 } else {
-                    // Fallback to since_id pagination
-                    if (products.length < 250) {
-                        hasMore = false;
+                    allProducts.push(...products);
+
+                    if (onProgress) {
+                        onProgress(allProducts.length);
+                    }
+
+                    // Check for pagination link header
+                    const linkHeader = response.headers.link as string | undefined;
+                    if (linkHeader && linkHeader.includes('rel="next"')) {
+                        const nextMatch = linkHeader.match(/<[^>]*page_info=([^>&]*)[^>]*>;\s*rel="next"/);
+                        pageInfo = nextMatch ? nextMatch[1] : null;
+                        hasMore = !!pageInfo;
                     } else {
-                        const lastId = products[products.length - 1].id;
-                        params.since_id = lastId;
-                        pageInfo = null;
+                        if (products.length < 250) {
+                            hasMore = false;
+                        } else {
+                            sinceId = String(products[products.length - 1].id);
+                            pageInfo = null;
+                        }
                     }
                 }
-            }
 
-            // Small delay to avoid rate limiting
-            await new Promise(resolve => setTimeout(resolve, 100));
+                // Small delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
         }
 
         return allProducts;

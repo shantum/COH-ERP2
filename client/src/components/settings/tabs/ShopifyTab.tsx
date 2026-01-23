@@ -62,7 +62,7 @@ export function ShopifyTab() {
     const triggerSyncFn = useServerFn(triggerSync);
 
     // Fetch current config using Server Function
-    const { data: config, isLoading: configLoading } = useQuery({
+    const { data: config, isLoading: configLoading, error: configError } = useQuery({
         queryKey: ['shopifyConfig'],
         queryFn: async () => {
             const result = await getShopifyConfigFn();
@@ -257,6 +257,24 @@ export function ShopifyTab() {
         return (
             <div className="flex justify-center p-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            </div>
+        );
+    }
+
+    // Show error state if config fetch failed
+    if (configError) {
+        return (
+            <div className="card">
+                <div className="flex items-center gap-3 text-red-700 bg-red-50 p-4 rounded-lg">
+                    <AlertCircle size={24} />
+                    <div>
+                        <p className="font-medium">Failed to load Shopify configuration</p>
+                        <p className="text-sm">{configError instanceof Error ? configError.message : 'Unknown error'}</p>
+                        <p className="text-xs mt-2 text-gray-600">
+                            Make sure the server is running and SHOPIFY_ACCESS_TOKEN / SHOPIFY_SHOP_DOMAIN are set in your environment.
+                        </p>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -1083,6 +1101,11 @@ export function ShopifyTab() {
                         <div>
                             <p className="font-medium">Shopify Not Configured</p>
                             <p className="text-sm">Please configure your Shopify credentials to enable sync features.</p>
+                            <p className="text-xs mt-2 text-gray-600">
+                                Set <code className="bg-gray-100 px-1 rounded">SHOPIFY_SHOP_DOMAIN</code> and{' '}
+                                <code className="bg-gray-100 px-1 rounded">SHOPIFY_ACCESS_TOKEN</code> in your environment variables,
+                                or use the database settings.
+                            </p>
                         </div>
                     </div>
                 </div>
