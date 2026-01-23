@@ -190,6 +190,13 @@ interface GetAllFabricColourTransactionsResponse {
     pageSize: number;
 }
 
+/** Response type for getRecentFabricReceipts */
+interface GetRecentFabricReceiptsResponse {
+    success: true;
+    receipts: FabricColourTransactionWithDetails[];
+    total: number;
+}
+
 /** Stock analysis item */
 interface StockAnalysisItem {
     fabricColourId: string;
@@ -313,6 +320,13 @@ const getAllTransactionsInputSchema = z.object({
     fabricColourId: z.string().uuid().optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
+}).optional();
+
+const getRecentFabricReceiptsInputSchema = z.object({
+    limit: z.number().int().positive().default(100),
+    days: z.number().int().positive().default(7),
+    supplierId: z.string().uuid().optional().nullable(),
+    fabricColourId: z.string().uuid().optional().nullable(),
 }).optional();
 
 const getStockAnalysisInputSchema = z.object({
@@ -543,6 +557,83 @@ export const getAllFabricColourTransactions = createServerFn({ method: 'POST' })
                 total,
                 page: Math.floor(offset / limit) + 1,
                 pageSize: limit,
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Get recent fabric receipts (inward transactions only)
+ *
+ * Optimized query for the Fabric Receipt Entry page.
+ * Returns only inward transactions from suppliers.
+ */
+export const getRecentFabricReceipts = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getRecentFabricReceiptsInputSchema.parse(input))
+    .handler(async ({ data }): Promise<GetRecentFabricReceiptsResponse> => {
+        const prisma = await getPrisma();
+
+        try {
+            const limit = data?.limit ?? 100;
+            const days = data?.days ?? 7;
+
+            // Calculate start date
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+            startDate.setHours(0, 0, 0, 0);
+
+            // Build where clause - only inward transactions
+            const where: Prisma.FabricColourTransactionWhereInput = {
+                txnType: 'inward',
+                createdAt: { gte: startDate },
+            };
+
+            // Optional filters
+            if (data?.supplierId) {
+                where.supplierId = data.supplierId;
+            }
+            if (data?.fabricColourId) {
+                where.fabricColourId = data.fabricColourId;
+            }
+
+            const [receipts, total] = await Promise.all([
+                prisma.fabricColourTransaction.findMany({
+                    where,
+                    include: {
+                        fabricColour: {
+                            select: {
+                                id: true,
+                                colourName: true,
+                                colourHex: true,
+                                fabric: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        material: {
+                                            select: {
+                                                id: true,
+                                                name: true,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        createdBy: { select: { id: true, name: true } },
+                        supplier: { select: { id: true, name: true } },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    take: limit,
+                }),
+                prisma.fabricColourTransaction.count({ where }),
+            ]);
+
+            return {
+                success: true,
+                receipts,
+                total,
             };
         } finally {
             await prisma.$disconnect();

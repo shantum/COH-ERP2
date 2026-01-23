@@ -906,9 +906,8 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                 globalForPrisma.prisma = prisma;
             }
 
-            // Fetch fabric types
+            // Fetch fabric types (FabricType doesn't have isActive field)
             const fabricTypes = await prisma.fabricType.findMany({
-                where: { isActive: true },
                 select: { id: true, name: true },
                 orderBy: { name: 'asc' },
             });
@@ -936,6 +935,22 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                             material: true,
                         },
                     },
+                    // Include linked variations to get product images
+                    variations: {
+                        where: { isActive: true },
+                        take: 4, // Limit to 4 product images
+                        select: {
+                            id: true,
+                            imageUrl: true,
+                            product: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    imageUrl: true,
+                                },
+                            },
+                        },
+                    },
                 },
                 orderBy: [
                     { fabric: { material: { name: 'asc' } } },
@@ -946,16 +961,33 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
 
             // Transform fabricColours to expected format
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const fabricColours = fabricColoursRaw.map((fc: any) => ({
-                id: fc.id,
-                name: fc.colourName,
-                hex: fc.colourHex,
-                fabricId: fc.fabricId,
-                fabricName: fc.fabric?.name ?? '',
-                materialId: fc.fabric?.materialId ?? '',
-                materialName: fc.fabric?.material?.name ?? '',
-                costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? null,
-            }));
+            const fabricColours = fabricColoursRaw.map((fc: any) => {
+                // Get unique product images (prefer variation image, fallback to product image)
+                const productImages: string[] = [];
+                const seenProductIds = new Set<string>();
+                for (const variation of fc.variations || []) {
+                    const productId = variation.product?.id;
+                    if (productId && !seenProductIds.has(productId)) {
+                        seenProductIds.add(productId);
+                        const imageUrl = variation.imageUrl || variation.product?.imageUrl;
+                        if (imageUrl) {
+                            productImages.push(imageUrl);
+                        }
+                    }
+                }
+
+                return {
+                    id: fc.id,
+                    name: fc.colourName,
+                    hex: fc.colourHex,
+                    fabricId: fc.fabricId,
+                    fabricName: fc.fabric?.name ?? '',
+                    materialId: fc.fabric?.materialId ?? '',
+                    materialName: fc.fabric?.material?.name ?? '',
+                    costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? null,
+                    productImages: productImages.slice(0, 3), // Max 3 images
+                };
+            });
 
             // Get distinct categories from products
             const categoriesResult = await prisma.product.findMany({

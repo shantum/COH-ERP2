@@ -16,3 +16,4 @@ export * from './reconciliation.js';
 export * from './customers.js';
 export * from './inventory.js';
 export * from './products.js';
+export * from './fabricReceipt.js';

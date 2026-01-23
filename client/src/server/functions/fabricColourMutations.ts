@@ -231,6 +231,14 @@ const deleteTransactionSchema = z.object({
     txnId: z.string().uuid('Invalid transaction ID'),
 });
 
+const updateTransactionSchema = z.object({
+    id: z.string().uuid('Invalid transaction ID'),
+    qty: z.number().positive('Quantity must be positive').optional(),
+    costPerUnit: z.number().positive('Cost must be positive').optional().nullable(),
+    supplierId: z.string().uuid().optional().nullable(),
+    notes: z.string().max(500).optional().nullable(),
+});
+
 const updateFabricColourReconciliationItemsInputSchema = z.object({
     reconciliationId: z.string().uuid('Invalid reconciliation ID'),
     items: z.array(
@@ -343,6 +351,58 @@ export const deleteFabricColourTransaction = createServerFn({ method: 'POST' })
             return {
                 success: true,
                 id: data.txnId,
+            };
+        } finally {
+            await prisma.$disconnect();
+        }
+    });
+
+/**
+ * Update a fabric colour transaction
+ *
+ * Allows editing qty, costPerUnit, supplierId, and notes.
+ * Cannot change fabricColourId or txnType after creation.
+ */
+export const updateFabricColourTransaction = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateTransactionSchema.parse(input))
+    .handler(async ({ data }): Promise<TransactionSuccessResult | TransactionErrorResult> => {
+        const prisma = await getPrisma();
+
+        try {
+            const existing = await prisma.fabricColourTransaction.findUnique({
+                where: { id: data.id },
+            });
+
+            if (!existing) {
+                return {
+                    success: false,
+                    error: {
+                        code: 'NOT_FOUND' as const,
+                        message: 'Transaction not found',
+                    },
+                };
+            }
+
+            // Build update data - only include fields that were provided
+            const updateData: Record<string, unknown> = {};
+            if (data.qty !== undefined) updateData.qty = data.qty;
+            if (data.costPerUnit !== undefined) updateData.costPerUnit = data.costPerUnit;
+            if (data.supplierId !== undefined) updateData.supplierId = data.supplierId;
+            if (data.notes !== undefined) updateData.notes = data.notes;
+
+            const transaction = await prisma.fabricColourTransaction.update({
+                where: { id: data.id },
+                data: updateData,
+                include: {
+                    createdBy: { select: { id: true, name: true } },
+                    supplier: { select: { id: true, name: true } },
+                },
+            });
+
+            return {
+                success: true,
+                transaction,
             };
         } finally {
             await prisma.$disconnect();
