@@ -250,7 +250,8 @@ interface ReconciliationHistoryItem {
     status: string;
     itemsCount: number;
     adjustments: number;
-    createdBy: string | null;
+    netChange: number;
+    createdByName: string | null;
     createdAt: Date;
 }
 
@@ -336,8 +337,9 @@ const getStockAnalysisInputSchema = z.object({
     status: z.enum(['low', 'ok']).optional(),
 }).optional();
 
+// days: positive = lookback days, 0 = today only, -1 = yesterday only
 const getTopMaterialsInputSchema = z.object({
-    days: z.number().int().positive().optional().default(30),
+    days: z.number().int().min(-1).optional().default(0),
     level: z.enum(['material', 'fabric', 'colour']).optional().default('material'),
     limit: z.number().int().positive().optional().default(15),
 }).optional();
@@ -772,12 +774,31 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
         const prisma = await getPrisma();
 
         try {
-            const days = data?.days ?? 30;
+            const days = data?.days ?? 0;
             const level = data?.level ?? 'material';
             const limit = data?.limit ?? 15;
 
-            const startDate = new Date();
-            startDate.setDate(startDate.getDate() - days);
+            // Helper function for IST midnight calculation
+            const getISTMidnightAsUTC = (daysOffset = 0): Date => {
+                const nowUTC = new Date();
+                const istOffset = 5.5 * 60 * 60 * 1000;
+                const nowIST = new Date(nowUTC.getTime() + istOffset);
+                const istMidnight = new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() + daysOffset);
+                return new Date(istMidnight.getTime() - istOffset);
+            };
+
+            // Calculate date filter: days > 0 = lookback, 0 = today, -1 = yesterday
+            let dateFilter: { gte: Date; lte?: Date };
+            if (days === -1) {
+                dateFilter = {
+                    gte: getISTMidnightAsUTC(-1),
+                    lte: getISTMidnightAsUTC(0),
+                };
+            } else if (days === 0) {
+                dateFilter = { gte: getISTMidnightAsUTC(0) };
+            } else {
+                dateFilter = { gte: getISTMidnightAsUTC(-days) };
+            }
 
             // Get SKUs with fabricColour to calculate top materials
             // Note: Using SKU table to get all sales data
@@ -803,7 +824,7 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                     orderLines: {
                         where: {
                             order: {
-                                orderDate: { gte: startDate },
+                                orderDate: dateFilter,
                                 status: { not: 'cancelled' },
                             },
                             OR: [
@@ -1092,17 +1113,35 @@ export const getFabricColourReconciliations = createServerFn({ method: 'GET' })
                 take: data?.limit ?? 10,
             });
 
-            const history = reconciliations.map((r) => ({
-                id: r.id,
-                date: r.reconcileDate,
-                status: r.status,
-                itemsCount: r.items.length,
-                adjustments: r.items.filter(
-                    (i) => i.variance !== 0 && i.variance !== null
-                ).length,
-                createdBy: r.createdBy,
-                createdAt: r.createdAt,
-            }));
+            // Get unique user IDs and fetch their names
+            const userIds = [...new Set(reconciliations.map(r => r.createdBy).filter(Boolean))] as string[];
+            const users = userIds.length > 0
+                ? await prisma.user.findMany({
+                    where: { id: { in: userIds } },
+                    select: { id: true, name: true },
+                })
+                : [];
+            const userMap = new Map(users.map(u => [u.id, u.name]));
+
+            const history = reconciliations.map((r) => {
+                // Calculate net change from all variances
+                const netChange = r.items.reduce((sum, item) => {
+                    return sum + (item.variance !== null ? Number(item.variance) : 0);
+                }, 0);
+
+                return {
+                    id: r.id,
+                    date: r.reconcileDate,
+                    status: r.status,
+                    itemsCount: r.items.length,
+                    adjustments: r.items.filter(
+                        (i) => i.variance !== 0 && i.variance !== null
+                    ).length,
+                    netChange,
+                    createdByName: r.createdBy ? userMap.get(r.createdBy) || null : null,
+                    createdAt: r.createdAt,
+                };
+            });
 
             return {
                 success: true,

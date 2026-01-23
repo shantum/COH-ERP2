@@ -10,11 +10,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import {
     ClipboardCheck, RefreshCw, AlertTriangle, CheckCircle, Search,
-    Plus, History, Send, Trash2
+    Plus, History, Send, Trash2, Eye, ArrowLeft, User, TrendingUp, TrendingDown
 } from 'lucide-react';
 import {
     getFabricColourReconciliations,
     startFabricColourReconciliation,
+    getFabricColourReconciliation,
 } from '../server/functions/fabricColours';
 import {
     updateFabricColourReconciliationItems,
@@ -43,6 +44,17 @@ interface Reconciliation {
     items: ReconciliationItem[];
 }
 
+interface ReconciliationHistoryItem {
+    id: string;
+    date: Date | null;
+    status: string;
+    itemsCount: number;
+    adjustments: number;
+    netChange: number;
+    createdByName: string | null;
+    createdAt: Date;
+}
+
 const ADJUSTMENT_REASONS = {
     shortage: [
         { value: 'shrinkage', label: 'Shrinkage' },
@@ -65,12 +77,16 @@ export default function FabricReconciliation() {
     const [searchTerm, setSearchTerm] = useState('');
     const [localItems, setLocalItems] = useState<ReconciliationItem[]>([]);
 
+    // State for viewing a specific reconciliation from history
+    const [viewingReconId, setViewingReconId] = useState<string | null>(null);
+
     // Server Function wrappers
     const getHistoryFn = useServerFn(getFabricColourReconciliations);
     const startReconFn = useServerFn(startFabricColourReconciliation);
     const updateReconFn = useServerFn(updateFabricColourReconciliationItems);
     const submitReconFn = useServerFn(submitFabricColourReconciliation);
     const deleteReconFn = useServerFn(deleteFabricColourReconciliation);
+    const getReconDetailFn = useServerFn(getFabricColourReconciliation);
 
     // Fetch history using Server Functions
     const { data: history, isLoading: historyLoading } = useQuery({
@@ -80,8 +96,22 @@ export default function FabricReconciliation() {
             if (!result.success) {
                 throw new Error('Failed to fetch reconciliation history');
             }
-            return result.history;
+            return result.history as ReconciliationHistoryItem[];
         },
+    });
+
+    // Fetch specific reconciliation detail when viewing
+    const { data: reconDetail, isLoading: reconDetailLoading } = useQuery({
+        queryKey: ['fabricColourReconciliation', viewingReconId],
+        queryFn: async () => {
+            if (!viewingReconId) return null;
+            const result = await getReconDetailFn({ data: { id: viewingReconId } });
+            if (!result.success) {
+                throw new Error('Failed to fetch reconciliation details');
+            }
+            return result.reconciliation;
+        },
+        enabled: !!viewingReconId,
     });
 
     // Start new reconciliation
@@ -483,58 +513,235 @@ export default function FabricReconciliation() {
             {/* History Tab */}
             {activeTab === 'history' && (
                 <div className="card">
-                    <h2 className="text-lg font-semibold mb-4">Reconciliation History</h2>
-                    {historyLoading ? (
-                        <div className="flex justify-center py-8">
-                            <RefreshCw className="animate-spin text-gray-400" />
-                        </div>
-                    ) : history && history.length > 0 ? (
-                        <table className="w-full">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date</th>
-                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Status</th>
-                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Colours</th>
-                                    <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Adjustments</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {history.map((r: { id: string; date: Date | null; status: string; itemsCount: number; adjustments: number }) => (
-                                    <tr key={r.id} className="hover:bg-gray-50">
-                                        <td className="px-4 py-3">
-                                            {r.date ? new Date(r.date).toLocaleDateString('en-IN', {
-                                                day: 'numeric',
-                                                month: 'short',
-                                                year: 'numeric',
-                                            }) : 'No date'}
-                                        </td>
-                                        <td className="px-4 py-3 text-center">
-                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'submitted'
+                    {/* Detail View */}
+                    {viewingReconId && (
+                        <div>
+                            <button
+                                className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+                                onClick={() => setViewingReconId(null)}
+                            >
+                                <ArrowLeft size={18} /> Back to History
+                            </button>
+
+                            {reconDetailLoading ? (
+                                <div className="flex justify-center py-8">
+                                    <RefreshCw className="animate-spin text-gray-400" />
+                                </div>
+                            ) : reconDetail ? (
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-lg font-semibold">Reconciliation Details</h2>
+                                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                            reconDetail.status === 'submitted'
                                                 ? 'bg-green-100 text-green-700'
                                                 : 'bg-yellow-100 text-yellow-700'
-                                                }`}>
-                                                {r.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-center">{r.itemsCount}</td>
-                                        <td className="px-4 py-3 text-center">
-                                            {r.adjustments > 0 && (
-                                                <span className="flex items-center justify-center gap-1 text-orange-600">
-                                                    <AlertTriangle size={14} /> {r.adjustments}
-                                                </span>
-                                            )}
-                                            {r.adjustments === 0 && (
-                                                <span className="text-green-600">
-                                                    <CheckCircle size={18} className="inline" />
-                                                </span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    ) : (
-                        <p className="text-gray-500 text-center py-8">No reconciliations yet.</p>
+                                        }`}>
+                                            {reconDetail.status}
+                                        </span>
+                                    </div>
+
+                                    <div className="text-sm text-gray-500 mb-4">
+                                        Created: {new Date(reconDetail.createdAt).toLocaleDateString('en-IN', {
+                                            day: 'numeric',
+                                            month: 'short',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                        })}
+                                        {reconDetail.notes && <span className="ml-4">Notes: {reconDetail.notes}</span>}
+                                    </div>
+
+                                    {/* Summary Stats */}
+                                    <div className="grid grid-cols-4 gap-4 mb-4">
+                                        <div className="bg-gray-50 rounded-lg py-3 text-center">
+                                            <p className="text-xl font-bold text-gray-900">{reconDetail.items.length}</p>
+                                            <p className="text-xs text-gray-500">Total Items</p>
+                                        </div>
+                                        <div className="bg-gray-50 rounded-lg py-3 text-center">
+                                            <p className="text-xl font-bold text-primary-600">
+                                                {reconDetail.items.filter(i => i.physicalQty !== null).length}
+                                            </p>
+                                            <p className="text-xs text-gray-500">Counted</p>
+                                        </div>
+                                        <div className="bg-gray-50 rounded-lg py-3 text-center">
+                                            <p className="text-xl font-bold text-orange-600">
+                                                {reconDetail.items.filter(i => i.variance !== null && i.variance !== 0).length}
+                                            </p>
+                                            <p className="text-xs text-gray-500">With Variance</p>
+                                        </div>
+                                        <div className="bg-gray-50 rounded-lg py-3 text-center">
+                                            <p className={`text-xl font-bold ${
+                                                reconDetail.items.reduce((sum, i) => sum + (i.variance || 0), 0) >= 0
+                                                    ? 'text-green-600'
+                                                    : 'text-red-600'
+                                            }`}>
+                                                {reconDetail.items.reduce((sum, i) => sum + (i.variance || 0), 0) >= 0 ? '+' : ''}
+                                                {reconDetail.items.reduce((sum, i) => sum + (i.variance || 0), 0).toFixed(2)}
+                                            </p>
+                                            <p className="text-xs text-gray-500">Net Change</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Items with Variance Only */}
+                                    <h3 className="font-medium text-gray-700 mb-2">Adjustments Made</h3>
+                                    {reconDetail.items.filter(i => i.variance !== null && i.variance !== 0).length === 0 ? (
+                                        <p className="text-gray-500 text-center py-4 bg-gray-50 rounded-lg">
+                                            No adjustments were made in this reconciliation.
+                                        </p>
+                                    ) : (
+                                        <table className="w-full">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Material / Fabric / Colour</th>
+                                                    <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">System</th>
+                                                    <th className="px-4 py-2 text-right text-sm font-semibold text-gray-700">Physical</th>
+                                                    <th className="px-4 py-2 text-center text-sm font-semibold text-gray-700">Variance</th>
+                                                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Reason</th>
+                                                    <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">Notes</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {reconDetail.items
+                                                    .filter(i => i.variance !== null && i.variance !== 0)
+                                                    .sort((a, b) => Math.abs(b.variance || 0) - Math.abs(a.variance || 0))
+                                                    .map((item) => (
+                                                        <tr key={item.id} className={
+                                                            item.variance && item.variance > 0
+                                                                ? 'bg-blue-50'
+                                                                : 'bg-orange-50'
+                                                        }>
+                                                            <td className="px-4 py-2">
+                                                                <div className="text-xs text-gray-500">{item.materialName} → {item.fabricName}</div>
+                                                                <div className="font-medium text-gray-900">{item.colourName}</div>
+                                                            </td>
+                                                            <td className="px-4 py-2 text-right font-mono text-sm">
+                                                                {item.systemQty.toFixed(2)} {item.unit}
+                                                            </td>
+                                                            <td className="px-4 py-2 text-right font-mono text-sm">
+                                                                {item.physicalQty?.toFixed(2)} {item.unit}
+                                                            </td>
+                                                            <td className="px-4 py-2 text-center">
+                                                                <span className={`inline-flex items-center gap-1 font-mono font-medium ${
+                                                                    item.variance && item.variance > 0
+                                                                        ? 'text-blue-600'
+                                                                        : 'text-orange-600'
+                                                                }`}>
+                                                                    {item.variance && item.variance > 0 ? (
+                                                                        <TrendingUp size={14} />
+                                                                    ) : (
+                                                                        <TrendingDown size={14} />
+                                                                    )}
+                                                                    {item.variance && item.variance > 0 ? '+' : ''}
+                                                                    {item.variance?.toFixed(2)}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-2 text-sm capitalize">
+                                                                {item.adjustmentReason?.replace(/_/g, ' ') || '-'}
+                                                            </td>
+                                                            <td className="px-4 py-2 text-sm text-gray-600">
+                                                                {item.notes || '-'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            ) : (
+                                <p className="text-gray-500 text-center py-8">Failed to load details.</p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* History List */}
+                    {!viewingReconId && (
+                        <>
+                            <h2 className="text-lg font-semibold mb-4">Reconciliation History</h2>
+                            {historyLoading ? (
+                                <div className="flex justify-center py-8">
+                                    <RefreshCw className="animate-spin text-gray-400" />
+                                </div>
+                            ) : history && history.length > 0 ? (
+                                <table className="w-full">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Date</th>
+                                            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">By</th>
+                                            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Status</th>
+                                            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Colours</th>
+                                            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Adjustments</th>
+                                            <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">Net Change</th>
+                                            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {history.map((r) => (
+                                            <tr key={r.id} className="hover:bg-gray-50">
+                                                <td className="px-4 py-3">
+                                                    {r.date ? new Date(r.date).toLocaleDateString('en-IN', {
+                                                        day: 'numeric',
+                                                        month: 'short',
+                                                        year: 'numeric',
+                                                    }) : 'No date'}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {r.createdByName ? (
+                                                        <span className="flex items-center gap-1 text-sm text-gray-600">
+                                                            <User size={14} /> {r.createdByName}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-sm">Unknown</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${r.status === 'submitted'
+                                                        ? 'bg-green-100 text-green-700'
+                                                        : 'bg-yellow-100 text-yellow-700'
+                                                        }`}>
+                                                        {r.status}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center">{r.itemsCount}</td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {r.adjustments > 0 && (
+                                                        <span className="flex items-center justify-center gap-1 text-orange-600">
+                                                            <AlertTriangle size={14} /> {r.adjustments}
+                                                        </span>
+                                                    )}
+                                                    {r.adjustments === 0 && (
+                                                        <span className="text-green-600">
+                                                            <CheckCircle size={18} className="inline" />
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    {r.netChange !== 0 ? (
+                                                        <span className={`font-mono text-sm font-medium ${
+                                                            r.netChange > 0 ? 'text-blue-600' : 'text-orange-600'
+                                                        }`}>
+                                                            {r.netChange > 0 ? '+' : ''}{r.netChange.toFixed(2)}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-sm">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <button
+                                                        className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                                                        onClick={() => setViewingReconId(r.id)}
+                                                        title="View details"
+                                                    >
+                                                        <Eye size={18} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <p className="text-gray-500 text-center py-8">No reconciliations yet.</p>
+                            )}
+                        </>
                     )}
                 </div>
             )}

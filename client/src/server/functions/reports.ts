@@ -57,14 +57,15 @@ const getTopCustomersInputSchema = z.object({
 });
 
 // Dashboard-specific input schemas (matching API response format)
+// days: positive = lookback days, 0 = today only, -1 = yesterday only
 const getTopProductsForDashboardInputSchema = z.object({
-    days: z.number().int().positive().optional().default(30),
+    days: z.number().int().min(-1).optional().default(0),
     level: z.enum(['product', 'variation']).optional().default('product'),
     limit: z.number().int().positive().optional().default(15),
 });
 
 const getTopCustomersForDashboardInputSchema = z.object({
-    period: z.string().optional().default('3months'),
+    period: z.string().optional().default('today'),
     limit: z.number().int().positive().optional().default(10),
 });
 
@@ -406,14 +407,28 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
         const { days, level, limit } = data;
 
         // Calculate date filter using IST boundaries
-        const startDate = getISTMidnightAsUTC(-days);
+        // days > 0: lookback period, 0: today only, -1: yesterday only
+        let dateFilter: { gte: Date; lte?: Date };
+        if (days === -1) {
+            // Yesterday only
+            dateFilter = {
+                gte: getISTMidnightAsUTC(-1),
+                lte: getISTMidnightAsUTC(0),
+            };
+        } else if (days === 0) {
+            // Today only
+            dateFilter = { gte: getISTMidnightAsUTC(0) };
+        } else {
+            // Lookback period
+            dateFilter = { gte: getISTMidnightAsUTC(-days) };
+        }
 
         // Get order lines with shipped status within the time period
         const orderLines = await prisma.orderLine.findMany({
             where: {
                 lineStatus: 'shipped',
                 order: {
-                    orderDate: { gte: startDate },
+                    orderDate: dateFilter,
                 },
             },
             include: {
@@ -569,32 +584,41 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
         const { period, limit } = data;
 
         // Parse period into date filter using IST boundaries
-        let startDate: Date | null = null;
+        let dateFilter: { gte: Date; lte?: Date };
 
         switch (period) {
+            case 'today':
+                dateFilter = { gte: getISTMidnightAsUTC(0) };
+                break;
+            case 'yesterday':
+                dateFilter = {
+                    gte: getISTMidnightAsUTC(-1),
+                    lte: getISTMidnightAsUTC(0),
+                };
+                break;
             case 'thisMonth':
-                startDate = getISTMonthStartAsUTC(0);
+                dateFilter = { gte: getISTMonthStartAsUTC(0) };
                 break;
             case 'lastMonth':
-                startDate = getISTMonthStartAsUTC(-1);
+                dateFilter = { gte: getISTMonthStartAsUTC(-1) };
                 break;
             case '3months':
-                startDate = getISTMidnightAsUTC(-90);
+                dateFilter = { gte: getISTMidnightAsUTC(-90) };
                 break;
             case '6months':
-                startDate = getISTMidnightAsUTC(-180);
+                dateFilter = { gte: getISTMidnightAsUTC(-180) };
                 break;
             case '1year':
-                startDate = getISTMidnightAsUTC(-365);
+                dateFilter = { gte: getISTMidnightAsUTC(-365) };
                 break;
             default:
-                startDate = getISTMidnightAsUTC(-90);
+                dateFilter = { gte: getISTMidnightAsUTC(0) };
         }
 
         // Get orders with customer info and order lines
         const orders = await prisma.order.findMany({
             where: {
-                orderDate: { gte: startDate },
+                orderDate: dateFilter,
                 status: { notIn: ['cancelled'] },
             },
             include: {

@@ -12,6 +12,8 @@ import { getTopMaterials } from '../../server/functions/fabricColours';
 import { Layers, Palette } from 'lucide-react';
 
 const TIME_PERIODS = [
+    { value: 0, label: 'Today' },
+    { value: -1, label: 'Yesterday' },
     { value: 7, label: '7d' },
     { value: 14, label: '14d' },
     { value: 30, label: '30d' },
@@ -25,7 +27,7 @@ const LEVELS = [
 ] as const;
 
 export function TopFabricsCard() {
-    const [days, setDays] = useState(30);
+    const [days, setDays] = useState(0);
     const [level, setLevel] = useState<'material' | 'colour'>('material');
 
     const { data, isLoading } = useQuery({
