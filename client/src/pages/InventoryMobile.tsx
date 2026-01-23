@@ -5,7 +5,7 @@
  * Shows SKU-level stock data with product info, Shopify stock, and fabric stock.
  */
 
-import { useMemo, useState, useCallback, memo } from 'react';
+import { useMemo, useState, useCallback, memo, useEffect, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -202,24 +202,45 @@ interface ZeroOutButtonProps {
     shopifyQty: number | null;
     shopifyProductStatus: 'active' | 'archived' | 'draft' | null;
     locationId: string | null | undefined;
-    onSuccess: () => void;
+    onRefresh: () => void;
 }
 
-/** Delay in ms to wait for Shopify webhook before refreshing data */
-const SHOPIFY_SYNC_DELAY = 3000;
+/** Polling interval in ms */
+const POLL_INTERVAL = 1000;
+/** Max polling attempts (10 seconds total) */
+const MAX_POLL_ATTEMPTS = 10;
 
 /**
  * ZeroOutButton - Button to zero out Shopify stock for archived SKUs
  * Only visible when: status is 'archived' AND shopifyQty > 0
+ * Polls for updates until shopifyQty becomes 0 or timeout
  */
 const ZeroOutButton = memo(function ZeroOutButton({
     skuCode,
     shopifyQty,
     shopifyProductStatus,
     locationId,
-    onSuccess,
+    onRefresh,
 }: ZeroOutButtonProps) {
     const [isPending, setIsPending] = useState(false);
+    const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const pollCountRef = useRef(0);
+
+    // Cleanup polling when shopifyQty becomes 0 or component unmounts
+    useEffect(() => {
+        if (shopifyQty === 0 || shopifyQty === null) {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+                setIsPending(false);
+            }
+        }
+        return () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+            }
+        };
+    }, [shopifyQty]);
 
     // Only show for archived SKUs with stock > 0 on Shopify
     const shouldShow = shopifyProductStatus === 'archived' && shopifyQty !== null && shopifyQty > 0;
@@ -230,15 +251,26 @@ const ZeroOutButton = memo(function ZeroOutButton({
         if (!locationId || isPending) return;
 
         setIsPending(true);
+        pollCountRef.current = 0;
+
         try {
             await zeroOutShopifyStock(skuCode, locationId);
-            showSuccess('Stock zeroed on Shopify', { description: `Refreshing in ${SHOPIFY_SYNC_DELAY / 1000}s...` });
+            showSuccess('Syncing with Shopify...', { description: 'Will refresh automatically' });
 
-            // Wait for Shopify webhook to update our database, then refresh
-            setTimeout(() => {
-                onSuccess();
-                setIsPending(false);
-            }, SHOPIFY_SYNC_DELAY);
+            // Start polling - refresh every second until data updates
+            pollIntervalRef.current = setInterval(() => {
+                pollCountRef.current++;
+                onRefresh();
+
+                // Stop after max attempts
+                if (pollCountRef.current >= MAX_POLL_ATTEMPTS) {
+                    if (pollIntervalRef.current) {
+                        clearInterval(pollIntervalRef.current);
+                        pollIntervalRef.current = null;
+                    }
+                    setIsPending(false);
+                }
+            }, POLL_INTERVAL);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             showError('Failed to zero stock', { description: message });
@@ -618,7 +650,7 @@ export default function InventoryMobile() {
                             shopifyQty={row.original.shopifyQty}
                             shopifyProductStatus={row.original.shopifyProductStatus}
                             locationId={locationId}
-                            onSuccess={() => {
+                            onRefresh={() => {
                                 queryClient.invalidateQueries({ queryKey: ['inventory-mobile'] });
                             }}
                         />
