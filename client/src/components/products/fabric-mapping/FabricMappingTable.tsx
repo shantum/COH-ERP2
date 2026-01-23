@@ -374,9 +374,10 @@ export function FabricMappingTable({
                             const isExpanded = expandedProducts.has(productId);
 
                             // Create a pseudo-selection for product-level dropdowns
+                            // Use manual selection if set, otherwise fall back to aggregated data from variations
                             const productCascadeSelection: CascadingSelection = {
-                                materialId: productSelection.materialId,
-                                fabricId: productSelection.fabricId,
+                                materialId: productSelection.materialId || row.currentMaterialId || null,
+                                fabricId: productSelection.fabricId || row.currentFabricId || null,
                                 colourId: null,
                             };
 
@@ -399,8 +400,8 @@ export function FabricMappingTable({
                                         <MaterialSelectCell
                                             selection={productCascadeSelection}
                                             materials={materialsLookup.materials}
-                                            currentMaterialId={null}
-                                            currentMaterialName={null}
+                                            currentMaterialId={row.currentMaterialId || null}
+                                            currentMaterialName={row.currentMaterialName || null}
                                             onChange={(materialId) =>
                                                 handleProductMaterialChange(productId, materialId)
                                             }
@@ -414,8 +415,8 @@ export function FabricMappingTable({
                                         <FabricSelectCell
                                             selection={productCascadeSelection}
                                             fabrics={materialsLookup.fabrics}
-                                            currentFabricId={null}
-                                            currentFabricName={null}
+                                            currentFabricId={row.currentFabricId || null}
+                                            currentFabricName={row.currentFabricName || null}
                                             onChange={(fabricId) =>
                                                 handleProductFabricChange(productId, fabricId)
                                             }

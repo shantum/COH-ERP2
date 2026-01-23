@@ -185,7 +185,32 @@ function buildFabricMappingRows(
         if (productVariationRows.length > 0) {
             totalProducts++;
 
-            // Add product header row
+            // Calculate aggregated material/fabric from mapped variations
+            const mappedRows = productVariationRows.filter(v => v.currentMaterialId);
+            let aggregatedMaterialId: string | null = null;
+            let aggregatedMaterialName: string | null = null;
+            let aggregatedFabricId: string | null = null;
+            let aggregatedFabricName: string | null = null;
+
+            if (mappedRows.length > 0) {
+                // Check if all mapped variations have the same material
+                const firstMaterialId = mappedRows[0].currentMaterialId;
+                const allSameMaterial = mappedRows.every(v => v.currentMaterialId === firstMaterialId);
+                if (allSameMaterial && firstMaterialId) {
+                    aggregatedMaterialId = firstMaterialId;
+                    aggregatedMaterialName = mappedRows[0].currentMaterialName || null;
+                }
+
+                // Check if all mapped variations have the same fabric
+                const firstFabricId = mappedRows[0].currentFabricId;
+                const allSameFabric = mappedRows.every(v => v.currentFabricId === firstFabricId);
+                if (allSameFabric && firstFabricId) {
+                    aggregatedFabricId = firstFabricId;
+                    aggregatedFabricName = mappedRows[0].currentFabricName || null;
+                }
+            }
+
+            // Add product header row with aggregated data
             rows.push({
                 id: `product-${product.id}`,
                 rowType: 'product',
@@ -197,6 +222,10 @@ function buildFabricMappingRows(
                 gender: product.gender,
                 variationCount: productVariationRows.length,
                 mappedCount: productMappedCount,
+                currentMaterialId: aggregatedMaterialId,
+                currentMaterialName: aggregatedMaterialName,
+                currentFabricId: aggregatedFabricId,
+                currentFabricName: aggregatedFabricName,
             });
 
             // Add variation rows
