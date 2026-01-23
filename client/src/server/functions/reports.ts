@@ -13,6 +13,35 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth';
 
 // ============================================
+// IST DATE UTILITIES FOR REPORTS
+// ============================================
+
+/**
+ * Get IST midnight as UTC Date for database queries.
+ * IST is UTC+5:30, so IST midnight = UTC previous day 18:30.
+ * @param daysOffset - Days from today (0 = today, -1 = yesterday, etc.)
+ */
+function getISTMidnightAsUTC(daysOffset = 0): Date {
+    const nowUTC = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5:30 in milliseconds
+    const nowIST = new Date(nowUTC.getTime() + istOffset);
+    const istMidnight = new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() + daysOffset);
+    return new Date(istMidnight.getTime() - istOffset);
+}
+
+/**
+ * Get the first day of a month in IST as UTC Date.
+ * @param monthOffset - Months from current (0 = this month, -1 = last month)
+ */
+function getISTMonthStartAsUTC(monthOffset = 0): Date {
+    const nowUTC = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const nowIST = new Date(nowUTC.getTime() + istOffset);
+    const istMonthStart = new Date(nowIST.getFullYear(), nowIST.getMonth() + monthOffset, 1);
+    return new Date(istMonthStart.getTime() - istOffset);
+}
+
+// ============================================
 // INPUT SCHEMAS
 // ============================================
 
@@ -144,11 +173,11 @@ export const getTopProducts = createServerFn({ method: 'GET' })
 
         const { days, level, limit } = data;
 
-        // Calculate date filter
+        // Calculate date filter using IST boundaries
         const dateFilter = days
             ? {
                   orderDate: {
-                      gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+                      gte: getISTMidnightAsUTC(-days),
                   },
               }
             : {};
@@ -261,12 +290,12 @@ export const getTopCustomers = createServerFn({ method: 'GET' })
 
         const { months, limit } = data;
 
-        // Calculate date filter
+        // Calculate date filter using IST boundaries
         const dateFilter =
             months !== 'all'
                 ? {
                       orderDate: {
-                          gte: new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000),
+                          gte: getISTMidnightAsUTC(-months * 30),
                       },
                   }
                 : {};
@@ -376,8 +405,8 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
 
         const { days, level, limit } = data;
 
-        // Calculate date filter
-        const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        // Calculate date filter using IST boundaries
+        const startDate = getISTMidnightAsUTC(-days);
 
         // Get order lines with shipped status within the time period
         const orderLines = await prisma.orderLine.findMany({
@@ -535,30 +564,27 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
 
         const { period, limit } = data;
 
-        // Parse period into date filter
+        // Parse period into date filter using IST boundaries
         let startDate: Date | null = null;
-        const now = new Date();
 
         switch (period) {
             case 'thisMonth':
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                startDate = getISTMonthStartAsUTC(0);
                 break;
-            case 'lastMonth': {
-                const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                startDate = lastMonth;
+            case 'lastMonth':
+                startDate = getISTMonthStartAsUTC(-1);
                 break;
-            }
             case '3months':
-                startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+                startDate = getISTMidnightAsUTC(-90);
                 break;
             case '6months':
-                startDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+                startDate = getISTMidnightAsUTC(-180);
                 break;
             case '1year':
-                startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+                startDate = getISTMidnightAsUTC(-365);
                 break;
             default:
-                startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+                startDate = getISTMidnightAsUTC(-90);
         }
 
         // Get orders with customer info and order lines
@@ -692,11 +718,11 @@ export const getCustomerOverviewStats = createServerFn({ method: 'GET' })
 
             const { months } = data;
 
-            // Calculate date filter
+            // Calculate date filter using IST boundaries
             const dateFilter =
                 months !== 'all'
                     ? {
-                          gte: new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000),
+                          gte: getISTMidnightAsUTC(-months * 30),
                       }
                     : undefined;
 
@@ -869,8 +895,8 @@ export const getAtRiskCustomers = createServerFn({ method: 'GET' })
     .handler(async (): Promise<TopCustomer[]> => {
         const prisma = await getPrisma();
 
-        // Get customers with orders but no recent orders (90+ days)
-        const cutoffDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+        // Get customers with orders but no recent orders (90+ days) using IST boundaries
+        const cutoffDate = getISTMidnightAsUTC(-90);
 
         const customers = await prisma.customer.findMany({
             where: {
@@ -1045,9 +1071,10 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
 
         const { dimension, startDate, endDate, orderStatus } = data;
 
-        // Parse dates (default to last 30 days)
-        const end = endDate ? new Date(endDate) : new Date();
-        const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        // Parse dates (default to last 30 days in IST)
+        // User-provided dates are YYYY-MM-DD strings which parse as UTC midnight
+        const end = endDate ? new Date(endDate + 'T23:59:59.999Z') : new Date();
+        const start = startDate ? new Date(startDate) : getISTMidnightAsUTC(-30);
 
         // Build line status filter based on orderStatus
         const lineStatusFilter = orderStatus === 'delivered'

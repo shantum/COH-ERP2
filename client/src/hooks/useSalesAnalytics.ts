@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getSalesAnalytics } from '../server/functions/reports';
 import type { SalesAnalyticsResponse } from '../server/functions/reports';
 import type { SalesDimension, OrderStatusFilter } from '../types';
+import { getLocalDateString, getLocalDateStringOffset } from '../components/orders/OrdersTable/utils/dateFormatters';
 
 // Re-export types for consumers
 export type { SalesDimension, OrderStatusFilter };
@@ -47,20 +48,16 @@ export function useSalesAnalytics({
 }
 
 // Helper to calculate date ranges for presets
+// Uses local dates to match user's timezone expectations
 export function getDateRange(preset: '7d' | '30d' | '90d' | 'custom', customStart?: string, customEnd?: string) {
-    const now = new Date();
-    const end = now.toISOString().split('T')[0];
-
     if (preset === 'custom' && customStart && customEnd) {
         return { startDate: customStart, endDate: customEnd };
     }
 
     const days = preset === '7d' ? 7 : preset === '30d' ? 30 : 90;
-    const start = new Date(now);
-    start.setDate(start.getDate() - days);
 
     return {
-        startDate: start.toISOString().split('T')[0],
-        endDate: end,
+        startDate: getLocalDateStringOffset(-days),
+        endDate: getLocalDateString(),
     };
 }

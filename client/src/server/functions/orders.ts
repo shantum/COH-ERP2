@@ -1438,6 +1438,60 @@ export interface OrdersAnalyticsResponse {
 // ORDERS ANALYTICS - Server Function
 // ============================================
 
+// ============================================
+// IST DATE UTILITIES FOR ANALYTICS
+// ============================================
+
+/**
+ * Get IST midnight as UTC Date for database queries.
+ * IST is UTC+5:30, so IST midnight = UTC previous day 18:30.
+ * @param daysOffset - Days from today (0 = today, -1 = yesterday, etc.)
+ */
+function getISTMidnightAsUTC(daysOffset = 0): Date {
+    // Get current time in IST by adding 5:30 to UTC
+    const nowUTC = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // 5:30 in milliseconds
+    const nowIST = new Date(nowUTC.getTime() + istOffset);
+
+    // Get IST midnight for the target day
+    const istMidnight = new Date(nowIST.getFullYear(), nowIST.getMonth(), nowIST.getDate() + daysOffset);
+
+    // Convert IST midnight back to UTC (subtract 5:30)
+    return new Date(istMidnight.getTime() - istOffset);
+}
+
+/**
+ * Get the first day of a month in IST as UTC Date.
+ * @param monthOffset - Months from current (0 = this month, -1 = last month)
+ */
+function getISTMonthStartAsUTC(monthOffset = 0): Date {
+    const nowUTC = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const nowIST = new Date(nowUTC.getTime() + istOffset);
+
+    // Get first day of target month in IST
+    const istMonthStart = new Date(nowIST.getFullYear(), nowIST.getMonth() + monthOffset, 1);
+
+    // Convert to UTC
+    return new Date(istMonthStart.getTime() - istOffset);
+}
+
+/**
+ * Get the last moment of a month in IST as UTC Date.
+ * @param monthOffset - Months from current (0 = this month, -1 = last month)
+ */
+function getISTMonthEndAsUTC(monthOffset = 0): Date {
+    const nowUTC = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const nowIST = new Date(nowUTC.getTime() + istOffset);
+
+    // Get last moment of target month in IST (day 0 of next month = last day of target month)
+    const istMonthEnd = new Date(nowIST.getFullYear(), nowIST.getMonth() + monthOffset + 1, 0, 23, 59, 59, 999);
+
+    // Convert to UTC
+    return new Date(istMonthEnd.getTime() - istOffset);
+}
+
 /**
  * Server Function: Get orders analytics
  *
@@ -1461,19 +1515,16 @@ export const getOrdersAnalytics = createServerFn({ method: 'GET' })
                 globalForPrisma.prisma = prisma;
             }
 
-            // Calculate date ranges
-            const now = new Date();
-            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const yesterdayStart = new Date(todayStart);
-            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-            const yesterdayEnd = new Date(todayStart);
-            const last7DaysStart = new Date(todayStart);
-            last7DaysStart.setDate(last7DaysStart.getDate() - 7);
-            const last30DaysStart = new Date(todayStart);
-            last30DaysStart.setDate(last30DaysStart.getDate() - 30);
-            const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-            const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+            // Calculate date ranges in IST timezone for user-facing analytics
+            // All dates are converted to UTC for database queries
+            const todayStart = getISTMidnightAsUTC(0);
+            const yesterdayStart = getISTMidnightAsUTC(-1);
+            const yesterdayEnd = todayStart; // Yesterday ends when today starts
+            const last7DaysStart = getISTMidnightAsUTC(-7);
+            const last30DaysStart = getISTMidnightAsUTC(-30);
+            const thisMonthStart = getISTMonthStartAsUTC(0);
+            const lastMonthStart = getISTMonthStartAsUTC(-1);
+            const lastMonthEnd = getISTMonthEndAsUTC(-1);
 
             // Open orders base filter
             const openFilter = {
