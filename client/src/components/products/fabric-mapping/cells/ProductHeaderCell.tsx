@@ -17,18 +17,18 @@ interface ProductHeaderCellProps {
 
 export const ProductHeaderCell = memo(function ProductHeaderCell({ row, isExpanded, onToggle }: ProductHeaderCellProps) {
     return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
             <button
                 onClick={(e) => {
                     e.stopPropagation();
                     onToggle();
                 }}
-                className="p-0.5 rounded hover:bg-gray-200"
+                className="p-0.5 rounded hover:bg-gray-200 transition-colors"
             >
                 {isExpanded ? (
-                    <ChevronDown size={16} className="text-gray-500" />
+                    <ChevronDown size={16} className="text-gray-400" />
                 ) : (
-                    <ChevronRight size={16} className="text-gray-500" />
+                    <ChevronRight size={16} className="text-gray-400" />
                 )}
             </button>
 
@@ -36,20 +36,24 @@ export const ProductHeaderCell = memo(function ProductHeaderCell({ row, isExpand
                 <img
                     src={row.productImageUrl}
                     alt=""
-                    className="w-8 h-8 rounded object-cover flex-shrink-0"
+                    className="w-8 h-8 rounded object-cover flex-shrink-0 border border-gray-100"
                 />
             ) : (
-                <div className="w-8 h-8 rounded bg-gray-200 flex-shrink-0" />
+                <div className="w-8 h-8 rounded bg-gray-100 flex-shrink-0 border border-gray-200" />
             )}
 
             <div className="min-w-0 flex-1">
-                <div className="font-medium text-gray-900 truncate">
+                <div className="font-medium text-gray-800 text-sm truncate">
                     {row.productName}
                 </div>
-                <div className="text-[10px] text-gray-500 flex items-center gap-2">
-                    {row.styleCode && <span>{row.styleCode}</span>}
-                    {row.category && <span>{row.category}</span>}
-                    <span>({row.variationCount} variations)</span>
+                <div className="text-[10px] text-gray-400 flex items-center gap-1.5">
+                    {row.styleCode && (
+                        <span className="font-mono">{row.styleCode}</span>
+                    )}
+                    {row.styleCode && row.gender && <span>·</span>}
+                    {row.gender && <span>{row.gender}</span>}
+                    <span className="text-gray-300">·</span>
+                    <span>{row.variationCount} variants</span>
                 </div>
             </div>
         </div>

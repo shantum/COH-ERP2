@@ -519,3 +519,92 @@ export const triggerSync = createServerFn({ method: 'POST' })
             };
         }
     });
+
+// ============================================
+// PRODUCT STATUS TYPES
+// ============================================
+
+export type ShopifyProductStatus = 'active' | 'archived' | 'draft' | 'not_linked' | 'not_cached' | 'unknown';
+
+export interface ProductShopifyStatus {
+    productId: string;
+    shopifyProductId: string | null;
+    status: ShopifyProductStatus;
+}
+
+const getProductShopifyStatusesSchema = z.object({
+    productIds: z.array(z.string()),
+});
+
+/**
+ * Get Shopify product statuses for given product IDs
+ * Fetches from ShopifyProductCache and returns status for each product
+ */
+export const getProductShopifyStatuses = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => getProductShopifyStatusesSchema.parse(input))
+    .handler(async ({ data }): Promise<MutationResult<ProductShopifyStatus[]>> => {
+        try {
+            const prisma = await getPrisma();
+            const { productIds } = data;
+
+            if (productIds.length === 0) {
+                return { success: true, data: [] };
+            }
+
+            // Fetch products with their Shopify IDs
+            const products = await prisma.product.findMany({
+                where: { id: { in: productIds } },
+                select: { id: true, shopifyProductId: true },
+            });
+
+            // Get Shopify product IDs that exist
+            const shopifyProductIds = products
+                .map(p => p.shopifyProductId)
+                .filter((id): id is string => Boolean(id));
+
+            // Fetch status from ShopifyProductCache
+            const shopifyStatusMap = new Map<string, ShopifyProductStatus>();
+            if (shopifyProductIds.length > 0) {
+                const shopifyCache = await prisma.shopifyProductCache.findMany({
+                    where: { id: { in: shopifyProductIds } },
+                    select: { id: true, rawData: true },
+                });
+                shopifyCache.forEach(cache => {
+                    try {
+                        const cacheData = JSON.parse(cache.rawData as string) as { status?: string };
+                        const status = cacheData.status || 'unknown';
+                        shopifyStatusMap.set(cache.id, status as ShopifyProductStatus);
+                    } catch {
+                        shopifyStatusMap.set(cache.id, 'unknown');
+                    }
+                });
+            }
+
+            // Map products to their statuses
+            const result: ProductShopifyStatus[] = products.map(product => {
+                if (!product.shopifyProductId) {
+                    return {
+                        productId: product.id,
+                        shopifyProductId: null,
+                        status: 'not_linked' as ShopifyProductStatus,
+                    };
+                }
+
+                const cachedStatus = shopifyStatusMap.get(product.shopifyProductId);
+                return {
+                    productId: product.id,
+                    shopifyProductId: product.shopifyProductId,
+                    status: cachedStatus || 'not_cached',
+                };
+            });
+
+            return { success: true, data: result };
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return {
+                success: false,
+                error: { code: 'EXTERNAL_ERROR', message },
+            };
+        }
+    });

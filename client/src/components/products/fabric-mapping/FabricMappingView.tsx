@@ -158,14 +158,8 @@ export function FabricMappingView() {
     return (
         <div className="h-full flex flex-col bg-white">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50 flex-shrink-0">
-                <div>
-                    <h3 className="text-sm font-medium text-gray-900">Fabric Mapping</h3>
-                    <p className="text-xs text-gray-500">
-                        Assign main fabrics to product variations
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white flex-shrink-0">
+                <div className="flex items-center gap-4">
                     {/* Search */}
                     <div className="relative">
                         <Search
@@ -179,12 +173,12 @@ export function FabricMappingView() {
                             placeholder="Search products..."
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            className="pl-8 pr-8 py-1.5 text-sm border rounded-md w-48 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="pl-8 pr-8 py-1.5 text-sm border border-gray-200 rounded-lg w-52 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
                         />
                         {searchInput && (
                             <button
                                 onClick={() => setSearchInput('')}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                             >
                                 <X size={14} />
                             </button>
@@ -200,7 +194,7 @@ export function FabricMappingView() {
                         <select
                             value={filter}
                             onChange={(e) => setFilter(e.target.value as FabricMappingFilter)}
-                            className="pl-8 pr-8 py-1.5 text-sm border rounded-md appearance-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="pl-8 pr-8 py-1.5 text-sm border border-gray-200 rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 bg-white transition-all cursor-pointer"
                         >
                             {filterOptions.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
@@ -209,15 +203,27 @@ export function FabricMappingView() {
                             ))}
                         </select>
                     </div>
+                </div>
 
-                    <div className="w-px h-6 bg-gray-300" />
+                <div className="flex items-center gap-3">
+                    {/* Stats */}
+                    <div className="text-xs text-gray-500 flex items-center gap-2">
+                        <span className="px-2 py-1 bg-green-50 text-green-700 rounded">
+                            {summary.mappedVariations} mapped
+                        </span>
+                        <span className="px-2 py-1 bg-gray-50 text-gray-600 rounded">
+                            {summary.unmappedVariations} unmapped
+                        </span>
+                    </div>
+
+                    <div className="w-px h-6 bg-gray-200" />
 
                     {/* Save Button */}
                     <Button
                         size="sm"
                         onClick={handleSave}
                         disabled={!hasChanges || isSaving}
-                        className="gap-1"
+                        className="gap-1.5"
                     >
                         {isSaving ? (
                             <Loader2 size={14} className="animate-spin" />
@@ -238,25 +244,16 @@ export function FabricMappingView() {
                 onAddColour={handleAddColour}
             />
 
-            {/* Footer */}
-            <div className="px-4 py-2 border-t bg-gray-50 text-xs text-gray-500 flex items-center justify-between flex-shrink-0">
-                <span>
-                    {summary.mappedVariations} mapped · {summary.unmappedVariations} unmapped ·{' '}
-                    {summary.totalProducts} products
-                </span>
-                <span className="text-gray-400">
-                    Material/Fabric selections auto-saved · Select Colour to finalize
-                </span>
-            </div>
-
-            {/* Pending changes footer */}
+            {/* Footer - only show when there are pending changes */}
             {hasChanges && (
-                <div className="px-4 py-2 border-t bg-amber-50 text-xs text-amber-700 flex items-center justify-between flex-shrink-0">
-                    <span>{pendingChanges.size} unsaved changes</span>
-                    <div className="flex items-center gap-2">
+                <div className="px-4 py-2 border-t border-amber-200 bg-amber-50 text-xs flex items-center justify-between flex-shrink-0">
+                    <span className="text-amber-700 font-medium">
+                        {pendingChanges.size} unsaved {pendingChanges.size === 1 ? 'change' : 'changes'}
+                    </span>
+                    <div className="flex items-center gap-3">
                         <button
                             onClick={handleDiscard}
-                            className="text-amber-600 hover:text-amber-800 underline"
+                            className="text-amber-600 hover:text-amber-800 transition-colors"
                         >
                             Discard
                         </button>
@@ -264,6 +261,18 @@ export function FabricMappingView() {
                             Save Changes
                         </Button>
                     </div>
+                </div>
+            )}
+
+            {/* Help text footer - only show when no pending changes */}
+            {!hasChanges && (
+                <div className="px-4 py-1.5 border-t border-gray-100 bg-gray-50/50 text-[11px] text-gray-400 flex items-center justify-between flex-shrink-0">
+                    <span>
+                        Set Material/Fabric at product level · Select Colour per variation · Save to apply
+                    </span>
+                    <span>
+                        {summary.totalProducts} products
+                    </span>
                 </div>
             )}
 

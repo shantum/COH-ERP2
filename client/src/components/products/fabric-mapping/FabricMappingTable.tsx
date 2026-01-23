@@ -19,6 +19,7 @@ import {
     FabricSelectCell,
     ColourSelectCell,
     StatusCell,
+    ShopifyStatusCell,
 } from './cells';
 import type {
     FabricMappingRow,
@@ -330,14 +331,14 @@ export function FabricMappingTable({
 
     return (
         <div className="overflow-auto flex-1">
-            <table className="w-full text-sm border-collapse min-w-[800px]">
-                <thead className="sticky top-0 bg-gray-50 z-10">
-                    <tr>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b w-64">
+            <table className="w-full text-sm border-collapse min-w-[900px]">
+                <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                    <tr className="border-b border-gray-200">
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '280px' }}>
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={allExpanded ? handleCollapseAll : handleExpandAll}
-                                    className="p-1 rounded hover:bg-gray-200 text-gray-500"
+                                    className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
                                     title={allExpanded ? 'Collapse all' : 'Expand all'}
                                 >
                                     {allExpanded ? (
@@ -349,17 +350,20 @@ export function FabricMappingTable({
                                 <span>Product / Variation</span>
                             </div>
                         </th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b w-40">
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '160px' }}>
                             Material
                         </th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b w-40">
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '180px' }}>
                             Fabric
                         </th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b w-40">
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '180px' }}>
                             Colour
                         </th>
-                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 border-b w-16">
-                            Status
+                        <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '70px' }}>
+                            Shopify
+                        </th>
+                        <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider" style={{ width: '60px' }}>
+                            Mapped
                         </th>
                     </tr>
                 </thead>
@@ -382,9 +386,9 @@ export function FabricMappingTable({
                             };
 
                             return (
-                                <tr key={row.id} className="bg-gray-100 hover:bg-gray-200">
+                                <tr key={row.id} className="bg-gray-50/80 hover:bg-gray-100/80 transition-colors">
                                     <td
-                                        className="px-3 py-2 border-b cursor-pointer"
+                                        className="px-3 py-2 border-b border-gray-100 cursor-pointer"
                                         onClick={() => toggleProduct(productId)}
                                     >
                                         <ProductHeaderCell
@@ -394,7 +398,7 @@ export function FabricMappingTable({
                                         />
                                     </td>
                                     <td
-                                        className="px-3 py-2 border-b"
+                                        className="px-3 py-2 border-b border-gray-100"
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <MaterialSelectCell
@@ -409,7 +413,7 @@ export function FabricMappingTable({
                                         />
                                     </td>
                                     <td
-                                        className="px-3 py-2 border-b"
+                                        className="px-3 py-2 border-b border-gray-100"
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <FabricSelectCell
@@ -427,10 +431,13 @@ export function FabricMappingTable({
                                             }
                                         />
                                     </td>
-                                    <td className="px-3 py-2 border-b text-center text-gray-400 text-xs">
+                                    <td className="px-3 py-2 border-b border-gray-100 text-center text-gray-400 text-xs">
                                         -
                                     </td>
-                                    <td className="px-3 py-2 border-b text-center">
+                                    <td className="px-3 py-2 border-b border-gray-100 text-center">
+                                        <ShopifyStatusCell status={row.shopifyStatus} />
+                                    </td>
+                                    <td className="px-3 py-2 border-b border-gray-100 text-center">
                                         <StatusCell row={row} />
                                     </td>
                                 </tr>
@@ -443,12 +450,16 @@ export function FabricMappingTable({
                         return (
                             <tr
                                 key={row.id}
-                                className={`hover:bg-gray-50 ${isPending ? 'bg-amber-50' : 'bg-white'}`}
+                                className={`transition-colors ${
+                                    isPending
+                                        ? 'bg-amber-50/60 hover:bg-amber-50'
+                                        : 'bg-white hover:bg-gray-50/50'
+                                }`}
                             >
-                                <td className="px-3 py-2 border-b">
+                                <td className="px-3 py-1.5 border-b border-gray-100">
                                     <VariationCell row={row} />
                                 </td>
-                                <td className="px-3 py-2 border-b">
+                                <td className="px-3 py-1.5 border-b border-gray-100">
                                     <MaterialSelectCell
                                         selection={selection}
                                         materials={materialsLookup.materials}
@@ -460,7 +471,7 @@ export function FabricMappingTable({
                                         onAddNew={onAddMaterial}
                                     />
                                 </td>
-                                <td className="px-3 py-2 border-b">
+                                <td className="px-3 py-1.5 border-b border-gray-100">
                                     <FabricSelectCell
                                         selection={selection}
                                         fabrics={materialsLookup.fabrics}
@@ -480,7 +491,7 @@ export function FabricMappingTable({
                                         }
                                     />
                                 </td>
-                                <td className="px-3 py-2 border-b">
+                                <td className="px-3 py-1.5 border-b border-gray-100">
                                     <ColourSelectCell
                                         selection={selection}
                                         colours={materialsLookup.colours}
@@ -497,7 +508,10 @@ export function FabricMappingTable({
                                         }
                                     />
                                 </td>
-                                <td className="px-3 py-2 border-b text-center">
+                                <td className="px-3 py-1.5 border-b border-gray-100 text-center">
+                                    <ShopifyStatusCell status={row.shopifyStatus} />
+                                </td>
+                                <td className="px-3 py-1.5 border-b border-gray-100 text-center">
                                     <StatusCell row={row} isPending={isPending} />
                                 </td>
                             </tr>
