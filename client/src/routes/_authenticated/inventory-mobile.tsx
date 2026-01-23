@@ -17,6 +17,10 @@ export const shopifyStatusFilterValues = ['all', 'active', 'archived', 'draft'] 
 export const discrepancyFilterValues = ['all', 'has_discrepancy', 'no_discrepancy'] as const;
 export const fabricFilterValues = ['all', 'has_fabric', 'no_fabric', 'low_fabric'] as const;
 
+// Sort options for numeric columns
+export const sortByValues = ['stock', 'shopify', 'fabric'] as const;
+export const sortOrderValues = ['desc', 'asc'] as const;
+
 // Search params schema
 const inventoryMobileSearchSchema = z.object({
     search: z.string().optional(),
@@ -27,6 +31,9 @@ const inventoryMobileSearchSchema = z.object({
     shopifyStatus: z.enum(shopifyStatusFilterValues).optional().default('all'),
     discrepancy: z.enum(discrepancyFilterValues).optional().default('all'),
     fabricFilter: z.enum(fabricFilterValues).optional().default('all'),
+    // Sorting
+    sortBy: z.enum(sortByValues).optional().default('stock'),
+    sortOrder: z.enum(sortOrderValues).optional().default('desc'),
 });
 
 export type InventoryMobileSearch = z.infer<typeof inventoryMobileSearchSchema>;
@@ -41,6 +48,8 @@ export const Route = createFileRoute('/_authenticated/inventory-mobile')({
         shopifyStatus: search.shopifyStatus,
         discrepancy: search.discrepancy,
         fabricFilter: search.fabricFilter,
+        sortBy: search.sortBy,
+        sortOrder: search.sortOrder,
     }),
     loader: async ({ deps }): Promise<InventoryMobileLoaderData> => {
         try {
@@ -55,6 +64,8 @@ export const Route = createFileRoute('/_authenticated/inventory-mobile')({
                     shopifyStatus: deps.shopifyStatus,
                     discrepancy: deps.discrepancy,
                     fabricFilter: deps.fabricFilter,
+                    sortBy: deps.sortBy,
+                    sortOrder: deps.sortOrder,
                 },
             });
             return { inventory, error: null };

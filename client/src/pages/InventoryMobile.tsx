@@ -26,7 +26,7 @@ import {
 } from '../components/ui/table';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
-import { Package, Search, ChevronLeft, ChevronRight, AlertCircle, X } from 'lucide-react';
+import { Package, Search, ChevronLeft, ChevronRight, AlertCircle, X, ArrowUp, ArrowDown } from 'lucide-react';
 import { cn } from '../lib/utils';
 // Filter types are defined locally since the route just needs the schema
 
@@ -177,6 +177,48 @@ const FilterChip = memo(function FilterChip({ label, isActive, onClick, onClear 
     );
 });
 
+// ============================================
+// SORTABLE HEADER COMPONENT
+// ============================================
+
+interface SortableHeaderProps {
+    label: string;
+    sortKey: 'stock' | 'shopify' | 'fabric';
+    currentSortBy: string;
+    currentSortOrder: string;
+    onSort: (key: 'stock' | 'shopify' | 'fabric') => void;
+}
+
+const SortableHeader = memo(function SortableHeader({
+    label,
+    sortKey,
+    currentSortBy,
+    currentSortOrder,
+    onSort,
+}: SortableHeaderProps) {
+    const isActive = currentSortBy === sortKey;
+
+    return (
+        <button
+            type="button"
+            onClick={() => onSort(sortKey)}
+            className={cn(
+                'flex items-center justify-end gap-0.5 w-full text-right hover:text-gray-900 transition-colors',
+                isActive ? 'text-blue-600 font-medium' : 'text-gray-500'
+            )}
+        >
+            <span>{label}</span>
+            {isActive && (
+                currentSortOrder === 'desc' ? (
+                    <ArrowDown className="w-3 h-3" />
+                ) : (
+                    <ArrowUp className="w-3 h-3" />
+                )
+            )}
+        </button>
+    );
+});
+
 // Filter options configuration
 const filterConfig = {
     stock: {
@@ -212,6 +254,7 @@ const filterConfig = {
     },
 } as const;
 
+
 // ============================================
 // MAIN COMPONENT
 // ============================================
@@ -235,6 +278,8 @@ export default function InventoryMobile() {
             search.shopifyStatus,
             search.discrepancy,
             search.fabricFilter,
+            search.sortBy,
+            search.sortOrder,
         ],
         queryFn: () =>
             getInventoryAll({
@@ -247,6 +292,8 @@ export default function InventoryMobile() {
                     shopifyStatus: search.shopifyStatus,
                     discrepancy: search.discrepancy,
                     fabricFilter: search.fabricFilter,
+                    sortBy: search.sortBy,
+                    sortOrder: search.sortOrder,
                 },
             }),
         initialData: loaderData.inventory ?? undefined,
@@ -321,9 +368,29 @@ export default function InventoryMobile() {
                 shopifyStatus: 'all',
                 discrepancy: 'all',
                 fabricFilter: 'all',
+                sortBy: search.sortBy,
+                sortOrder: search.sortOrder,
             },
         });
-    }, [navigate, search.search, search.pageSize]);
+    }, [navigate, search.search, search.pageSize, search.sortBy, search.sortOrder]);
+
+    // Handle sort change
+    const handleSortChange = useCallback(
+        (sortBy: 'stock' | 'shopify' | 'fabric') => {
+            // If clicking the same sort field, toggle order; otherwise set to desc
+            const newOrder = search.sortBy === sortBy && search.sortOrder === 'desc' ? 'asc' : 'desc';
+            navigate({
+                to: '/inventory-mobile',
+                search: {
+                    ...search,
+                    sortBy,
+                    sortOrder: newOrder,
+                    page: 1, // Reset to first page on sort change
+                },
+            });
+        },
+        [navigate, search]
+    );
 
     // Count active filters
     const activeFilterCount = useMemo(() => {
@@ -345,7 +412,15 @@ export default function InventoryMobile() {
             },
             {
                 id: 'stock',
-                header: () => <div className="text-right">Stock</div>,
+                header: () => (
+                    <SortableHeader
+                        label="Stock"
+                        sortKey="stock"
+                        currentSortBy={search.sortBy}
+                        currentSortOrder={search.sortOrder}
+                        onSort={handleSortChange}
+                    />
+                ),
                 cell: ({ row }) => (
                     <div className="text-right">
                         <StockValueCell
@@ -357,7 +432,15 @@ export default function InventoryMobile() {
             },
             {
                 id: 'shopify',
-                header: () => <div className="text-right">Shopify</div>,
+                header: () => (
+                    <SortableHeader
+                        label="Shopify"
+                        sortKey="shopify"
+                        currentSortBy={search.sortBy}
+                        currentSortOrder={search.sortOrder}
+                        onSort={handleSortChange}
+                    />
+                ),
                 cell: ({ row }) => {
                     const { shopifyQty, availableBalance } = row.original;
                     const hasDiscrepancy = shopifyQty !== null && availableBalance !== shopifyQty;
@@ -381,7 +464,15 @@ export default function InventoryMobile() {
             },
             {
                 id: 'fabric',
-                header: () => <div className="text-right">Fabric</div>,
+                header: () => (
+                    <SortableHeader
+                        label="Fabric"
+                        sortKey="fabric"
+                        currentSortBy={search.sortBy}
+                        currentSortOrder={search.sortOrder}
+                        onSort={handleSortChange}
+                    />
+                ),
                 cell: ({ row }) => (
                     <div className="text-right">
                         <StockValueCell
@@ -393,7 +484,7 @@ export default function InventoryMobile() {
             },
             {
                 id: 'shopifyStatus',
-                header: () => <div className="text-center">Shopify</div>,
+                header: () => <div className="text-center">Status</div>,
                 cell: ({ row }) => (
                     <div className="text-center">
                         <ShopifyStatusCell status={row.original.shopifyProductStatus} />
@@ -401,7 +492,7 @@ export default function InventoryMobile() {
                 ),
             },
         ],
-        []
+        [search.sortBy, search.sortOrder, handleSortChange]
     );
 
     // Table instance

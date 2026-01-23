@@ -34,6 +34,9 @@ const getInventoryAllSchema = z.object({
     shopifyStatus: z.enum(['all', 'active', 'archived', 'draft']).optional().default('all'),
     discrepancy: z.enum(['all', 'has_discrepancy', 'no_discrepancy']).optional().default('all'),
     fabricFilter: z.enum(['all', 'has_fabric', 'no_fabric', 'low_fabric']).optional().default('all'),
+    // Sorting
+    sortBy: z.enum(['stock', 'shopify', 'fabric']).optional().default('stock'),
+    sortOrder: z.enum(['desc', 'asc']).optional().default('desc'),
 });
 
 // Legacy schema kept for backwards compatibility
@@ -355,7 +358,7 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
             getInventoryAllSchema.parse(input)
     )
     .handler(async ({ data }): Promise<InventoryAllResult> => {
-        const { includeCustomSkus, belowTarget, search, limit, offset, stockFilter, shopifyStatus, discrepancy, fabricFilter } = data;
+        const { includeCustomSkus, belowTarget, search, limit, offset, stockFilter, shopifyStatus, discrepancy, fabricFilter, sortBy, sortOrder } = data;
 
         const prisma = await getPrisma();
 
@@ -501,8 +504,31 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
             });
         }
 
-        // Sort: highest inventory first
-        filteredBalances.sort((a, b) => b.availableBalance - a.availableBalance);
+        // Sort by selected column and order
+        filteredBalances.sort((a, b) => {
+            let aVal: number;
+            let bVal: number;
+
+            switch (sortBy) {
+                case 'shopify':
+                    // Sort nulls to end
+                    aVal = a.shopifyQty ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    bVal = b.shopifyQty ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    break;
+                case 'fabric':
+                    // Sort nulls to end
+                    aVal = a.fabricColourBalance ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    bVal = b.fabricColourBalance ?? (sortOrder === 'desc' ? -Infinity : Infinity);
+                    break;
+                case 'stock':
+                default:
+                    aVal = a.availableBalance;
+                    bVal = b.availableBalance;
+                    break;
+            }
+
+            return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+        });
 
         // Apply pagination
         const totalCount = filteredBalances.length;
