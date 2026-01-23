@@ -3,6 +3,10 @@
  *
  * Consolidates all shipping operations into a single service that all shipping paths use.
  *
+ * ⚠️  SERVER-ONLY CODE ⚠️
+ * This module uses Prisma transaction types. Do not add static imports of
+ * kysely/pg/@prisma/client. See services/index.ts for bundling constraints.
+ *
  * SIMPLIFIED MODEL (2024-01):
  * - Inventory is now handled at ALLOCATION time (not shipping)
  * - Shipping only updates status, AWB, courier, and tracking info

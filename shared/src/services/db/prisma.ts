@@ -4,6 +4,10 @@
  * Creates a shared Prisma client instance for database operations.
  * Uses globalThis singleton pattern to prevent multiple connections.
  *
+ * ⚠️  DYNAMIC IMPORTS ONLY - DO NOT USE STATIC IMPORTS ⚠️
+ * This file uses `await import('@prisma/client')` intentionally.
+ * Static imports would break client bundling. See services/index.ts for details.
+ *
  * Usage:
  *   import { getPrisma } from '@coh/shared/services/db';
  *

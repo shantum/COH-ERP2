@@ -4,6 +4,10 @@
  * High-performance customer queries using type-safe SQL.
  * Moved from server/src/db/queries/customersListKysely.ts
  * to be accessible from Server Functions.
+ *
+ * ⚠️  DYNAMIC IMPORTS ONLY ⚠️
+ * Uses getKysely() which has dynamic imports internally.
+ * Do not add static imports of kysely/pg here. See services/index.ts for details.
  */
 
 import { getKysely } from '../kysely.js';

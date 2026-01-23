@@ -3,6 +3,10 @@
  *
  * High-performance inventory queries using type-safe SQL.
  * Includes balance calculations using Kysely and Prisma patterns.
+ *
+ * ⚠️  DYNAMIC IMPORTS ONLY - DO NOT USE STATIC IMPORTS ⚠️
+ * Uses `await import('kysely')` for sql template tag.
+ * Static imports would break client bundling. See services/index.ts for details.
  */
 
 // NOTE: kysely's `sql` is imported dynamically to prevent client bundling

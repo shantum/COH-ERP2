@@ -2,6 +2,10 @@
  * @module inventoryBalanceCache
  * In-memory cache for inventory balances to optimize Server Function balance queries.
  *
+ * ⚠️  SERVER-ONLY CODE ⚠️
+ * This module depends on Prisma types and inventory queries that use dynamic imports.
+ * Do not add static imports of kysely/pg/@prisma/client. See services/index.ts for details.
+ *
  * Key features:
  * - 5-minute max staleness (auto-expires stale entries on read)
  * - Batch fetch for uncached SKUs using calculateAllInventoryBalances

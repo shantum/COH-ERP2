@@ -220,6 +220,7 @@ Login: `admin@coh.com` / `XOFiya@34`
 40. **Cell component memoization**: All AG-Grid and TanStack Table cell components MUST be wrapped with `React.memo()`. Prevents re-renders of 500+ rows when unrelated state changes.
 41. **Mutation query cancellation scope**: Use specific `queryKey` for `cancelQueries()`, not broad keys like `['orders']`. Cancelling unrelated queries causes data loss on concurrent operations.
 42. **Prisma batch operations**: Prefer `createMany()` and `updateMany()` over sequential `create()`/`update()` in loops. Use `groupBy: ['field1', 'field2']` for multi-field aggregation in single query. `Promise.all()` is acceptable when each item needs unique calculation.
+43. **⚠️ CRITICAL: Shared services use DYNAMIC imports only**: `@coh/shared/services/` contains server-only code (kysely, pg, prisma). It works because these packages are externalized via `ssr.external` in vite.config.ts AND all imports use `await import()`. **NEVER add static imports** like `import { sql } from 'kysely'` in shared services—this WILL break client bundling. Always use `const { sql } = await import('kysely')`. One static import = broken build.
 
 ## Orders Architecture
 
@@ -540,28 +541,51 @@ utils/
 ```
 
 ### Shared Package (@coh/shared)
+
+> **⚠️ CRITICAL CONSTRAINT: `services/` uses DYNAMIC IMPORTS ONLY**
+>
+> The `services/` directory contains server-only code (kysely, pg, prisma) but lives in the
+> shared package for architectural reasons (Server Functions can't import from `@server/`).
+>
+> **This works because:**
+> 1. `@coh/shared` is bundled (`noExternal` in vite.config.ts)
+> 2. `kysely`, `pg`, `@prisma/client` are externalized (`ssr.external`)
+> 3. All imports use `await import()` so they resolve at runtime, not build time
+>
+> **RULES:**
+> - ❌ NEVER: `import { sql } from 'kysely'` (static import = broken build)
+> - ✅ ALWAYS: `const { sql } = await import('kysely')` (dynamic import = safe)
+> - One static import in services/ WILL break client bundling
+>
+> If you need to add new server-only code, either:
+> 1. Add to existing services files using dynamic imports
+> 2. Add to `server/src/` if it doesn't need Server Function access
+
 ```
 shared/src/
-  schemas/                            # Zod schemas + inferred output types
+  schemas/                            # Zod schemas + inferred output types (CLIENT-SAFE)
     customers.ts                      # CustomerDetailResult, etc.
     inventory.ts                      # InventorySkuRow, InventoryBalanceRow
     orders.ts, searchParams.ts, etc.
-  services/
+  services/                           # ⚠️ SERVER-ONLY - DYNAMIC IMPORTS ONLY
     db/
-      kysely.ts                       # getKysely() - Kysely singleton factory
-      prisma.ts                       # getPrisma(), PrismaInstance, PrismaTransaction types
+      kysely.ts                       # getKysely() - uses await import('kysely')
+      prisma.ts                       # getPrisma() - uses await import('@prisma/client')
       queries/
         customers.ts                  # getCustomerKysely
-        inventory.ts                  # listInventorySkusKysely, calculateInventoryBalance, calculateAllInventoryBalances
+        inventory.ts                  # listInventorySkusKysely, calculateInventoryBalance
         index.ts                      # Barrel export
       index.ts                        # Re-exports singletons + queries
     inventory/
       balanceCache.ts                 # inventoryBalanceCache singleton (5min TTL)
       index.ts                        # Exports cache + types
-    index.ts                          # Top-level barrel: db + inventory
-  domain/                             # Pure business logic functions
-  validators/                         # Validation helper functions
-  types/                              # Shared TypeScript types
+    orders/
+      shipService.ts                  # shipOrderLines, shipOrder, validateShipment
+      index.ts                        # Exports ship service
+    index.ts                          # Top-level barrel: db + inventory + orders
+  domain/                             # Pure business logic functions (CLIENT-SAFE)
+  validators/                         # Validation helper functions (CLIENT-SAFE)
+  types/                              # Shared TypeScript types (CLIENT-SAFE)
 ```
 
 ### Root (Monorepo)

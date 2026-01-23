@@ -4,6 +4,10 @@
  * Creates a shared Kysely query builder instance for type-safe SQL queries.
  * Uses globalThis singleton pattern to prevent multiple connections.
  *
+ * ⚠️  DYNAMIC IMPORTS ONLY - DO NOT USE STATIC IMPORTS ⚠️
+ * This file uses `await import('kysely')` and `await import('pg')` intentionally.
+ * Static imports would break client bundling. See services/index.ts for details.
+ *
  * Usage:
  *   import { getKysely } from '@coh/shared/services/db';
  *
