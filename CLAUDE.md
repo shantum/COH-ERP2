@@ -418,6 +418,77 @@ Source of truth: `server/src/services/shopifyOrderProcessor.ts`
 
 **Status precedence:** ERP is source of truth for `shipped`/`delivered`. Shopify captures tracking but does NOT auto-ship.
 
+## Shopify Inventory Sync
+
+### Architecture
+
+**Two-way sync between ERP and Shopify inventory:**
+
+| Direction | Mechanism | Trigger |
+|-----------|-----------|---------|
+| ERP → Shopify | GraphQL Admin API | Manual via API endpoints |
+| Shopify → ERP | Webhook (`inventory_levels/update`) | Automatic on Shopify stock change |
+
+### Pushing Stock to Shopify (ERP → Shopify)
+
+**API Endpoints** (`/api/shopify/inventory/`):
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/locations` | GET | List Shopify inventory locations |
+| `/item/:sku` | GET | Lookup inventory item by SKU |
+| `/set` | POST | Set quantity for single SKU |
+| `/zero-out` | POST | Batch zero-out for multiple SKUs |
+
+**Usage Example** (zeroing archived product stock):
+```bash
+# 1. Get location ID
+curl http://localhost:3001/api/shopify/inventory/locations
+# Returns: { "locations": [{ "id": "gid://shopify/Location/xxx", "name": "Office" }] }
+
+# 2. Zero out SKUs
+curl -X POST http://localhost:3001/api/shopify/inventory/zero-out \
+  -H "Content-Type: application/json" \
+  -d '{ "skus": ["SKU1", "SKU2"], "locationId": "gid://shopify/Location/xxx" }'
+```
+
+**Key Files:**
+- `server/src/services/shopify.ts` - ShopifyClient with GraphQL methods
+- `server/src/routes/shopify/inventory.ts` - Express endpoints
+
+**ShopifyClient Methods:**
+- `getLocations()` - Fetch all inventory locations
+- `getInventoryItemBySku(sku)` - Lookup single SKU
+- `getInventoryItemsBySkus(skus)` - Batch lookup (50 per request)
+- `setInventoryQuantity(inventoryItemId, locationId, qty)` - Set absolute quantity
+- `setInventoryQuantityBySku(sku, locationId, qty)` - Convenience wrapper
+- `zeroOutInventoryForSkus(skus, locationId)` - Batch zero-out (skips already-zero)
+
+### Receiving Stock Updates (Shopify → ERP)
+
+**Webhook:** `POST /api/webhooks/shopify/inventory_levels/update`
+
+**Flow:**
+1. Shopify fires webhook when stock changes
+2. Webhook handler looks up SKU by `shopifyInventoryItemId`
+3. Updates `ShopifyInventoryCache` table with new quantity
+4. Inventory mobile page displays `shopifyQty` from cache
+
+**Requirements for webhook sync:**
+- SKU must have `shopifyInventoryItemId` populated (via product sync)
+- Webhook must be registered in Shopify Admin
+- `SHOPIFY_WEBHOOK_SECRET` env var must be set
+
+**Database Tables:**
+- `Sku.shopifyInventoryItemId` - Links SKU to Shopify inventory item
+- `ShopifyInventoryCache` - Caches Shopify stock levels per SKU
+
+### Shopify App Permissions Required
+
+- `read_locations` - For fetching inventory locations
+- `write_inventory` - For setting inventory quantities
+- `read_products` - For SKU → inventory item lookup
+
 ## Tracking & iThink Integration
 
 ### Status Mapping Priority (CRITICAL)
@@ -835,4 +906,4 @@ PGPASSWORD=<staging_password> psql -h <staging_host> -p <staging_port> -U postgr
 **Note**: `/products` consolidates Products, Materials, Trims, Services, and BOM. Legacy `/materials` page exists but use `/products?tab=materials` for new work.
 
 ---
-**Updated till commit:** `f2274f8` (2026-01-23) - Added staging environment workflow (develop branch → staging → production)
+**Updated till commit:** `89d6bd3` (2026-01-23) - Added Shopify inventory sync documentation
