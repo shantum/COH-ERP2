@@ -5,7 +5,7 @@
  * Includes balance calculations using Kysely and Prisma patterns.
  */
 
-import { sql } from 'kysely';
+// NOTE: kysely's `sql` is imported dynamically to prevent client bundling
 import { getKysely } from '../kysely.js';
 import type { PrismaInstance, PrismaTransaction } from '../prisma.js';
 import type { InventorySkuRow, InventoryBalanceRow } from '../../../schemas/inventory.js';
@@ -79,6 +79,8 @@ export async function listInventorySkusKysely(
 
     // Apply search filter
     if (search) {
+        // Dynamic import to prevent kysely from being bundled into client
+        const { sql } = await import('kysely');
         const searchTerm = `%${search.toLowerCase()}%`;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         query = query.where((eb: any) =>
