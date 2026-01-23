@@ -162,6 +162,7 @@ export interface FabricColour {
   materialId: string;
   materialName: string;
   costPerUnit: number | null;
+  productImages?: string[]; // Linked product thumbnails
 }
 
 export interface CatalogFilters {

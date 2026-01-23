@@ -32,6 +32,7 @@ import { Route as AuthenticatedInventoryInwardRouteImport } from './routes/_auth
 import { Route as AuthenticatedInventoryCountRouteImport } from './routes/_authenticated/inventory-count'
 import { Route as AuthenticatedInventoryRouteImport } from './routes/_authenticated/inventory'
 import { Route as AuthenticatedFabricReconciliationRouteImport } from './routes/_authenticated/fabric-reconciliation'
+import { Route as AuthenticatedFabricReceiptRouteImport } from './routes/_authenticated/fabric-receipt'
 import { Route as AuthenticatedCustomersRouteImport } from './routes/_authenticated/customers'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 
@@ -154,6 +155,12 @@ const AuthenticatedFabricReconciliationRoute =
     path: '/fabric-reconciliation',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedFabricReceiptRoute =
+  AuthenticatedFabricReceiptRouteImport.update({
+    id: '/fabric-receipt',
+    path: '/fabric-receipt',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedCustomersRoute = AuthenticatedCustomersRouteImport.update({
   id: '/customers',
   path: '/customers',
@@ -176,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/customers': typeof AuthenticatedCustomersRoute
+  '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
@@ -201,6 +209,7 @@ export interface FileRoutesByTo {
   '/shipments': typeof ShipmentsRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/customers': typeof AuthenticatedCustomersRoute
+  '/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/inventory': typeof AuthenticatedInventoryRoute
   '/inventory-count': typeof AuthenticatedInventoryCountRoute
@@ -229,6 +238,7 @@ export interface FileRoutesById {
   '/shipments': typeof ShipmentsRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/customers': typeof AuthenticatedCustomersRoute
+  '/_authenticated/fabric-receipt': typeof AuthenticatedFabricReceiptRoute
   '/_authenticated/fabric-reconciliation': typeof AuthenticatedFabricReconciliationRoute
   '/_authenticated/inventory': typeof AuthenticatedInventoryRoute
   '/_authenticated/inventory-count': typeof AuthenticatedInventoryCountRoute
@@ -258,6 +268,7 @@ export interface FileRouteTypes {
     | '/shipments'
     | '/analytics'
     | '/customers'
+    | '/fabric-receipt'
     | '/fabric-reconciliation'
     | '/inventory'
     | '/inventory-count'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/shipments'
     | '/analytics'
     | '/customers'
+    | '/fabric-receipt'
     | '/fabric-reconciliation'
     | '/inventory'
     | '/inventory-count'
@@ -310,6 +322,7 @@ export interface FileRouteTypes {
     | '/shipments'
     | '/_authenticated/analytics'
     | '/_authenticated/customers'
+    | '/_authenticated/fabric-receipt'
     | '/_authenticated/fabric-reconciliation'
     | '/_authenticated/inventory'
     | '/_authenticated/inventory-count'
@@ -501,6 +514,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFabricReconciliationRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/fabric-receipt': {
+      id: '/_authenticated/fabric-receipt'
+      path: '/fabric-receipt'
+      fullPath: '/fabric-receipt'
+      preLoaderRoute: typeof AuthenticatedFabricReceiptRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/customers': {
       id: '/_authenticated/customers'
       path: '/customers'
@@ -521,6 +541,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedCustomersRoute: typeof AuthenticatedCustomersRoute
+  AuthenticatedFabricReceiptRoute: typeof AuthenticatedFabricReceiptRoute
   AuthenticatedFabricReconciliationRoute: typeof AuthenticatedFabricReconciliationRoute
   AuthenticatedInventoryRoute: typeof AuthenticatedInventoryRoute
   AuthenticatedInventoryCountRoute: typeof AuthenticatedInventoryCountRoute
@@ -541,6 +562,7 @@ interface AuthenticatedRouteChildren {
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
   AuthenticatedCustomersRoute: AuthenticatedCustomersRoute,
+  AuthenticatedFabricReceiptRoute: AuthenticatedFabricReceiptRoute,
   AuthenticatedFabricReconciliationRoute:
     AuthenticatedFabricReconciliationRoute,
   AuthenticatedInventoryRoute: AuthenticatedInventoryRoute,
