@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAuth } from '../hooks/useAuth';
 import {
-    LayoutDashboard, Scissors, ShoppingCart, Truck,
+    LayoutDashboard, ShoppingCart,
     Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
@@ -48,14 +48,12 @@ const navGroups: NavGroup[] = [
         items: [
             { to: '/products', icon: Package, label: 'Products' },
             { to: '/inventory', icon: Package, label: 'Inventory' },
-            { to: '/fabrics', icon: Scissors, label: 'Fabrics' },
         ],
     },
     {
         label: 'Shipping & Returns',
         collapsible: true,
         items: [
-            { to: '/orders?tab=shipped', icon: Truck, label: 'Shipments' },
             { to: '/returns', icon: RotateCcw, label: 'Returns' },
             { to: '/returns-rto', icon: PackageX, label: 'RTO Inward' },
         ],
@@ -63,7 +61,7 @@ const navGroups: NavGroup[] = [
     {
         label: 'Operations',
         items: [
-            { to: '/production', icon: Factory, label: 'Production' },
+            { to: '/production', icon: Factory, label: 'Production Plan' },
             { to: '/inventory-inward', icon: PackagePlus, label: 'Inventory Inward' },
         ],
     },
