@@ -18,7 +18,7 @@ import type { Prisma } from '@prisma/client';
 
 const searchAllInputSchema = z.object({
     q: z.string().min(2, 'Search query must be at least 2 characters'),
-    limit: z.number().int().positive().max(20).default(5),
+    limit: z.number().int().positive().max(50).default(10),
 });
 
 export type SearchAllInput = z.infer<typeof searchAllInputSchema>;
@@ -828,16 +828,31 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                 ],
             };
 
-            // Define tab filters (matching ORDER_VIEWS from server)
+            // Define tab filters (matching buildWhereClause logic from getOrders)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const tabs: Record<string, any> = {
                 open: {
-                    AND: [searchWhere, { status: 'open', isArchived: false }],
+                    AND: [
+                        searchWhere,
+                        {
+                            isArchived: false,
+                            // Match buildWhereClause: status='open' OR (not released to shipped/cancelled)
+                            OR: [
+                                { status: 'open' },
+                                {
+                                    AND: [{ releasedToShipped: false }, { releasedToCancelled: false }],
+                                },
+                            ],
+                        },
+                    ],
                 },
                 shipped: {
                     AND: [
                         searchWhere,
-                        { status: { in: ['shipped', 'delivered'] }, isArchived: false },
+                        {
+                            isArchived: false,
+                            releasedToShipped: true,
+                        },
                         // Exclude RTO orders (check at line level)
                         {
                             NOT: {
@@ -855,6 +870,7 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                         searchWhere,
                         {
                             isArchived: false,
+                            releasedToShipped: true,
                             orderLines: {
                                 some: {
                                     trackingStatus: { in: ['rto_in_transit', 'rto_delivered'] },
@@ -867,12 +883,13 @@ export const searchAllOrders = createServerFn({ method: 'GET' })
                     AND: [
                         searchWhere,
                         {
+                            isArchived: false,
+                            releasedToShipped: true,
                             paymentMethod: 'COD',
                             codRemittedAt: null,
-                            isArchived: false,
                             // At least one delivered line
                             orderLines: {
-                                some: { deliveredAt: { not: null } },
+                                some: { trackingStatus: 'delivered' },
                             },
                         },
                     ],
