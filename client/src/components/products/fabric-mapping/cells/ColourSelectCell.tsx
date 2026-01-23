@@ -6,6 +6,7 @@
  * Includes "+ Add new colour" option in dropdown for better UX.
  */
 
+import { memo, useMemo } from 'react';
 import { Plus } from 'lucide-react';
 import type { ColourOption, CascadingSelection } from '../types';
 
@@ -22,7 +23,7 @@ interface ColourSelectCellProps {
     disabled?: boolean;
 }
 
-export function ColourSelectCell({
+export const ColourSelectCell = memo(function ColourSelectCell({
     selection,
     colours,
     currentColourId,
@@ -36,17 +37,22 @@ export function ColourSelectCell({
     const selectedId = selection.colourId ?? currentColourId;
     const selectedFabricId = selection.fabricId;
 
-    // Filter colours by selected fabric
-    const filteredColours = selectedFabricId
-        ? colours.filter((c) => c.fabricId === selectedFabricId)
-        : colours;
+    // Filter colours by selected fabric (memoized for performance)
+    const filteredColours = useMemo(
+        () => selectedFabricId
+            ? colours.filter((c) => c.fabricId === selectedFabricId)
+            : colours,
+        [colours, selectedFabricId]
+    );
 
     // Disabled if no fabric selected
     const isDisabled = disabled || !selectedFabricId;
 
-    // Get the selected colour for displaying the swatch
-    const selectedColour = filteredColours.find((c) => c.id === selectedId);
-    const displayHex = selectedColour?.colourHex || currentColourHex;
+    // Get the selected colour for displaying the swatch (memoized)
+    const displayHex = useMemo(() => {
+        const selectedColour = filteredColours.find((c) => c.id === selectedId);
+        return selectedColour?.colourHex || currentColourHex;
+    }, [filteredColours, selectedId, currentColourHex]);
 
     const handleChange = (value: string) => {
         if (value === ADD_NEW_VALUE) {
@@ -100,4 +106,4 @@ export function ColourSelectCell({
             )}
         </div>
     );
-}
+});

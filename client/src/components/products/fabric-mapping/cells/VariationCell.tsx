@@ -4,13 +4,14 @@
  * Shows indented variation name with color swatch.
  */
 
+import { memo } from 'react';
 import type { FabricMappingRow } from '../types';
 
 interface VariationCellProps {
     row: FabricMappingRow;
 }
 
-export function VariationCell({ row }: VariationCellProps) {
+export const VariationCell = memo(function VariationCell({ row }: VariationCellProps) {
     return (
         <div className="flex items-center gap-2 pl-8">
             <span className="text-gray-400 text-sm">-</span>
@@ -28,4 +29,4 @@ export function VariationCell({ row }: VariationCellProps) {
             </span>
         </div>
     );
-}
+});
