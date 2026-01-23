@@ -974,8 +974,9 @@ export type SalesDimension =
   | 'gender'
   | 'color'
   | 'standardColor'
-  | 'fabricType'
-  | 'fabricColor'
+  | 'material'
+  | 'fabric'
+  | 'fabricColour'
   | 'channel';
 
 export type OrderStatusFilter = 'all' | 'shipped' | 'delivered';
@@ -989,6 +990,7 @@ export interface SalesMetricSummary {
 
 export interface SalesBreakdownItem {
   key: string;
+  label: string;
   keyId?: string;
   revenue: number;
   units: number;

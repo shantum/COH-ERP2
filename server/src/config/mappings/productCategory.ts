@@ -425,15 +425,15 @@ export const DEFAULT_CATEGORY = 'uncategorized';
  * Resolve product category from Shopify product data
  *
  * @param input - Shopify product with product_type and tags
- * @returns Category string in format "gender garmentType" or just garmentType
+ * @returns Category string (garment type only, gender is stored separately in Product.gender)
  *
  * @example
  * resolveProductCategory({ product_type: 'Shirt', tags: '_related_men' })
- * // Returns: 'men shirt'
+ * // Returns: 'shirt'
  *
  * @example
  * resolveProductCategory({ product_type: '', tags: 'mens shirts, Linen' })
- * // Returns: 'men shirt'
+ * // Returns: 'shirt'
  */
 export function resolveProductCategory(input: ShopifyProductInput): string {
     // Normalize tags to array
@@ -443,26 +443,17 @@ export function resolveProductCategory(input: ShopifyProductInput): string {
           ? input.tags.split(',').map((t) => t.trim())
           : [];
 
-    // Extract gender from tags
-    const gender = extractGender(tags);
-
     // 1. First try product_type if not empty
     if (input.product_type && input.product_type.trim()) {
-        const garmentType = input.product_type.trim().toLowerCase();
-        // Combine with gender if gender-specific
-        if (gender !== 'unisex') {
-            return `${gender} ${garmentType}`;
-        }
-        return garmentType;
+        let garmentType = input.product_type.trim().toLowerCase();
+        // Strip any gender prefix from product_type (e.g., "Women Co-Ord Set" -> "co-ord set")
+        garmentType = garmentType.replace(/^(men|women|mens|womens|men's|women's|unisex)\s+/i, '').trim();
+        return garmentType || DEFAULT_CATEGORY;
     }
 
     // 2. Try to extract garment type from tags
     const garmentType = extractGarmentType(tags);
     if (garmentType) {
-        // Combine with gender if gender-specific
-        if (gender !== 'unisex') {
-            return `${gender} ${garmentType}`;
-        }
         return garmentType;
     }
 

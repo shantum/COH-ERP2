@@ -23,8 +23,9 @@ const DIMENSIONS: { key: SalesDimension; label: string }[] = [
     { key: 'gender', label: 'By Gender' },
     { key: 'color', label: 'By Color' },
     { key: 'standardColor', label: 'By Std Color' },
-    { key: 'fabricType', label: 'By Fabric Type' },
-    { key: 'fabricColor', label: 'By Fabric Color' },
+    { key: 'material', label: 'By Material' },
+    { key: 'fabric', label: 'By Fabric' },
+    { key: 'fabricColour', label: 'By Fabric Colour' },
     { key: 'channel', label: 'By Channel' },
 ];
 
@@ -94,7 +95,7 @@ export default function Analytics() {
     const columnDefs: ColDef<SalesBreakdownItem>[] = useMemo(() => {
         const baseDefs: ColDef<SalesBreakdownItem>[] = [
             {
-                field: 'key' as const,
+                field: 'label' as const,
                 headerName: getDimensionColumnHeader(dimension),
                 flex: 2,
                 minWidth: 150,
@@ -152,8 +153,8 @@ export default function Analytics() {
         } else if (data?.breakdown) {
             // Bar chart for breakdown (top 10)
             return data.breakdown.slice(0, 10).map(item => ({
-                name: item.key.length > 15 ? item.key.substring(0, 15) + '...' : item.key,
-                fullName: item.key,
+                name: item.label.length > 15 ? item.label.substring(0, 15) + '...' : item.label,
+                fullName: item.label,
                 revenue: item.revenue,
                 units: item.units,
                 orders: item.orders,
@@ -431,8 +432,9 @@ function getDimensionLabel(dimension: SalesDimension): string {
         gender: 'Gender',
         color: 'Color',
         standardColor: 'Standard Color',
-        fabricType: 'Fabric Type',
-        fabricColor: 'Fabric Color',
+        material: 'Material',
+        fabric: 'Fabric',
+        fabricColour: 'Fabric Colour',
         channel: 'Channel',
     };
     return labels[dimension];
@@ -446,14 +448,18 @@ function getDimensionColumnHeader(dimension: SalesDimension): string {
         gender: 'Gender',
         color: 'Color',
         standardColor: 'Standard Color',
-        fabricType: 'Fabric Type',
-        fabricColor: 'Fabric Color',
+        material: 'Material',
+        fabric: 'Fabric',
+        fabricColour: 'Fabric Colour',
         channel: 'Channel',
     };
     return headers[dimension];
 }
 
 function formatChartDate(dateStr: string): string {
-    const date = new Date(dateStr);
+    // Parse YYYY-MM-DD as local date parts to avoid timezone shifts
+    // Server already returns IST-based dates
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day); // month is 0-indexed
     return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }

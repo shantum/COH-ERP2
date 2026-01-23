@@ -422,7 +422,11 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
                         variation: {
                             include: {
                                 product: true,
-                                fabric: true,
+                                fabricColour: {
+                                    include: {
+                                        fabric: true,
+                                    },
+                                },
                             },
                         },
                     },
@@ -455,7 +459,7 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
                         id: variation.id,
                         name: variation.product.name,
                         colorName: variation.colorName,
-                        fabricName: variation.fabric?.colorName || null,
+                        fabricName: variation.fabricColour?.colourName || null,
                         imageUrl: variation.imageUrl || variation.product.imageUrl,
                         units: 0,
                         revenue: 0,
@@ -1003,7 +1007,7 @@ export const getFrequentReturners = createServerFn({ method: 'GET' })
 const getSalesAnalyticsInputSchema = z.object({
     dimension: z.enum([
         'summary', 'product', 'category', 'gender', 'color',
-        'standardColor', 'fabricType', 'fabricColor', 'channel'
+        'standardColor', 'material', 'fabric', 'fabricColour', 'channel'
     ]).optional().default('summary'),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
@@ -1106,9 +1110,13 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                         variation: {
                             include: {
                                 product: true,
-                                fabric: {
+                                fabricColour: {
                                     include: {
-                                        fabricType: true,
+                                        fabric: {
+                                            include: {
+                                                material: true,
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -1137,8 +1145,11 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
             switch (dimension) {
                 case 'summary': {
                     // For summary, aggregate by day for time series
+                    // Convert to IST before extracting date to avoid off-by-one errors
                     const date = line.order.orderDate;
-                    key = date.toISOString().split('T')[0];
+                    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+                    const istDate = new Date(date.getTime() + istOffset);
+                    key = istDate.toISOString().split('T')[0];
                     label = key;
                     break;
                 }
@@ -1163,21 +1174,34 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                     break;
                 }
                 case 'standardColor': {
-                    key = line.sku.variation.standardColor || 'no-color';
+                    // Get from new fabric model first, fall back to variation field for older data
+                    const fabricColour = line.sku.variation.fabricColour;
+                    key = fabricColour?.standardColour || line.sku.variation.standardColor || 'no-color';
                     label = key;
                     break;
                 }
-                case 'fabricType': {
-                    // Get fabric type from linked fabric if available
-                    const fabric = line.sku.variation.fabric;
-                    key = fabric?.fabricType?.name || 'no-fabric';
+                case 'material': {
+                    // Get material from new hierarchy: FabricColour -> Fabric -> Material
+                    const fabricColour = line.sku.variation.fabricColour;
+                    key = fabricColour?.fabric?.material?.name || 'no-material';
                     label = key;
                     break;
                 }
-                case 'fabricColor': {
-                    const fabric = line.sku.variation.fabric;
-                    key = fabric ? `${fabric.fabricType?.name || ''} - ${fabric.colorName}` : 'no-fabric';
-                    label = key;
+                case 'fabric': {
+                    // Get fabric (construction type) from new hierarchy
+                    const fabricColour = line.sku.variation.fabricColour;
+                    const fabric = fabricColour?.fabric;
+                    key = fabric?.name || 'no-fabric';
+                    label = fabric ? `${fabric.material?.name || ''} - ${fabric.name}` : 'no-fabric';
+                    break;
+                }
+                case 'fabricColour': {
+                    // Get fabric colour (the actual color variant)
+                    const fabricColour = line.sku.variation.fabricColour;
+                    key = fabricColour?.id || 'no-fabric-colour';
+                    label = fabricColour
+                        ? `${fabricColour.fabric?.name || ''} - ${fabricColour.colourName}`
+                        : 'no-fabric-colour';
                     break;
                 }
                 case 'channel': {
@@ -1221,8 +1245,8 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                         : 0,
             }))
             .sort((a, b) => {
-                // Sort by key for time dimensions, by revenue for others
-                if (['day', 'week', 'month'].includes(dimension)) {
+                // Sort chronologically for summary (time series), by revenue for other dimensions
+                if (dimension === 'summary') {
                     return a.key.localeCompare(b.key);
                 }
                 return b.revenue - a.revenue;
