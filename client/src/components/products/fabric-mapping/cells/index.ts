@@ -8,3 +8,4 @@ export { MaterialSelectCell } from './MaterialSelectCell';
 export { FabricSelectCell } from './FabricSelectCell';
 export { ColourSelectCell } from './ColourSelectCell';
 export { StatusCell } from './StatusCell';
+export { ShopifyStatusCell } from './ShopifyStatusCell';

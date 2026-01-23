@@ -13,6 +13,11 @@
 export type FabricMappingRowType = 'product' | 'variation';
 
 /**
+ * Shopify product/variation status
+ */
+export type ShopifyStatus = 'active' | 'archived' | 'draft' | 'not_linked' | 'not_cached' | 'unknown';
+
+/**
  * Unified row for the fabric mapping table.
  * Product rows are visual grouping headers, variation rows have the actual dropdowns.
  */
@@ -40,6 +45,12 @@ export interface FabricMappingRow {
     colorHex?: string;
     parentProductId?: string;
     parentProductName?: string;
+    /** Variation active status */
+    isActive?: boolean;
+
+    // === Shopify Status ===
+    /** Shopify product status (active, archived, draft, etc.) */
+    shopifyStatus?: ShopifyStatus;
 
     // === Current Fabric Assignment (variation rows only) ===
     currentMaterialId?: string | null;

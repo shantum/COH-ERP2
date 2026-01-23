@@ -13,18 +13,18 @@ interface VariationCellProps {
 
 export const VariationCell = memo(function VariationCell({ row }: VariationCellProps) {
     return (
-        <div className="flex items-center gap-2 pl-8">
-            <span className="text-gray-400 text-sm">-</span>
-
-            {row.colorHex && (
+        <div className="flex items-center gap-2 pl-6">
+            {row.colorHex ? (
                 <div
-                    className="w-4 h-4 rounded-full border border-gray-200 flex-shrink-0"
+                    className="w-3.5 h-3.5 rounded-full border border-gray-200 flex-shrink-0 shadow-sm"
                     style={{ backgroundColor: row.colorHex }}
                     title={row.variationName}
                 />
+            ) : (
+                <div className="w-3.5 h-3.5 rounded-full border border-dashed border-gray-300 flex-shrink-0" />
             )}
 
-            <span className="text-gray-700 text-sm truncate">
+            <span className="text-gray-600 text-sm truncate">
                 {row.variationName}
             </span>
         </div>

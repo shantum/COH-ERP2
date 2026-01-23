@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getProductsTree } from '../../../../server/functions/products';
 import { getComponentRoles, getFabricAssignments } from '../../../../server/functions/bomMutations';
+import { getProductShopifyStatuses } from '../../../../server/functions/shopify';
 import { useMaterialsTree } from '../../../materials/hooks/useMaterialsTree';
 import type { ProductTreeResponse, ProductTreeNode } from '../../types';
 import type { MaterialNode } from '../../../materials/types';
@@ -23,6 +24,7 @@ import type {
     ColourOption,
     FabricMappingSummary,
     FabricMappingFilter,
+    ShopifyStatus,
 } from '../types';
 
 interface UseFabricMappingDataOptions {
@@ -110,6 +112,7 @@ function buildMaterialsLookup(materialsData: MaterialNode[]): MaterialsLookup {
 function buildFabricMappingRows(
     productsData: ProductTreeNode[],
     variationAssignments: Map<string, { colourId: string; fabricId: string; materialId: string; colourName: string; fabricName: string; materialName: string; colourHex?: string }>,
+    shopifyStatusMap: Map<string, ShopifyStatus>,
     filter: FabricMappingFilter,
     searchQuery: string
 ): { rows: FabricMappingRow[]; summary: FabricMappingSummary } {
@@ -171,6 +174,8 @@ function buildFabricMappingRows(
                 colorHex: variation.colorHex,
                 parentProductId: product.id,
                 parentProductName: product.name,
+                isActive: variation.isActive,
+                shopifyStatus: shopifyStatusMap.get(product.id) || 'not_linked',
                 currentMaterialId: assignment?.materialId || null,
                 currentMaterialName: assignment?.materialName || null,
                 currentFabricId: assignment?.fabricId || null,
@@ -222,6 +227,7 @@ function buildFabricMappingRows(
                 gender: product.gender,
                 variationCount: productVariationRows.length,
                 mappedCount: productMappedCount,
+                shopifyStatus: shopifyStatusMap.get(product.id) || 'not_linked',
                 currentMaterialId: aggregatedMaterialId,
                 currentMaterialName: aggregatedMaterialName,
                 currentFabricId: aggregatedFabricId,
@@ -251,6 +257,7 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
     const getProductsTreeFn = useServerFn(getProductsTree);
     const getComponentRolesFn = useServerFn(getComponentRoles);
     const getFabricAssignmentsFn = useServerFn(getFabricAssignments);
+    const getProductShopifyStatusesFn = useServerFn(getProductShopifyStatuses);
 
     // Fetch products tree
     const {
@@ -312,6 +319,39 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         staleTime: 30 * 1000,
     });
 
+    // Get all product IDs for Shopify status lookup
+    const productIds = useMemo(() => {
+        return (productsResponse?.items || [])
+            .filter(item => item.type === 'product')
+            .map(item => item.id);
+    }, [productsResponse?.items]);
+
+    // Fetch Shopify product statuses
+    const {
+        data: shopifyStatusesData,
+        isLoading: statusesLoading,
+        refetch: refetchStatuses,
+    } = useQuery({
+        queryKey: ['shopifyProductStatuses', productIds, 'server-fn'],
+        queryFn: async () => {
+            const result = await getProductShopifyStatusesFn({ data: { productIds } });
+            return result;
+        },
+        enabled: productIds.length > 0,
+        staleTime: 5 * 60 * 1000, // 5 minutes - status doesn't change often
+    });
+
+    // Build Shopify status map
+    const shopifyStatusMap = useMemo(() => {
+        const map = new Map<string, ShopifyStatus>();
+        if (shopifyStatusesData?.success && shopifyStatusesData.data) {
+            for (const status of shopifyStatusesData.data) {
+                map.set(status.productId, status.status);
+            }
+        }
+        return map;
+    }, [shopifyStatusesData]);
+
     // Build materials lookup
     const materialsLookup = useMemo(
         () => buildMaterialsLookup(materialsData || []),
@@ -354,23 +394,25 @@ export function useFabricMappingData(options: UseFabricMappingDataOptions = {}):
         () => buildFabricMappingRows(
             productsResponse?.items || [],
             variationAssignments,
+            shopifyStatusMap,
             filter,
             searchQuery
         ),
-        [productsResponse?.items, variationAssignments, filter, searchQuery]
+        [productsResponse?.items, variationAssignments, shopifyStatusMap, filter, searchQuery]
     );
 
     const refetch = () => {
         refetchProducts();
         refetchMaterials();
         refetchAssignments();
+        refetchStatuses();
     };
 
     return {
         rows,
         materialsLookup,
         summary,
-        isLoading: productsLoading || materialsLoading || rolesLoading || assignmentsLoading,
+        isLoading: productsLoading || materialsLoading || rolesLoading || assignmentsLoading || statusesLoading,
         error: (productsError || materialsError) as Error | null,
         refetch,
         mainFabricRoleId,
