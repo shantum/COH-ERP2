@@ -1174,7 +1174,9 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                     break;
                 }
                 case 'standardColor': {
-                    key = line.sku.variation.standardColor || 'no-color';
+                    // Get from new fabric model first, fall back to variation field for older data
+                    const fabricColour = line.sku.variation.fabricColour;
+                    key = fabricColour?.standardColour || line.sku.variation.standardColor || 'no-color';
                     label = key;
                     break;
                 }
