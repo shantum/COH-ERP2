@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getTopFabricsForDashboard } from '../../server/functions/fabrics';
+import { getTopMaterials } from '../../server/functions/fabricColours';
 import { Layers, Palette } from 'lucide-react';
 
 const TIME_PERIODS = [
@@ -20,17 +20,17 @@ const TIME_PERIODS = [
 ];
 
 const LEVELS = [
-    { value: 'type', label: 'Type', icon: Layers },
-    { value: 'color', label: 'Color', icon: Palette },
+    { value: 'material', label: 'Material', icon: Layers },
+    { value: 'colour', label: 'Colour', icon: Palette },
 ] as const;
 
 export function TopFabricsCard() {
     const [days, setDays] = useState(30);
-    const [level, setLevel] = useState<'type' | 'color'>('type');
+    const [level, setLevel] = useState<'material' | 'colour'>('material');
 
     const { data, isLoading } = useQuery({
-        queryKey: ['topFabrics', days, level],
-        queryFn: () => getTopFabricsForDashboard({ data: { days, level, limit: 12 } }),
+        queryKey: ['topMaterials', days, level],
+        queryFn: () => getTopMaterials({ data: { days, level, limit: 12 } }),
         staleTime: 60 * 1000,
     });
 
@@ -89,7 +89,7 @@ export function TopFabricsCard() {
                     ))}
                 </div>
             ) : !data?.data?.length ? (
-                <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">No fabric sales data for this period</p>
+                <p className="text-gray-500 text-center py-6 sm:py-8 text-sm">No materials sales data for this period</p>
             ) : (
                 <div className="space-y-0.5 max-h-[300px] sm:max-h-[400px] overflow-y-auto">
                     {data.data.map((item, index) => (
@@ -107,26 +107,26 @@ export function TopFabricsCard() {
                                 {index + 1}
                             </span>
 
-                            {/* Color Swatch - only in color mode */}
-                            {level === 'color' && (
+                            {/* Colour Swatch - only in colour mode */}
+                            {level === 'colour' && (
                                 <div
                                     className="w-6 h-6 sm:w-7 sm:h-7 rounded-md flex-shrink-0 border border-gray-200 shadow-sm"
                                     style={{
                                         backgroundColor: item.colorHex || '#e5e7eb',
                                     }}
-                                    title={item.colorHex || 'No color'}
+                                    title={item.colorHex || 'No colour'}
                                 />
                             )}
 
-                            {/* Name & Type Badge */}
+                            {/* Name & Fabric Badge */}
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5">
                                     <span className="font-medium text-gray-900 text-sm sm:text-base truncate">
                                         {item.name}
                                     </span>
-                                    {level === 'color' && item.typeName && (
+                                    {level === 'colour' && item.fabricName && (
                                         <span className="text-[9px] sm:text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded flex-shrink-0">
-                                            {item.typeName}
+                                            {item.fabricName}
                                         </span>
                                     )}
                                 </div>
@@ -135,11 +135,11 @@ export function TopFabricsCard() {
                                     <span>{item.productCount} products</span>
                                     <span>·</span>
                                     <span>{item.orderCount} orders</span>
-                                    {level === 'type' && item.topColors && item.topColors.length > 0 && (
+                                    {level === 'material' && item.topColours && item.topColours.length > 0 && (
                                         <>
                                             <span className="hidden sm:inline">·</span>
                                             <span className="truncate hidden sm:inline text-purple-400">
-                                                {item.topColors.slice(0, 2).join(', ')}
+                                                {item.topColours.slice(0, 2).join(', ')}
                                             </span>
                                         </>
                                     )}

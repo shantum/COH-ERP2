@@ -148,6 +148,7 @@ interface VariationData {
     colorName: string;
     colorHex: string | null;
     fabricId: string;
+    fabricColourId: string | null;
     imageUrl: string | null;
     isActive: boolean;
     hasLining: boolean;
@@ -158,6 +159,23 @@ interface VariationData {
     fabric: {
         id: string;
         name: string;
+        material?: {
+            id: string;
+            name: string;
+        } | null;
+    } | null;
+    fabricColour: {
+        id: string;
+        colourName: string;
+        colourHex: string | null;
+        fabric: {
+            id: string;
+            name: string;
+            material?: {
+                id: string;
+                name: string;
+            } | null;
+        };
     } | null;
     skus: SkuData[];
 }
@@ -678,6 +696,9 @@ export interface VariationDetailResponse {
     colorHex: string | null;
     fabricId: string | null;
     fabricName: string | null;
+    fabricColourId: string | null;
+    fabricColourName: string | null;
+    materialName: string | null;
     hasLining: boolean;
     trimsCost: number | null;
     liningCost: number | null;
@@ -751,7 +772,20 @@ export const getProductById = createServerFn({ method: 'GET' })
                     variations: {
                         orderBy: { colorName: 'asc' },
                         include: {
-                            fabric: true,
+                            fabric: {
+                                include: {
+                                    material: true,
+                                },
+                            },
+                            fabricColour: {
+                                include: {
+                                    fabric: {
+                                        include: {
+                                            material: true,
+                                        },
+                                    },
+                                },
+                            },
                             skus: {
                                 orderBy: { size: 'asc' },
                             },
@@ -788,6 +822,9 @@ export const getProductById = createServerFn({ method: 'GET' })
                     colorHex: v.colorHex,
                     fabricId: v.fabricId,
                     fabricName: v.fabric?.name ?? null,
+                    fabricColourId: v.fabricColourId ?? null,
+                    fabricColourName: v.fabricColour?.colourName ?? null,
+                    materialName: v.fabricColour?.fabric?.material?.name ?? v.fabric?.material?.name ?? null,
                     hasLining: v.hasLining,
                     trimsCost: v.trimsCost,
                     liningCost: v.liningCost,
@@ -835,6 +872,16 @@ export interface CatalogFiltersResponse {
         colorHex: string | null;
         costPerUnit: number | null;
     }[];
+    fabricColours: {
+        id: string;
+        name: string;
+        hex: string | null;
+        fabricId: string;
+        fabricName: string;
+        materialId: string;
+        materialName: string;
+        costPerUnit: number | null;
+    }[];
     categories: string[];
     genders: string[];
 }
@@ -842,7 +889,7 @@ export interface CatalogFiltersResponse {
 /**
  * Server Function: Get catalog filters
  *
- * Fetches filter data for product forms (fabric types, fabrics, categories, genders).
+ * Fetches filter data for product forms (fabric types, fabrics, fabricColours, categories, genders).
  * Used by UnifiedProductEditModal for dropdown options.
  */
 export const getCatalogFilters = createServerFn({ method: 'GET' })
@@ -866,8 +913,8 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                 orderBy: { name: 'asc' },
             });
 
-            // Fetch fabrics (legacy FabricColor table for product variations)
-            const fabrics = await prisma.fabricColor.findMany({
+            // Fetch fabrics (legacy - for backward compatibility)
+            const fabrics = await prisma.fabric.findMany({
                 where: { isActive: true },
                 select: {
                     id: true,
@@ -879,6 +926,36 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
                 },
                 orderBy: { name: 'asc' },
             });
+
+            // Fetch fabric colours (NEW - 3-tier hierarchy)
+            const fabricColoursRaw = await prisma.fabricColour.findMany({
+                where: { isActive: true },
+                include: {
+                    fabric: {
+                        include: {
+                            material: true,
+                        },
+                    },
+                },
+                orderBy: [
+                    { fabric: { material: { name: 'asc' } } },
+                    { fabric: { name: 'asc' } },
+                    { colourName: 'asc' },
+                ],
+            });
+
+            // Transform fabricColours to expected format
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const fabricColours = fabricColoursRaw.map((fc: any) => ({
+                id: fc.id,
+                name: fc.colourName,
+                hex: fc.colourHex,
+                fabricId: fc.fabricId,
+                fabricName: fc.fabric?.name ?? '',
+                materialId: fc.fabric?.materialId ?? '',
+                materialName: fc.fabric?.material?.name ?? '',
+                costPerUnit: fc.costPerUnit ?? fc.fabric?.costPerUnit ?? null,
+            }));
 
             // Get distinct categories from products
             const categoriesResult = await prisma.product.findMany({
@@ -895,6 +972,7 @@ export const getCatalogFilters = createServerFn({ method: 'GET' })
             return {
                 fabricTypes,
                 fabrics,
+                fabricColours,
                 categories,
                 genders,
             };

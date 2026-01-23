@@ -43,6 +43,7 @@ model User {
   gridPreferences       UserGridPreference[]
   inventoryTransactions InventoryTransaction[]
   fabricTransactions    FabricTransaction[]
+  fabricColourTransactions FabricColourTransaction[] @relation("FabricColourTxnCreator")
   returnStatusHistory   ReturnStatusHistory[]
   processedRepackItems  RepackingQueueItem[]     @relation("RepackingProcessor")
   createdWriteOffs      WriteOffLog[]            @relation("WriteOffCreator")
@@ -123,6 +124,7 @@ model Variation {
   standardColor          String?
   colorHex               String?
   fabricId               String
+  fabricColourId         String?  // NEW: Link to FabricColour (replaces fabricId)
   imageUrl               String?
   isActive               Boolean @default(true)
   hasLining              Boolean @default(false)
@@ -134,12 +136,14 @@ model Variation {
   shopifySourceHandle    String?
   skus                   Sku[]
   fabric                 Fabric  @relation(fields: [fabricId], references: [id])
+  fabricColour           FabricColour? @relation(fields: [fabricColourId], references: [id])
   product                Product @relation(fields: [productId], references: [id])
   bomLines               VariationBomLine[] // NEW: BOM overrides for this variation
 
   @@unique([productId, colorName])
   @@index([productId])
   @@index([fabricId])
+  @@index([fabricColourId])
   @@index([shopifySourceProductId])
 }
 
@@ -268,6 +272,11 @@ model FabricColour {
   variationBomLines VariationBomLine[]
   skuBomLines       SkuBomLine[]
 
+  // NEW: Direct variation link and transactions
+  variations               Variation[]
+  transactions             FabricColourTransaction[]
+  reconciliationItems      FabricColourReconciliationItem[]
+
   @@unique([fabricId, colourName])
   @@index([fabricId])
   @@index([supplierId])
@@ -317,19 +326,20 @@ model Fabric {
 }
 
 model Supplier {
-  id                 String              @id @default(uuid())
-  name               String              @unique // Prevent duplicate supplier names
-  contactName        String?
-  email              String?
-  phone              String?
-  address            String?
-  isActive           Boolean             @default(true)
-  createdAt          DateTime            @default(now())
-  fabrics            Fabric[]
-  fabricOrders       FabricOrder[]
-  fabricTransactions FabricTransaction[]
-  fabricColours      FabricColour[]      @relation("FabricColourSupplier")
-  trimItems          TrimItem[]          @relation("TrimSupplier")
+  id                         String              @id @default(uuid())
+  name                       String              @unique // Prevent duplicate supplier names
+  contactName                String?
+  email                      String?
+  phone                      String?
+  address                    String?
+  isActive                   Boolean             @default(true)
+  createdAt                  DateTime            @default(now())
+  fabrics                    Fabric[]
+  fabricOrders               FabricOrder[]
+  fabricTransactions         FabricTransaction[]
+  fabricColourTransactions   FabricColourTransaction[] @relation("FabricColourTxnSupplier")
+  fabricColours              FabricColour[]      @relation("FabricColourSupplier")
+  trimItems                  TrimItem[]          @relation("TrimSupplier")
 }
 
 model FabricTransaction {
@@ -1346,4 +1356,69 @@ model SkuBomLine {
   @@unique([skuId, roleId]) // One line per role per SKU
   @@index([skuId])
   @@index([roleId])
+}
+
+// ============================================
+// FABRIC COLOUR TRANSACTIONS (NEW - replaces FabricTransaction)
+// ============================================
+
+model FabricColourTransaction {
+  id              String        @id @default(uuid())
+  fabricColourId  String
+  txnType         String        // "inward" | "outward"
+  qty             Float
+  unit            String
+  reason          String
+  costPerUnit     Float?
+  supplierId      String?
+  referenceId     String?
+  notes           String?
+  createdById     String
+  createdAt       DateTime      @default(now())
+
+  fabricColour    FabricColour  @relation(fields: [fabricColourId], references: [id])
+  createdBy       User          @relation("FabricColourTxnCreator", fields: [createdById], references: [id])
+  supplier        Supplier?     @relation("FabricColourTxnSupplier", fields: [supplierId], references: [id])
+
+  @@index([fabricColourId])
+  @@index([txnType])
+  @@index([createdAt])
+  @@index([fabricColourId, createdAt])
+  @@index([supplierId])
+  @@index([createdById])
+}
+
+// ============================================
+// FABRIC COLOUR RECONCILIATION (NEW - replaces FabricReconciliation)
+// ============================================
+
+model FabricColourReconciliation {
+  id            String                            @id @default(uuid())
+  reconcileDate DateTime                          @default(now())
+  status        String                            @default("draft")
+  notes         String?
+  createdBy     String?
+  createdAt     DateTime                          @default(now())
+  updatedAt     DateTime                          @updatedAt
+  items         FabricColourReconciliationItem[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model FabricColourReconciliationItem {
+  id               String                      @id @default(uuid())
+  reconciliationId String
+  fabricColourId   String
+  systemQty        Float
+  physicalQty      Float?
+  variance         Float?
+  adjustmentReason String?
+  notes            String?
+  txnId            String?                     @unique
+  fabricColour     FabricColour                @relation(fields: [fabricColourId], references: [id])
+  reconciliation   FabricColourReconciliation  @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+
+  @@index([reconciliationId])
+  @@index([fabricColourId])
 }

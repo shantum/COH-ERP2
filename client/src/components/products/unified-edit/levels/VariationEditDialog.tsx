@@ -11,12 +11,12 @@ import { VariationFabricTab } from '../tabs/VariationFabricTab';
 import { VariationCostsTab } from '../tabs/VariationCostsTab';
 import { EditDialogFooter, UnsavedIndicator } from '../shared/EditDialogFooter';
 import { ColorSwatch } from '../shared/FabricSelector';
-import type { VariationTabId, EditLevel, VariationDetailData, ProductDetailData, Fabric } from '../types';
+import type { VariationTabId, EditLevel, VariationDetailData, ProductDetailData, FabricColour } from '../types';
 
 interface VariationEditDialogProps {
   variation: VariationDetailData;
   product: ProductDetailData;
-  fabrics: Fabric[];
+  fabricColours: FabricColour[];
   isActive: boolean;
   onNavigate: (level: EditLevel, id: string, name: string) => void;
   onBack: () => void;
@@ -34,7 +34,7 @@ const TABS: { id: VariationTabId; label: string }[] = [
 export function VariationEditDialog({
   variation,
   product,
-  fabrics,
+  fabricColours,
   isActive,
   onNavigate,
   onBack,
@@ -140,8 +140,8 @@ export function VariationEditDialog({
         {activeTab === 'fabric' && (
           <VariationFabricTab
             form={form}
-            fabrics={fabrics}
-            fabricTypeId={product.fabricTypeId}
+            fabricColours={fabricColours}
+            materialId={product.fabricTypeId}
             disabled={isSaving}
           />
         )}

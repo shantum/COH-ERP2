@@ -93,6 +93,40 @@ export type FabricColour = {
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
 };
+export type FabricColourReconciliation = {
+    id: Generated<string>;
+    reconcileDate: Generated<Timestamp>;
+    status: Generated<string>;
+    notes: string | null;
+    createdBy: string | null;
+    createdAt: Generated<Timestamp>;
+    updatedAt: Timestamp;
+};
+export type FabricColourReconciliationItem = {
+    id: Generated<string>;
+    reconciliationId: string;
+    fabricColourId: string;
+    systemQty: number;
+    physicalQty: number | null;
+    variance: number | null;
+    adjustmentReason: string | null;
+    notes: string | null;
+    txnId: string | null;
+};
+export type FabricColourTransaction = {
+    id: Generated<string>;
+    fabricColourId: string;
+    txnType: string;
+    qty: number;
+    unit: string;
+    reason: string;
+    costPerUnit: number | null;
+    supplierId: string | null;
+    referenceId: string | null;
+    notes: string | null;
+    createdById: string;
+    createdAt: Generated<Timestamp>;
+};
 export type FabricOrder = {
     id: Generated<string>;
     fabricId: string;
@@ -764,6 +798,7 @@ export type Variation = {
     standardColor: string | null;
     colorHex: string | null;
     fabricId: string;
+    fabricColourId: string | null;
     imageUrl: string | null;
     isActive: Generated<boolean>;
     hasLining: Generated<boolean>;
@@ -831,6 +866,9 @@ export type DB = {
     Customer: Customer;
     Fabric: Fabric;
     FabricColour: FabricColour;
+    FabricColourReconciliation: FabricColourReconciliation;
+    FabricColourReconciliationItem: FabricColourReconciliationItem;
+    FabricColourTransaction: FabricColourTransaction;
     FabricOrder: FabricOrder;
     FabricReconciliation: FabricReconciliation;
     FabricReconciliationItem: FabricReconciliationItem;

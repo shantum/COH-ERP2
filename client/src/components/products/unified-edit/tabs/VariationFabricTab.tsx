@@ -1,28 +1,28 @@
 /**
- * VariationFabricTab - Fabric selection for variation
+ * VariationFabricTab - Fabric colour selection for variation
  */
 
 import { type UseFormReturn } from 'react-hook-form';
 import { Info } from 'lucide-react';
-import type { VariationFormData, Fabric } from '../types';
+import type { VariationFormData, FabricColour } from '../types';
 import { FabricSelector } from '../shared/FabricSelector';
 
 interface VariationFabricTabProps {
   form: UseFormReturn<VariationFormData>;
-  fabrics: Fabric[];
-  fabricTypeId?: string | null;
+  fabricColours: FabricColour[];
+  materialId?: string | null;
   disabled?: boolean;
 }
 
 export function VariationFabricTab({
   form,
-  fabrics,
-  fabricTypeId,
+  fabricColours,
+  materialId,
   disabled = false,
 }: VariationFabricTabProps) {
   const { control, watch } = form;
-  const selectedFabricId = watch('fabricId');
-  const selectedFabric = fabrics.find(f => f.id === selectedFabricId);
+  const selectedFabricColourId = watch('fabricColourId');
+  const selectedFabricColour = fabricColours.find(fc => fc.id === selectedFabricColourId);
 
   return (
     <div className="space-y-6">
@@ -31,52 +31,54 @@ export function VariationFabricTab({
         <Info size={16} className="mt-0.5 flex-shrink-0" />
         <div>
           <p>
-            Select the specific fabric color for this variation.
-            {fabricTypeId && ' Fabrics are filtered to match the product\'s fabric type.'}
+            Select the specific fabric colour for this variation.
+            {materialId && ' Colours are filtered to match the product\'s material type.'}
           </p>
         </div>
       </div>
 
-      {/* Fabric Selector */}
+      {/* Fabric Colour Selector */}
       <FabricSelector
-        name="fabricId"
-        label="Fabric"
+        name="fabricColourId"
+        label="Fabric Colour"
         control={control}
-        fabrics={fabrics}
-        fabricTypeId={fabricTypeId}
+        fabricColours={fabricColours}
+        materialId={materialId}
         disabled={disabled}
-        placeholder="Select a fabric color..."
+        placeholder="Select a fabric colour..."
       />
 
-      {/* Selected fabric details */}
-      {selectedFabric && (
+      {/* Selected fabric colour details */}
+      {selectedFabricColour && (
         <div className="border rounded-lg p-4 bg-gray-50">
-          <h4 className="text-sm font-medium text-gray-700 mb-3">Selected Fabric</h4>
+          <h4 className="text-sm font-medium text-gray-700 mb-3">Selected Fabric Colour</h4>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-gray-500">Name:</span>
-              <span className="ml-2 font-medium">{selectedFabric.name}</span>
+              <span className="text-gray-500">Colour:</span>
+              <span className="ml-2 font-medium">{selectedFabricColour.name}</span>
             </div>
-            {selectedFabric.colorName && (
-              <div>
-                <span className="text-gray-500">Color:</span>
-                <span className="ml-2 font-medium">{selectedFabric.colorName}</span>
-              </div>
-            )}
-            {selectedFabric.costPerUnit && (
+            <div>
+              <span className="text-gray-500">Material:</span>
+              <span className="ml-2 font-medium">{selectedFabricColour.materialName}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">Fabric:</span>
+              <span className="ml-2 font-medium">{selectedFabricColour.fabricName}</span>
+            </div>
+            {selectedFabricColour.costPerUnit && (
               <div>
                 <span className="text-gray-500">Cost:</span>
-                <span className="ml-2 font-medium">{selectedFabric.costPerUnit}/m</span>
+                <span className="ml-2 font-medium">₹{selectedFabricColour.costPerUnit}/m</span>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* No fabric warning */}
-      {!selectedFabricId && (
+      {/* No fabric colour warning */}
+      {!selectedFabricColourId && (
         <p className="text-sm text-amber-600">
-          No fabric selected. COGS calculation may be incomplete.
+          No fabric colour selected. COGS calculation may be incomplete.
         </p>
       )}
     </div>
