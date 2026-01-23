@@ -5,14 +5,17 @@
  * - Header with search, filter, and save button
  * - FabricMappingTable with cascading dropdowns
  * - Footer with summary stats and pending changes indicator
+ * - UnifiedMaterialModal for inline colour creation
  */
 
-import { useState, useCallback, useDeferredValue } from 'react';
+import { useState, useCallback, useDeferredValue, useMemo } from 'react';
 import { Loader2, Save, Search, X, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FabricMappingTable } from './FabricMappingTable';
 import { useFabricMappingData } from './hooks/useFabricMappingData';
 import { useFabricMappingMutations } from './hooks/useFabricMappingMutations';
+import { UnifiedMaterialModal } from '../../materials/UnifiedMaterialModal';
+import type { MaterialNode } from '../../materials/types';
 import type { PendingFabricChange, FabricMappingFilter } from './types';
 
 export function FabricMappingView() {
@@ -22,6 +25,12 @@ export function FabricMappingView() {
     const [pendingChanges, setPendingChanges] = useState<Map<string, PendingFabricChange>>(
         new Map()
     );
+
+    // Modal state for adding new colours
+    const [addColourModal, setAddColourModal] = useState<{
+        isOpen: boolean;
+        fabricId: string | null;
+    }>({ isOpen: false, fabricId: null });
 
     // Defer the search query to prevent blocking input
     const deferredSearchQuery = useDeferredValue(searchInput);
@@ -45,6 +54,37 @@ export function FabricMappingView() {
 
     // Mutations
     const { saveAssignments, isSaving } = useFabricMappingMutations();
+
+    // Build parent node for the modal (fabric info)
+    const addColourParentNode = useMemo((): MaterialNode | undefined => {
+        if (!addColourModal.fabricId) return undefined;
+        const fabric = materialsLookup.fabrics.find(f => f.id === addColourModal.fabricId);
+        if (!fabric) return undefined;
+        const material = materialsLookup.materials.find(m => m.id === fabric.materialId);
+        return {
+            id: fabric.id,
+            name: fabric.name,
+            type: 'fabric',
+            materialId: fabric.materialId,
+            constructionType: fabric.constructionType,
+            materialName: material?.name,
+        } as MaterialNode;
+    }, [addColourModal.fabricId, materialsLookup]);
+
+    // Handle add colour button
+    const handleAddColour = useCallback((fabricId: string) => {
+        setAddColourModal({ isOpen: true, fabricId });
+    }, []);
+
+    // Handle modal close
+    const handleCloseAddColourModal = useCallback(() => {
+        setAddColourModal({ isOpen: false, fabricId: null });
+    }, []);
+
+    // Handle modal success - refetch data to get new colour
+    const handleAddColourSuccess = useCallback(() => {
+        refetch();
+    }, [refetch]);
 
     // Handle pending change
     const handlePendingChange = useCallback(
@@ -195,10 +235,7 @@ export function FabricMappingView() {
                 materialsLookup={materialsLookup}
                 pendingChanges={pendingChanges}
                 onPendingChange={handlePendingChange}
-                // TODO: Add modal handlers for inline creation
-                // onAddMaterial={() => {}}
-                // onAddFabric={(materialId) => {}}
-                // onAddColour={(fabricId) => {}}
+                onAddColour={handleAddColour}
             />
 
             {/* Footer */}
@@ -229,6 +266,17 @@ export function FabricMappingView() {
                     </div>
                 </div>
             )}
+
+            {/* Add Colour Modal */}
+            <UnifiedMaterialModal
+                isOpen={addColourModal.isOpen}
+                onClose={handleCloseAddColourModal}
+                mode="add"
+                type="colour"
+                parentId={addColourModal.fabricId || undefined}
+                parentNode={addColourParentNode}
+                onSuccess={handleAddColourSuccess}
+            />
         </div>
     );
 }
