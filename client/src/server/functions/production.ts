@@ -90,7 +90,7 @@ export interface CustomizationInfo {
 export interface ProductionBatchItem {
     id: string;
     batchCode: string | null;
-    batchDate: Date;
+    batchDate: string; // YYYY-MM-DD format to avoid timezone issues
     status: string;
     qtyPlanned: number;
     qtyCompleted: number;
@@ -314,36 +314,55 @@ export const getProductionBatches = createServerFn({ method: 'GET' })
 
         // Transform to match tRPC router output format
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const batches = rows.map((r: any) => ({
-            id: r.id,
-            batchCode: r.batchCode,
-            batchDate: r.batchDate as Date,
-            status: r.status,
-            qtyPlanned: r.qtyPlanned,
-            qtyCompleted: r.qtyCompleted,
-            priority: r.priority,
-            notes: r.notes,
-            sourceOrderLineId: r.sourceOrderLineId,
-            sampleCode: r.sampleCode,
-            sampleName: r.sampleName,
-            sampleColour: r.sampleColour,
-            sampleSize: r.sampleSize,
-            tailorId: r.tailorId,
-            tailorName: r.tailorName,
-            skuId: r.skuId,
-            skuCode: r.skuCode,
-            skuSize: r.skuSize,
-            isCustomSku: r.isCustomSku ?? false,
-            customizationType: r.customizationType,
-            customizationValue: r.customizationValue,
-            customizationNotes: r.customizationNotes,
-            variationId: r.variationId,
-            colorName: r.colorName,
-            productId: r.productId,
-            productName: r.productName,
-            fabricId: r.fabricId,
-            fabricName: r.fabricName,
-        }));
+        const batches = rows.map((r: any) => {
+            // Extract date-only string to avoid timezone interpretation issues
+            // Kysely returns Date objects interpreted in server timezone, but we need just the date part
+            const batchDateRaw = r.batchDate;
+            let batchDateStr: string;
+            if (batchDateRaw instanceof Date) {
+                // Extract YYYY-MM-DD from the date without timezone conversion
+                // Use getFullYear/Month/Date to get the date parts as stored in DB
+                const y = batchDateRaw.getFullYear();
+                const m = String(batchDateRaw.getMonth() + 1).padStart(2, '0');
+                const d = String(batchDateRaw.getDate()).padStart(2, '0');
+                batchDateStr = `${y}-${m}-${d}`;
+            } else if (typeof batchDateRaw === 'string') {
+                // If already a string, extract the date part
+                batchDateStr = batchDateRaw.split('T')[0].split(' ')[0];
+            } else {
+                batchDateStr = new Date().toISOString().split('T')[0];
+            }
+            return {
+                id: r.id,
+                batchCode: r.batchCode,
+                batchDate: batchDateStr,
+                status: r.status,
+                qtyPlanned: r.qtyPlanned,
+                qtyCompleted: r.qtyCompleted,
+                priority: r.priority,
+                notes: r.notes,
+                sourceOrderLineId: r.sourceOrderLineId,
+                sampleCode: r.sampleCode,
+                sampleName: r.sampleName,
+                sampleColour: r.sampleColour,
+                sampleSize: r.sampleSize,
+                tailorId: r.tailorId,
+                tailorName: r.tailorName,
+                skuId: r.skuId,
+                skuCode: r.skuCode,
+                skuSize: r.skuSize,
+                isCustomSku: r.isCustomSku ?? false,
+                customizationType: r.customizationType,
+                customizationValue: r.customizationValue,
+                customizationNotes: r.customizationNotes,
+                variationId: r.variationId,
+                colorName: r.colorName,
+                productId: r.productId,
+                productName: r.productName,
+                fabricId: r.fabricId,
+                fabricName: r.fabricName,
+            };
+        });
 
         // Fetch order lines for all batches
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

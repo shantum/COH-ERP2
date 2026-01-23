@@ -3,6 +3,50 @@
  * Centralizes date formatting to avoid recreating formatters in each cell
  */
 
+// ============================================
+// LOCAL DATE STRING UTILITIES
+// Use these instead of toISOString().split('T')[0] to avoid timezone bugs
+// ============================================
+
+/**
+ * Get today's date as YYYY-MM-DD string in LOCAL timezone
+ * Use this instead of: new Date().toISOString().split('T')[0]
+ */
+export function getLocalDateString(date: Date = new Date()): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+/**
+ * Get a date string N days from today in LOCAL timezone
+ */
+export function getLocalDateStringOffset(daysOffset: number): string {
+    const date = new Date();
+    date.setDate(date.getDate() + daysOffset);
+    return getLocalDateString(date);
+}
+
+/**
+ * Get today's date as YYYY-MM-DD string in LOCAL timezone
+ * Convenience alias for getLocalDateString()
+ */
+export function getTodayString(): string {
+    return getLocalDateString();
+}
+
+/**
+ * Get tomorrow's date as YYYY-MM-DD string in LOCAL timezone
+ */
+export function getTomorrowString(): string {
+    return getLocalDateStringOffset(1);
+}
+
+// ============================================
+// DATE FORMATTING UTILITIES
+// ============================================
+
 // Pre-created formatters (created once, reused)
 const shortDateFormatter = new Intl.DateTimeFormat('en-IN', {
     day: '2-digit',

@@ -6,6 +6,7 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Calendar, X } from 'lucide-react';
+import { getLocalDateStringOffset, getTodayString } from '../utils/dateFormatters';
 
 interface ProductionDatePopoverProps {
     currentDate: string | null;
@@ -62,11 +63,9 @@ export const ProductionDatePopover = memo(function ProductionDatePopover({
         setIsOpen(!isOpen);
     };
 
-    // Quick date helpers
+    // Quick date helpers - use local date to avoid timezone issues
     const getDateString = (daysFromNow: number) => {
-        const date = new Date();
-        date.setDate(date.getDate() + daysFromNow);
-        return date.toISOString().split('T')[0];
+        return getLocalDateStringOffset(daysFromNow);
     };
 
     const formatDisplayDate = (dateStr: string) => {
@@ -173,7 +172,7 @@ export const ProductionDatePopover = memo(function ProductionDatePopover({
                         <input
                             type="date"
                             className="w-full text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-300 focus:border-orange-300"
-                            min={new Date().toISOString().split('T')[0]}
+                            min={getTodayString()}
                             value={currentDate || ''}
                             onChange={(e) => {
                                 if (e.target.value) {

@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { inventoryQueryKeys } from '../../constants/queryKeys';
 import { useOrderInvalidation, getOrdersListQueryKey } from './orderMutationUtils';
+import { getTodayString } from '../../components/orders/OrdersTable/utils/dateFormatters';
 import {
     createBatch as createBatchFn,
     updateBatch as updateBatchFn,
@@ -103,7 +104,7 @@ export function useProductionBatchMutations(options: UseProductionBatchMutations
 
             // Generate a temp ID for optimistic update
             const tempBatchId = `temp-${Date.now()}`;
-            const batchDate = data.batchDate || new Date().toISOString().split('T')[0];
+            const batchDate = data.batchDate || getTodayString(); // Use local date to avoid timezone issues
 
             // Only apply optimistic update if we have a sourceOrderLineId
             if (data.sourceOrderLineId) {

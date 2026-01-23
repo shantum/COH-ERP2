@@ -4,6 +4,7 @@ import { useSearch, useNavigate, ClientOnly } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { sortBySizeOrder } from '../constants/sizes';
 import { AddToPlanModal } from '../components/production/AddToPlanModal';
+import { getTodayString, getLocalDateString } from '../components/orders/OrdersTable/utils/dateFormatters';
 import {
     useBatches,
     useCapacity,
@@ -68,7 +69,7 @@ interface BatchCustomization {
 interface ProductionBatch {
     id: string;
     batchCode: string | null;
-    batchDate: Date;
+    batchDate: string; // YYYY-MM-DD format to avoid timezone issues
     status: string;
     qtyPlanned: number;
     qtyCompleted: number;
@@ -196,9 +197,10 @@ const getDefaultDateRange = () => {
     startDate.setDate(startDate.getDate() - 14);
     const endDate = new Date(today);
     endDate.setDate(endDate.getDate() + 45);
+    // Use local date format to avoid timezone issues
     return {
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0]
+        startDate: getLocalDateString(startDate),
+        endDate: getLocalDateString(endDate)
     };
 };
 
@@ -404,9 +406,10 @@ function ProductionContent() {
         });
 
         // Format date as "19 Aug 2025"
-        const date = new Date(group.date);
+        // Parse YYYY-MM-DD string directly to avoid timezone issues
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const formattedDate = `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+        const [year, month, day] = group.date.split('-');
+        const formattedDate = `${parseInt(day, 10)} ${months[parseInt(month, 10) - 1]} ${year}`;
 
         // Format as numbered list
         const lines = [`*Production Plan ${formattedDate}*\n`];
@@ -483,13 +486,16 @@ function ProductionContent() {
         const groups: Record<string, ProductionBatch[]> = {};
 
         batches.forEach(batch => {
-            const dateKey = new Date(batch.batchDate).toISOString().split('T')[0];
+            // batchDate is now returned as YYYY-MM-DD string from server to avoid timezone issues
+            const dateKey = batch.batchDate;
             if (!groups[dateKey]) groups[dateKey] = [];
             groups[dateKey].push(batch);
         });
 
         // Sort dates descending (most recent first), but put future dates at top
-        const today = new Date().toISOString().split('T')[0];
+        // Use local date to match batch dates format
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         return Object.entries(groups)
             .sort(([a], [b]) => {
                 if (a >= today && b < today) return -1;
@@ -590,9 +596,12 @@ function ProductionContent() {
 
     const dateGroups = groupBatchesByDate(batches || []);
 
-    // Today's date for UI
-    const today = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    // Today's date for UI - use local date to match batch dates
+    const todayDate = new Date();
+    const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-${String(todayDate.getDate()).padStart(2, '0')}`;
+    const tomorrowDate = new Date(todayDate);
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrow = `${tomorrowDate.getFullYear()}-${String(tomorrowDate.getMonth() + 1).padStart(2, '0')}-${String(tomorrowDate.getDate()).padStart(2, '0')}`;
 
     // Expand today and tomorrow by default
     useEffect(() => {
@@ -708,14 +717,14 @@ function ProductionContent() {
                                                             <input
                                                                 type="date"
                                                                 className="text-xs border rounded px-2 py-1 w-32"
-                                                                defaultValue={new Date().toISOString().split('T')[0]}
-                                                                min={new Date().toISOString().split('T')[0]}
+                                                                defaultValue={getTodayString()}
+                                                                min={getTodayString()}
                                                                 id={`date-${item.orderLineId}`}
                                                             />
                                                             <button
                                                                 onClick={() => {
                                                                     const dateInput = document.getElementById(`date-${item.orderLineId}`) as HTMLInputElement;
-                                                                    const selectedDate = dateInput?.value || new Date().toISOString().split('T')[0];
+                                                                    const selectedDate = dateInput?.value || getTodayString();
                                                                     if (lockedDates?.includes(selectedDate)) {
                                                                         alert('This date is locked. Please select another date.');
                                                                         return;

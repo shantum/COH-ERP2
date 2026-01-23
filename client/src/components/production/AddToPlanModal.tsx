@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useServerFn } from '@tanstack/react-start';
 import { getProductsList } from '@/server/functions/products';
 import { createBatch } from '@/server/functions/productionMutations';
+import { getTodayString } from '@/components/orders/OrdersTable/utils/dateFormatters';
 import {
     Dialog,
     DialogContent,
@@ -30,7 +31,7 @@ export function AddToPlanModal({
     lockedDates = [],
 }: AddToPlanModalProps) {
     const queryClient = useQueryClient();
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayString(); // Use local date to avoid timezone issues
 
     // State
     const [activeTab, setActiveTab] = useState<'existing' | 'sample'>('existing');
