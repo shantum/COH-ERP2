@@ -143,25 +143,33 @@ interface CsvRow {
     rowNumber: number;
 }
 
-interface ImportPreview {
-    rows: CsvRow[];
-    skuColumnIndex: number;
-    styleCodeColumnIndex: number;
+interface RawCsvData {
     headers: string[];
+    rawRows: string[][];
 }
 
-function parseCSV(content: string): { headers: string[]; rows: string[][] } {
+function parseCSV(content: string): RawCsvData {
     const lines = content.split('\n');
     const headers = lines[0]?.split(',').map(h => h.trim()) || [];
-    const rows: string[][] = [];
+    const rawRows: string[][] = [];
 
     for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        rows.push(line.split(',').map(c => c.trim()));
+        rawRows.push(line.split(',').map(c => c.trim()));
     }
 
-    return { headers, rows };
+    return { headers, rawRows };
+}
+
+function extractRows(rawRows: string[][], skuIdx: number, styleCodeIdx: number): CsvRow[] {
+    return rawRows
+        .map((row, idx) => ({
+            barcode: row[skuIdx] || '',
+            styleCode: row[styleCodeIdx] || '',
+            rowNumber: idx + 2, // +2 for 1-indexed and header row
+        }))
+        .filter(r => r.barcode && r.styleCode);
 }
 
 export function StyleCodesTable() {
@@ -170,9 +178,15 @@ export function StyleCodesTable() {
 
     // Import dialog state
     const [isImportOpen, setIsImportOpen] = useState(false);
-    const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+    const [rawCsvData, setRawCsvData] = useState<RawCsvData | null>(null);
     const [skuColIndex, setSkuColIndex] = useState(0);
     const [styleCodeColIndex, setStyleCodeColIndex] = useState(5);
+
+    // Derived: parsed rows based on current column selection
+    const parsedRows = useMemo(() => {
+        if (!rawCsvData) return [];
+        return extractRows(rawCsvData.rawRows, skuColIndex, styleCodeColIndex);
+    }, [rawCsvData, skuColIndex, styleCodeColIndex]);
 
     // Server Function hooks
     const getStyleCodesFn = useServerFn(getStyleCodes);
@@ -203,7 +217,7 @@ export function StyleCodesTable() {
             queryClient.invalidateQueries({ queryKey: ['styleCodes'] });
             queryClient.invalidateQueries({ queryKey: ['productsTree'] });
             setIsImportOpen(false);
-            setImportPreview(null);
+            setRawCsvData(null);
             if (result.success) {
                 alert(`Import complete!\n\nUpdated: ${result.updated}\nSkipped (not found): ${result.notFound}\nSkipped (duplicates): ${result.duplicates}\nErrors: ${result.errors}`);
             }
@@ -221,14 +235,14 @@ export function StyleCodesTable() {
         const reader = new FileReader();
         reader.onload = (event) => {
             const content = event.target?.result as string;
-            const { headers, rows } = parseCSV(content);
+            const csvData = parseCSV(content);
 
             // Auto-detect columns
             let skuIdx = 0;
             let styleCodeIdx = 5;
 
             // Try to find by header name
-            headers.forEach((h, i) => {
+            csvData.headers.forEach((h, i) => {
                 const lower = h.toLowerCase();
                 if (lower.includes('barcode') || lower.includes('sku')) skuIdx = i;
                 if (lower.includes('style') && lower.includes('code')) styleCodeIdx = i;
@@ -236,22 +250,7 @@ export function StyleCodesTable() {
 
             setSkuColIndex(skuIdx);
             setStyleCodeColIndex(styleCodeIdx);
-
-            // Parse rows with selected columns
-            const parsedRows: CsvRow[] = rows
-                .map((row, idx) => ({
-                    barcode: row[skuIdx] || '',
-                    styleCode: row[styleCodeIdx] || '',
-                    rowNumber: idx + 2, // +2 for 1-indexed and header row
-                }))
-                .filter(r => r.barcode && r.styleCode);
-
-            setImportPreview({
-                rows: parsedRows,
-                skuColumnIndex: skuIdx,
-                styleCodeColumnIndex: styleCodeIdx,
-                headers,
-            });
+            setRawCsvData(csvData);
             setIsImportOpen(true);
         };
         reader.readAsText(file);
@@ -263,12 +262,12 @@ export function StyleCodesTable() {
     }, []);
 
     const handleImport = useCallback(() => {
-        if (!importPreview) return;
-        importMutation.mutate(importPreview.rows.map(r => ({
+        if (parsedRows.length === 0) return;
+        importMutation.mutate(parsedRows.map(r => ({
             barcode: r.barcode,
             styleCode: r.styleCode,
         })));
-    }, [importPreview, importMutation]);
+    }, [parsedRows, importMutation]);
 
     const items: StyleCodeItem[] = data?.items || [];
 
@@ -282,13 +281,13 @@ export function StyleCodesTable() {
 
     // Unique style codes in preview
     const previewStats = useMemo(() => {
-        if (!importPreview) return null;
-        const uniqueCodes = new Set(importPreview.rows.map(r => r.styleCode));
+        if (parsedRows.length === 0) return null;
+        const uniqueCodes = new Set(parsedRows.map(r => r.styleCode));
         return {
-            totalRows: importPreview.rows.length,
+            totalRows: parsedRows.length,
             uniqueCodes: uniqueCodes.size,
         };
-    }, [importPreview]);
+    }, [parsedRows]);
 
     // Column definitions
     const columns = useMemo<ColumnDef<StyleCodeItem>[]>(() => [
@@ -415,7 +414,7 @@ export function StyleCodesTable() {
                         </DialogDescription>
                     </DialogHeader>
 
-                    {importPreview && (
+                    {rawCsvData && (
                         <div className="space-y-4">
                             {/* Column Selection */}
                             <div className="grid grid-cols-2 gap-4">
@@ -423,17 +422,10 @@ export function StyleCodesTable() {
                                     <label className="text-sm font-medium">SKU/Barcode Column</label>
                                     <select
                                         value={skuColIndex}
-                                        onChange={(e) => {
-                                            const idx = parseInt(e.target.value);
-                                            setSkuColIndex(idx);
-                                            // Re-parse with new column
-                                            if (importPreview) {
-                                                // This would need to re-read the file, simplified for now
-                                            }
-                                        }}
+                                        onChange={(e) => setSkuColIndex(parseInt(e.target.value))}
                                         className="w-full mt-1 h-9 rounded-md border px-3 text-sm"
                                     >
-                                        {importPreview.headers.map((h, i) => (
+                                        {rawCsvData.headers.map((h, i) => (
                                             <option key={i} value={i}>
                                                 {h || `Column ${i + 1}`}
                                             </option>
@@ -444,13 +436,10 @@ export function StyleCodesTable() {
                                     <label className="text-sm font-medium">Style Code Column</label>
                                     <select
                                         value={styleCodeColIndex}
-                                        onChange={(e) => {
-                                            const idx = parseInt(e.target.value);
-                                            setStyleCodeColIndex(idx);
-                                        }}
+                                        onChange={(e) => setStyleCodeColIndex(parseInt(e.target.value))}
                                         className="w-full mt-1 h-9 rounded-md border px-3 text-sm"
                                     >
-                                        {importPreview.headers.map((h, i) => (
+                                        {rawCsvData.headers.map((h, i) => (
                                             <option key={i} value={i}>
                                                 {h || `Column ${i + 1}`}
                                             </option>
@@ -485,17 +474,17 @@ export function StyleCodesTable() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {importPreview.rows.slice(0, 20).map((row, i) => (
+                                        {parsedRows.slice(0, 20).map((row, i) => (
                                             <tr key={i} className="border-t">
                                                 <td className="p-2 text-muted-foreground">{row.rowNumber}</td>
                                                 <td className="p-2 font-mono">{row.barcode}</td>
                                                 <td className="p-2 font-mono">{row.styleCode}</td>
                                             </tr>
                                         ))}
-                                        {importPreview.rows.length > 20 && (
+                                        {parsedRows.length > 20 && (
                                             <tr className="border-t bg-gray-50">
                                                 <td colSpan={3} className="p-2 text-center text-muted-foreground">
-                                                    ... and {importPreview.rows.length - 20} more rows
+                                                    ... and {parsedRows.length - 20} more rows
                                                 </td>
                                             </tr>
                                         )}
@@ -520,9 +509,9 @@ export function StyleCodesTable() {
                         </Button>
                         <Button
                             onClick={handleImport}
-                            disabled={importMutation.isPending || !importPreview?.rows.length}
+                            disabled={importMutation.isPending || parsedRows.length === 0}
                         >
-                            {importMutation.isPending ? 'Importing...' : `Import ${importPreview?.rows.length || 0} Rows`}
+                            {importMutation.isPending ? 'Importing...' : `Import ${parsedRows.length} Rows`}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
