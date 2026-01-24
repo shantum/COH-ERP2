@@ -66,6 +66,7 @@ export async function listInventorySkusKysely(
             'Sku.skuCode',
             'Sku.size',
             'Sku.mrp',
+            'Sku.currentBalance',
             'Sku.targetStockQty',
             'Sku.isCustomSku',
             'Variation.id as variationId',
@@ -113,6 +114,7 @@ export async function listInventorySkusKysely(
         skuCode: r.skuCode,
         size: r.size,
         mrp: r.mrp,
+        currentBalance: r.currentBalance,
         targetStockQty: r.targetStockQty,
         isCustomSku: r.isCustomSku,
         variationId: r.variationId,
@@ -140,12 +142,44 @@ export async function listInventorySkusKysely(
 // ============================================
 
 /**
- * Calculate inventory balance for a single SKU
+ * Get inventory balance for a single SKU
  *
- * Uses Prisma groupBy for efficient aggregation.
- * Returns inward/outward/current balance.
+ * Reads directly from Sku.currentBalance column (maintained by DB trigger).
+ * O(1) lookup - no aggregation needed.
  */
 export async function calculateInventoryBalance(
+    prisma: PrismaInstance | PrismaTransaction,
+    skuId: string,
+    options: { allowNegative?: boolean } = {}
+): Promise<InventoryBalanceRow & { availableBalance: number; hasDataIntegrityIssue: boolean }> {
+    // Fast path: read materialized balance from Sku table
+    const sku = await prisma.sku.findUnique({
+        where: { id: skuId },
+        select: { currentBalance: true },
+    });
+
+    const currentBalance = sku?.currentBalance ?? 0;
+    const hasDataIntegrityIssue = !options.allowNegative && currentBalance < 0;
+
+    // Note: totalInward/totalOutward are not tracked in materialized column
+    // If needed, use calculateInventoryBalanceWithTotals() instead
+    return {
+        totalInward: 0, // Not tracked - use calculateInventoryBalanceWithTotals if needed
+        totalOutward: 0, // Not tracked - use calculateInventoryBalanceWithTotals if needed
+        currentBalance,
+        availableBalance: currentBalance,
+        hasDataIntegrityIssue,
+    };
+}
+
+/**
+ * Calculate inventory balance with inward/outward totals
+ *
+ * Uses Prisma groupBy for full aggregation.
+ * Use this when you need to display totalInward/totalOutward.
+ * For just currentBalance, use calculateInventoryBalance() instead (faster).
+ */
+export async function calculateInventoryBalanceWithTotals(
     prisma: PrismaInstance | PrismaTransaction,
     skuId: string,
     options: { allowNegative?: boolean } = {}
@@ -177,12 +211,44 @@ export async function calculateInventoryBalance(
 }
 
 /**
- * Calculate inventory balances for all SKUs efficiently
+ * Get inventory balances for multiple SKUs efficiently
  *
- * Uses single aggregation query - O(1) instead of O(N).
- * Returns Map of skuId → balance for fast lookup.
+ * Reads directly from Sku.currentBalance column (maintained by DB trigger).
+ * Single query, O(1) per SKU.
  */
 export async function calculateAllInventoryBalances(
+    prisma: PrismaInstance | PrismaTransaction,
+    skuIds: string[] | null = null
+): Promise<Map<string, InventoryBalanceWithSkuId & { availableBalance: number }>> {
+    // Fast path: read materialized balances from Sku table
+    const skus = await prisma.sku.findMany({
+        where: skuIds ? { id: { in: skuIds } } : undefined,
+        select: { id: true, currentBalance: true },
+    });
+
+    const balanceMap = new Map<string, InventoryBalanceWithSkuId & { availableBalance: number }>();
+
+    for (const sku of skus) {
+        balanceMap.set(sku.id, {
+            skuId: sku.id,
+            totalInward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
+            totalOutward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
+            currentBalance: sku.currentBalance,
+            availableBalance: sku.currentBalance,
+        });
+    }
+
+    return balanceMap;
+}
+
+/**
+ * Calculate inventory balances with inward/outward totals for multiple SKUs
+ *
+ * Uses aggregation query for full totals.
+ * Use this when you need to display totalInward/totalOutward.
+ * For just currentBalance, use calculateAllInventoryBalances() instead (faster).
+ */
+export async function calculateAllInventoryBalancesWithTotals(
     prisma: PrismaInstance | PrismaTransaction,
     skuIds: string[] | null = null
 ): Promise<Map<string, InventoryBalanceWithSkuId & { availableBalance: number }>> {

@@ -64,6 +64,10 @@ const { data } = useQuery({
 | # | Rule |
 |---|------|
 | 38 | Balance: use `txnType` column, NEVER `qty > 0`. OUTWARD stores POSITIVE qty with `txnType='outward'` |
+| 44 | **Materialized Balance**: `Sku.currentBalance` and `FabricColour.currentBalance` are maintained by DB triggers. Read directly for O(1) lookups. |
+| 45 | Triggers: `update_sku_balance()` for SKU, `update_fabric_colour_balance()` for fabric. Auto-update on INSERT/DELETE/UPDATE to transaction tables. |
+| 46 | `currentBalance` is PROTECTED: Guard triggers block direct UPDATEs. Only create transactions (InventoryTransaction / FabricColourTransaction). |
+| 47 | **Legacy Fabric system**: `Fabric` + `FabricTransaction` are deprecated. Use `FabricColour` + `FabricColourTransaction` for all new features. |
 
 ### TypeScript & Validation
 | # | Rule |
@@ -195,6 +199,8 @@ cancelled  cancelled  cancelled cancelled > pending (uncancel)
 |-------|-----|----------|
 | `inventoryBalanceCache` | 5 min | `@coh/shared/services/inventory` |
 | `customerStatsCache` | 2 min | `server/services/customerStatsCache.ts` |
+
+**Note**: `Sku.currentBalance` is materialized via DB trigger, so balance lookups are O(1). The cache reduces DB round trips but is no longer critical for performance.
 
 ```typescript
 import { inventoryBalanceCache } from '@coh/shared/services/inventory';
