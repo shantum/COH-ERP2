@@ -547,12 +547,12 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
             try {
                 const { rows } = data;
 
-                // Get all barcodes to look up
-                const barcodes = rows.map(r => r.barcode);
+                // Get unique barcodes to look up
+                const uniqueBarcodes = [...new Set(rows.map(r => r.barcode))];
 
                 // Find matching SKUs with their Product IDs
                 const skus = await prisma.sku.findMany({
-                    where: { skuCode: { in: barcodes } },
+                    where: { skuCode: { in: uniqueBarcodes } },
                     select: {
                         skuCode: true,
                         variation: {
@@ -580,31 +580,35 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                     });
                 }
 
+                // Track unique barcodes not found
+                const barcodesNotFound = new Set<string>();
+
                 // Build product -> style code mapping (deduplicate by product)
+                // Multiple products CAN share the same style code
                 const productUpdates = new Map<string, string>();
-                let notFound = 0;
-                let skippedExisting = 0;
+                const productsAlreadySet = new Set<string>();
 
                 for (const row of rows) {
                     const product = barcodeToProduct.get(row.barcode);
                     if (!product) {
-                        notFound++;
+                        barcodesNotFound.add(row.barcode);
                         continue;
                     }
 
-                    // Skip if product already has a style code
+                    // Skip if product already has a style code in DB
                     if (product.currentStyleCode) {
-                        skippedExisting++;
+                        productsAlreadySet.add(product.id);
                         continue;
                     }
 
-                    // Only update if not already queued (first occurrence wins)
+                    // Queue for update (first occurrence wins for this product)
+                    // Note: Multiple different products can have the same style code
                     if (!productUpdates.has(product.id)) {
                         productUpdates.set(product.id, row.styleCode);
                     }
                 }
 
-                // Perform updates (style codes can be shared, no duplicate checking needed)
+                // Perform updates (style codes can be shared across products)
                 let updated = 0;
                 let errors = 0;
 
@@ -615,7 +619,8 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                             data: { styleCode },
                         });
                         updated++;
-                    } catch {
+                    } catch (err) {
+                        console.error(`Failed to update product ${productId}:`, err);
                         errors++;
                     }
                 }
@@ -623,8 +628,8 @@ export const importStyleCodes = createServerFn({ method: 'POST' })
                 return {
                     success: true as const,
                     updated,
-                    notFound,
-                    duplicates: skippedExisting, // Now just counts already-set products
+                    notFound: barcodesNotFound.size,
+                    duplicates: productsAlreadySet.size,
                     errors,
                 };
             } finally {
