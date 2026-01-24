@@ -800,47 +800,35 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                 dateFilter = { gte: getISTMidnightAsUTC(-days) };
             }
 
-            // Get SKUs with fabricColour to calculate top materials
-            // Note: Using SKU table to get all sales data
-            const skus = await prisma.sku.findMany({
+            // Get order lines in the date range (by order date) with fabric colour info
+            // Include all non-cancelled lines to see what was ordered
+            const orderLines = await prisma.orderLine.findMany({
                 where: {
-                    variation: {
-                        fabricColourId: { not: null },
+                    lineStatus: { not: 'cancelled' },
+                    order: {
+                        orderDate: dateFilter,
+                    },
+                    sku: {
+                        variation: {
+                            fabricColourId: { not: null },
+                        },
                     },
                 },
                 include: {
-                    variation: {
+                    sku: {
                         include: {
-                            fabricColour: {
+                            variation: {
                                 include: {
-                                    fabric: {
-                                        include: { material: true },
+                                    fabricColour: {
+                                        include: {
+                                            fabric: {
+                                                include: { material: true },
+                                            },
+                                        },
                                     },
+                                    product: true,
                                 },
                             },
-                            product: true,
-                        },
-                    },
-                    orderLines: {
-                        where: {
-                            order: {
-                                orderDate: dateFilter,
-                                status: { not: 'cancelled' },
-                            },
-                            OR: [
-                                { trackingStatus: null },
-                                {
-                                    trackingStatus: {
-                                        notIn: ['rto_initiated', 'rto_in_transit', 'rto_delivered'],
-                                    },
-                                },
-                            ],
-                        },
-                        select: {
-                            id: true,
-                            orderId: true,
-                            qty: true,
-                            unitPrice: true,
                         },
                     },
                 },
@@ -863,9 +851,9 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const sku of skus) {
-                    const fabricColour = sku.variation?.fabricColour;
-                    if (!fabricColour || !sku.orderLines || sku.orderLines.length === 0) continue;
+                for (const line of orderLines) {
+                    const fabricColour = line.sku.variation?.fabricColour;
+                    if (!fabricColour) continue;
 
                     const key = fabricColour.id;
                     if (!colourStats[key]) {
@@ -882,13 +870,11 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                         };
                     }
 
-                    for (const line of sku.orderLines) {
-                        colourStats[key].units += line.qty;
-                        colourStats[key].revenue += line.qty * Number(line.unitPrice);
-                        colourStats[key].orderCount.add(line.orderId);
-                    }
+                    colourStats[key].units += line.qty;
+                    colourStats[key].revenue += line.qty * Number(line.unitPrice);
+                    colourStats[key].orderCount.add(line.orderId);
 
-                    const productId = sku.variation?.product?.id;
+                    const productId = line.sku.variation?.product?.id;
                     if (productId) {
                         colourStats[key].productCount.add(productId);
                     }
@@ -931,9 +917,9 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const sku of skus) {
-                    const fabricColour = sku.variation?.fabricColour;
-                    if (!fabricColour || !sku.orderLines || sku.orderLines.length === 0) continue;
+                for (const line of orderLines) {
+                    const fabricColour = line.sku.variation?.fabricColour;
+                    if (!fabricColour) continue;
 
                     const fabric = fabricColour.fabric;
                     const key = fabric.id;
@@ -950,13 +936,11 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                         };
                     }
 
-                    for (const line of sku.orderLines) {
-                        fabricStats[key].units += line.qty;
-                        fabricStats[key].revenue += line.qty * Number(line.unitPrice);
-                        fabricStats[key].orderCount.add(line.orderId);
-                    }
+                    fabricStats[key].units += line.qty;
+                    fabricStats[key].revenue += line.qty * Number(line.unitPrice);
+                    fabricStats[key].orderCount.add(line.orderId);
 
-                    const productId = sku.variation?.product?.id;
+                    const productId = line.sku.variation?.product?.id;
                     if (productId) {
                         fabricStats[key].productCount.add(productId);
                     }
@@ -968,11 +952,8 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                             revenue: 0,
                         };
                     }
-
-                    for (const line of sku.orderLines) {
-                        fabricStats[key].colours[fabricColour.id].revenue +=
-                            line.qty * Number(line.unitPrice);
-                    }
+                    fabricStats[key].colours[fabricColour.id].revenue +=
+                        line.qty * Number(line.unitPrice);
                 }
 
                 const result = Object.values(fabricStats)
@@ -1016,9 +997,9 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                     }
                 > = {};
 
-                for (const sku of skus) {
-                    const fabricColour = sku.variation?.fabricColour;
-                    if (!fabricColour?.fabric.material || !sku.orderLines || sku.orderLines.length === 0) continue;
+                for (const line of orderLines) {
+                    const fabricColour = line.sku.variation?.fabricColour;
+                    if (!fabricColour?.fabric.material) continue;
 
                     const material = fabricColour.fabric.material;
                     const key = material.id;
@@ -1034,13 +1015,11 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                         };
                     }
 
-                    for (const line of sku.orderLines) {
-                        materialStats[key].units += line.qty;
-                        materialStats[key].revenue += line.qty * Number(line.unitPrice);
-                        materialStats[key].orderCount.add(line.orderId);
-                    }
+                    materialStats[key].units += line.qty;
+                    materialStats[key].revenue += line.qty * Number(line.unitPrice);
+                    materialStats[key].orderCount.add(line.orderId);
 
-                    const productId = sku.variation?.product?.id;
+                    const productId = line.sku.variation?.product?.id;
                     if (productId) {
                         materialStats[key].productCount.add(productId);
                     }
@@ -1052,11 +1031,8 @@ export const getTopMaterials = createServerFn({ method: 'GET' })
                             revenue: 0,
                         };
                     }
-
-                    for (const line of sku.orderLines) {
-                        materialStats[key].colours[fabricColour.id].revenue +=
-                            line.qty * Number(line.unitPrice);
-                    }
+                    materialStats[key].colours[fabricColour.id].revenue +=
+                        line.qty * Number(line.unitPrice);
                 }
 
                 const result = Object.values(materialStats)

@@ -423,10 +423,11 @@ export const getTopProductsForDashboard = createServerFn({ method: 'GET' })
             dateFilter = { gte: getISTMidnightAsUTC(-days) };
         }
 
-        // Get order lines with shipped status within the time period
+        // Get order lines within the time period (by order date)
+        // Include all non-cancelled lines to see what was ordered, not just shipped
         const orderLines = await prisma.orderLine.findMany({
             where: {
-                lineStatus: 'shipped',
+                lineStatus: { not: 'cancelled' },
                 order: {
                     orderDate: dateFilter,
                 },
@@ -615,23 +616,25 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
                 dateFilter = { gte: getISTMidnightAsUTC(0) };
         }
 
-        // Get orders with customer info and order lines
-        const orders = await prisma.order.findMany({
+        // Get order lines within the time period (by order date)
+        // Include all non-cancelled lines to see what was ordered
+        const orderLines = await prisma.orderLine.findMany({
             where: {
-                orderDate: dateFilter,
-                status: { notIn: ['cancelled'] },
+                lineStatus: { not: 'cancelled' },
+                order: {
+                    orderDate: dateFilter,
+                },
             },
             include: {
-                customer: true,
-                orderLines: {
-                    where: { lineStatus: 'shipped' },
+                order: {
                     include: {
-                        sku: {
-                            include: {
-                                variation: {
-                                    include: { product: true },
-                                },
-                            },
+                        customer: true,
+                    },
+                },
+                sku: {
+                    include: {
+                        variation: {
+                            include: { product: true },
                         },
                     },
                 },
@@ -649,15 +652,15 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
                 tier: string;
                 units: number;
                 revenue: number;
-                orderCount: number;
+                orderIds: Set<string>;
                 products: Map<string, { name: string; units: number }>;
             }
         >();
 
-        for (const order of orders) {
-            if (!order.customer) continue;
+        for (const line of orderLines) {
+            const customer = line.order.customer;
+            if (!customer) continue;
 
-            const customer = order.customer;
             const customerId = customer.id;
 
             if (!customerMap.has(customerId)) {
@@ -669,25 +672,22 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
                     tier: customer.tier || 'bronze',
                     units: 0,
                     revenue: 0,
-                    orderCount: 0,
+                    orderIds: new Set(),
                     products: new Map(),
                 });
             }
 
             const stats = customerMap.get(customerId)!;
-            stats.orderCount++;
+            stats.orderIds.add(line.orderId);
+            stats.units += line.qty;
+            stats.revenue += line.unitPrice * line.qty;
 
-            for (const line of order.orderLines) {
-                stats.units += line.qty;
-                stats.revenue += line.unitPrice * line.qty;
-
-                // Track product purchases
-                const productName = line.sku.variation.product.name;
-                if (!stats.products.has(productName)) {
-                    stats.products.set(productName, { name: productName, units: 0 });
-                }
-                stats.products.get(productName)!.units += line.qty;
+            // Track product purchases
+            const productName = line.sku.variation.product.name;
+            if (!stats.products.has(productName)) {
+                stats.products.set(productName, { name: productName, units: 0 });
             }
+            stats.products.get(productName)!.units += line.qty;
         }
 
         // Convert to array and format
@@ -700,7 +700,7 @@ export const getTopCustomersForDashboard = createServerFn({ method: 'GET' })
                 tier: c.tier,
                 units: c.units,
                 revenue: Math.round(c.revenue * 100) / 100,
-                orderCount: c.orderCount,
+                orderCount: c.orderIds.size,
                 topProducts: Array.from(c.products.values())
                     .sort((a, b) => b.units - a.units)
                     .slice(0, 3),
