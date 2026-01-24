@@ -183,10 +183,10 @@ export const getTopProducts = createServerFn({ method: 'GET' })
               }
             : {};
 
-        // Get order lines with shipped status
+        // Get all non-cancelled order lines
         const orderLines = await prisma.orderLine.findMany({
             where: {
-                lineStatus: 'shipped',
+                lineStatus: { not: 'cancelled' },
                 order: dateFilter,
             },
             include: {
@@ -301,7 +301,7 @@ export const getTopCustomers = createServerFn({ method: 'GET' })
                   }
                 : {};
 
-        // Get orders with customer info
+        // Get orders with customer info (all non-cancelled lines)
         const orders = await prisma.order.findMany({
             where: {
                 ...dateFilter,
@@ -313,7 +313,7 @@ export const getTopCustomers = createServerFn({ method: 'GET' })
                 customer: true,
                 orderLines: {
                     where: {
-                        lineStatus: 'shipped',
+                        lineStatus: { not: 'cancelled' },
                     },
                 },
             },
@@ -773,7 +773,7 @@ export const getCustomerOverviewStats = createServerFn({ method: 'GET' })
                         },
                         orderLines: {
                             where: {
-                                lineStatus: 'shipped',
+                                lineStatus: { not: 'cancelled' },
                             },
                         },
                     },
@@ -1035,7 +1035,7 @@ const getSalesAnalyticsInputSchema = z.object({
     ]).optional().default('summary'),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
-    orderStatus: z.enum(['all', 'shipped', 'delivered']).optional().default('shipped'),
+    orderStatus: z.enum(['all', 'shipped', 'delivered']).optional().default('all'),
 });
 
 export type GetSalesAnalyticsInput = z.infer<typeof getSalesAnalyticsInputSchema>;
@@ -1105,11 +1105,12 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
         const start = startDate ? new Date(startDate) : getISTMidnightAsUTC(-30);
 
         // Build line status filter based on orderStatus
+        // 'all' = all non-cancelled, 'shipped' = shipped + delivered, 'delivered' = delivered only
         const lineStatusFilter = orderStatus === 'delivered'
-            ? ['delivered']
+            ? { in: ['delivered'] }
             : orderStatus === 'shipped'
-                ? ['shipped', 'delivered']
-                : undefined;
+                ? { in: ['shipped', 'delivered'] }
+                : { not: 'cancelled' };  // 'all' - include all non-cancelled
 
         // Fetch order lines
         const orderLines = await prisma.orderLine.findMany({
@@ -1121,7 +1122,7 @@ export const getSalesAnalytics = createServerFn({ method: 'GET' })
                     },
                     status: { notIn: ['cancelled'] },
                 },
-                ...(lineStatusFilter ? { lineStatus: { in: lineStatusFilter } } : {}),
+                lineStatus: lineStatusFilter,
             },
             include: {
                 order: {
