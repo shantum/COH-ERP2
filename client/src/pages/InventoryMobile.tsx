@@ -409,27 +409,33 @@ const ProductSection = memo(function ProductSection({
     const previewColors = product.colors.slice(0, 4);
     const remainingCount = product.colors.length - previewColors.length;
 
+    // Count active colors on Shopify
+    const activeCount = product.colors.filter(c => c.sizes[0]?.status === 'active').length;
+
     return (
         <div className="mb-3">
-            {/* Product header - white theme with color stack on right */}
+            {/* Product header - white theme with thumbnails on second line */}
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className={cn(
-                    'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all',
+                    'w-full px-4 py-3 rounded-xl transition-all',
                     'bg-white border border-zinc-200',
                     isExpanded && 'rounded-b-none border-b-0'
                 )}
             >
-                {/* Name */}
-                <div className="flex-1 text-left min-w-0">
-                    <h2 className="font-semibold text-sm text-zinc-900 truncate">{product.productName}</h2>
-                    <p className="text-xs text-zinc-400">
-                        {product.colors.length} color{product.colors.length !== 1 ? 's' : ''}
-                    </p>
+                {/* First row: Title + Chevron */}
+                <div className="flex items-center gap-2">
+                    <h2 className="flex-1 font-semibold text-sm text-zinc-900 text-left">
+                        {product.productName}
+                    </h2>
+                    <ChevronDown className={cn(
+                        'w-5 h-5 text-zinc-400 transition-transform flex-shrink-0',
+                        isExpanded && 'rotate-180'
+                    )} />
                 </div>
 
-                {/* Color thumbnails stack - rectangles */}
-                <div className="flex items-center flex-shrink-0">
+                {/* Second row: Color thumbnails + count */}
+                <div className="flex items-center gap-2 mt-2">
                     <div className="flex -space-x-1.5">
                         {previewColors.map((color, idx) => (
                             <div
@@ -454,13 +460,10 @@ const ProductSection = memo(function ProductSection({
                             </div>
                         )}
                     </div>
+                    <p className="text-xs text-zinc-400">
+                        {product.colors.length} colour{product.colors.length !== 1 ? 's' : ''} | <span className="text-emerald-600">{activeCount} active</span>
+                    </p>
                 </div>
-
-                {/* Chevron */}
-                <ChevronDown className={cn(
-                    'w-5 h-5 text-zinc-400 transition-transform',
-                    isExpanded && 'rotate-180'
-                )} />
             </button>
 
             {/* Color cards */}
