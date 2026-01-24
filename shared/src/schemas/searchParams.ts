@@ -63,14 +63,14 @@ export type OrdersSearchParams = z.infer<typeof OrdersSearchParams>;
 
 /**
  * Products page search params
- * Supports 8 tabs: products, materials, trims, services, bom, consumption, import, fabricMapping
+ * Supports 9 tabs: products, materials, trims, services, bom, consumption, import, fabricMapping, styleCodes
  *
  * @example
  * /products?tab=bom&id=123e4567-e89b-12d3-a456-426614174000&type=product
  */
 export const ProductsSearchParams = z.object({
     /** Active tab in products page */
-    tab: z.enum(['products', 'materials', 'trims', 'services', 'bom', 'consumption', 'import', 'fabricMapping']).catch('products'),
+    tab: z.enum(['products', 'materials', 'trims', 'services', 'bom', 'consumption', 'import', 'fabricMapping', 'styleCodes']).catch('products'),
     /** View mode for products tab */
     view: z.enum(['tree', 'flat']).catch('tree'),
     /** Selected item ID for master-detail views */
