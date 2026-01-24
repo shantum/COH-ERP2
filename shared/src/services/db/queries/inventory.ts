@@ -54,6 +54,7 @@ export async function listInventorySkusKysely(
         .innerJoin('Variation', 'Variation.id', 'Sku.variationId')
         .innerJoin('Product', 'Product.id', 'Variation.productId')
         .leftJoin('Fabric', 'Fabric.id', 'Variation.fabricId')
+        .leftJoin('FabricColour', 'FabricColour.id', 'Variation.fabricColourId')
         .leftJoin('ShopifyInventoryCache', 'ShopifyInventoryCache.skuId', 'Sku.id')
         // Use Variation.shopifySourceProductId for status lookup (more accurate for multi-color products)
         // Falls back to Product.shopifyProductId if variation source is not set
@@ -78,7 +79,10 @@ export async function listInventorySkusKysely(
             'Product.imageUrl as productImageUrl',
             'Variation.fabricId',
             'Fabric.name as fabricName',
+            'Fabric.unit as fabricUnit',
             'Variation.fabricColourId',
+            'FabricColour.colourName as fabricColourName',
+            'FabricColour.colourHex as fabricColourHex',
             'ShopifyInventoryCache.availableQty as shopifyAvailableQty',
             // Extract status from ShopifyProductCache.rawData JSON
             sql<string | null>`"ShopifyProductCache"."rawData"::json->>'status'`.as('shopifyProductStatus'),
@@ -122,7 +126,10 @@ export async function listInventorySkusKysely(
         productImageUrl: r.productImageUrl,
         fabricId: r.fabricId,
         fabricName: r.fabricName,
+        fabricUnit: r.fabricUnit,
         fabricColourId: r.fabricColourId,
+        fabricColourName: r.fabricColourName,
+        fabricColourHex: r.fabricColourHex,
         shopifyAvailableQty: r.shopifyAvailableQty,
         shopifyProductStatus: r.shopifyProductStatus as 'active' | 'archived' | 'draft' | null,
     }));

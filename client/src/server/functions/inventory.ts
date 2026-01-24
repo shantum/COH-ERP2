@@ -119,7 +119,11 @@ export interface InventoryAllItem {
     mrp: number | null;
     shopifyQty: number | null;
     isCustomSku: boolean;
+    fabricName: string | null;
+    fabricUnit: string | null;
     fabricColourId: string | null;
+    fabricColourName: string | null;
+    fabricColourHex: string | null;
     fabricColourBalance: number | null;
     shopifyProductStatus: 'active' | 'archived' | 'draft' | null;
 }
@@ -445,7 +449,11 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
                 mrp: sku.mrp,
                 shopifyQty: sku.shopifyAvailableQty ?? null,
                 isCustomSku: sku.isCustomSku || false,
+                fabricName: sku.fabricName ?? null,
+                fabricUnit: sku.fabricUnit ?? null,
                 fabricColourId: sku.fabricColourId ?? null,
+                fabricColourName: sku.fabricColourName ?? null,
+                fabricColourHex: sku.fabricColourHex ?? null,
                 fabricColourBalance,
                 shopifyProductStatus: sku.shopifyProductStatus ?? null,
             };
