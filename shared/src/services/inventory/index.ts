@@ -8,4 +8,7 @@ export {
     inventoryBalanceCache,
     InventoryBalanceCache,
     type CachedBalance,
+    fabricColourBalanceCache,
+    FabricColourBalanceCache,
+    type CachedFabricColourBalance,
 } from './balanceCache.js';

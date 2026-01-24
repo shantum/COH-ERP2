@@ -296,6 +296,10 @@ export const createFabricColourTransaction = createServerFn({ method: 'POST' })
                 },
             });
 
+            // Invalidate fabric colour balance cache
+            const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+            fabricColourBalanceCache.invalidate([data.fabricColourId]);
+
             return {
                 success: true,
                 transaction,
@@ -348,6 +352,10 @@ export const deleteFabricColourTransaction = createServerFn({ method: 'POST' })
                 where: { id: data.txnId },
             });
 
+            // Invalidate fabric colour balance cache
+            const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+            fabricColourBalanceCache.invalidate([transaction.fabricColourId]);
+
             return {
                 success: true,
                 id: data.txnId,
@@ -399,6 +407,12 @@ export const updateFabricColourTransaction = createServerFn({ method: 'POST' })
                     supplier: { select: { id: true, name: true } },
                 },
             });
+
+            // Invalidate fabric colour balance cache (only if qty changed)
+            if (data.qty !== undefined) {
+                const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+                fabricColourBalanceCache.invalidate([transaction.fabricColourId]);
+            }
 
             return {
                 success: true,
@@ -610,6 +624,13 @@ export const submitFabricColourReconciliation = createServerFn({ method: 'POST' 
                     data: { status: 'submitted' },
                 });
             });
+
+            // Invalidate fabric colour balance cache for all affected colours
+            if (itemsWithVariance.length > 0) {
+                const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+                const affectedIds = itemsWithVariance.map((item) => item.fabricColourId);
+                fabricColourBalanceCache.invalidate(affectedIds);
+            }
 
             return {
                 success: true,

@@ -154,6 +154,7 @@ model Sku {
   size                   String
   fabricConsumption      Float                         @default(1.5)
   mrp                    Float
+  currentBalance         Int                           @default(0) // Materialized balance: updated atomically on every transaction
   targetStockQty         Int                           @default(10)
   targetStockMethod      String                        @default("day14")
   isActive               Boolean                       @default(true)
@@ -261,6 +262,8 @@ model FabricColour {
   leadTimeDays   Int?
   minOrderQty    Float?
 
+  currentBalance Float    @default(0) // Materialized balance: updated atomically by DB trigger
+
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -295,6 +298,7 @@ model Fabric {
   leadTimeDays        Int?
   minOrderQty         Float?
   isActive            Boolean                    @default(true)
+  // NOTE: Legacy model - use FabricColour for new inventory tracking
 
   // NEW: Material hierarchy fields (optional for migration)
   materialId          String?                    // Link to new Material model
@@ -1384,6 +1388,7 @@ model FabricColourTransaction {
   @@index([txnType])
   @@index([createdAt])
   @@index([fabricColourId, createdAt])
+  @@index([fabricColourId, txnType]) // Optimizes balance aggregation queries
   @@index([supplierId])
   @@index([createdById])
 }

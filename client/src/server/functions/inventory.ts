@@ -380,32 +380,19 @@ export const getInventoryAll = createServerFn({ method: 'GET' })
         const skuIds = skus.map((sku) => sku.skuId);
         const balanceMap = await inventoryBalanceCache.get(prisma, skuIds);
 
-        // Get unique fabricColourIds and calculate their balances
+        // Get unique fabricColourIds and calculate their balances (cached)
         const fabricColourIds = [...new Set(
             skus.map((sku) => sku.fabricColourId).filter((id): id is string => id !== null)
         )];
 
-        // Calculate fabric colour balances in batch
-        const fabricColourBalanceMap = new Map<string, number>();
-        if (fabricColourIds.length > 0) {
-            const fcBalances: Array<{
-                fabricColourId: string;
-                totalInward: bigint;
-                totalOutward: bigint;
-            }> = await prisma.$queryRaw`
-                SELECT
-                    "fabricColourId",
-                    COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN qty ELSE 0 END), 0)::bigint AS "totalInward",
-                    COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN qty ELSE 0 END), 0)::bigint AS "totalOutward"
-                FROM "FabricColourTransaction"
-                WHERE "fabricColourId" = ANY(${fabricColourIds})
-                GROUP BY "fabricColourId"
-            `;
+        // Calculate fabric colour balances using cache (5-min TTL, same as inventory)
+        const { fabricColourBalanceCache } = await import('@coh/shared/services/inventory');
+        const fcBalanceMap = await fabricColourBalanceCache.get(prisma, fabricColourIds);
 
-            for (const b of fcBalances) {
-                const balance = Number(b.totalInward) - Number(b.totalOutward);
-                fabricColourBalanceMap.set(b.fabricColourId, balance);
-            }
+        // Convert to simple number map for downstream use
+        const fabricColourBalanceMap = new Map<string, number>();
+        for (const [id, balance] of fcBalanceMap) {
+            fabricColourBalanceMap.set(id, balance.currentBalance);
         }
 
         // Map SKU metadata with balances

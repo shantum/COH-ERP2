@@ -524,6 +524,9 @@ export default function InventoryMobile() {
     const { data: locationId } = useShopifyLocation();
     const [searchInput, setSearchInput] = useState(search.search || '');
 
+    // Get loader data for initial hydration
+    const loaderData = InventoryMobileRoute.useLoaderData();
+
     const { data, isLoading, error } = useQuery({
         queryKey: [
             'inventory-mobile-all',
@@ -531,19 +534,27 @@ export default function InventoryMobile() {
             search.stockFilter,
             search.shopifyStatus,
             search.discrepancy,
+            search.fabricFilter,
+            search.sortBy,
+            search.sortOrder,
         ],
         queryFn: () =>
             getInventoryAll({
                 data: {
                     includeCustomSkus: false,
                     search: search.search,
-                    limit: 10000,
+                    limit: 10000, // Need all for product grouping
                     offset: 0,
                     stockFilter: search.stockFilter,
                     shopifyStatus: search.shopifyStatus,
                     discrepancy: search.discrepancy,
+                    fabricFilter: search.fabricFilter,
+                    sortBy: search.sortBy,
+                    sortOrder: search.sortOrder,
                 },
             }),
+        // Use loader data as initial data when available and params match
+        initialData: loaderData?.inventory ?? undefined,
         staleTime: 60000,
     });
 
@@ -565,10 +576,10 @@ export default function InventoryMobile() {
     }, [products, searchInput]);
 
     const handleFilterChange = useCallback(
-        (filterKey: 'stockFilter' | 'shopifyStatus' | 'discrepancy', value: string) => {
+        (filterKey: 'stockFilter' | 'shopifyStatus' | 'discrepancy' | 'fabricFilter', value: string) => {
             const currentValue = search[filterKey];
             const newValue = currentValue === value ? 'all' : value;
-            navigate({ to: '/inventory-mobile', search: { ...search, [filterKey]: newValue, page: 1 } });
+            navigate({ to: '/inventory-mobile', search: { ...search, [filterKey]: newValue } });
         },
         [navigate, search]
     );
@@ -669,6 +680,17 @@ export default function InventoryMobile() {
                             label="Archived"
                             isActive={search.shopifyStatus === 'archived'}
                             onClick={() => handleFilterChange('shopifyStatus', 'archived')}
+                        />
+                        <FilterPill
+                            label="Has Fabric"
+                            isActive={search.fabricFilter === 'has_fabric'}
+                            onClick={() => handleFilterChange('fabricFilter', 'has_fabric')}
+                        />
+                        <FilterPill
+                            label="Low Fabric"
+                            isActive={search.fabricFilter === 'low_fabric'}
+                            onClick={() => handleFilterChange('fabricFilter', 'low_fabric')}
+                            variant="warning"
                         />
                     </div>
                 </div>
