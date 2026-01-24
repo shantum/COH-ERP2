@@ -409,6 +409,9 @@ const ProductSection = memo(function ProductSection({
     const previewColors = product.colors.slice(0, 4);
     const remainingCount = product.colors.length - previewColors.length;
 
+    // Count active colors on Shopify
+    const activeCount = product.colors.filter(c => c.sizes[0]?.status === 'active').length;
+
     return (
         <div className="mb-3">
             {/* Product header - white theme with thumbnails on second line */}
@@ -458,7 +461,7 @@ const ProductSection = memo(function ProductSection({
                         )}
                     </div>
                     <p className="text-xs text-zinc-400">
-                        {product.colors.length} color{product.colors.length !== 1 ? 's' : ''}
+                        {product.colors.length} colour{product.colors.length !== 1 ? 's' : ''} | <span className="text-emerald-600">{activeCount} active</span>
                     </p>
                 </div>
             </button>
