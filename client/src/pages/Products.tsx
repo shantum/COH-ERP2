@@ -11,7 +11,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2 } from 'lucide-react';
+import { Package, Layers, Scissors, Wrench, GitBranch, Grid3X3, FileUp, Link2, Hash } from 'lucide-react';
 
 import { ProductsViewSwitcher } from '../components/products/ProductsViewSwitcher';
 import { DetailPanel } from '../components/products/DetailPanel';
@@ -21,6 +21,7 @@ import { ServicesTable } from '../components/materials/ServicesTable';
 import { useProductsTree } from '../components/products/hooks/useProductsTree';
 import { BomProductList, ConsumptionGridView, ConsumptionImportView } from '../components/products/bom';
 import { FabricMappingView } from '../components/products/fabric-mapping';
+import { StyleCodesTable } from '../components/products/StyleCodesTable';
 import type { ProductTreeNode, ProductNodeType, ProductsTabType } from '../components/products/types';
 import { Route } from '../routes/_authenticated/products';
 
@@ -204,6 +205,12 @@ export default function Products() {
                     isActive={activeTab === 'fabricMapping'}
                     onClick={() => setActiveTab('fabricMapping')}
                 />
+                <TabButton
+                    icon={Hash}
+                    label="Style Codes"
+                    isActive={activeTab === 'styleCodes'}
+                    onClick={() => setActiveTab('styleCodes')}
+                />
             </div>
 
             {/* Main Content */}
@@ -294,6 +301,13 @@ export default function Products() {
                         <FabricMappingView />
                     </div>
                 )}
+
+                {/* Style Codes Tab - Quick view and edit style codes */}
+                {activeTab === 'styleCodes' && (
+                    <div className="flex-1 p-4 overflow-auto">
+                        <StyleCodesTable />
+                    </div>
+                )}
             </div>
 
             {/* Footer Summary */}
@@ -321,6 +335,9 @@ export default function Products() {
                 )}
                 {activeTab === 'fabricMapping' && (
                     <span>Set Material/Fabric at product level • Select Colour per variation • Save to apply</span>
+                )}
+                {activeTab === 'styleCodes' && (
+                    <span>Click any style code to edit inline • Press Enter to save, Escape to cancel</span>
                 )}
             </div>
         </div>

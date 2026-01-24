@@ -87,7 +87,7 @@ model UserGridPreference {
 model Product {
   id                       String      @id @default(uuid())
   name                     String
-  styleCode                String?     @unique
+  styleCode                String?
   category                 String
   productType              String
   gender                   String      @default("unisex")
@@ -115,6 +115,7 @@ model Product {
   @@index([category])
   @@index([shopifyHandle])
   @@index([name])
+  @@index([styleCode])
 }
 
 model Variation {

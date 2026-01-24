@@ -477,3 +477,162 @@ export const updateSku = createServerFn({ method: 'POST' })
             return { success: false, error: { message } };
         }
     });
+
+// ============================================
+// STYLE CODE UPDATE
+// ============================================
+
+const updateStyleCodeSchema = z.object({
+    id: z.string().uuid('Invalid product ID'),
+    styleCode: z.string().nullable(),
+});
+
+/**
+ * Update a product's style code
+ *
+ * Used by the Style Codes tab for quick inline editing.
+ * Style codes must be unique across all products.
+ */
+export const updateStyleCode = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => updateStyleCodeSchema.parse(input))
+    .handler(async ({ data }) => {
+        try {
+            const { PrismaClient } = await import('@prisma/client');
+            const prisma = new PrismaClient();
+
+            try {
+                const product = await prisma.product.update({
+                    where: { id: data.id },
+                    data: { styleCode: data.styleCode },
+                });
+
+                return { success: true as const, data: { id: product.id, styleCode: product.styleCode } };
+            } finally {
+                await prisma.$disconnect();
+            }
+        } catch (error: unknown) {
+            console.error('Update style code error:', error);
+            const message = error instanceof Error ? error.message : 'Failed to update style code';
+            return { success: false as const, error: { message } };
+        }
+    });
+
+// ============================================
+// STYLE CODE BULK IMPORT
+// ============================================
+
+const importStyleCodesSchema = z.object({
+    rows: z.array(z.object({
+        barcode: z.string(),
+        styleCode: z.string(),
+    })),
+});
+
+/**
+ * Bulk import style codes from CSV data
+ *
+ * Matches SKU barcodes to find products, then updates style codes.
+ * Multiple products can share the same style code (same pattern).
+ * Skips products that already have a style code set.
+ */
+export const importStyleCodes = createServerFn({ method: 'POST' })
+    .middleware([authMiddleware])
+    .inputValidator((input: unknown) => importStyleCodesSchema.parse(input))
+    .handler(async ({ data }) => {
+        try {
+            const { PrismaClient } = await import('@prisma/client');
+            const prisma = new PrismaClient();
+
+            try {
+                const { rows } = data;
+
+                // Get all barcodes to look up
+                const barcodes = rows.map(r => r.barcode);
+
+                // Find matching SKUs with their Product IDs
+                const skus = await prisma.sku.findMany({
+                    where: { skuCode: { in: barcodes } },
+                    select: {
+                        skuCode: true,
+                        variation: {
+                            select: {
+                                productId: true,
+                                product: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        styleCode: true,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+
+                // Create barcode -> product mapping
+                const barcodeToProduct = new Map<string, { id: string; name: string; currentStyleCode: string | null }>();
+                for (const sku of skus) {
+                    barcodeToProduct.set(sku.skuCode, {
+                        id: sku.variation.productId,
+                        name: sku.variation.product.name,
+                        currentStyleCode: sku.variation.product.styleCode,
+                    });
+                }
+
+                // Build product -> style code mapping (deduplicate by product)
+                const productUpdates = new Map<string, string>();
+                let notFound = 0;
+                let skippedExisting = 0;
+
+                for (const row of rows) {
+                    const product = barcodeToProduct.get(row.barcode);
+                    if (!product) {
+                        notFound++;
+                        continue;
+                    }
+
+                    // Skip if product already has a style code
+                    if (product.currentStyleCode) {
+                        skippedExisting++;
+                        continue;
+                    }
+
+                    // Only update if not already queued (first occurrence wins)
+                    if (!productUpdates.has(product.id)) {
+                        productUpdates.set(product.id, row.styleCode);
+                    }
+                }
+
+                // Perform updates (style codes can be shared, no duplicate checking needed)
+                let updated = 0;
+                let errors = 0;
+
+                for (const [productId, styleCode] of productUpdates) {
+                    try {
+                        await prisma.product.update({
+                            where: { id: productId },
+                            data: { styleCode },
+                        });
+                        updated++;
+                    } catch {
+                        errors++;
+                    }
+                }
+
+                return {
+                    success: true as const,
+                    updated,
+                    notFound,
+                    duplicates: skippedExisting, // Now just counts already-set products
+                    errors,
+                };
+            } finally {
+                await prisma.$disconnect();
+            }
+        } catch (error: unknown) {
+            console.error('Import style codes error:', error);
+            const message = error instanceof Error ? error.message : 'Failed to import style codes';
+            return { success: false as const, error: { message }, updated: 0, notFound: 0, duplicates: 0, errors: 0 };
+        }
+    });
