@@ -89,6 +89,7 @@ export type FabricColour = {
     supplierId: string | null;
     leadTimeDays: number | null;
     minOrderQty: number | null;
+    currentBalance: Generated<number>;
     isActive: Generated<boolean>;
     createdAt: Generated<Timestamp>;
     updatedAt: Timestamp;
@@ -654,6 +655,7 @@ export type Sku = {
     size: string;
     fabricConsumption: Generated<number>;
     mrp: number;
+    currentBalance: Generated<number>;
     targetStockQty: Generated<number>;
     targetStockMethod: Generated<string>;
     isActive: Generated<boolean>;

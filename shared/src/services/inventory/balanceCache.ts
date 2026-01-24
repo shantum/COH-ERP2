@@ -188,3 +188,130 @@ export const inventoryBalanceCache = getInventoryBalanceCache();
 
 // Export class for testing with custom maxAge
 export { InventoryBalanceCache };
+
+// ============================================
+// FABRIC COLOUR BALANCE CACHE
+// ============================================
+
+/**
+ * Cached fabric colour balance entry
+ */
+export interface CachedFabricColourBalance {
+    totalInward: number;
+    totalOutward: number;
+    currentBalance: number;
+    cachedAt: number;
+}
+
+const FABRIC_COLOUR_CACHE_KEY = '__fabricColourBalanceCache__';
+
+/**
+ * In-memory fabric colour balance cache
+ * Optimizes repeated balance lookups for fabric colours
+ */
+class FabricColourBalanceCache {
+    private cache: Map<string, CachedFabricColourBalance>;
+    private maxAgeMs: number;
+
+    constructor(maxAgeMs: number = DEFAULT_MAX_AGE_MS) {
+        this.cache = new Map();
+        this.maxAgeMs = maxAgeMs;
+    }
+
+    /**
+     * Get fabric colour balances for a list of fabric colour IDs
+     * Returns cached values for fresh entries, fetches uncached/stale ones from DB
+     * Now reads directly from FabricColour.currentBalance (maintained by DB trigger)
+     */
+    async get(
+        prisma: PrismaInstance | PrismaTransaction,
+        fabricColourIds: string[]
+    ): Promise<Map<string, CachedFabricColourBalance>> {
+        if (fabricColourIds.length === 0) {
+            return new Map();
+        }
+
+        const now = Date.now();
+        const result = new Map<string, CachedFabricColourBalance>();
+        const uncachedIds: string[] = [];
+
+        // Check cache for each fabric colour
+        for (const id of fabricColourIds) {
+            const cached = this.cache.get(id);
+            if (cached && now - cached.cachedAt < this.maxAgeMs) {
+                result.set(id, cached);
+            } else {
+                uncachedIds.push(id);
+                if (cached) {
+                    this.cache.delete(id);
+                }
+            }
+        }
+
+        // Fetch uncached/stale balances from DB - reads materialized column directly
+        if (uncachedIds.length > 0) {
+            const freshBalances = await prisma.fabricColour.findMany({
+                where: { id: { in: uncachedIds } },
+                select: { id: true, currentBalance: true },
+            });
+
+            // Update cache and result with fresh data
+            const freshMap = new Map<string, number>(
+                freshBalances.map((b: { id: string; currentBalance: number }) => [b.id, b.currentBalance])
+            );
+
+            for (const id of uncachedIds) {
+                const balance = freshMap.get(id);
+                const cachedBalance: CachedFabricColourBalance = {
+                    totalInward: 0, // Not tracked - use aggregation query if needed
+                    totalOutward: 0, // Not tracked - use aggregation query if needed
+                    currentBalance: balance ?? 0,
+                    cachedAt: now,
+                };
+
+                this.cache.set(id, cachedBalance);
+                result.set(id, cachedBalance);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Invalidate specific fabric colours from cache
+     */
+    invalidate(fabricColourIds: string[]): void {
+        for (const id of fabricColourIds) {
+            this.cache.delete(id);
+        }
+    }
+
+    /**
+     * Clear entire cache
+     */
+    invalidateAll(): void {
+        this.cache.clear();
+    }
+
+    get size(): number {
+        return this.cache.size;
+    }
+}
+
+/**
+ * Get or create the singleton fabric colour balance cache instance
+ */
+function getFabricColourBalanceCache(): FabricColourBalanceCache {
+    const globalForCache = globalThis as unknown as {
+        [FABRIC_COLOUR_CACHE_KEY]: FabricColourBalanceCache | undefined;
+    };
+
+    if (!globalForCache[FABRIC_COLOUR_CACHE_KEY]) {
+        globalForCache[FABRIC_COLOUR_CACHE_KEY] = new FabricColourBalanceCache();
+    }
+
+    return globalForCache[FABRIC_COLOUR_CACHE_KEY];
+}
+
+export const fabricColourBalanceCache = getFabricColourBalanceCache();
+export { FabricColourBalanceCache };

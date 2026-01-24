@@ -1,43 +1,62 @@
 /**
- * InventoryMobile - Mobile-friendly inventory page
+ * InventoryMobile - Mobile inventory scanner
  *
- * Uses TanStack Table with shadcn/ui styling.
- * Shows SKU-level stock data with product info, Shopify stock, and fabric stock.
+ * Industrial-utilitarian design for rapid stock scanning.
+ * Card-based layout with size grids for instant pattern recognition.
  */
 
-import { useMemo, useState, useCallback, memo, useEffect, useRef } from 'react';
+import { useMemo, useState, useCallback, memo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-    useReactTable,
-    getCoreRowModel,
-    flexRender,
-    type ColumnDef,
-} from '@tanstack/react-table';
 import { Route as InventoryMobileRoute } from '../routes/_authenticated/inventory-mobile';
 import { getInventoryAll, type InventoryAllItem } from '../server/functions/inventory';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '../components/ui/table';
-import { Input } from '../components/ui/input';
-import { Button } from '../components/ui/button';
-import { Package, Search, ChevronLeft, ChevronRight, AlertCircle, X, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
+import { Search, AlertTriangle, Package, RefreshCw, ChevronDown, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { showSuccess, showError } from '../utils/toast';
 
 // ============================================
-// SHOPIFY INVENTORY SYNC
+// TYPES
 // ============================================
 
-/**
- * Fetch Shopify inventory locations
- * Returns the first (primary) location ID
- */
+interface SizeStock {
+    size: string;
+    skuCode: string;
+    skuId: string;
+    stock: number;
+    shopify: number | null;
+    status: 'active' | 'archived' | 'draft' | null;
+}
+
+interface ColorGroup {
+    variationId: string;
+    colorName: string;
+    imageUrl: string | null;
+    sizes: SizeStock[];
+    totalStock: number;
+    totalShopify: number;
+    hasArchived: boolean;
+    archivedWithStock: SizeStock[];
+    // Fabric details
+    fabricName: string | null;
+    fabricUnit: string | null;
+    fabricColourName: string | null;
+    fabricColourHex: string | null;
+    fabricColourBalance: number | null;
+}
+
+interface ProductGroup {
+    productId: string;
+    productName: string;
+    imageUrl: string | null;
+    colors: ColorGroup[];
+    totalStock: number;
+    totalShopify: number;
+}
+
+// ============================================
+// SHOPIFY SYNC
+// ============================================
+
 async function fetchShopifyLocationId(): Promise<string | null> {
     try {
         const res = await fetch('/api/shopify/inventory/locations');
@@ -49,364 +68,449 @@ async function fetchShopifyLocationId(): Promise<string | null> {
     }
 }
 
-/**
- * Zero out Shopify stock for a SKU
- */
-async function zeroOutShopifyStock(sku: string, locationId: string): Promise<{ success: boolean; error?: string }> {
+async function zeroOutShopifyStock(sku: string, locationId: string): Promise<void> {
     const res = await fetch('/api/shopify/inventory/set', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sku, locationId, quantity: 0 }),
     });
-
     if (!res.ok) {
         const data = await res.json() as { error?: string };
-        throw new Error(data.error || 'Failed to update Shopify');
+        throw new Error(data.error || 'Failed to sync');
     }
-
-    return res.json() as Promise<{ success: boolean; error?: string }>;
 }
 
-/**
- * Hook to manage Shopify location ID (fetched once and cached)
- */
 function useShopifyLocation() {
     return useQuery({
         queryKey: ['shopify-location'],
         queryFn: fetchShopifyLocationId,
-        staleTime: Infinity, // Location rarely changes
+        staleTime: Infinity,
         retry: 1,
     });
 }
 
 // ============================================
-// CELL COMPONENTS (Memoized for performance)
+// GROUPING LOGIC
 // ============================================
 
-interface ProductCellProps {
-    item: InventoryAllItem;
-}
+function groupInventory(items: InventoryAllItem[]): ProductGroup[] {
+    const productMap = new Map<string, ProductGroup>();
+    const sizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL'];
 
-/**
- * ProductCell - Displays product thumbnail, name, color, size, and SKU code
- * Styled similar to orders table ProductNameCell
- */
-const ProductCell = memo(function ProductCell({ item }: ProductCellProps) {
-    const { productName, colorName, size, skuCode, imageUrl } = item;
+    for (const item of items) {
+        let product = productMap.get(item.productId);
+        if (!product) {
+            product = {
+                productId: item.productId,
+                productName: item.productName,
+                imageUrl: item.imageUrl,
+                colors: [],
+                totalStock: 0,
+                totalShopify: 0,
+            };
+            productMap.set(item.productId, product);
+        }
 
-    return (
-        <div className="flex items-center gap-2 py-1">
-            {/* Thumbnail */}
-            <div className="w-10 h-10 rounded bg-gray-100 flex-shrink-0 overflow-hidden">
-                {imageUrl ? (
-                    <img
-                        src={imageUrl}
-                        alt={productName}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                    />
-                ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-300">
-                        <Package size={18} />
-                    </div>
-                )}
-            </div>
+        let color = product.colors.find(c => c.variationId === item.variationId);
+        if (!color) {
+            color = {
+                variationId: item.variationId,
+                colorName: item.colorName,
+                imageUrl: item.imageUrl,
+                sizes: [],
+                totalStock: 0,
+                totalShopify: 0,
+                hasArchived: false,
+                archivedWithStock: [],
+                fabricName: item.fabricName,
+                fabricUnit: item.fabricUnit,
+                fabricColourName: item.fabricColourName,
+                fabricColourHex: item.fabricColourHex,
+                fabricColourBalance: item.fabricColourBalance,
+            };
+            product.colors.push(color);
+        }
 
-            {/* Product info */}
-            <div className="flex flex-col justify-center leading-tight min-w-0 flex-1">
-                {/* Line 1: Product name */}
-                <span className="font-medium text-gray-900 truncate text-sm">
-                    {productName || '-'}
-                </span>
-                {/* Line 2: Color | Size */}
-                <div className="flex items-center gap-1 mt-0.5 text-xs text-gray-500">
-                    {colorName && (
-                        <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[80px]">
-                            {colorName}
-                        </span>
-                    )}
-                    {colorName && size && <span className="text-gray-300">|</span>}
-                    {size && <span className="shrink-0">{size}</span>}
-                </div>
-                {/* Line 3: SKU code */}
-                <span className="font-mono text-[10px] text-gray-400 truncate mt-0.5">
-                    {skuCode}
-                </span>
-            </div>
-        </div>
-    );
-});
+        const sizeData: SizeStock = {
+            size: item.size,
+            skuCode: item.skuCode,
+            skuId: item.skuId,
+            stock: item.availableBalance,
+            shopify: item.shopifyQty,
+            status: item.shopifyProductStatus,
+        };
 
-interface StockValueCellProps {
-    value: number | null;
-    isOutOfStock?: boolean;
-    showUnit?: string;
-}
+        color.sizes.push(sizeData);
+        color.totalStock += item.availableBalance;
+        color.totalShopify += item.shopifyQty ?? 0;
+        product.totalStock += item.availableBalance;
+        product.totalShopify += item.shopifyQty ?? 0;
 
-/**
- * StockValueCell - Displays a stock value with color coding
- */
-const StockValueCell = memo(function StockValueCell({
-    value,
-    isOutOfStock = false,
-    showUnit,
-}: StockValueCellProps) {
-    if (value === null) {
-        return <span className="text-gray-300 text-sm">-</span>;
+        // Track archived SKUs with Shopify stock
+        if (item.shopifyProductStatus === 'archived') {
+            color.hasArchived = true;
+            if ((item.shopifyQty ?? 0) > 0) {
+                color.archivedWithStock.push(sizeData);
+            }
+        }
+
+        if (!product.imageUrl && item.imageUrl) product.imageUrl = item.imageUrl;
+        if (!color.imageUrl && item.imageUrl) color.imageUrl = item.imageUrl;
     }
 
-    const displayValue = showUnit ? value.toFixed(1) : value;
-
-    return (
-        <span
-            className={cn(
-                'font-semibold tabular-nums',
-                isOutOfStock || value <= 0 ? 'text-red-600' : 'text-gray-900'
-            )}
-        >
-            {displayValue}
-            {showUnit && <span className="text-xs text-gray-400 ml-0.5">{showUnit}</span>}
-        </span>
-    );
-});
-
-interface ShopifyStatusCellProps {
-    status: 'active' | 'archived' | 'draft' | null;
-}
-
-/**
- * ShopifyStatusCell - Displays Shopify product status as a badge
- */
-const ShopifyStatusCell = memo(function ShopifyStatusCell({ status }: ShopifyStatusCellProps) {
-    if (!status) {
-        return <span className="text-gray-300 text-xs">-</span>;
+    // Sort sizes
+    for (const product of productMap.values()) {
+        for (const color of product.colors) {
+            color.sizes.sort((a, b) => {
+                const aIdx = sizeOrder.indexOf(a.size);
+                const bIdx = sizeOrder.indexOf(b.size);
+                if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                if (aIdx !== -1) return -1;
+                if (bIdx !== -1) return 1;
+                return a.size.localeCompare(b.size);
+            });
+        }
     }
 
-    const config: Record<string, { label: string; className: string }> = {
-        active: { label: 'Active', className: 'bg-green-100 text-green-700' },
-        archived: { label: 'Archived', className: 'bg-gray-100 text-gray-600' },
-        draft: { label: 'Draft', className: 'bg-amber-100 text-amber-700' },
-    };
+    return Array.from(productMap.values());
+}
 
-    const { label, className } = config[status] || { label: status, className: 'bg-gray-100 text-gray-500' };
+// ============================================
+// LOGOS
+// ============================================
 
+const CohLogo = memo(function CohLogo() {
     return (
-        <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium uppercase', className)}>
-            {label}
-        </span>
+        <img
+            src="/COH-Square-Monkey-Logo.png"
+            alt="COH"
+            className="w-5 h-5 rounded object-contain"
+        />
     );
 });
 
-interface ZeroOutButtonProps {
-    skuCode: string;
-    shopifyQty: number | null;
-    shopifyProductStatus: 'active' | 'archived' | 'draft' | null;
+const ShopifyLogo = memo(function ShopifyLogo() {
+    return (
+        <img
+            src="/shopify_glyph.svg"
+            alt="Shopify"
+            className="w-5 h-5 object-contain"
+        />
+    );
+});
+
+// ============================================
+// COLOR CARD COMPONENT
+// ============================================
+
+interface ColorCardProps {
+    color: ColorGroup;
     locationId: string | null | undefined;
     onRefresh: () => void;
 }
 
-/** Polling interval in ms */
-const POLL_INTERVAL = 1000;
-/** Max polling attempts (10 seconds total) */
-const MAX_POLL_ATTEMPTS = 10;
+const ColorCard = memo(function ColorCard({ color, locationId, onRefresh }: ColorCardProps) {
+    const [syncing, setSyncing] = useState<string | null>(null);
+    const isOutOfStock = color.totalStock <= 0;
+    const hasActionable = color.archivedWithStock.length > 0;
 
-/**
- * ZeroOutButton - Button to zero out Shopify stock for archived SKUs
- * Only visible when: status is 'archived' AND shopifyQty > 0
- * Polls for updates until shopifyQty becomes 0 or timeout
- */
-const ZeroOutButton = memo(function ZeroOutButton({
-    skuCode,
-    shopifyQty,
-    shopifyProductStatus,
-    locationId,
-    onRefresh,
-}: ZeroOutButtonProps) {
-    const [isPending, setIsPending] = useState(false);
-    const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const pollCountRef = useRef(0);
+    // Get Shopify status from first size (all sizes of a variation share the same status)
+    const shopifyStatus = color.sizes[0]?.status ?? null;
 
-    // Cleanup polling when shopifyQty becomes 0 or component unmounts
-    useEffect(() => {
-        if (shopifyQty === 0 || shopifyQty === null) {
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-                setIsPending(false);
-            }
-        }
-        return () => {
-            if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-            }
-        };
-    }, [shopifyQty]);
-
-    // Only show for archived SKUs with stock > 0 on Shopify
-    const shouldShow = shopifyProductStatus === 'archived' && shopifyQty !== null && shopifyQty > 0;
-
-    if (!shouldShow) return null;
-
-    const handleClick = async () => {
-        if (!locationId || isPending) return;
-
-        setIsPending(true);
-        pollCountRef.current = 0;
-
+    const handleZeroAll = async () => {
+        if (!locationId || syncing || color.archivedWithStock.length === 0) return;
+        setSyncing('all');
         try {
-            await zeroOutShopifyStock(skuCode, locationId);
-            showSuccess('Syncing with Shopify...', { description: 'Will refresh automatically' });
-
-            // Start polling - refresh every second until data updates
-            pollIntervalRef.current = setInterval(() => {
-                pollCountRef.current++;
-                onRefresh();
-
-                // Stop after max attempts
-                if (pollCountRef.current >= MAX_POLL_ATTEMPTS) {
-                    if (pollIntervalRef.current) {
-                        clearInterval(pollIntervalRef.current);
-                        pollIntervalRef.current = null;
-                    }
-                    setIsPending(false);
-                }
-            }, POLL_INTERVAL);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            showError('Failed to zero stock', { description: message });
-            setIsPending(false);
+            for (const sku of color.archivedWithStock) {
+                await zeroOutShopifyStock(sku.skuCode, locationId);
+            }
+            showSuccess(`Zeroed ${color.archivedWithStock.length} SKUs`);
+            setTimeout(onRefresh, 500);
+        } catch (e) {
+            showError(e instanceof Error ? e.message : 'Sync failed');
+        } finally {
+            setSyncing(null);
         }
     };
 
-    // Don't show button if location not loaded yet
-    if (!locationId) return null;
+    // Use fabric hex for border if available
+    const borderColor = color.fabricColourHex || (
+        isOutOfStock ? '#fecaca' :
+        shopifyStatus === 'archived' ? '#d4d4d8' :
+        shopifyStatus === 'draft' ? '#fde68a' :
+        '#e4e4e7'
+    );
 
     return (
-        <button
-            type="button"
-            onClick={handleClick}
-            disabled={isPending}
-            className={cn(
-                'px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap transition-colors',
-                'bg-red-50 text-red-600 hover:bg-red-100',
-                isPending && 'cursor-not-allowed opacity-50'
-            )}
+        <div
+            className="bg-white rounded-xl overflow-hidden"
+            style={{ boxShadow: `inset 0 0 0 2px ${borderColor}` }}
         >
-            {isPending ? (
-                <Loader2 className="w-3 h-3 animate-spin inline" />
-            ) : (
-                'Set Shopify to 0'
+            {/* Header */}
+            <div className="flex items-center gap-3 p-3 pb-2">
+                {/* Color swatch - use fabric hex if available */}
+                <div
+                    className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0"
+                    style={{ backgroundColor: color.fabricColourHex || '#f4f4f5' }}
+                >
+                    {color.imageUrl && (
+                        <img src={color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    )}
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-zinc-900 truncate text-sm">
+                        {color.colorName}
+                    </h3>
+                    {/* Fabric info */}
+                    {(color.fabricName || color.fabricColourName) && (
+                        <p className="text-[10px] text-zinc-500 truncate">
+                            {color.fabricName && color.fabricColourName
+                                ? `${color.fabricName} - ${color.fabricColourName}`
+                                : color.fabricName || color.fabricColourName}
+                            <span className={cn(
+                                'ml-1 font-medium',
+                                (color.fabricColourBalance ?? 0) <= 0 ? 'text-red-500' :
+                                (color.fabricColourBalance ?? 0) < 10 ? 'text-amber-500' :
+                                'text-emerald-600'
+                            )}>
+                                | {color.fabricColourBalance ?? 0}{color.fabricUnit === 'kg' ? 'kg' : 'm'}
+                            </span>
+                        </p>
+                    )}
+                </div>
+
+                {/* Stock total + status */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className={cn(
+                        'text-lg font-bold tabular-nums',
+                        isOutOfStock ? 'text-red-500' : 'text-zinc-800'
+                    )}>
+                        {color.totalStock}
+                    </div>
+                    {shopifyStatus && (
+                        <span className={cn(
+                            'px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wide',
+                            shopifyStatus === 'active' ? 'bg-emerald-100 text-emerald-700' :
+                            shopifyStatus === 'archived' ? 'bg-zinc-200 text-zinc-500' :
+                            shopifyStatus === 'draft' ? 'bg-amber-100 text-amber-700' :
+                            'bg-zinc-100 text-zinc-400'
+                        )}>
+                            {shopifyStatus}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Stock grid */}
+            <div className="px-3 pb-3">
+                {/* Size headers */}
+                <div className="flex items-center mb-1">
+                    <div className="w-8 flex-shrink-0" /> {/* Logo spacer */}
+                    <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${color.sizes.length}, 1fr)` }}>
+                        {color.sizes.map((size) => (
+                            <div key={size.skuId} className="text-center">
+                                <span className="text-[10px] font-medium text-zinc-400 uppercase">
+                                    {size.size}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* COH Row */}
+                <div className="flex items-center py-1">
+                    <div className="w-8 flex-shrink-0">
+                        <CohLogo />
+                    </div>
+                    <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${color.sizes.length}, 1fr)` }}>
+                        {color.sizes.map((size) => {
+                            const isOut = size.stock <= 0;
+                            return (
+                                <div key={size.skuId} className="text-center">
+                                    <span className={cn(
+                                        'text-sm font-semibold tabular-nums',
+                                        isOut ? 'text-red-500' : 'text-zinc-800'
+                                    )}>
+                                        {size.stock}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Shopify Row */}
+                <div className="flex items-center py-1">
+                    <div className="w-8 flex-shrink-0">
+                        <ShopifyLogo />
+                    </div>
+                    <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${color.sizes.length}, 1fr)` }}>
+                        {color.sizes.map((size) => {
+                            const shopifyVal = size.shopify ?? 0;
+                            const sizeMismatch = size.shopify !== null && size.stock !== size.shopify;
+                            return (
+                                <div key={size.skuId} className="text-center">
+                                    <span className={cn(
+                                        'text-sm tabular-nums',
+                                        sizeMismatch ? 'text-amber-500 font-semibold' : 'text-zinc-400'
+                                    )}>
+                                        {shopifyVal}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            {/* Zero action - only show if there are archived SKUs with Shopify stock */}
+            {hasActionable && (
+                <div className="px-3 pb-3 pt-1 border-t border-zinc-100">
+                    <button
+                        onClick={handleZeroAll}
+                        disabled={syncing !== null}
+                        className={cn(
+                            'w-full py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-2',
+                            'bg-amber-500 text-white hover:bg-amber-600',
+                            syncing === 'all' && 'opacity-50'
+                        )}
+                    >
+                        <Zap className="w-3 h-3" />
+                        {syncing === 'all' ? 'Syncing...' : `Zero ${color.archivedWithStock.length} archived on Shopify`}
+                    </button>
+                </div>
             )}
-        </button>
+        </div>
     );
 });
 
 // ============================================
-// FILTER CHIP COMPONENT
+// PRODUCT SECTION
 // ============================================
 
-interface FilterChipProps {
+interface ProductSectionProps {
+    product: ProductGroup;
+    locationId: string | null | undefined;
+    onRefresh: () => void;
+    defaultExpanded?: boolean;
+}
+
+const ProductSection = memo(function ProductSection({
+    product,
+    locationId,
+    onRefresh,
+    defaultExpanded = false
+}: ProductSectionProps) {
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+
+    // Get up to 4 color thumbnails for the stack preview
+    const previewColors = product.colors.slice(0, 4);
+    const remainingCount = product.colors.length - previewColors.length;
+
+    return (
+        <div className="mb-3">
+            {/* Product header - white theme with color stack on right */}
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className={cn(
+                    'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all',
+                    'bg-white border border-zinc-200',
+                    isExpanded && 'rounded-b-none border-b-0'
+                )}
+            >
+                {/* Name */}
+                <div className="flex-1 text-left min-w-0">
+                    <h2 className="font-semibold text-sm text-zinc-900 truncate">{product.productName}</h2>
+                    <p className="text-xs text-zinc-400">
+                        {product.colors.length} color{product.colors.length !== 1 ? 's' : ''}
+                    </p>
+                </div>
+
+                {/* Color thumbnails stack - rectangles */}
+                <div className="flex items-center flex-shrink-0">
+                    <div className="flex -space-x-1.5">
+                        {previewColors.map((color, idx) => (
+                            <div
+                                key={color.variationId}
+                                className="w-7 h-9 rounded-md border-2 border-white overflow-hidden bg-zinc-100 shadow-sm"
+                                style={{
+                                    zIndex: previewColors.length - idx,
+                                    backgroundColor: color.fabricColourHex || '#f4f4f5'
+                                }}
+                            >
+                                {color.imageUrl && (
+                                    <img src={color.imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                )}
+                            </div>
+                        ))}
+                        {remainingCount > 0 && (
+                            <div
+                                className="w-7 h-9 rounded-md border-2 border-white bg-zinc-200 flex items-center justify-center shadow-sm"
+                                style={{ zIndex: 0 }}
+                            >
+                                <span className="text-[9px] font-medium text-zinc-600">+{remainingCount}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Chevron */}
+                <ChevronDown className={cn(
+                    'w-5 h-5 text-zinc-400 transition-transform',
+                    isExpanded && 'rotate-180'
+                )} />
+            </button>
+
+            {/* Color cards */}
+            {isExpanded && (
+                <div className="bg-zinc-100 rounded-b-xl p-3 space-y-3 border border-t-0 border-zinc-200">
+                    {product.colors.map((color) => (
+                        <ColorCard
+                            key={color.variationId}
+                            color={color}
+                            locationId={locationId}
+                            onRefresh={onRefresh}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+});
+
+// ============================================
+// FILTER PILL
+// ============================================
+
+interface FilterPillProps {
     label: string;
     isActive: boolean;
     onClick: () => void;
-    onClear?: () => void;
+    variant?: 'default' | 'danger' | 'warning';
 }
 
-const FilterChip = memo(function FilterChip({ label, isActive, onClick, onClear }: FilterChipProps) {
+const FilterPill = memo(function FilterPill({ label, isActive, onClick, variant = 'default' }: FilterPillProps) {
     return (
         <button
-            type="button"
-            onClick={isActive && onClear ? onClear : onClick}
+            onClick={onClick}
             className={cn(
-                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
-                isActive
-                    ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                    : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
+                'px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap',
+                'border-2',
+                isActive ? (
+                    variant === 'danger' ? 'bg-red-500 border-red-500 text-white' :
+                    variant === 'warning' ? 'bg-amber-500 border-amber-500 text-zinc-900' :
+                    'bg-zinc-900 border-zinc-900 text-white'
+                ) : (
+                    'bg-white border-zinc-300 text-zinc-600 hover:border-zinc-400'
+                )
             )}
         >
             {label}
-            {isActive && onClear && <X className="w-3 h-3" />}
         </button>
     );
 });
-
-// ============================================
-// SORTABLE HEADER COMPONENT
-// ============================================
-
-interface SortableHeaderProps {
-    label: string;
-    sortKey: 'stock' | 'shopify' | 'fabric';
-    currentSortBy: string;
-    currentSortOrder: string;
-    onSort: (key: 'stock' | 'shopify' | 'fabric') => void;
-}
-
-const SortableHeader = memo(function SortableHeader({
-    label,
-    sortKey,
-    currentSortBy,
-    currentSortOrder,
-    onSort,
-}: SortableHeaderProps) {
-    const isActive = currentSortBy === sortKey;
-
-    return (
-        <button
-            type="button"
-            onClick={() => onSort(sortKey)}
-            className={cn(
-                'flex items-center justify-end gap-0.5 w-full text-right hover:text-gray-900 transition-colors',
-                isActive ? 'text-blue-600 font-medium' : 'text-gray-500'
-            )}
-        >
-            <span>{label}</span>
-            {isActive && (
-                currentSortOrder === 'desc' ? (
-                    <ArrowDown className="w-3 h-3" />
-                ) : (
-                    <ArrowUp className="w-3 h-3" />
-                )
-            )}
-        </button>
-    );
-});
-
-// Filter options configuration
-const filterConfig = {
-    stock: {
-        label: 'Stock',
-        options: [
-            { value: 'in_stock', label: 'In Stock' },
-            { value: 'out_of_stock', label: 'Out of Stock' },
-            { value: 'low_stock', label: 'Low Stock' },
-        ],
-    },
-    shopifyStatus: {
-        label: 'Shopify',
-        options: [
-            { value: 'active', label: 'Active' },
-            { value: 'archived', label: 'Archived' },
-            { value: 'draft', label: 'Draft' },
-        ],
-    },
-    discrepancy: {
-        label: 'Sync',
-        options: [
-            { value: 'has_discrepancy', label: 'Discrepancy' },
-            { value: 'no_discrepancy', label: 'In Sync' },
-        ],
-    },
-    fabric: {
-        label: 'Fabric',
-        options: [
-            { value: 'has_fabric', label: 'Has Fabric' },
-            { value: 'no_fabric', label: 'No Fabric' },
-            { value: 'low_fabric', label: 'Low Fabric' },
-        ],
-    },
-} as const;
-
 
 // ============================================
 // MAIN COMPONENT
@@ -416,21 +520,17 @@ export default function InventoryMobile() {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const search = InventoryMobileRoute.useSearch();
-    const loaderData = InventoryMobileRoute.useLoaderData();
 
-    // Shopify location (fetched once)
     const { data: locationId } = useShopifyLocation();
-
-    // Local search input state (debounced)
     const [searchInput, setSearchInput] = useState(search.search || '');
 
-    // Query with loader data as initial
+    // Get loader data for initial hydration
+    const loaderData = InventoryMobileRoute.useLoaderData();
+
     const { data, isLoading, error } = useQuery({
         queryKey: [
-            'inventory-mobile',
+            'inventory-mobile-all',
             search.search,
-            search.page,
-            search.pageSize,
             search.stockFilter,
             search.shopifyStatus,
             search.discrepancy,
@@ -443,8 +543,8 @@ export default function InventoryMobile() {
                 data: {
                     includeCustomSkus: false,
                     search: search.search,
-                    limit: search.pageSize,
-                    offset: (search.page - 1) * search.pageSize,
+                    limit: 10000, // Need all for product grouping
+                    offset: 0,
                     stockFilter: search.stockFilter,
                     shopifyStatus: search.shopifyStatus,
                     discrepancy: search.discrepancy,
@@ -453,411 +553,173 @@ export default function InventoryMobile() {
                     sortOrder: search.sortOrder,
                 },
             }),
-        initialData: loaderData.inventory ?? undefined,
+        // Use loader data as initial data when available and params match
+        initialData: loaderData?.inventory ?? undefined,
+        staleTime: 60000,
     });
 
     const items = data?.items ?? [];
-    const pagination = data?.pagination;
-    const totalPages = pagination ? Math.ceil(pagination.total / search.pageSize) : 1;
+    const products = useMemo(() => groupInventory(items), [items]);
 
-    // Handle search submit
-    const handleSearch = useCallback(() => {
-        navigate({
-            to: '/inventory-mobile',
-            search: {
-                ...search,
-                search: searchInput || undefined,
-                page: 1,
-            },
-        });
-    }, [navigate, searchInput, search]);
+    // Real-time filtering based on searchInput
+    const filteredProducts = useMemo(() => {
+        if (!searchInput) return products;
+        const q = searchInput.toLowerCase();
+        return products.filter(p =>
+            p.productName.toLowerCase().includes(q) ||
+            p.colors.some(c =>
+                c.colorName.toLowerCase().includes(q) ||
+                c.fabricColourName?.toLowerCase().includes(q) ||
+                c.sizes.some(s => s.skuCode.toLowerCase().includes(q))
+            )
+        );
+    }, [products, searchInput]);
 
-    // Handle page change
-    const handlePageChange = useCallback(
-        (newPage: number) => {
-            navigate({
-                to: '/inventory-mobile',
-                search: { ...search, page: newPage },
-            });
-        },
-        [navigate, search]
-    );
-
-    // Handle filter change
     const handleFilterChange = useCallback(
         (filterKey: 'stockFilter' | 'shopifyStatus' | 'discrepancy' | 'fabricFilter', value: string) => {
-            navigate({
-                to: '/inventory-mobile',
-                search: {
-                    ...search,
-                    [filterKey]: value,
-                    page: 1, // Reset to first page on filter change
-                },
-            });
+            const currentValue = search[filterKey];
+            const newValue = currentValue === value ? 'all' : value;
+            navigate({ to: '/inventory-mobile', search: { ...search, [filterKey]: newValue } });
         },
         [navigate, search]
     );
 
-    // Clear a specific filter
-    const clearFilter = useCallback(
-        (filterKey: 'stockFilter' | 'shopifyStatus' | 'discrepancy' | 'fabricFilter') => {
-            navigate({
-                to: '/inventory-mobile',
-                search: {
-                    ...search,
-                    [filterKey]: 'all',
-                    page: 1,
-                },
-            });
-        },
-        [navigate, search]
-    );
+    const handleRefresh = useCallback(() => {
+        queryClient.invalidateQueries({ queryKey: ['inventory-mobile-all'] });
+    }, [queryClient]);
 
-    // Clear all filters
-    const clearAllFilters = useCallback(() => {
-        navigate({
-            to: '/inventory-mobile',
-            search: {
-                search: search.search,
-                page: 1,
-                pageSize: search.pageSize,
-                stockFilter: 'all',
-                shopifyStatus: 'all',
-                discrepancy: 'all',
-                fabricFilter: 'all',
-                sortBy: search.sortBy,
-                sortOrder: search.sortOrder,
-            },
-        });
-    }, [navigate, search.search, search.pageSize, search.sortBy, search.sortOrder]);
-
-    // Handle sort change
-    const handleSortChange = useCallback(
-        (sortBy: 'stock' | 'shopify' | 'fabric') => {
-            // If clicking the same sort field, toggle order; otherwise set to desc
-            const newOrder = search.sortBy === sortBy && search.sortOrder === 'desc' ? 'asc' : 'desc';
-            navigate({
-                to: '/inventory-mobile',
-                search: {
-                    ...search,
-                    sortBy,
-                    sortOrder: newOrder,
-                    page: 1, // Reset to first page on sort change
-                },
-            });
-        },
-        [navigate, search]
-    );
-
-    // Count active filters
-    const activeFilterCount = useMemo(() => {
-        let count = 0;
-        if (search.stockFilter && search.stockFilter !== 'all') count++;
-        if (search.shopifyStatus && search.shopifyStatus !== 'all') count++;
-        if (search.discrepancy && search.discrepancy !== 'all') count++;
-        if (search.fabricFilter && search.fabricFilter !== 'all') count++;
-        return count;
-    }, [search.stockFilter, search.shopifyStatus, search.discrepancy, search.fabricFilter]);
-
-    // Table columns
-    const columns = useMemo<ColumnDef<InventoryAllItem>[]>(
-        () => [
-            {
-                id: 'product',
-                header: 'Product',
-                cell: ({ row }) => <ProductCell item={row.original} />,
-            },
-            {
-                id: 'stock',
-                header: () => (
-                    <SortableHeader
-                        label="Stock"
-                        sortKey="stock"
-                        currentSortBy={search.sortBy}
-                        currentSortOrder={search.sortOrder}
-                        onSort={handleSortChange}
-                    />
-                ),
-                cell: ({ row }) => (
-                    <div className="text-right">
-                        <StockValueCell
-                            value={row.original.availableBalance}
-                            isOutOfStock={row.original.availableBalance <= 0}
-                        />
-                    </div>
-                ),
-            },
-            {
-                id: 'shopify',
-                header: () => (
-                    <SortableHeader
-                        label="Shopify"
-                        sortKey="shopify"
-                        currentSortBy={search.sortBy}
-                        currentSortOrder={search.sortOrder}
-                        onSort={handleSortChange}
-                    />
-                ),
-                cell: ({ row }) => {
-                    const { shopifyQty, availableBalance } = row.original;
-                    const hasDiscrepancy = shopifyQty !== null && availableBalance !== shopifyQty;
-                    return (
-                        <div className="text-right">
-                            {shopifyQty !== null ? (
-                                <span
-                                    className={cn(
-                                        'tabular-nums',
-                                        hasDiscrepancy ? 'text-amber-600 font-medium' : 'text-gray-500'
-                                    )}
-                                >
-                                    {shopifyQty}
-                                </span>
-                            ) : (
-                                <span className="text-gray-300 text-sm">-</span>
-                            )}
-                        </div>
-                    );
-                },
-            },
-            {
-                id: 'fabric',
-                header: () => (
-                    <SortableHeader
-                        label="Fabric"
-                        sortKey="fabric"
-                        currentSortBy={search.sortBy}
-                        currentSortOrder={search.sortOrder}
-                        onSort={handleSortChange}
-                    />
-                ),
-                cell: ({ row }) => (
-                    <div className="text-right">
-                        <StockValueCell
-                            value={row.original.fabricColourBalance}
-                            showUnit="m"
-                        />
-                    </div>
-                ),
-            },
-            {
-                id: 'shopifyStatus',
-                header: () => <div className="text-center">Status</div>,
-                cell: ({ row }) => (
-                    <div className="flex items-center justify-center gap-1">
-                        <ShopifyStatusCell status={row.original.shopifyProductStatus} />
-                        <ZeroOutButton
-                            skuCode={row.original.skuCode}
-                            shopifyQty={row.original.shopifyQty}
-                            shopifyProductStatus={row.original.shopifyProductStatus}
-                            locationId={locationId}
-                            onRefresh={() => {
-                                queryClient.invalidateQueries({ queryKey: ['inventory-mobile'] });
-                            }}
-                        />
-                    </div>
-                ),
-            },
-        ],
-        [search.sortBy, search.sortOrder, handleSortChange, locationId, queryClient]
-    );
-
-    // Table instance
-    const table = useReactTable({
-        data: items,
-        columns,
-        getCoreRowModel: getCoreRowModel(),
-    });
-
-    // Error state
-    if (loaderData.error || error) {
+    if (error) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[50vh] p-4">
-                <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-                <p className="text-gray-600 text-center">
-                    {loaderData.error || (error as Error)?.message || 'Failed to load inventory'}
-                </p>
-                <Button
-                    variant="outline"
-                    className="mt-4"
-                    onClick={() => window.location.reload()}
-                >
-                    Retry
-                </Button>
+            <div className="min-h-screen bg-zinc-100 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl p-6 text-center max-w-sm">
+                    <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                    <h2 className="font-semibold text-lg mb-2">Failed to load</h2>
+                    <p className="text-sm text-zinc-500 mb-4">
+                        {(error as Error)?.message || 'Something went wrong'}
+                    </p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-4 py-2 bg-zinc-900 text-white rounded-lg text-sm font-medium"
+                    >
+                        Try Again
+                    </button>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="flex flex-col h-full bg-gray-50">
-            {/* Header with search */}
-            <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 space-y-3">
-                <h1 className="text-lg font-semibold text-gray-900">Inventory</h1>
-
-                {/* Search bar */}
-                <div className="flex gap-2">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <Input
-                            type="text"
-                            placeholder="Search SKU, product, color..."
-                            value={searchInput}
-                            onChange={(e) => setSearchInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                            className="pl-9"
-                        />
-                    </div>
-                    <Button onClick={handleSearch} variant="default" size="sm">
-                        Search
-                    </Button>
-                </div>
-
-                {/* Filter chips */}
-                <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-hide">
-                    {/* Stock filters */}
-                    {filterConfig.stock.options.map((opt) => (
-                        <FilterChip
-                            key={`stock-${opt.value}`}
-                            label={opt.label}
-                            isActive={search.stockFilter === opt.value}
-                            onClick={() => handleFilterChange('stockFilter', opt.value)}
-                            onClear={() => clearFilter('stockFilter')}
-                        />
-                    ))}
-                    {/* Shopify status filters */}
-                    {filterConfig.shopifyStatus.options.map((opt) => (
-                        <FilterChip
-                            key={`shopify-${opt.value}`}
-                            label={opt.label}
-                            isActive={search.shopifyStatus === opt.value}
-                            onClick={() => handleFilterChange('shopifyStatus', opt.value)}
-                            onClear={() => clearFilter('shopifyStatus')}
-                        />
-                    ))}
-                    {/* Discrepancy filter */}
-                    {filterConfig.discrepancy.options.map((opt) => (
-                        <FilterChip
-                            key={`disc-${opt.value}`}
-                            label={opt.label}
-                            isActive={search.discrepancy === opt.value}
-                            onClick={() => handleFilterChange('discrepancy', opt.value)}
-                            onClear={() => clearFilter('discrepancy')}
-                        />
-                    ))}
-                    {/* Fabric filters */}
-                    {filterConfig.fabric.options.map((opt) => (
-                        <FilterChip
-                            key={`fabric-${opt.value}`}
-                            label={opt.label}
-                            isActive={search.fabricFilter === opt.value}
-                            onClick={() => handleFilterChange('fabricFilter', opt.value)}
-                            onClear={() => clearFilter('fabricFilter')}
-                        />
-                    ))}
-                </div>
-
-                {/* Stats bar */}
-                {pagination && (
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                        <div className="flex items-center gap-2">
-                            <span>{pagination.total.toLocaleString()} SKUs</span>
-                            {activeFilterCount > 0 && (
-                                <button
-                                    onClick={clearAllFilters}
-                                    className="text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
-                                >
-                                    Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
-                                    <X className="w-3 h-3" />
-                                </button>
+        <div className="min-h-screen bg-zinc-100">
+            {/* Sticky header - white theme */}
+            <div className="sticky top-0 z-20 bg-white border-b border-zinc-200">
+                {/* Title bar */}
+                <div className="px-4 py-3">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h1 className="text-lg font-bold tracking-tight text-zinc-900">Stock Scanner</h1>
+                            {!isLoading && (
+                                <p className="text-xs text-zinc-500">
+                                    {filteredProducts.length} products · {items.length} SKUs
+                                </p>
                             )}
                         </div>
-                        <span>
-                            Page {search.page} of {totalPages}
-                        </span>
+                        <button
+                            onClick={handleRefresh}
+                            disabled={isLoading}
+                            className={cn(
+                                'p-2 rounded-lg bg-zinc-100 hover:bg-zinc-200 transition-colors',
+                                isLoading && 'animate-pulse'
+                            )}
+                        >
+                            <RefreshCw className={cn('w-5 h-5 text-zinc-600', isLoading && 'animate-spin')} />
+                        </button>
                     </div>
-                )}
+                </div>
+
+                {/* Search - real-time */}
+                <div className="px-4 pb-3">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                        <input
+                            type="text"
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            placeholder="Search products, colors, SKUs..."
+                            className="w-full pl-10 pr-4 py-2.5 bg-zinc-100 border-0 rounded-lg text-sm placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                        />
+                    </div>
+                </div>
+
+                {/* Filters */}
+                <div className="px-4 pb-3 overflow-x-auto scrollbar-hide">
+                    <div className="flex gap-2">
+                        <FilterPill
+                            label="Out of Stock"
+                            isActive={search.stockFilter === 'out_of_stock'}
+                            onClick={() => handleFilterChange('stockFilter', 'out_of_stock')}
+                            variant="danger"
+                        />
+                        <FilterPill
+                            label="Low Stock"
+                            isActive={search.stockFilter === 'low_stock'}
+                            onClick={() => handleFilterChange('stockFilter', 'low_stock')}
+                            variant="warning"
+                        />
+                        <FilterPill
+                            label="Mismatch"
+                            isActive={search.discrepancy === 'has_discrepancy'}
+                            onClick={() => handleFilterChange('discrepancy', 'has_discrepancy')}
+                            variant="warning"
+                        />
+                        <FilterPill
+                            label="Active"
+                            isActive={search.shopifyStatus === 'active'}
+                            onClick={() => handleFilterChange('shopifyStatus', 'active')}
+                        />
+                        <FilterPill
+                            label="Archived"
+                            isActive={search.shopifyStatus === 'archived'}
+                            onClick={() => handleFilterChange('shopifyStatus', 'archived')}
+                        />
+                        <FilterPill
+                            label="Has Fabric"
+                            isActive={search.fabricFilter === 'has_fabric'}
+                            onClick={() => handleFilterChange('fabricFilter', 'has_fabric')}
+                        />
+                        <FilterPill
+                            label="Low Fabric"
+                            isActive={search.fabricFilter === 'low_fabric'}
+                            onClick={() => handleFilterChange('fabricFilter', 'low_fabric')}
+                            variant="warning"
+                        />
+                    </div>
+                </div>
             </div>
 
-            {/* Table */}
-            <div className="flex-1 overflow-auto">
+            {/* Content */}
+            <div className="px-4 py-4">
                 {isLoading ? (
-                    <div className="flex items-center justify-center h-40">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
+                    <div className="flex flex-col items-center justify-center py-20">
+                        <div className="w-12 h-12 rounded-full border-4 border-zinc-300 border-t-zinc-900 animate-spin" />
+                        <p className="mt-4 text-sm text-zinc-500">Loading inventory...</p>
                     </div>
-                ) : items.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-40 text-gray-500">
-                        <Package className="w-10 h-10 mb-2 text-gray-300" />
-                        <p>No inventory found</p>
+                ) : filteredProducts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20">
+                        <Package className="w-16 h-16 text-zinc-300 mb-4" />
+                        <h2 className="font-semibold text-zinc-900 mb-1">No products found</h2>
+                        <p className="text-sm text-zinc-500">Try adjusting your search or filters</p>
                     </div>
                 ) : (
-                    <Table>
-                        <TableHeader className="sticky top-0 bg-white">
-                            {table.getHeaderGroups().map((headerGroup) => (
-                                <TableRow key={headerGroup.id}>
-                                    {headerGroup.headers.map((header) => (
-                                        <TableHead
-                                            key={header.id}
-                                            className="text-xs font-medium text-gray-500 bg-gray-50"
-                                        >
-                                            {header.isPlaceholder
-                                                ? null
-                                                : flexRender(
-                                                      header.column.columnDef.header,
-                                                      header.getContext()
-                                                  )}
-                                        </TableHead>
-                                    ))}
-                                </TableRow>
-                            ))}
-                        </TableHeader>
-                        <TableBody>
-                            {table.getRowModel().rows.map((row) => (
-                                <TableRow
-                                    key={row.id}
-                                    className={cn(
-                                        row.original.availableBalance <= 0 && 'bg-red-50/50'
-                                    )}
-                                >
-                                    {row.getVisibleCells().map((cell) => (
-                                        <TableCell key={cell.id} className="py-2">
-                                            {flexRender(
-                                                cell.column.columnDef.cell,
-                                                cell.getContext()
-                                            )}
-                                        </TableCell>
-                                    ))}
-                                </TableRow>
-                            ))}
-                        </TableBody>
-                    </Table>
+                    filteredProducts.map((product) => (
+                        <ProductSection
+                            key={product.productId}
+                            product={product}
+                            locationId={locationId}
+                            onRefresh={handleRefresh}
+                        />
+                    ))
                 )}
             </div>
-
-            {/* Pagination footer */}
-            {pagination && totalPages > 1 && (
-                <div className="sticky bottom-0 bg-white border-t px-4 py-3 flex items-center justify-between">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handlePageChange(search.page - 1)}
-                        disabled={search.page <= 1}
-                    >
-                        <ChevronLeft className="w-4 h-4 mr-1" />
-                        Prev
-                    </Button>
-                    <span className="text-sm text-gray-600">
-                        {search.page} / {totalPages}
-                    </span>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handlePageChange(search.page + 1)}
-                        disabled={!pagination.hasMore}
-                    >
-                        Next
-                        <ChevronRight className="w-4 h-4 ml-1" />
-                    </Button>
-                </div>
-            )}
         </div>
     );
 }

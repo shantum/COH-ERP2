@@ -42,8 +42,6 @@ export const Route = createFileRoute('/_authenticated/inventory-mobile')({
     validateSearch: (search) => inventoryMobileSearchSchema.parse(search),
     loaderDeps: ({ search }) => ({
         search: search.search,
-        page: search.page,
-        pageSize: search.pageSize,
         stockFilter: search.stockFilter,
         shopifyStatus: search.shopifyStatus,
         discrepancy: search.discrepancy,
@@ -53,13 +51,14 @@ export const Route = createFileRoute('/_authenticated/inventory-mobile')({
     }),
     loader: async ({ deps }): Promise<InventoryMobileLoaderData> => {
         try {
-            const offset = (deps.page - 1) * deps.pageSize;
+            // Fetch all items for product grouping (client groups by product)
+            // Filters are applied server-side, only the filtered subset is returned
             const inventory = await getInventoryAll({
                 data: {
                     includeCustomSkus: false,
                     search: deps.search,
-                    limit: deps.pageSize,
-                    offset,
+                    limit: 10000, // Need all for product grouping
+                    offset: 0,
                     stockFilter: deps.stockFilter,
                     shopifyStatus: deps.shopifyStatus,
                     discrepancy: deps.discrepancy,

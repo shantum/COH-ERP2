@@ -60,6 +60,7 @@ export async function listInventorySkusKysely(
             'Sku.skuCode',
             'Sku.size',
             'Sku.mrp',
+            'Sku.currentBalance',
             'Sku.targetStockQty',
             'Sku.isCustomSku',
             'Variation.id as variationId',
@@ -100,6 +101,7 @@ export async function listInventorySkusKysely(
         skuCode: r.skuCode,
         size: r.size,
         mrp: r.mrp,
+        currentBalance: r.currentBalance,
         targetStockQty: r.targetStockQty,
         isCustomSku: r.isCustomSku,
         variationId: r.variationId,
@@ -125,8 +127,8 @@ export async function listInventorySkusKysely(
 // ============================================
 
 /**
- * Calculate inventory balances for given SKU IDs using Kysely
- * This is an alternative to the Prisma groupBy in the cache
+ * Get inventory balances for given SKU IDs from materialized column
+ * Fast O(1) lookup - reads directly from Sku.currentBalance
  */
 export async function calculateBalancesKysely(
     skuIds: string[]
@@ -135,7 +137,46 @@ export async function calculateBalancesKysely(
         return new Map();
     }
 
-    // Use groupBy with SUM aggregation
+    // Fast path: read materialized balances from Sku table
+    const results = await kysely
+        .selectFrom('Sku')
+        .select(['Sku.id as skuId', 'Sku.currentBalance'])
+        .where('Sku.id', 'in', skuIds)
+        .execute();
+
+    const balanceMap = new Map<string, InventoryBalanceRow>();
+
+    for (const row of results) {
+        balanceMap.set(row.skuId, {
+            totalInward: 0, // Not tracked - use calculateBalancesWithTotalsKysely if needed
+            totalOutward: 0, // Not tracked - use calculateBalancesWithTotalsKysely if needed
+            currentBalance: row.currentBalance,
+        });
+    }
+
+    // Fill in zeros for SKUs not found
+    for (const skuId of skuIds) {
+        if (!balanceMap.has(skuId)) {
+            balanceMap.set(skuId, { totalInward: 0, totalOutward: 0, currentBalance: 0 });
+        }
+    }
+
+    return balanceMap;
+}
+
+/**
+ * Calculate inventory balances with inward/outward totals using Kysely
+ * Use this when you need to display totalInward/totalOutward.
+ * For just currentBalance, use calculateBalancesKysely() instead (faster).
+ */
+export async function calculateBalancesWithTotalsKysely(
+    skuIds: string[]
+): Promise<Map<string, InventoryBalanceRow>> {
+    if (skuIds.length === 0) {
+        return new Map();
+    }
+
+    // Use groupBy with SUM aggregation for full totals
     const results = await kysely
         .selectFrom('InventoryTransaction')
         .select([

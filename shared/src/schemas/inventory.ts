@@ -16,6 +16,7 @@ export const inventorySkuRowSchema = z.object({
     skuCode: z.string(),
     size: z.string(),
     mrp: z.number(),
+    currentBalance: z.number(), // Materialized balance from Sku table (DB trigger maintained)
     targetStockQty: z.number(),
     isCustomSku: z.boolean(),
     variationId: z.string(),
@@ -29,7 +30,10 @@ export const inventorySkuRowSchema = z.object({
     productImageUrl: z.string().nullable(),
     fabricId: z.string(),
     fabricName: z.string().nullable(),
+    fabricUnit: z.string().nullable(),
     fabricColourId: z.string().nullable(),
+    fabricColourName: z.string().nullable(),
+    fabricColourHex: z.string().nullable(),
     shopifyAvailableQty: z.number().nullable(),
     shopifyProductStatus: z.enum(['active', 'archived', 'draft']).nullable(),
 });

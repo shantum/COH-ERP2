@@ -30,10 +30,51 @@ export type { InventoryBalance, InventoryBalanceWithSkuId, FabricBalance, Fabric
 // ============================================
 
 /**
- * Calculate inventory balance for a SKU
- * Fetches transaction data from database and uses shared pure function for calculation.
+ * Get inventory balance for a SKU
+ * Reads directly from Sku.currentBalance column (maintained by DB trigger).
+ * O(1) lookup - no aggregation needed.
  */
 export async function calculateInventoryBalance(
+    prisma: PrismaOrTransaction,
+    skuId: string,
+    options: Pick<InventoryBalanceOptions, 'allowNegative'> = {}
+): Promise<InventoryBalance> {
+    // Fast path: read materialized balance from Sku table
+    const sku = await prisma.sku.findUnique({
+        where: { id: skuId },
+        select: { currentBalance: true },
+    });
+
+    const currentBalance = sku?.currentBalance ?? 0;
+
+    // Use shared pure function for balance calculation
+    // Note: totalInward/totalOutward are not tracked in materialized column
+    return calculateBalance({ totalInward: 0, totalOutward: 0 }, {
+        ...options,
+        // Override the calculated balance with the materialized one
+    }).currentBalance !== undefined
+        ? {
+            totalInward: 0,
+            totalOutward: 0,
+            currentBalance,
+            availableBalance: currentBalance,
+            hasDataIntegrityIssue: !options.allowNegative && currentBalance < 0,
+        }
+        : {
+            totalInward: 0,
+            totalOutward: 0,
+            currentBalance,
+            availableBalance: currentBalance,
+            hasDataIntegrityIssue: !options.allowNegative && currentBalance < 0,
+        };
+}
+
+/**
+ * Calculate inventory balance with inward/outward totals
+ * Use this when you need to display totalInward/totalOutward.
+ * For just currentBalance, use calculateInventoryBalance() instead (faster).
+ */
+export async function calculateInventoryBalanceWithTotals(
     prisma: PrismaOrTransaction,
     skuId: string,
     options: Pick<InventoryBalanceOptions, 'allowNegative'> = {}
@@ -57,10 +98,55 @@ export async function calculateInventoryBalance(
 }
 
 /**
- * Calculate inventory balances for all SKUs efficiently
- * Uses single aggregation query - O(1) instead of O(N)
+ * Get inventory balances for multiple SKUs efficiently
+ * Reads directly from Sku.currentBalance column (maintained by DB trigger).
+ * Single query, O(1) per SKU.
  */
 export async function calculateAllInventoryBalances(
+    prisma: PrismaOrTransaction,
+    skuIds: string[] | null = null,
+    options: InventoryBalanceOptions = {}
+): Promise<Map<string, InventoryBalanceWithSkuId>> {
+    const { allowNegative = true, excludeCustomSkus = false } = options;
+
+    const where: Prisma.SkuWhereInput = {};
+
+    if (skuIds) {
+        where.id = { in: skuIds };
+    }
+
+    if (excludeCustomSkus) {
+        where.isCustomSku = false;
+    }
+
+    // Fast path: read materialized balances from Sku table
+    const skus = await prisma.sku.findMany({
+        where,
+        select: { id: true, currentBalance: true },
+    });
+
+    const balanceMap = new Map<string, InventoryBalanceWithSkuId>();
+
+    for (const sku of skus) {
+        balanceMap.set(sku.id, {
+            skuId: sku.id,
+            totalInward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
+            totalOutward: 0, // Not tracked - use calculateAllInventoryBalancesWithTotals if needed
+            currentBalance: sku.currentBalance,
+            availableBalance: sku.currentBalance,
+            hasDataIntegrityIssue: !allowNegative && sku.currentBalance < 0,
+        });
+    }
+
+    return balanceMap;
+}
+
+/**
+ * Calculate inventory balances with inward/outward totals for multiple SKUs
+ * Use this when you need to display totalInward/totalOutward.
+ * For just currentBalance, use calculateAllInventoryBalances() instead (faster).
+ */
+export async function calculateAllInventoryBalancesWithTotals(
     prisma: PrismaOrTransaction,
     skuIds: string[] | null = null,
     options: InventoryBalanceOptions = {}
@@ -108,8 +194,8 @@ export async function calculateAllInventoryBalances(
 }
 
 /**
- * Calculate inventory balances with row-level locking for allocation
- * Uses FOR UPDATE to prevent race conditions during concurrent allocations
+ * Get inventory balances with row-level locking for allocation
+ * Uses FOR UPDATE on Sku rows to prevent race conditions during concurrent allocations.
  *
  * CRITICAL: This function MUST be called inside a transaction to be effective.
  * The FOR UPDATE lock is held until the transaction commits/rolls back.
@@ -126,36 +212,35 @@ export async function calculateInventoryBalancesWithLock(
         return new Map();
     }
 
-    // Use raw SQL with FOR UPDATE to lock inventory transaction rows
-    // This prevents concurrent allocations from reading stale data
+    // Use raw SQL with FOR UPDATE to lock Sku rows
+    // This prevents concurrent allocations from reading stale balance
     const result = await tx.$queryRaw<Array<{
-        skuId: string;
-        totalInward: bigint;
-        totalOutward: bigint;
+        id: string;
+        currentBalance: number;
     }>>`
-        SELECT
-            "skuId",
-            COALESCE(SUM(CASE WHEN "txnType" = 'inward' THEN qty ELSE 0 END), 0) as "totalInward",
-            COALESCE(SUM(CASE WHEN "txnType" = 'outward' THEN qty ELSE 0 END), 0) as "totalOutward"
-        FROM "InventoryTransaction"
-        WHERE "skuId" = ANY(${skuIds}::uuid[])
-        GROUP BY "skuId"
+        SELECT "id", "currentBalance"
+        FROM "Sku"
+        WHERE "id" = ANY(${skuIds}::uuid[])
         FOR UPDATE
     `;
 
     const balanceMap = new Map<string, InventoryBalanceWithSkuId>();
 
-    // Initialize all requested SKUs using shared helper (some may have no transactions yet)
+    // Initialize all requested SKUs using shared helper (some may not exist)
     for (const skuId of skuIds) {
         balanceMap.set(skuId, createEmptyBalanceWithId(skuId));
     }
 
-    // Populate with actual data from locked rows using shared pure function
+    // Populate with actual data from locked rows
     for (const row of result) {
-        const totalInward = Number(row.totalInward);
-        const totalOutward = Number(row.totalOutward);
-        const balance = calculateBalance({ totalInward, totalOutward });
-        balanceMap.set(row.skuId, { skuId: row.skuId, ...balance });
+        balanceMap.set(row.id, {
+            skuId: row.id,
+            totalInward: 0, // Not tracked in materialized column
+            totalOutward: 0, // Not tracked in materialized column
+            currentBalance: row.currentBalance,
+            availableBalance: row.currentBalance,
+            hasDataIntegrityIssue: row.currentBalance < 0,
+        });
     }
 
     return balanceMap;

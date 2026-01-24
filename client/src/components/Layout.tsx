@@ -2,7 +2,7 @@ import { Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-route
 import { useAuth } from '../hooks/useAuth';
 import {
     LayoutDashboard, ShoppingCart,
-    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2, Smartphone
+    Users, RotateCcw, Factory, LogOut, Menu, X, BookOpen, Settings, ClipboardCheck, PackagePlus, Clipboard, BarChart3, UserCog, ChevronLeft, ChevronRight, Search, Package, PackageX, ChevronDown, Minimize2, Maximize2
 } from 'lucide-react';
 import { usePermissions } from '../hooks/usePermissions';
 import { useState, useEffect, useMemo } from 'react';
@@ -41,7 +41,6 @@ const navGroups: NavGroup[] = [
         label: 'Orders',
         items: [
             { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-            { to: '/orders-mobile', icon: Smartphone, label: 'Orders (Mobile)' },
         ],
     },
     {
