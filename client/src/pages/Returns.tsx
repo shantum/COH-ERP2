@@ -12,6 +12,8 @@ import {
     getActiveLineReturns,
     getLineReturnActionQueue,
     getOrderForReturn,
+    getReturnConfig,
+    type ReturnConfigResponse,
 } from '../server/functions/returns';
 import {
     initiateLineReturn,
@@ -35,7 +37,7 @@ import { useState } from 'react';
 import {
     Plus, X, Search, Package, Truck, Check,
     PackageCheck, AlertCircle, CheckCircle,
-    ArrowRight, DollarSign, XCircle
+    ArrowRight, DollarSign, XCircle, Settings
 } from 'lucide-react';
 import { CustomerDetailModal } from '../components/orders/CustomerDetailModal';
 
@@ -86,7 +88,7 @@ const WRITE_OFF_REASONS = [
     { value: 'other', label: 'Other' },
 ] as const;
 
-type TabType = 'actions' | 'all' | 'analytics';
+type TabType = 'actions' | 'all' | 'analytics' | 'settings';
 
 // ============================================
 // HELPERS
@@ -154,6 +156,7 @@ export default function Returns() {
     const getActiveLineReturnsFn = useServerFn(getActiveLineReturns);
     const getLineReturnActionQueueFn = useServerFn(getLineReturnActionQueue);
     const getOrderForReturnFn = useServerFn(getOrderForReturn);
+    const getReturnConfigFn = useServerFn(getReturnConfig);
 
     const { data: activeReturns = [], isLoading: loadingReturns } = useQuery({
         queryKey: ['returns', 'active'],
@@ -172,6 +175,12 @@ export default function Returns() {
         queryFn: () => getLineReturnActionQueueFn(),
         enabled: tab === 'actions',
         refetchInterval: 30000, // Refresh every 30 seconds
+    });
+
+    const { data: returnConfig, isLoading: loadingConfig } = useQuery({
+        queryKey: ['returns', 'config'],
+        queryFn: () => getReturnConfigFn(),
+        enabled: tab === 'settings',
     });
 
     // ============================================
@@ -506,6 +515,17 @@ export default function Returns() {
                     >
                         Analytics
                     </button>
+                    <button
+                        onClick={() => setTab('settings')}
+                        className={`px-4 py-2 border-b-2 font-medium flex items-center gap-1 ${
+                            tab === 'settings'
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                        <Settings size={16} />
+                        Settings
+                    </button>
                 </nav>
             </div>
 
@@ -533,6 +553,10 @@ export default function Returns() {
             )}
 
             {tab === 'analytics' && <AnalyticsTab />}
+
+            {tab === 'settings' && (
+                <SettingsTab config={returnConfig} loading={loadingConfig} />
+            )}
 
             {/* Initiate Return Modal */}
             {showInitiateModal && (
@@ -900,6 +924,176 @@ function AnalyticsTab() {
 }
 
 // ============================================
+// SETTINGS TAB
+// ============================================
+
+interface SettingsTabProps {
+    config: ReturnConfigResponse | undefined;
+    loading: boolean;
+}
+
+function SettingsTab({ config, loading }: SettingsTabProps) {
+    if (loading) {
+        return <div className="text-center py-12">Loading settings...</div>;
+    }
+
+    if (!config) {
+        return <div className="text-center py-12 text-gray-500">Failed to load settings</div>;
+    }
+
+    return (
+        <div className="space-y-6">
+            {/* Return Window Settings */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Return Window</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Return Window (Days)
+                        </label>
+                        <div className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+                            {config.windowDays} days
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Days from delivery within which returns are accepted
+                        </p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Warning Threshold (Days)
+                        </label>
+                        <div className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+                            {config.windowWarningDays} days
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Show warning when this many days have passed
+                        </p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Auto-Reject After (Days)
+                        </label>
+                        <div className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+                            {config.autoRejectAfterDays ?? 'Disabled (allow override)'}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Automatically reject returns after this many days
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Reason Categories */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Return Reason Categories</h3>
+                <div className="flex flex-wrap gap-2">
+                    {config.reasonCategories.map((reason) => (
+                        <span
+                            key={reason.value}
+                            className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm"
+                        >
+                            {reason.label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* Item Conditions */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Item Conditions (QC)</h3>
+                <div className="flex flex-wrap gap-2">
+                    {config.conditions.map((condition) => (
+                        <span
+                            key={condition.value}
+                            className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm"
+                        >
+                            {condition.label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* Resolution Types */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Resolution Types</h3>
+                <div className="flex flex-wrap gap-2">
+                    {config.resolutions.map((resolution) => (
+                        <span
+                            key={resolution.value}
+                            className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-sm"
+                        >
+                            {resolution.label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* Pickup Types */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Pickup Types</h3>
+                <div className="flex flex-wrap gap-2">
+                    {config.pickupTypes.map((type) => (
+                        <span
+                            key={type.value}
+                            className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-sm"
+                        >
+                            {type.label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* Refund Methods */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Refund Methods</h3>
+                <div className="flex flex-wrap gap-2">
+                    {config.refundMethods.map((method) => (
+                        <span
+                            key={method.value}
+                            className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-sm"
+                        >
+                            {method.label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* Non-Returnable Reasons */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold mb-4">Non-Returnable Reasons</h3>
+                <p className="text-sm text-gray-500 mb-3">
+                    Reasons a product may be marked as non-returnable
+                </p>
+                <div className="flex flex-wrap gap-2">
+                    {config.nonReturnableReasons.map((reason) => (
+                        <span
+                            key={reason.value}
+                            className="px-3 py-1 bg-red-50 text-red-700 rounded-full text-sm"
+                        >
+                            {reason.label}
+                        </span>
+                    ))}
+                </div>
+            </div>
+
+            {/* Info Box */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex gap-3">
+                    <AlertCircle className="text-yellow-600 flex-shrink-0" size={20} />
+                    <div>
+                        <h4 className="font-medium text-yellow-800">Configuration Note</h4>
+                        <p className="text-sm text-yellow-700 mt-1">
+                            These settings are currently read-only. To modify return configuration,
+                            edit the config file at <code className="bg-yellow-100 px-1 rounded">/server/src/config/thresholds/returns.ts</code>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ============================================
 // INITIATE RETURN MODAL
 // ============================================
 
@@ -987,57 +1181,75 @@ function InitiateReturnModal({
                                 Order {searchedOrder.orderNumber} - {searchedOrder.customerName}
                             </h3>
                             <div className="space-y-2">
-                                {searchedOrder.lines.map((line) => (
-                                    <div
-                                        key={line.id}
-                                        className={`p-3 border rounded-lg ${
-                                            line.eligibility.eligible
-                                                ? 'border-gray-200 hover:border-blue-300 cursor-pointer'
-                                                : 'border-red-200 bg-red-50'
-                                        }`}
-                                        onClick={() => line.eligibility.eligible && onToggleLine(line.id)}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            {line.eligibility.eligible && (
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedLines.has(line.id)}
-                                                    onChange={() => onToggleLine(line.id)}
-                                                    className="w-4 h-4"
-                                                />
-                                            )}
-                                            <div className="flex-1">
-                                                <div className="font-medium">
-                                                    {line.productName} - {line.colorName} - {line.size}
-                                                </div>
-                                                <div className="text-sm text-gray-500">
-                                                    SKU: {line.skuCode} | Qty: {line.qty}
-                                                </div>
-                                                {!line.eligibility.eligible && (
-                                                    <div className="text-sm text-red-600 mt-1">
-                                                        Not eligible: {line.eligibility.reason}
+                                {searchedOrder.lines.map((line) => {
+                                    const hasWarning = line.eligibility.eligible && line.eligibility.warning;
+                                    const borderClass = !line.eligibility.eligible
+                                        ? 'border-red-200 bg-red-50'
+                                        : hasWarning
+                                        ? 'border-yellow-200 bg-yellow-50 hover:border-yellow-300 cursor-pointer'
+                                        : 'border-gray-200 hover:border-blue-300 cursor-pointer';
+
+                                    return (
+                                        <div
+                                            key={line.id}
+                                            className={`p-3 border rounded-lg ${borderClass}`}
+                                            onClick={() => line.eligibility.eligible && onToggleLine(line.id)}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                {line.eligibility.eligible && (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedLines.has(line.id)}
+                                                        onChange={() => onToggleLine(line.id)}
+                                                        className="w-4 h-4"
+                                                    />
+                                                )}
+                                                <div className="flex-1">
+                                                    <div className="font-medium">
+                                                        {line.productName} - {line.colorName} - {line.size}
                                                     </div>
+                                                    <div className="text-sm text-gray-500">
+                                                        SKU: {line.skuCode} | Qty: {line.qty}
+                                                        {line.eligibility.daysRemaining !== null && (
+                                                            <span className="ml-2">
+                                                                ({line.eligibility.daysRemaining >= 0
+                                                                    ? `${line.eligibility.daysRemaining}d left`
+                                                                    : `${Math.abs(line.eligibility.daysRemaining)}d overdue`})
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {!line.eligibility.eligible && (
+                                                        <div className="text-sm text-red-600 mt-1">
+                                                            Not eligible: {line.eligibility.reason}
+                                                        </div>
+                                                    )}
+                                                    {hasWarning && (
+                                                        <div className="text-sm text-yellow-700 mt-1 flex items-center gap-1">
+                                                            <AlertCircle size={14} />
+                                                            Warning: {line.eligibility.warning?.replace(/_/g, ' ')}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {selectedLines.has(line.id) && (
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max={line.qty}
+                                                        value={returnQtyMap[line.id] || 1}
+                                                        onChange={(e) =>
+                                                            setReturnQtyMap({
+                                                                ...returnQtyMap,
+                                                                [line.id]: parseInt(e.target.value, 10),
+                                                            })
+                                                        }
+                                                        className="w-20 px-2 py-1 border border-gray-300 rounded"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
                                                 )}
                                             </div>
-                                            {selectedLines.has(line.id) && (
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    max={line.qty}
-                                                    value={returnQtyMap[line.id] || 1}
-                                                    onChange={(e) =>
-                                                        setReturnQtyMap({
-                                                            ...returnQtyMap,
-                                                            [line.id]: parseInt(e.target.value, 10),
-                                                        })
-                                                    }
-                                                    className="w-20 px-2 py-1 border border-gray-300 rounded"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                />
-                                            )}
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     )}

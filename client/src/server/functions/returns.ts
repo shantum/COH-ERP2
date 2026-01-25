@@ -1597,23 +1597,18 @@ function getReturnEligibility(
         isNonReturnable: boolean;
     },
     product: { isReturnable: boolean; nonReturnableReason: string | null }
-): { eligible: boolean; reason?: string; daysRemaining: number | null; windowExpiringSoon: boolean } {
-    // Check if already has active return
+): { eligible: boolean; reason?: string; daysRemaining: number | null; windowExpiringSoon: boolean; warning?: string } {
+    // Check if already has active return (HARD BLOCK)
     if (line.returnStatus && !['cancelled', 'complete'].includes(line.returnStatus)) {
         return { eligible: false, reason: 'already_returned', daysRemaining: null, windowExpiringSoon: false };
     }
 
-    // Check line-level non-returnable
+    // Check line-level non-returnable (HARD BLOCK)
     if (line.isNonReturnable) {
         return { eligible: false, reason: 'line_non_returnable', daysRemaining: null, windowExpiringSoon: false };
     }
 
-    // Check product-level returnability
-    if (!product.isReturnable) {
-        return { eligible: false, reason: product.nonReturnableReason || 'product_non_returnable', daysRemaining: null, windowExpiringSoon: false };
-    }
-
-    // Check delivery status
+    // Check delivery status (HARD BLOCK - can't return what wasn't delivered)
     if (!line.deliveredAt) {
         return { eligible: false, reason: 'not_delivered', daysRemaining: null, windowExpiringSoon: false };
     }
@@ -1623,11 +1618,26 @@ function getReturnEligibility(
     const daysRemaining = RETURN_WINDOW_DAYS - daysSinceDelivery;
     const windowExpiringSoon = daysRemaining > 0 && daysRemaining <= 2;
 
-    if (daysRemaining < 0) {
-        return { eligible: false, reason: 'window_expired', daysRemaining, windowExpiringSoon: false };
+    // Collect warnings (soft conditions - allow with warning)
+    let warning: string | undefined;
+
+    // Check product-level returnability (SOFT WARNING)
+    if (!product.isReturnable) {
+        warning = product.nonReturnableReason || 'product_marked_non_returnable';
     }
 
-    return { eligible: true, reason: 'within_window', daysRemaining, windowExpiringSoon };
+    // Check window expiry (SOFT WARNING - allow override)
+    if (daysRemaining < 0) {
+        warning = warning ? `${warning}, window_expired` : 'window_expired';
+    }
+
+    return {
+        eligible: true,
+        reason: daysRemaining >= 0 ? 'within_window' : 'window_expired_override',
+        daysRemaining,
+        windowExpiringSoon,
+        warning
+    };
 }
 
 /**
@@ -1965,5 +1975,98 @@ export const calculateLineReturnRefund = createServerFn({ method: 'GET' })
             discountClawback,
             suggestedDeductions,
             netAmount,
+        };
+    });
+
+// ============================================
+// RETURN CONFIGURATION
+// ============================================
+
+export interface ReturnConfigResponse {
+    windowDays: number;
+    windowWarningDays: number;
+    autoRejectAfterDays: number | null;
+    reasonCategories: Array<{ value: string; label: string }>;
+    conditions: Array<{ value: string; label: string }>;
+    resolutions: Array<{ value: string; label: string }>;
+    pickupTypes: Array<{ value: string; label: string }>;
+    refundMethods: Array<{ value: string; label: string }>;
+    nonReturnableReasons: Array<{ value: string; label: string }>;
+}
+
+/**
+ * Get return configuration settings
+ * Used by Returns Settings tab
+ *
+ * NOTE: These values mirror /server/src/config/thresholds/returns.ts
+ * When editing, update both places until we move config to shared package
+ */
+export const getReturnConfig = createServerFn({ method: 'GET' })
+    .middleware([authMiddleware])
+    .handler(async (): Promise<ReturnConfigResponse> => {
+        // Return window settings
+        const windowDays = 14;
+        const windowWarningDays = 12;
+        const autoRejectAfterDays: number | null = null;
+
+        // Reason categories
+        const reasonCategories = [
+            { value: 'fit_size', label: 'Size/Fit Issue' },
+            { value: 'product_quality', label: 'Quality Issue' },
+            { value: 'product_different', label: 'Different from Listing' },
+            { value: 'wrong_item_sent', label: 'Wrong Item Sent' },
+            { value: 'damaged_in_transit', label: 'Damaged in Transit' },
+            { value: 'changed_mind', label: 'Changed Mind' },
+            { value: 'other', label: 'Other' },
+        ];
+
+        // Item conditions
+        const conditions = [
+            { value: 'good', label: 'Good - Restockable' },
+            { value: 'damaged', label: 'Damaged' },
+            { value: 'defective', label: 'Defective' },
+            { value: 'wrong_item', label: 'Wrong Item Received' },
+            { value: 'used', label: 'Used/Worn' },
+        ];
+
+        // Resolutions
+        const resolutions = [
+            { value: 'refund', label: 'Refund' },
+            { value: 'exchange', label: 'Exchange' },
+            { value: 'rejected', label: 'Rejected' },
+        ];
+
+        // Pickup types
+        const pickupTypes = [
+            { value: 'arranged_by_us', label: 'Arranged by Us' },
+            { value: 'customer_shipped', label: 'Customer Shipped' },
+        ];
+
+        // Refund methods
+        const refundMethods = [
+            { value: 'payment_link', label: 'Payment Link (Razorpay)' },
+            { value: 'bank_transfer', label: 'Bank Transfer' },
+            { value: 'store_credit', label: 'Store Credit' },
+        ];
+
+        // Non-returnable reasons
+        const nonReturnableReasons = [
+            { value: 'sale_item', label: 'Sale Item' },
+            { value: 'hygiene', label: 'Hygiene Product' },
+            { value: 'custom_made', label: 'Custom Made' },
+            { value: 'clearance', label: 'Clearance Item' },
+            { value: 'final_sale', label: 'Final Sale' },
+        ];
+
+        return {
+            windowDays,
+            windowWarningDays,
+            autoRejectAfterDays,
+            reasonCategories,
+            conditions,
+            resolutions,
+            pickupTypes,
+            refundMethods,
+            nonReturnableReasons,
         };
     });

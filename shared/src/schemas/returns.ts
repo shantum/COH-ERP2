@@ -345,6 +345,7 @@ export const ReturnEligibilitySchema = z.object({
     reason: z.string().optional(), // 'within_window', 'expired', 'non_returnable', 'already_returned', etc.
     daysRemaining: z.number().nullable(),
     windowExpiringSoon: z.boolean(),
+    warning: z.string().optional(), // Soft warnings (product non-returnable, window expired) - allow with caution
 });
 export type ReturnEligibility = z.infer<typeof ReturnEligibilitySchema>;
 
