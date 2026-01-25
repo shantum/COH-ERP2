@@ -177,32 +177,15 @@ const getCustomerInputSchema = z.object({
 /**
  * Server Function: Get single customer by ID
  *
- * Uses Kysely for high-performance query with order count and recent orders.
+ * Uses Kysely for high-performance query with full customer profile.
+ * Includes stats, style DNA (color/product/fabric affinities), and orders with lines.
  */
-/** Customer detail result type from Kysely query */
-export interface CustomerDetailResult {
-    id: string;
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-    phone: string | null;
-    tier: string | null;
-    tags: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    ordersCount: number;
-    recentOrders: Array<{
-        id: string;
-        orderNumber: string;
-        totalAmount: number | null;
-        status: string;
-        orderDate: Date;
-    }>;
-}
+// Re-export type from shared package for consumers
+export type { CustomerDetailResult } from '@coh/shared/schemas/customers';
 
-export const getCustomer = createServerFn({ method: 'GET' })
+export const getCustomer = createServerFn({ method: 'POST' }) // POST to avoid header size limits with large response
     .inputValidator((input: unknown) => getCustomerInputSchema.parse(input))
-    .handler(async ({ data }): Promise<CustomerDetailResult> => {
+    .handler(async ({ data }) => {
         const { getCustomerKysely } = await import('@coh/shared/services/db/queries');
 
         const customer = await getCustomerKysely(data.id);

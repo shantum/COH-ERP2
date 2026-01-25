@@ -79,7 +79,7 @@ export function ModalHeader({
         backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
       }} />
 
-      <div className="relative px-6 py-5 border-b border-slate-200/80">
+      <div className="relative px-4 sm:px-6 py-4 sm:py-5 border-b border-slate-200/80">
         {/* Breadcrumb Navigation */}
         {showBreadcrumb && (
           <div className="flex items-center gap-2 mb-3 text-sm">
@@ -111,11 +111,11 @@ export function ModalHeader({
           </div>
         )}
 
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3 sm:gap-4">
           {/* Left: Order info */}
-          <div className="flex items-start gap-4 min-w-0 flex-1">
-            {/* Icon */}
-            <div className={`p-3 rounded-2xl shadow-sm flex-shrink-0 ${
+          <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
+            {/* Icon - hidden on mobile to save space */}
+            <div className={`hidden sm:flex p-3 rounded-2xl shadow-sm flex-shrink-0 ${
               order.isExchange
                 ? 'bg-gradient-to-br from-amber-100 to-amber-50 text-amber-600'
                 : 'bg-gradient-to-br from-sky-100 to-sky-50 text-sky-600'
@@ -125,8 +125,8 @@ export function ModalHeader({
 
             {/* Order details */}
             <div className="min-w-0">
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl font-semibold text-slate-800 tracking-tight">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <h2 className="text-lg sm:text-xl font-semibold text-slate-800 tracking-tight">
                   Order #{order.orderNumber}
                 </h2>
                 {order.shopifyOrderId && (
@@ -142,8 +142,8 @@ export function ModalHeader({
                 )}
               </div>
 
-              {/* Meta info row */}
-              <div className="flex items-center gap-3 mt-1.5 text-sm text-slate-500 flex-wrap">
+              {/* Meta info row - hidden on mobile, shown in a more compact format */}
+              <div className="hidden sm:flex items-center gap-3 mt-1.5 text-sm text-slate-500 flex-wrap">
                 <span className="flex items-center gap-1.5 whitespace-nowrap">
                   <Calendar size={13} className="text-slate-400 flex-shrink-0" />
                   {formatDate(order.orderDate)}
@@ -162,6 +162,10 @@ export function ModalHeader({
                     </span>
                   </>
                 )}
+              </div>
+              {/* Mobile: simplified date display */}
+              <div className="sm:hidden text-xs text-slate-500 mt-1">
+                {formatDate(order.orderDate)}
               </div>
 
               {/* Status badges */}
@@ -187,12 +191,12 @@ export function ModalHeader({
           </div>
 
           {/* Right: Mode tabs and close */}
-          <div className="flex items-start gap-3 flex-shrink-0">
-            {/* Mode tabs */}
-            <div className="flex bg-slate-100/80 rounded-xl p-1 shadow-inner">
+          <div className="flex items-start gap-2 sm:gap-3 flex-shrink-0">
+            {/* Mode tabs - compact on mobile */}
+            <div className="flex bg-slate-100/80 rounded-lg sm:rounded-xl p-0.5 sm:p-1 shadow-inner">
               <button
                 onClick={() => onModeChange('view')}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md sm:rounded-lg transition-all duration-200 ${
                   mode === 'view'
                     ? 'bg-white text-slate-800 shadow-sm'
                     : 'text-slate-500 hover:text-slate-700'
@@ -203,7 +207,7 @@ export function ModalHeader({
               <button
                 onClick={() => onModeChange('edit')}
                 disabled={!canEdit}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md sm:rounded-lg transition-all duration-200 ${
                   mode === 'edit'
                     ? 'bg-white text-slate-800 shadow-sm'
                     : canEdit
@@ -216,7 +220,7 @@ export function ModalHeader({
               <button
                 onClick={() => onModeChange('ship')}
                 disabled={!canShip}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md sm:rounded-lg transition-all duration-200 ${
                   mode === 'ship'
                     ? 'bg-white text-slate-800 shadow-sm'
                     : canShip
@@ -230,7 +234,7 @@ export function ModalHeader({
                 onClick={() => onModeChange('customer')}
                 disabled={!canCustomer}
                 title={!canCustomer ? 'No customer linked to this order' : undefined}
-                className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 flex items-center gap-1.5 ${
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-md sm:rounded-lg transition-all duration-200 flex items-center gap-1 sm:gap-1.5 ${
                   mode === 'customer'
                     ? 'bg-white text-slate-800 shadow-sm'
                     : canCustomer
@@ -238,17 +242,19 @@ export function ModalHeader({
                       : 'text-slate-300 cursor-not-allowed'
                 }`}
               >
-                <User size={14} />
-                Customer
+                <User size={14} className="sm:block hidden" />
+                <span className="hidden sm:inline">Customer</span>
+                <User size={14} className="sm:hidden" />
               </button>
             </div>
 
             {/* Close button */}
             <button
               onClick={onClose}
-              className="p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              className="p-2 sm:p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg sm:rounded-xl transition-all"
             >
-              <X size={20} />
+              <X size={18} className="sm:hidden" />
+              <X size={20} className="hidden sm:block" />
             </button>
           </div>
         </div>

@@ -35,15 +35,21 @@ export interface CustomerData {
   email?: string | null;
   phone?: string | null;
   customerTier?: string | null;
+  tier?: string | null;
   lifetimeValue?: number | null;
   totalOrders?: number | null;
   returnRate?: number | null;
+  returnCount?: number | null;
   rtoCount?: number | null;
   exchangeCount?: number | null;
-  firstOrderDate?: string | null;
-  lastOrderDate?: string | null;
+  firstOrderDate?: string | Date | null;
+  lastOrderDate?: string | Date | null;
   acceptsMarketing?: boolean | null;
   avgOrderValue?: number | null;
+  defaultAddress?: unknown | null;
+  createdAt?: string | Date | null;
+  updatedAt?: string | Date | null;
+  tags?: string | null;
 }
 
 // ============================================================================

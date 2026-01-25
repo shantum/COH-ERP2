@@ -62,13 +62,10 @@ export function CustomerSection({
 
   // Extract customer insights
   const customerInsights = customerData ? {
-    lifetimeValue: 0, // Not available in server function response
-    totalOrders: customerData.ordersCount || 0,
-    customerTier: customerData.tier || 'New',
-    // Calculate RTO stats from recent orders
-    rtoCount: customerData.recentOrders?.filter((o: any) =>
-      o.trackingStatus?.startsWith('rto_') || o.status === 'returned'
-    ).length || 0,
+    lifetimeValue: customerData.lifetimeValue || 0,
+    totalOrders: customerData.totalOrders || 0,
+    customerTier: customerData.customerTier || customerData.tier || 'New',
+    rtoCount: customerData.rtoCount || 0,
   } : null;
 
   const handleSelectCustomer = (customer: any) => {

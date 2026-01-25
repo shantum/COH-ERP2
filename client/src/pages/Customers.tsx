@@ -303,20 +303,21 @@ export default function Customers() {
     // Fetch full order when customer data is available
     const getOrdersFn = useServerFn(getOrders);
     useEffect(() => {
-        if (customerOrderData?.recentOrders?.length && !modalOrder) {
+        const orders = customerOrderData?.orders;
+        if (orders?.length && !modalOrder) {
             const fetchOrder = async () => {
                 try {
                     const response = await getOrdersFn({
                         data: {
                             view: 'open',
-                            orderId: customerOrderData.recentOrders[0].id,
+                            orderId: orders[0].id,
                         },
                     });
                     // Extract order lines from response and build modal order
                     if (response.rows.length > 0) {
                         // Filter rows for this specific order
                         const orderLines = response.rows.filter(
-                            (line) => line.order.id === customerOrderData.recentOrders[0].id
+                            (line) => line.order.id === orders[0].id
                         );
                         // Build the modal order from flattened rows
                         const order = buildModalOrder(orderLines);
@@ -775,7 +776,7 @@ export default function Customers() {
                                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
                                 <p className="text-sm text-gray-600">Loading customer profile...</p>
                             </>
-                        ) : customerOrderData && customerOrderData.recentOrders?.length === 0 ? (
+                        ) : customerOrderData && customerOrderData.orders?.length === 0 ? (
                             <>
                                 <div className="p-3 bg-gray-100 rounded-full">
                                     <ShoppingBag size={24} className="text-gray-400" />

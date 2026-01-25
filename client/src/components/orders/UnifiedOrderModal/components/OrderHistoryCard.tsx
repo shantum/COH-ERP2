@@ -11,21 +11,23 @@ interface OrderLine {
   id: string;
   qty: number;
   sku?: {
-    size?: string;
+    size?: string | null;
     variation?: {
-      colorName?: string;
-      imageUrl?: string;
-      product?: { name?: string; imageUrl?: string };
-    };
-  };
+      colorName?: string | null;
+      colorHex?: string | null;
+      imageUrl?: string | null;
+      product?: { name?: string | null; imageUrl?: string | null } | null;
+      fabricColour?: { fabric?: { name?: string | null } | null } | null;
+    } | null;
+  } | null;
 }
 
 interface OrderSummary {
   id: string;
   orderNumber: string;
   status: string;
-  totalAmount: number;
-  orderDate: string;
+  totalAmount?: number | null;
+  orderDate: string | Date;
   orderLines?: OrderLine[];
 }
 
@@ -49,8 +51,9 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string }> = {
   rto_delivered: { bg: 'bg-orange-100', text: 'text-orange-700' },
 };
 
-function getRelativeTime(date: string): string {
-  const days = Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24));
+function getRelativeTime(date: string | Date): string {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  const days = Math.floor((Date.now() - dateObj.getTime()) / (1000 * 60 * 60 * 24));
 
   if (days === 0) return 'Today';
   if (days === 1) return 'Yesterday';
@@ -60,8 +63,8 @@ function getRelativeTime(date: string): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
+function formatDate(dateInput: string | Date): string {
+  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
   return date.toLocaleDateString('en-IN', {
     day: 'numeric',
     month: 'short',
@@ -138,7 +141,7 @@ export function OrderHistoryCard({ order, isCurrent, onClick }: OrderHistoryCard
         <div className="flex items-center gap-2">
           <div className="text-right">
             <div className="font-semibold text-slate-900 tabular-nums text-sm">
-              {Number(order.totalAmount).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })}
+              {(order.totalAmount ?? 0).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 })}
             </div>
             <div className="text-[10px] text-slate-400" title={formatDate(order.orderDate)}>
               {getRelativeTime(order.orderDate)}
